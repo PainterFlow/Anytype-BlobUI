@@ -93,6 +93,10 @@ markupcode * {
     margin-top: max(0px, calc(var(--header-image-height) - 52px + 4px)) !important;
 }
 
+/* Align the search and create/edit controls with the widgets' right edge. */
+.sidebar .sidebarPage .spaceName {
+    padding-right: 0 !important;
+}
 /* Amber star when this object is a favorite. */
 #button-header-favorite.menuActionUnfav {
     color: var(--color-orange) !important;
