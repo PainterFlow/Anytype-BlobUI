@@ -4,3 +4,4 @@ It gives Anytype a more modern and elegant touch, coloring buttons, changing fon
 and just improving the overall UI.
 *Made by @PainterFlow11 - All rights reserved, no license*
 
+For more documentation, visit: https://any.coop/A9drcF6fXs9QvXiR114HjF7Lx5ZzrysS1PLZcWFRYYW9Jiob/anytype-blobui
