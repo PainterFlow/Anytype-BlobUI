@@ -1,0 +1,99 @@
+/*
+    BlobUI V1.0.0 (Development)
+    Custom CSS made for Anytype Version 0.57.4
+    Made by @PainterFlow11
+    All rights reserved, no license.
+*/
+
+:root {
+    --color-blob-pink: #de50de;
+    --header-image: url("file:///C:/Users/adria/AppData/Roaming/anytype/blob/header.png");
+    --header-image-height: 120px;
+}
+
+* {
+    font-family: "Libron", sans-serif !important;
+}
+
+/* Code blocks */
+.textCode .value,
+.textCode .value *,
+/* Inline code */
+markupcode,
+markupcode * {
+    font-family: "Consolas", "Courier New", monospace !important;
+}
+
+#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg {
+    color: var(--color-blob-pink) !important;
+}
+
+/* One oversized image on the fixed header, behind the scrolling content. */
+.sidebar .sidebarPage.pageWidget>.head.isDefault,
+.sidebar .sidebarPage.pageWidgetManage>.head.isDefault {
+    background: transparent !important;
+    z-index: auto !important;
+    box-sizing: border-box;
+    align-items: flex-start;
+    padding: 9px 9px 0 21px;
+}
+
+.sidebar .sidebarPage.pageWidget>.head.isDefault::after,
+.sidebar .sidebarPage.pageWidgetManage>.head.isDefault::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 12px;
+    right: 0;
+    width: auto;
+    border-radius: 12px 0 0 4px;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    height: var(--header-image-height);
+    background: var(--header-image) center top / cover no-repeat !important;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 1;
+    transition: opacity 200ms ease;
+}
+
+/* Put header controls and scrollable widgets above the image. */
+.sidebar .sidebarPage.pageWidget>.head.isDefault>*,
+.sidebar .sidebarPage.pageWidgetManage>.head.isDefault>* {
+    position: relative;
+    top: -1px;
+    z-index: 1;
+}
+
+.sidebar .sidebarPage.pageWidget>.body,
+.sidebar .sidebarPage.pageWidgetManage>.body {
+    position: relative;
+    z-index: 1;
+}
+
+/* The space widget no longer paints a separate image or gradient. */
+.sidebar .sidebarPage .widget.widgetSpace {
+    background: transparent !important;
+}
+
+.sidebar .sidebarPage .widget.widgetSpace::after {
+    background: none !important;
+}
+
+/* Anytype toggles this class when the sidebar scrolls. */
+.sidebar .sidebarPage.pageWidget.isScrolled>.head.isDefault::after,
+.sidebar .sidebarPage.pageWidgetManage.isScrolled>.head.isDefault::after {
+    opacity: 0;
+}
+
+/* Start the scrollbar below the image without moving the scrolling content.
+   The fixed header is 52px tall; add a 4px gap below the image. */
+.sidebar .sidebarPage.pageWidget>.body::-webkit-scrollbar-track,
+.sidebar .sidebarPage.pageWidgetManage>.body::-webkit-scrollbar-track {
+    margin-top: max(0px, calc(var(--header-image-height) - 52px + 4px)) !important;
+}
+
+/* Amber star when this object is a favorite. */
+#button-header-favorite.menuActionUnfav {
+    color: var(--color-orange) !important;
+}
