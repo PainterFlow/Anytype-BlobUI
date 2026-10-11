@@ -19,6 +19,8 @@ a[href^="blob://"]:active {
     opacity: 1;
     animation: blobui-glitchy-text 2.8s steps(1, end) infinite;
     text-shadow: none;
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 @keyframes blobui-glitchy-text {
@@ -27,27 +29,35 @@ a[href^="blob://"]:active {
         top: 0;
         opacity: 1;
         text-shadow: none;
+        -webkit-mask-image: none;
+        mask-image: none;
     }
 
     60%, 63% {
         left: -2px;
         top: 0;
         opacity: 0.78;
-        text-shadow: -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
+        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 8px, transparent 8px 9px);
+        mask-image: repeating-linear-gradient(to bottom, #000 0 8px, transparent 8px 9px);
+        text-shadow: -4px 0 rgba(255, 35, 70, 0.55), 4px 0 rgba(0, 220, 255, 0.55), -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
     }
 
     61%, 64% {
         left: 1px;
         top: 1px;
         opacity: 0.92;
-        text-shadow: 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
+        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 6px, transparent 6px 7px);
+        mask-image: repeating-linear-gradient(to bottom, #000 0 6px, transparent 6px 7px);
+        text-shadow: 5px 0 rgba(255, 35, 70, 0.5), -5px 0 rgba(0, 220, 255, 0.5), 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
     }
 
     62%, 65% {
         left: -1px;
         top: -1px;
         opacity: 0.68;
-        text-shadow: -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
+        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 4px, transparent 4px 5px);
+        mask-image: repeating-linear-gradient(to bottom, #000 0 4px, transparent 4px 5px);
+        text-shadow: -6px 0 rgba(255, 35, 70, 0.52), 6px 0 rgba(0, 220, 255, 0.52), -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
     }
 }
 
@@ -58,5 +68,7 @@ a[href^="blob://"]:active {
         top: 0;
         opacity: 1;
         text-shadow: none;
+        -webkit-mask-image: none;
+        mask-image: none;
     }
 }
