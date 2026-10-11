@@ -38,3 +38,25 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 	- If you didn't pick a custom instillation, just press A and Enter.
 	- Paste your Anytype API key.
 9. In Anytype, press Ctrl/Cmd + R to reload and it should be done.
+
+## Dev Features
+
+### Text Effects & Embeds
+
+I'm currently working on implementing custom text effects and embeds with the help of the href attribute
+The Base Idea is:
+```css
+/* All BlobUI markers inside object text */
+.pageMain .editor .blockText .editable a[href^="blob://"] {
+}
+
+/* A specific text effect */
+.pageMain .editor .blockText .editable a[href="blob://animated.txt"] {
+}
+
+/* The block containing that marker */
+.pageMain .editor .blockText:has(
+  .editable a[href="blob://animated.txt"]
+) {
+}
+```
