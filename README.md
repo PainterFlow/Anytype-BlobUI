@@ -60,3 +60,5 @@ The Base Idea is:
 ) {
 }
 ```
+The current text effects are:
+- `blob://animated.txt/glitchy`: Creates a cool glitchy effect

@@ -1,26 +1,62 @@
-/* Brief color offsets add a glitch to this link without changing its layout. */
+/* Blob links stay plain in every interactive state. */
+a[href^="blob://"],
+a[href^="blob://"]:visited,
+a[href^="blob://"]:hover,
+a[href^="blob://"]:focus,
+a[href^="blob://"]:focus-visible,
+a[href^="blob://"]:active {
+    text-decoration: none !important;
+    text-decoration-line: none !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+}
+
+/* Small offsets keep the glitch inside the link's existing line boxes. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
+    position: relative;
+    left: 0;
+    top: 0;
+    opacity: 1;
     animation: blobui-glitchy-text 2.8s steps(1, end) infinite;
-    text-shadow: 0 0 0 transparent, 0 0 0 transparent;
+    text-shadow: none;
 }
 
 @keyframes blobui-glitchy-text {
-    0%, 64%, 67%, 93%, 100% {
-        text-shadow: 0 0 0 transparent, 0 0 0 transparent;
+    0%, 58%, 66%, 92%, 100% {
+        left: 0;
+        top: 0;
+        opacity: 1;
+        text-shadow: none;
     }
 
-    65%, 91% {
-        text-shadow: -1px 0 rgba(255, 55, 95, 0.72), 1px 0 rgba(0, 205, 255, 0.72);
+    60%, 63% {
+        left: -2px;
+        top: 0;
+        opacity: 0.78;
+        text-shadow: -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
     }
 
-    66%, 92% {
-        text-shadow: 1px 0 rgba(255, 55, 95, 0.72), -1px 0 rgba(0, 205, 255, 0.72);
+    61%, 64% {
+        left: 1px;
+        top: 1px;
+        opacity: 0.92;
+        text-shadow: 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
+    }
+
+    62%, 65% {
+        left: -1px;
+        top: -1px;
+        opacity: 0.68;
+        text-shadow: -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
-        animation: none;
+        animation: none !important;
+        left: 0;
+        top: 0;
+        opacity: 1;
         text-shadow: none;
     }
 }
