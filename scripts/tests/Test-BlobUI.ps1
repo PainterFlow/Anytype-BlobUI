@@ -92,6 +92,8 @@ $spaceObjectId = 'bafy-space-settings-object-id'
 $emptyObjectId = 'bafy-empty-settings-object-id'
 $calendarBlueObjectId = 'bafy-calendar-blue-object-id'
 $calendarBlobPinkObjectId = 'bafy-calendar-blob-pink-object-id'
+$calendarHexObjectId = 'bafy-calendar-hex-object-id'
+$calendarRgbObjectId = 'bafy-calendar-rgb-object-id'
 $calendarDefaultObjectId = 'bafy-calendar-default-object-id'
 $calendarUncoloredObjectId = 'bafy-calendar-uncolored-object-id'
 $staleCalendarObjectId = 'bafy-calendar-stale-object-id'
@@ -211,12 +213,24 @@ $apiTransport = {
                             name = 'Blob Pink calendar record'
                             type = 'page'
                             properties = @{ $calendarColorPropertyKey = @{ format = 'select'; select = @{ name = 'Blob Pink' } } }
+                        },
+                        @{
+                            id = $calendarHexObjectId
+                            name = 'Hex calendar record'
+                            type = 'page'
+                            properties = @{ $calendarColorPropertyKey = @{ format = 'text'; text = '#de50de' } }
+                        },
+                        @{
+                            id = $calendarRgbObjectId
+                            name = 'RGB calendar record'
+                            type = 'page'
+                            properties = @{ $calendarColorPropertyKey = @{ format = 'text'; text = 'rgba(12, 34, 56, 0.5)' } }
                         }
                     )
                     has_more = $true
                     limit = 100
                     offset = 0
-                    total = 4
+                    total = 6
                     warnings = @()
                 }
             }
@@ -239,7 +253,7 @@ $apiTransport = {
                     has_more = $false
                     limit = 100
                     offset = $offset
-                    total = 4
+                    total = 6
                     warnings = @()
                 }
             }
@@ -352,6 +366,8 @@ try {
     Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
     Assert-Equal 'Blue' $fetchedData.calendarObjectColors.$calendarBlueObjectId 'The Calendar Color property was not read from the independent space search.'
     Assert-Equal 'Blob Pink' $fetchedData.calendarObjectColors.$calendarBlobPinkObjectId 'Blob Pink was not preserved as a canonical calendar color.'
+    Assert-Equal '#DE50DE' $fetchedData.calendarObjectColors.$calendarHexObjectId 'A hexadecimal Calendar Color value was not normalized.'
+    Assert-Equal 'rgba(12, 34, 56, 0.5)' $fetchedData.calendarObjectColors.$calendarRgbObjectId 'An rgba() Calendar Color value was not preserved.'
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarDefaultObjectId]) 'Default did not remove its calendar color override.'
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarUncoloredObjectId]) 'An object without Calendar Color received an override.'
     Assert-True ($fetchedData.calendarObjectColors.PSObject.Properties[$calendarBlueObjectId] -and $fetchedData.settingsObjectIds -notcontains $calendarBlueObjectId) 'Calendar color collection reused selected theme settings objects instead of the space object search.'
@@ -411,7 +427,15 @@ try {
     Assert-Equal 'Segoe UI' (ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI') 'A valid font name was rejected.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI; color:red' } 'Unsafe font value' 'font family'
     Assert-Equal '#12ABEF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value '#12abef') 'A valid hex color was not normalized.'
+    Assert-Equal 'rgb(12, 34, 56)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(12, 34, 56)') 'A comma-form rgb() color was rejected.'
+    Assert-Equal 'rgba(12 34 56 / 50%)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgba(12 34 56 / 50%)') 'A modern space/slash rgba() color was rejected.'
+    Assert-Equal 'rgb(100% 0 0)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100% 0 0)') 'Modern rgb() did not accept valid mixed channel units.'
+    Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'Accent Color lost White compatibility.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'red; color:blue' } 'Unsafe color value' 'hexadecimal'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(256, 0, 0)' } 'Out-of-range RGB channel was accepted.' 'channel outside'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100%, 0, 0)' } 'Legacy comma rgb() accepted mixed channel units.' 'mixed rgb()/rgba() channel units'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgba(0 0 0 / 1.1)' } 'Out-of-range alpha was accepted.' 'alpha outside'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(1, 2, 3)); color: red;/*' } 'Injected CSS color was accepted.' 'hexadecimal'
     Assert-Equal '12.5' (ConvertTo-BlobUiCssPlaceholderValue -Type number -Value '12.5') 'A valid CSS number was rejected.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type number -Value '12px' } 'Unsafe number value' 'CSS number'
     Assert-Equal '1' (ConvertTo-BlobUiCssPlaceholderValue -Type boolean -Value 'true') 'A valid true value was rejected.'
@@ -431,6 +455,8 @@ try {
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('background-color: var(--color-blue) !important;')) 'Compiled CSS did not use the existing Anytype Blue palette color.'
     Assert-True ($css.Contains('[data-id="' + $calendarBlobPinkObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS did not map Blob Pink to the existing Blob Pink color.'
+    Assert-True ($css.Contains('[data-id="' + $calendarHexObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS omitted the hexadecimal Calendar Color value.'
+    Assert-True ($css.Contains('[data-id="' + $calendarRgbObjectId + '"]') -and $css.Contains('background-color: rgba(12, 34, 56, 0.5) !important;')) 'Compiled CSS omitted the rgba() Calendar Color value.'
     Assert-True (-not $css.Contains($calendarDefaultObjectId)) 'Compiled CSS emitted a selector for Default.'
     Assert-True (-not ($css -match '\[data-id="[^"]+"\]\s+[^\{]*checkbox')) 'Calendar color CSS unexpectedly targets task checkboxes.'
     Assert-True ($css.Contains('font-family: "Libron", sans-serif !important;')) 'Compiled CSS omitted the default UI font.'

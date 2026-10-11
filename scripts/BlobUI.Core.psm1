@@ -381,27 +381,126 @@ function Get-BlobUiObjectPropertyValue {
     return Get-BlobUiPropertyValue -PropertyValue $matches[0] -DisplayName $DisplayName
 }
 
-function ConvertTo-BlobUiCalendarColorName {
-    param([AllowNull()][string]$Value)
+function Test-BlobUiCssColorComponent {
+    param([Parameter(Mandatory = $true)][string]$Value, [Parameter(Mandatory = $true)][decimal]$Maximum)
 
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-    switch ($Value.Trim().ToLowerInvariant()) {
-        'default' { return $null }
-        'grey' { return 'Grey' }
-        'yellow' { return 'Yellow' }
-        'amber' { return 'Amber' }
-        'red' { return 'Red' }
-        'pink' { return 'Pink' }
-        'purple' { return 'Purple' }
-        'blue' { return 'Blue' }
-        'sky' { return 'Sky' }
-        'teal' { return 'Teal' }
-        'green' { return 'Green' }
-        'blob pink' { return 'Blob Pink' }
-        default {
-            throw "'Calendar Color' must be Default, Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky, Teal, Green, or Blob Pink."
-        }
+    $numberText = $Value.Trim()
+    $isPercentage = $numberText.EndsWith('%')
+    if ($isPercentage) { $numberText = $numberText.Substring(0, $numberText.Length - 1) }
+    if ($numberText -notmatch '^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$') { return $false }
+    $number = [decimal]0
+    if (-not [decimal]::TryParse($numberText, [System.Globalization.NumberStyles]::AllowDecimalPoint, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)) {
+        return $false
     }
+    $limit = if ($isPercentage) { [decimal]100 } else { $Maximum }
+    return $number -ge 0 -and $number -le $limit
+}
+
+function Test-BlobUiCssColorAlpha {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $alphaText = $Value.Trim()
+    $isPercentage = $alphaText.EndsWith('%')
+    if ($isPercentage) { $alphaText = $alphaText.Substring(0, $alphaText.Length - 1) }
+    if ($alphaText -notmatch '^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$') { return $false }
+    $alpha = [decimal]0
+    if (-not [decimal]::TryParse($alphaText, [System.Globalization.NumberStyles]::AllowDecimalPoint, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$alpha)) {
+        return $false
+    }
+    $limit = if ($isPercentage) { [decimal]100 } else { [decimal]1 }
+    return $alpha -ge 0 -and $alpha -le $limit
+}
+
+function ConvertTo-BlobUiColorValue {
+    param(
+        [AllowNull()][string]$Value,
+        [string]$Name = 'CSS color',
+        [switch]$AllowDefault,
+        [switch]$AllowWhite
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        if ($AllowDefault) { return $null }
+        throw "'$Name' must be a supported color value."
+    }
+    $trimmed = $Value.Trim()
+    if ($trimmed.Length -gt 128) { throw "'$Name' must be a supported color value." }
+    $paletteNames = @{
+        grey = 'Grey'
+        yellow = 'Yellow'
+        amber = 'Amber'
+        red = 'Red'
+        pink = 'Pink'
+        purple = 'Purple'
+        blue = 'Blue'
+        sky = 'Sky'
+        teal = 'Teal'
+        green = 'Green'
+        'blob pink' = 'Blob Pink'
+    }
+    $lowerValue = $trimmed.ToLowerInvariant()
+    if ($lowerValue -ceq 'default') {
+        if ($AllowDefault) { return $null }
+        throw "'$Name' does not accept Default."
+    }
+    if ($paletteNames.ContainsKey($lowerValue)) { return $paletteNames[$lowerValue] }
+    if ($AllowWhite -and $lowerValue -ceq 'white') { return 'White' }
+    if ($trimmed -match '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
+        return $trimmed.ToUpperInvariant()
+    }
+    if ($trimmed -in @(
+        'var(--color-grey)',
+        'var(--color-yellow)',
+        'var(--color-amber, var(--color-orange))',
+        'var(--color-red)',
+        'var(--color-pink)',
+        'var(--color-purple)',
+        'var(--color-blue)',
+        'var(--color-sky, var(--color-ice))',
+        'var(--color-teal)',
+        'var(--color-green, var(--color-lime))'
+    )) {
+        return $trimmed
+    }
+
+    $functionMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $trimmed,
+        '^(?i:rgba?)\(\s*(?<body>[^()]+)\s*\)$'
+    )
+    if ($functionMatch.Success) {
+        $body = $functionMatch.Groups['body'].Value.Trim()
+        $channels = @()
+        $alpha = $null
+        if ($body.Contains(',')) {
+            if ($body -match '/') { throw "'$Name' contains an invalid rgb()/rgba() color." }
+            $parts = @($body.Split(',') | ForEach-Object { $_.Trim() })
+            if ($parts.Count -notin @(3, 4)) { throw "'$Name' contains an invalid rgb()/rgba() color." }
+            $channels = @($parts[0..2])
+            $channelUnits = @($channels | ForEach-Object { $_.EndsWith('%') } | Select-Object -Unique)
+            if ($channelUnits.Count -gt 1) { throw "'$Name' contains mixed rgb()/rgba() channel units." }
+            if ($parts.Count -eq 4) { $alpha = $parts[3] }
+        }
+        else {
+            $spaceMatch = [System.Text.RegularExpressions.Regex]::Match(
+                $body,
+                '^(?<r>\S+)\s+(?<g>\S+)\s+(?<b>\S+)(?:\s*/\s*(?<a>\S+))?$'
+            )
+            if (-not $spaceMatch.Success) { throw "'$Name' contains an invalid rgb()/rgba() color." }
+            $channels = @($spaceMatch.Groups['r'].Value, $spaceMatch.Groups['g'].Value, $spaceMatch.Groups['b'].Value)
+            if ($spaceMatch.Groups['a'].Success) { $alpha = $spaceMatch.Groups['a'].Value }
+        }
+        foreach ($channel in $channels) {
+            if (-not (Test-BlobUiCssColorComponent -Value $channel -Maximum ([decimal]255))) {
+                throw "'$Name' contains an rgb()/rgba() channel outside its valid range."
+            }
+        }
+        if ($null -ne $alpha -and -not (Test-BlobUiCssColorAlpha -Value $alpha)) {
+            throw "'$Name' contains an rgb()/rgba() alpha outside its valid range."
+        }
+        return $trimmed
+    }
+
+    throw "'$Name' must be a three or six digit hexadecimal color, a valid rgb()/rgba() color, an Anytype color name (Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky, Teal, or Green), or Blob Pink."
 }
 
 function Get-BlobUiCalendarObjectColors {
@@ -439,7 +538,7 @@ function Get-BlobUiCalendarObjectColors {
     foreach ($object in $objects) {
         $value = Get-BlobUiObjectPropertyValue -Object $object -Key $propertyKey -DisplayName 'Calendar Color'
         if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) { continue }
-        $colorName = ConvertTo-BlobUiCalendarColorName -Value ([string]$value)
+        $colorName = ConvertTo-BlobUiColorValue -Value ([string]$value) -Name 'Calendar Color' -AllowDefault
         if ($null -eq $colorName) { continue }
 
         $objectId = [string](Get-BlobUiPropertyField -InputObject $object -FieldName 'id')
@@ -483,20 +582,16 @@ function ConvertTo-BlobUiCssPlaceholderValue {
                 teal = 'var(--color-teal)'
                 green = 'var(--color-green, var(--color-lime))'
             }
-            $paletteName = $trimmed.ToLowerInvariant()
+            $colorValue = ConvertTo-BlobUiColorValue -Value $trimmed -Name $Name -AllowWhite
+            $paletteName = $colorValue.ToLowerInvariant()
             if ($paletteVariables.ContainsKey($paletteName)) {
                 return $paletteVariables[$paletteName]
             }
+            if ($paletteName -ceq 'white') { return '#FFFFFF' }
             if ($paletteName -ceq 'blob pink') {
                 return '#DE50DE'
             }
-            if ($trimmed -match '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
-                return $trimmed.ToUpperInvariant()
-            }
-            if ($trimmed -in @($paletteVariables.Values) -or $trimmed -ceq '#DE50DE') {
-                return $trimmed
-            }
-            throw "'$Name' must be a three or six digit hexadecimal CSS color, an Anytype color name (White, Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky, Teal, or Green), or Blob Pink."
+            return $colorValue
         }
         'url' {
             $uri = $null
@@ -921,7 +1016,7 @@ function New-BlobUiCalendarColorCss {
         if ($entry.objectId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$') {
             throw "Calendar Color data contains an invalid Anytype object ID: $($entry.objectId)"
         }
-        $colorName = ConvertTo-BlobUiCalendarColorName -Value ([string]$entry.colorName)
+        $colorName = ConvertTo-BlobUiColorValue -Value ([string]$entry.colorName) -Name 'Calendar Color' -AllowDefault
         if ($null -eq $colorName) { continue }
         $cssColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value $colorName -Name 'Calendar Color'
         $rules.Add((
