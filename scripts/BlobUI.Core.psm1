@@ -895,7 +895,7 @@ function Copy-BlobUiRuntime {
     [System.IO.Directory]::CreateDirectory($runtimeFullPath) | Out-Null
     $runtimeScriptsDirectory = Join-Path $runtimeFullPath 'scripts'
     [System.IO.Directory]::CreateDirectory($runtimeScriptsDirectory) | Out-Null
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1', 'Uninstall.ps1')) {
         $sourcePath = Join-Path (Join-Path $sourceFullPath 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"

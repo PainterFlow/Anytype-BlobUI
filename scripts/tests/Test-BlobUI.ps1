@@ -238,6 +238,7 @@ Push-Location $testRoot
 try {
     $installDirectory = Join-Path $testRoot 'Anytype Data ü #1'
     [System.IO.Directory]::CreateDirectory($installDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $installDirectory 'unrelated-anytype-file.txt'), 'keep-anytype-file')
     $oldCssPath = Join-Path $installDirectory 'custom.css'
     [System.IO.File]::WriteAllText($oldCssPath, 'old-css-sentinel')
     $blobDirectory = Join-Path $installDirectory 'blob'
@@ -457,6 +458,7 @@ try {
     $firstInstall = Invoke-BlobUiInstall @installArguments
     Assert-True (Test-Path -LiteralPath $firstInstall.cssPath -PathType Leaf) 'The CSS install did not create custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1') -PathType Leaf) 'The runtime install did not copy Uninstall.ps1.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'The install created a persistent backup directory.'
     $backupArtifacts = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter '*.bak')
@@ -518,7 +520,7 @@ try {
     $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
     $sourceScriptsFixture = Join-Path $sourceFixture 'scripts'
     [System.IO.Directory]::CreateDirectory($sourceScriptsFixture) | Out-Null
-    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1')) {
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $scriptsDirectory $sourceFile) -Destination $sourceScriptsFixture
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
@@ -569,6 +571,124 @@ try {
     finally {
         $env:APPDATA = $oldAppData
     }
+
+    $sourceUninstallScript = Join-Path $sourceScriptsFixture 'Uninstall.ps1'
+    Assert-True (Test-Path -LiteralPath $sourceUninstallScript -PathType Leaf) 'The source fixture did not include Uninstall.ps1.'
+    $emptyAppData = Join-Path $testRoot 'Empty APPDATA'
+    $env:APPDATA = $emptyAppData
+    try {
+        Assert-Throws { & $sourceUninstallScript } 'An uninstall without a pointer or default install was accepted.' 'No BlobUI installation was found'
+    }
+    finally {
+        $env:APPDATA = $oldAppData
+    }
+
+    $staleUninstallDirectory = Join-Path $testRoot 'Missing uninstall target'
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $staleUninstallDirectory
+    $staleUninstallPointerText = [System.IO.File]::ReadAllText($pointerPath)
+    $env:APPDATA = $emptyAppData
+    try {
+        Assert-Throws { & $sourceUninstallScript } 'An uninstall with a stale source pointer was accepted.' 'no longer exists'
+    }
+    finally {
+        $env:APPDATA = $oldAppData
+    }
+    Assert-Equal $staleUninstallPointerText ([System.IO.File]::ReadAllText($pointerPath)) 'A stale uninstall pointer was removed or changed.'
+
+    $pointedUninstallDirectory = Join-Path $testRoot 'Pointer Anytype Data With Spaces'
+    $explicitUninstallDirectory = Join-Path $testRoot 'Explicit Anytype Data With Spaces'
+    foreach ($uninstallDirectory in @($pointedUninstallDirectory, $explicitUninstallDirectory)) {
+        [System.IO.Directory]::CreateDirectory($uninstallDirectory) | Out-Null
+        [System.IO.Directory]::CreateDirectory((Join-Path $uninstallDirectory 'blob\backups')) | Out-Null
+        [System.IO.Directory]::CreateDirectory((Join-Path $uninstallDirectory 'blob\runtime\scripts')) | Out-Null
+        [System.IO.Directory]::CreateDirectory((Join-Path $uninstallDirectory 'blob\assets')) | Out-Null
+        [System.IO.Directory]::CreateDirectory((Join-Path $uninstallDirectory 'blob\staging\run')) | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'custom.css'), 'uninstall-css')
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'blob\backups\old-custom.css.bak'), 'old-backup')
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'blob\runtime\scripts\Rebuild.ps1'), 'runtime-script')
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'blob\assets\user-asset.txt'), 'asset')
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'blob\staging\run\candidate.css'), 'staged-css')
+        [System.IO.File]::WriteAllText((Join-Path $uninstallDirectory 'unrelated-anytype-file.txt'), 'keep-anytype-file')
+    }
+    $releaseCssPath = Join-Path $pointedUninstallDirectory 'Releases\custom.css'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $releaseCssPath)) | Out-Null
+    [System.IO.File]::WriteAllText($releaseCssPath, 'preserve-release-css')
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $pointedUninstallDirectory
+    & $sourceUninstallScript -InstallDirectory $explicitUninstallDirectory
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $explicitUninstallDirectory 'custom.css'))) 'An explicit uninstall left the selected custom.css file.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $explicitUninstallDirectory 'blob'))) 'An explicit uninstall left files or old backups in the selected blob folder.'
+    Assert-Equal 'keep-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $explicitUninstallDirectory 'unrelated-anytype-file.txt'))) 'An explicit uninstall removed an unrelated Anytype file.'
+    Assert-True (Test-Path -LiteralPath $pointerPath -PathType Leaf) 'An explicit uninstall removed a source pointer for a different installation.'
+    $remainingPointer = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
+    Assert-Equal $pointedUninstallDirectory $remainingPointer.installDirectory 'An explicit uninstall changed a source pointer for a different installation.'
+
+    & $sourceUninstallScript
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $pointedUninstallDirectory 'custom.css'))) 'A source-pointer uninstall left the selected custom.css file.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $pointedUninstallDirectory 'blob'))) 'A source-pointer uninstall left the selected blob folder.'
+    Assert-Equal 'keep-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $pointedUninstallDirectory 'unrelated-anytype-file.txt'))) 'A source-pointer uninstall removed an unrelated Anytype file.'
+    Assert-Equal 'preserve-release-css' ([System.IO.File]::ReadAllText($releaseCssPath)) 'A source-pointer uninstall removed a custom.css file in Releases.'
+    Assert-True (-not (Test-Path -LiteralPath $pointerPath)) 'A successful source-pointer uninstall left its matching source pointer.'
+    & $sourceUninstallScript -InstallDirectory $pointedUninstallDirectory
+    Assert-True (Test-Path -LiteralPath (Join-Path $pointedUninstallDirectory 'unrelated-anytype-file.txt') -PathType Leaf) 'A repeated uninstall removed unrelated Anytype data.'
+
+    $legacyUninstallCss = Join-Path $legacyInstallDirectory 'Releases\custom.css'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $legacyUninstallCss)) | Out-Null
+    [System.IO.File]::WriteAllText($legacyUninstallCss, 'preserve-legacy-release-css')
+    [System.IO.File]::WriteAllText((Join-Path $legacyInstallDirectory 'unrelated-anytype-file.txt'), 'keep-legacy-anytype-file')
+    $env:APPDATA = $legacyAppData
+    try {
+        & $sourceUninstallScript
+    }
+    finally {
+        $env:APPDATA = $oldAppData
+    }
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'custom.css'))) 'The validated default fallback left custom.css installed.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'blob'))) 'The validated default fallback left the blob folder.'
+    Assert-Equal 'keep-legacy-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $legacyInstallDirectory 'unrelated-anytype-file.txt'))) 'The validated default fallback removed another Anytype file.'
+    Assert-Equal 'preserve-legacy-release-css' ([System.IO.File]::ReadAllText($legacyUninstallCss)) 'The validated default fallback removed a custom.css file in Releases.'
+
+    $releaseRoot = Join-Path $testRoot 'Releases'
+    [System.IO.Directory]::CreateDirectory((Join-Path $releaseRoot 'blob')) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $releaseRoot 'custom.css'), 'release-root-css')
+    Assert-Throws { & $sourceUninstallScript -InstallDirectory $releaseRoot } 'An uninstall accepted a Releases folder as the Anytype directory.' 'Releases path'
+    Assert-Equal 'release-root-css' ([System.IO.File]::ReadAllText((Join-Path $releaseRoot 'custom.css'))) 'The Releases folder guard changed custom.css.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $releaseRoot 'blob') -PathType Container) 'The Releases folder guard changed the blob directory.'
+
+    $outsideReparseTarget = Join-Path $testRoot 'Outside reparse target'
+    [System.IO.Directory]::CreateDirectory((Join-Path $outsideReparseTarget 'blob')) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $outsideReparseTarget 'custom.css'), 'outside-css')
+    [System.IO.File]::WriteAllText((Join-Path $outsideReparseTarget 'blob\outside-sentinel.txt'), 'preserve-outside')
+    $selectedRootJunction = Join-Path $testRoot 'Selected Anytype Junction'
+    $junctionSupported = $false
+    try {
+        New-Item -ItemType Junction -Path $selectedRootJunction -Target $outsideReparseTarget -ErrorAction Stop | Out-Null
+        $junctionSupported = $true
+    }
+    catch {
+        Write-Warning "Junction safety checks were skipped because this host could not create a junction: $($_.Exception.Message)"
+    }
+    if ($junctionSupported) {
+        Assert-Throws { & $sourceUninstallScript -InstallDirectory $selectedRootJunction } 'An uninstall accepted a reparse-point Anytype root.' 'reparse point'
+        Assert-Equal 'outside-css' ([System.IO.File]::ReadAllText((Join-Path $outsideReparseTarget 'custom.css'))) 'A rejected root junction changed the external CSS.'
+        Assert-Equal 'preserve-outside' ([System.IO.File]::ReadAllText((Join-Path $outsideReparseTarget 'blob\outside-sentinel.txt'))) 'A rejected root junction changed external blob contents.'
+        Remove-Item -LiteralPath $selectedRootJunction -Force
+
+        $nestedJunctionRoot = Join-Path $testRoot 'Anytype Data With Nested Junction'
+        $nestedBlob = Join-Path $nestedJunctionRoot 'blob'
+        [System.IO.Directory]::CreateDirectory($nestedBlob) | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $nestedJunctionRoot 'custom.css'), 'nested-junction-css')
+        $nestedJunctionPath = Join-Path $nestedBlob 'external'
+        New-Item -ItemType Junction -Path $nestedJunctionPath -Target $outsideReparseTarget -ErrorAction Stop | Out-Null
+        & $sourceUninstallScript -InstallDirectory $nestedJunctionRoot
+        Assert-True (-not (Test-Path -LiteralPath $nestedJunctionRoot)) 'Uninstall left a blob tree containing a junction.'
+        Assert-Equal 'preserve-outside' ([System.IO.File]::ReadAllText((Join-Path $outsideReparseTarget 'blob\outside-sentinel.txt'))) 'Uninstall traversed a junction and removed external blob contents.'
+    }
+
+    $runtimeUninstallScript = Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1'
+    & $runtimeUninstallScript
+    Assert-True (-not (Test-Path -LiteralPath $firstInstall.cssPath)) 'The installed runtime uninstaller left custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath $blobDirectory)) 'The installed runtime uninstaller left the blob folder.'
+    Assert-Equal 'keep-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $installDirectory 'unrelated-anytype-file.txt'))) 'The installed runtime uninstaller removed an unrelated Anytype file.'
 
     Write-Host 'BlobUI isolated workflow checks passed.'
 }
