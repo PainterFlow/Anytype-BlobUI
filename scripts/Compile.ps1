@@ -1,8 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$DataPath,
     [Parameter(Mandatory = $true)][string]$OutputPath,
-    [string]$DevDirectory = (Join-Path $PSScriptRoot 'Dev'),
-    [string]$AssetSourceDirectory = (Join-Path $PSScriptRoot 'assets')
+    [string]$DevDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'Dev'),
+    [string]$AssetSourceDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'assets')
 )
 
 $ErrorActionPreference = 'Stop'

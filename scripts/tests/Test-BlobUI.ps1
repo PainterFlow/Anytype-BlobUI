@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$scriptsDirectory = Join-Path $repoRoot 'scripts'
 $testRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '.tmp'))
 $testsRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 if (-not $testRoot.StartsWith($testsRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -9,7 +10,7 @@ if (Test-Path -LiteralPath $testRoot) {
     Remove-Item -LiteralPath $testRoot -Recurse -Force
 }
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
-Import-Module (Join-Path $repoRoot 'BlobUI.Core.psm1') -Force
+Import-Module (Join-Path $scriptsDirectory 'BlobUI.Core.psm1') -Force
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -233,6 +234,7 @@ $unavailableApiTransport = {
     throw [System.Net.Sockets.SocketException]::new([System.Net.Sockets.SocketError]::ConnectionRefused)
 }
 
+Push-Location $testRoot
 try {
     $installDirectory = Join-Path $testRoot 'Anytype Data ü #1'
     [System.IO.Directory]::CreateDirectory($installDirectory) | Out-Null
@@ -257,7 +259,7 @@ try {
         }
         ApiTransport = $apiTransport
     }
-    & (Join-Path $repoRoot 'Get-Data.ps1') @getArguments
+    & (Join-Path $scriptsDirectory 'Get-Data.ps1') @getArguments
     $fetchedData = Read-BlobUiDataFile -Path $candidateDataPath
 
     Assert-Equal $testSpaceId $fetchedData.selectedSpace.id 'The selected space ID was not saved in its full v2 form.'
@@ -317,6 +319,10 @@ try {
     $compiledCssPath = Join-Path $testRoot 'compiled.css'
     $compileResult = Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $compiledCssPath -Data $fetchedData
     $css = [System.IO.File]::ReadAllText($compiledCssPath)
+    $scriptCompiledCssPath = Join-Path $testRoot 'script-compiled.css'
+    & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
+    Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
+    Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('font-family: "Libron", sans-serif !important;')) 'Compiled CSS omitted the default UI font.'
@@ -452,9 +458,9 @@ try {
     Assert-True (Test-Path -LiteralPath $firstInstall.cssPath -PathType Leaf) 'The CSS install did not create custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
-    $backups = @(Get-ChildItem -LiteralPath (Join-Path $blobDirectory 'backups') -Filter 'custom.css.*.bak')
-    Assert-Equal 1 $backups.Count 'The first install did not create a CSS backup.'
-    Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($backups[0].FullName)) 'The CSS backup does not preserve the original file.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'The install created a persistent backup directory.'
+    $backupArtifacts = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter '*.bak')
+    Assert-Equal 0 $backupArtifacts.Count 'The install left a backup file behind.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'The encrypted API key did not decrypt for the current user.'
     $savedData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     Assert-Equal $installDirectory $savedData.installDirectory 'The successful install directory was not saved.'
@@ -468,41 +474,71 @@ try {
         DataCandidatePath = $candidateDataPath
     }
     Invoke-BlobUiInstall @repeatInstallArguments | Out-Null
-    $backups = @(Get-ChildItem -LiteralPath (Join-Path $blobDirectory 'backups') -Filter 'custom.css.*.bak')
-    Assert-Equal 2 $backups.Count 'A repeated install did not create a fresh CSS backup.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'A repeated install created a persistent backup directory.'
+    $backupArtifacts = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter '*.bak')
+    Assert-Equal 0 $backupArtifacts.Count 'A repeated install left a backup file behind.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'A repeated install damaged the encrypted API key.'
 
     $rebuildArguments = @{ ApiTransport = $apiTransport }
-    & (Join-Path $firstInstall.runtimePath 'Rebuild.ps1') @rebuildArguments
-    $backups = @(Get-ChildItem -LiteralPath (Join-Path $blobDirectory 'backups') -Filter 'custom.css.*.bak')
-    Assert-Equal 3 $backups.Count 'Rebuild did not install using the saved target directory and create a CSS backup.'
+    & (Join-Path $firstInstall.runtimePath 'scripts\Rebuild.ps1') @rebuildArguments
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'Rebuild created a persistent backup directory.'
+    $backupArtifacts = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter '*.bak')
+    Assert-Equal 0 $backupArtifacts.Count 'Rebuild left a backup file behind.'
     $rebuiltData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     Assert-Equal $installDirectory $rebuiltData.installDirectory 'Rebuild changed the saved install directory.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Rebuild damaged the encrypted API key.'
 
+    $rollbackInstallDirectory = Join-Path $testRoot 'Rollback Anytype Data'
+    [System.IO.Directory]::CreateDirectory($rollbackInstallDirectory) | Out-Null
+    $rollbackBlobDirectory = Join-Path $rollbackInstallDirectory 'blob'
+    $rollbackCredentialDirectory = Join-Path $rollbackBlobDirectory 'credentials'
+    [System.IO.Directory]::CreateDirectory($rollbackCredentialDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $rollbackInstallDirectory 'custom.css'), 'rollback-css-sentinel')
+    [System.IO.File]::WriteAllText((Join-Path $rollbackBlobDirectory 'data.json'), 'rollback-data-sentinel')
+    [System.IO.Directory]::CreateDirectory((Join-Path $rollbackCredentialDirectory 'anytype-api-key.dpapi')) | Out-Null
+    $rollbackCandidatePath = Join-Path $testRoot 'rollback-data.json'
+    $rollbackCandidate = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($candidateDataPath))
+    $rollbackCandidate.installDirectory = $rollbackInstallDirectory
+    Write-BlobUiAtomicJson -Path $rollbackCandidatePath -InputObject $rollbackCandidate
+    $rollbackArguments = @{
+        InstallDirectory = $rollbackInstallDirectory
+        RuntimeSourceDirectory = $repoRoot
+        AssetsSourceDirectory = Join-Path $repoRoot 'assets'
+        CompiledCssPath = $compiledCssPath
+        DataCandidatePath = $rollbackCandidatePath
+        CredentialProtectedText = $protectedCredential
+    }
+    Assert-Throws { Invoke-BlobUiInstall @rollbackArguments } 'A credential write failure was accepted.' ''
+    Assert-Equal 'rollback-css-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackInstallDirectory 'custom.css'))) 'A failed install did not restore the existing CSS.'
+    Assert-Equal 'rollback-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackBlobDirectory 'data.json'))) 'A failed install did not restore existing settings data.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory 'backups'))) 'A failed install created a persistent backup directory.'
+    $backupArtifacts = @(Get-ChildItem -LiteralPath $rollbackInstallDirectory -Recurse -File -Filter '*.bak')
+    Assert-Equal 0 $backupArtifacts.Count 'A failed install left a backup file behind.'
+
     $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
-    [System.IO.Directory]::CreateDirectory($sourceFixture) | Out-Null
-    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $repoRoot $sourceFile) -Destination $sourceFixture
+    $sourceScriptsFixture = Join-Path $sourceFixture 'scripts'
+    [System.IO.Directory]::CreateDirectory($sourceScriptsFixture) | Out-Null
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $scriptsDirectory $sourceFile) -Destination $sourceScriptsFixture
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
     Copy-Item -LiteralPath (Join-Path $repoRoot 'assets') -Destination $sourceFixture -Recurse
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
     $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
-    & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments
+    & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments
     $pointerData = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
     Assert-Equal $installDirectory $pointerData.installDirectory 'The source rebuild did not resolve the saved custom install path with spaces.'
 
     $stalePointerText = [System.IO.File]::ReadAllText($pointerPath)
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory (Join-Path $testRoot 'missing install')
     $failedInstallPointerText = [System.IO.File]::ReadAllText($pointerPath)
-    Assert-Throws { & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments } 'A stale source install pointer was accepted.' 'no longer exists'
+    Assert-Throws { & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments } 'A stale source install pointer was accepted.' 'no longer exists'
     Assert-Equal $failedInstallPointerText ([System.IO.File]::ReadAllText($pointerPath)) 'A failed source rebuild changed the saved install pointer.'
     Write-BlobUiAtomicText -Path $pointerPath -Content $stalePointerText
 
     Remove-Item -LiteralPath $pointerPath -Force
-    & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments -InstallDirectory $installDirectory
+    & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments -InstallDirectory $installDirectory
     $oldAppData = $env:APPDATA
     $legacyAppData = Join-Path $testRoot 'Legacy APPDATA'
     $legacyInstallDirectory = Join-Path $legacyAppData 'anytype'
@@ -515,7 +551,7 @@ try {
     Copy-Item -LiteralPath $firstInstall.credentialPath -Destination (Join-Path $legacyBlobDirectory 'credentials\anytype-api-key.dpapi')
     $env:APPDATA = $legacyAppData
     try {
-        & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments
+        & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments
     }
     finally {
         $env:APPDATA = $oldAppData
@@ -528,7 +564,7 @@ try {
     if (Test-Path -LiteralPath $noInstallPointer) { Remove-Item -LiteralPath $noInstallPointer -Force }
     $env:APPDATA = Join-Path $testRoot 'Empty APPDATA'
     try {
-        Assert-Throws { & (Join-Path $noInstallFixture 'Rebuild.ps1') @sourceRebuildArguments } 'A source rebuild without an installation did not fail clearly.' 'No BlobUI installation was found'
+        Assert-Throws { & (Join-Path $noInstallFixture 'scripts\Rebuild.ps1') @sourceRebuildArguments } 'A source rebuild without an installation did not fail clearly.' 'No BlobUI installation was found'
     }
     finally {
         $env:APPDATA = $oldAppData
@@ -537,6 +573,7 @@ try {
     Write-Host 'BlobUI isolated workflow checks passed.'
 }
 finally {
+    Pop-Location
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

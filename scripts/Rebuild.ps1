@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
+$sourceDirectory = Split-Path -Parent $PSScriptRoot
 
 function Resolve-BlobUiRebuildState {
     param(
@@ -68,7 +69,7 @@ function Resolve-BlobUiRebuildState {
     }
 }
 
-$state = Resolve-BlobUiRebuildState -RequestedInstallDirectory $InstallDirectory -SourceDirectory $PSScriptRoot
+$state = Resolve-BlobUiRebuildState -RequestedInstallDirectory $InstallDirectory -SourceDirectory $sourceDirectory
 $blobDirectory = $state.BlobDirectory
 $dataPath = Join-Path $blobDirectory 'data.json'
 $credentialPath = Join-Path $blobDirectory 'credentials\anytype-api-key.dpapi'
@@ -114,15 +115,15 @@ try {
     $compileArguments = @{
         DataPath = $candidateDataPath
         OutputPath = $compiledCssPath
-        DevDirectory = Join-Path $PSScriptRoot 'Dev'
-        AssetSourceDirectory = Join-Path $PSScriptRoot 'assets'
+        DevDirectory = Join-Path $sourceDirectory 'Dev'
+        AssetSourceDirectory = Join-Path $sourceDirectory 'assets'
     }
     & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments
 
     $installArguments = @{
         InstallDirectory = $installDirectory
-        RuntimeSourceDirectory = $PSScriptRoot
-        AssetsSourceDirectory = Join-Path $PSScriptRoot 'assets'
+        RuntimeSourceDirectory = $sourceDirectory
+        AssetsSourceDirectory = Join-Path $sourceDirectory 'assets'
         CompiledCssPath = $compiledCssPath
         DataCandidatePath = $candidateDataPath
     }

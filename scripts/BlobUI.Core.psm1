@@ -861,19 +861,6 @@ function Invoke-BlobUiCssCompile {
     }
 }
 
-function Get-BlobUiUniqueBackupPath {
-    param([Parameter(Mandatory = $true)][string]$BackupDirectory)
-
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
-    $candidate = Join-Path $BackupDirectory ("custom.css.$stamp.bak")
-    $counter = 1
-    while (Test-Path -LiteralPath $candidate) {
-        $candidate = Join-Path $BackupDirectory ("custom.css.$stamp-$counter.bak")
-        $counter++
-    }
-    return $candidate
-}
-
 function Copy-BlobUiDirectoryContents {
     param(
         [Parameter(Mandatory = $true)][string]$SourceDirectory,
@@ -906,12 +893,14 @@ function Copy-BlobUiRuntime {
     }
 
     [System.IO.Directory]::CreateDirectory($runtimeFullPath) | Out-Null
+    $runtimeScriptsDirectory = Join-Path $runtimeFullPath 'scripts'
+    [System.IO.Directory]::CreateDirectory($runtimeScriptsDirectory) | Out-Null
     foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1')) {
-        $sourcePath = Join-Path $sourceFullPath $scriptName
+        $sourcePath = Join-Path (Join-Path $sourceFullPath 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
         }
-        Copy-Item -LiteralPath $sourcePath -Destination $runtimeFullPath -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $sourcePath -Destination $runtimeScriptsDirectory -Force -ErrorAction Stop
     }
     Copy-BlobUiDirectoryContents -SourceDirectory (Join-Path $sourceFullPath 'Dev') -DestinationDirectory (Join-Path $runtimeFullPath 'Dev')
     Copy-BlobUiDirectoryContents -SourceDirectory (Join-Path $sourceFullPath 'assets') -DestinationDirectory (Join-Path $runtimeFullPath 'assets')
@@ -1023,7 +1012,6 @@ function Invoke-BlobUiInstall {
     $blobDirectory = Join-Path $installFullPath 'blob'
     $assetDestination = Join-Path $blobDirectory 'assets'
     $runtimeDestination = Join-Path $blobDirectory 'runtime'
-    $backupDirectory = Join-Path $blobDirectory 'backups'
     $credentialDirectory = Join-Path $blobDirectory 'credentials'
     $credentialPath = Join-Path $credentialDirectory 'anytype-api-key.dpapi'
     $dataPath = Join-Path $blobDirectory 'data.json'
@@ -1042,13 +1030,6 @@ function Invoke-BlobUiInstall {
     try {
         Copy-BlobUiDirectoryContents -SourceDirectory $AssetsSourceDirectory -DestinationDirectory $assetDestination
         Copy-BlobUiRuntime -SourceDirectory $RuntimeSourceDirectory -RuntimeDirectory $runtimeDestination
-
-        if ($oldCssExists) {
-            [System.IO.Directory]::CreateDirectory($backupDirectory) | Out-Null
-            $backupPath = Get-BlobUiUniqueBackupPath -BackupDirectory $backupDirectory
-            Copy-Item -LiteralPath $cssDestination -Destination $backupPath -ErrorAction Stop
-            Write-Host "Existing CSS backed up to: $backupPath"
-        }
 
         $compiledCss = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($CompiledCssPath), [System.Text.Encoding]::UTF8)
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss

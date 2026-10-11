@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
+$sourceDirectory = Split-Path -Parent $PSScriptRoot
 
 function Get-InstallDirectory {
     $defaultDirectory = $null
@@ -87,25 +88,25 @@ try {
     $compileArguments = @{
         DataPath = $candidateDataPath
         OutputPath = $compiledCssPath
-        DevDirectory = Join-Path $PSScriptRoot 'Dev'
-        AssetSourceDirectory = Join-Path $PSScriptRoot 'assets'
+        DevDirectory = Join-Path $sourceDirectory 'Dev'
+        AssetSourceDirectory = Join-Path $sourceDirectory 'assets'
     }
     & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments
 
     $installArguments = @{
         InstallDirectory = $installDirectory
-        RuntimeSourceDirectory = $PSScriptRoot
-        AssetsSourceDirectory = Join-Path $PSScriptRoot 'assets'
+        RuntimeSourceDirectory = $sourceDirectory
+        AssetsSourceDirectory = Join-Path $sourceDirectory 'assets'
         CompiledCssPath = $compiledCssPath
         DataCandidatePath = $candidateDataPath
         CredentialProtectedText = $protectedCredential
     }
     $result = Invoke-BlobUiInstall @installArguments
 
-    $installedBlobDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-    $sourceInstallPointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $PSScriptRoot
+    $installedBlobDirectory = [System.IO.Path]::GetFullPath((Join-Path $sourceDirectory '..'))
+    $sourceInstallPointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceDirectory
     if (-not (Test-Path -LiteralPath (Join-Path $installedBlobDirectory 'data.json') -PathType Leaf)) {
-        Write-BlobUiInstallPointer -SourceDirectory $PSScriptRoot -InstallDirectory $installDirectory
+        Write-BlobUiInstallPointer -SourceDirectory $sourceDirectory -InstallDirectory $installDirectory
         Write-Host "Source rebuild location saved: $sourceInstallPointerPath"
     }
 
