@@ -1,0 +1,26 @@
+/* Brief color offsets add a glitch to this link without changing its layout. */
+.pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
+    animation: blobui-glitchy-text 2.8s steps(1, end) infinite;
+    text-shadow: 0 0 0 transparent, 0 0 0 transparent;
+}
+
+@keyframes blobui-glitchy-text {
+    0%, 64%, 67%, 93%, 100% {
+        text-shadow: 0 0 0 transparent, 0 0 0 transparent;
+    }
+
+    65%, 91% {
+        text-shadow: -1px 0 rgba(255, 55, 95, 0.72), 1px 0 rgba(0, 205, 255, 0.72);
+    }
+
+    66%, 92% {
+        text-shadow: 1px 0 rgba(255, 55, 95, 0.72), -1px 0 rgba(0, 205, 255, 0.72);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
+        animation: none;
+        text-shadow: none;
+    }
+}
