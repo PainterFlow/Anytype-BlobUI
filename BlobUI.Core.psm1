@@ -641,6 +641,24 @@ function Write-BlobUiAtomicJson {
     Write-BlobUiAtomicText -Path $Path -Content ($json + [Environment]::NewLine)
 }
 
+function Get-BlobUiInstallPointerPath {
+    param([Parameter(Mandatory = $true)][string]$SourceDirectory)
+
+    return Join-Path ([System.IO.Path]::GetFullPath($SourceDirectory)) '.blobui-install.json'
+}
+
+function Write-BlobUiInstallPointer {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDirectory,
+        [Parameter(Mandatory = $true)][string]$InstallDirectory
+    )
+
+    $installFullPath = [System.IO.Path]::GetFullPath($InstallDirectory)
+    Write-BlobUiAtomicJson -Path (Get-BlobUiInstallPointerPath -SourceDirectory $SourceDirectory) -InputObject ([ordered]@{
+        installDirectory = $installFullPath
+    })
+}
+
 function Get-BlobUiSettingsData {
     param(
         [Parameter(Mandatory = $true)][string]$ApiKey,
@@ -1084,10 +1102,12 @@ Export-ModuleMember -Function @(
     'Invoke-BlobUiCssCompile',
     'Copy-BlobUiDirectoryContents',
     'Get-BlobUiSettingsData',
+    'Get-BlobUiInstallPointerPath',
     'Invoke-BlobUiInstall',
     'New-BlobUiProtectedCredential',
     'Read-BlobUiDataFile',
     'Read-BlobUiProtectedCredential',
     'Write-BlobUiAtomicJson',
+    'Write-BlobUiInstallPointer',
     'Write-BlobUiAtomicText'
 )

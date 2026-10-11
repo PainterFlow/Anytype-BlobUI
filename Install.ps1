@@ -102,6 +102,13 @@ try {
     }
     $result = Invoke-BlobUiInstall @installArguments
 
+    $installedBlobDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $sourceInstallPointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $PSScriptRoot
+    if (-not (Test-Path -LiteralPath (Join-Path $installedBlobDirectory 'data.json') -PathType Leaf)) {
+        Write-BlobUiInstallPointer -SourceDirectory $PSScriptRoot -InstallDirectory $installDirectory
+        Write-Host "Source rebuild location saved: $sourceInstallPointerPath"
+    }
+
     Write-Host "Installed CSS: $($result.cssPath)"
     Write-Host "Installed assets: $($result.assetsPath)"
     Write-Host 'Installation complete.'

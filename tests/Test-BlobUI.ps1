@@ -480,6 +480,60 @@ try {
     Assert-Equal $installDirectory $rebuiltData.installDirectory 'Rebuild changed the saved install directory.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Rebuild damaged the encrypted API key.'
 
+    $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
+    [System.IO.Directory]::CreateDirectory($sourceFixture) | Out-Null
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $repoRoot $sourceFile) -Destination $sourceFixture
+    }
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'assets') -Destination $sourceFixture -Recurse
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
+    $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
+    $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
+    & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments
+    $pointerData = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
+    Assert-Equal $installDirectory $pointerData.installDirectory 'The source rebuild did not resolve the saved custom install path with spaces.'
+
+    $stalePointerText = [System.IO.File]::ReadAllText($pointerPath)
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory (Join-Path $testRoot 'missing install')
+    $failedInstallPointerText = [System.IO.File]::ReadAllText($pointerPath)
+    Assert-Throws { & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments } 'A stale source install pointer was accepted.' 'no longer exists'
+    Assert-Equal $failedInstallPointerText ([System.IO.File]::ReadAllText($pointerPath)) 'A failed source rebuild changed the saved install pointer.'
+    Write-BlobUiAtomicText -Path $pointerPath -Content $stalePointerText
+
+    Remove-Item -LiteralPath $pointerPath -Force
+    & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments -InstallDirectory $installDirectory
+    $oldAppData = $env:APPDATA
+    $legacyAppData = Join-Path $testRoot 'Legacy APPDATA'
+    $legacyInstallDirectory = Join-Path $legacyAppData 'anytype'
+    [System.IO.Directory]::CreateDirectory($legacyInstallDirectory) | Out-Null
+    $legacyData = Read-BlobUiDataFile -Path $firstInstall.dataPath
+    $legacyData.installDirectory = $legacyInstallDirectory
+    $legacyBlobDirectory = Join-Path $legacyInstallDirectory 'blob'
+    [System.IO.Directory]::CreateDirectory((Join-Path $legacyBlobDirectory 'credentials')) | Out-Null
+    Write-BlobUiAtomicJson -Path (Join-Path $legacyBlobDirectory 'data.json') -InputObject $legacyData
+    Copy-Item -LiteralPath $firstInstall.credentialPath -Destination (Join-Path $legacyBlobDirectory 'credentials\anytype-api-key.dpapi')
+    $env:APPDATA = $legacyAppData
+    try {
+        & (Join-Path $sourceFixture 'Rebuild.ps1') @sourceRebuildArguments
+    }
+    finally {
+        $env:APPDATA = $oldAppData
+    }
+    Assert-True (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'custom.css') -PathType Leaf) 'The source rebuild did not discover a valid legacy default installation without a pointer.'
+
+    $noInstallFixture = Join-Path $testRoot 'No Install Source'
+    Copy-Item -LiteralPath $sourceFixture -Destination $noInstallFixture -Recurse
+    $noInstallPointer = Get-BlobUiInstallPointerPath -SourceDirectory $noInstallFixture
+    if (Test-Path -LiteralPath $noInstallPointer) { Remove-Item -LiteralPath $noInstallPointer -Force }
+    $env:APPDATA = Join-Path $testRoot 'Empty APPDATA'
+    try {
+        Assert-Throws { & (Join-Path $noInstallFixture 'Rebuild.ps1') @sourceRebuildArguments } 'A source rebuild without an installation did not fail clearly.' 'No BlobUI installation was found'
+    }
+    finally {
+        $env:APPDATA = $oldAppData
+    }
+
     Write-Host 'BlobUI isolated workflow checks passed.'
 }
 finally {
