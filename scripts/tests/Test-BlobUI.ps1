@@ -90,8 +90,14 @@ $otherSpaceId = 'bafy-space-two-cid.replication-key'
 $generalObjectId = 'bafy-general-settings-object-id'
 $spaceObjectId = 'bafy-space-settings-object-id'
 $emptyObjectId = 'bafy-empty-settings-object-id'
+$calendarBlueObjectId = 'bafy-calendar-blue-object-id'
+$calendarBlobPinkObjectId = 'bafy-calendar-blob-pink-object-id'
+$calendarDefaultObjectId = 'bafy-calendar-default-object-id'
+$calendarUncoloredObjectId = 'bafy-calendar-uncolored-object-id'
+$staleCalendarObjectId = 'bafy-calendar-stale-object-id'
+$calendarColorPropertyKey = 'calendar_color'
 $apiRequests = [System.Collections.Generic.List[object]]::new()
-$knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key')
+$knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
 $apiTransport = {
     param($ApiKey, $Method, $Path, $Body, $Headers)
 
@@ -165,27 +171,100 @@ $apiTransport = {
         }
     }
     elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/search") {
-        if ($Method -cne 'Post' -or $null -eq $Body -or [string]$Body.type -cne 'setting') {
-            throw 'The mock API expected a read-only v2 search POST filtered by the Setting type key.'
+        if ($Method -cne 'Post' -or $null -eq $Body) {
+            throw 'The mock API expected a read-only v2 search POST with a JSON body.'
         }
-        if ($offset -eq 0) {
+        if ([string]$Body.type -ceq 'setting') {
+            if ($offset -eq 0) {
+                $payload = @{
+                    data = @(@{ id = $generalObjectId; name = 'General Settings'; type = 'setting' })
+                    has_more = $true
+                    limit = 100
+                    offset = 0
+                    total = 2
+                    warnings = @()
+                }
+            }
+            else {
+                $payload = @{
+                    data = @(@{ id = $spaceObjectId; name = 'Space Specific Settings'; type = 'setting' })
+                    has_more = $false
+                    limit = 100
+                    offset = $offset
+                    total = 2
+                    warnings = @()
+                }
+            }
+        }
+        elseif ([string]::Join(',', @($Body.fields)) -ceq $calendarColorPropertyKey) {
+            if ($offset -eq 0) {
+                $payload = @{
+                    data = @(
+                        @{
+                            id = $calendarBlueObjectId
+                            name = 'Blue calendar record'
+                            type = 'task'
+                            properties = @{ $calendarColorPropertyKey = @{ format = 'select'; select = @{ name = 'Blue' } } }
+                        },
+                        @{
+                            id = $calendarBlobPinkObjectId
+                            name = 'Blob Pink calendar record'
+                            type = 'page'
+                            properties = @{ $calendarColorPropertyKey = @{ format = 'select'; select = @{ name = 'Blob Pink' } } }
+                        }
+                    )
+                    has_more = $true
+                    limit = 100
+                    offset = 0
+                    total = 4
+                    warnings = @()
+                }
+            }
+            else {
+                $payload = @{
+                    data = @(
+                        @{
+                            id = $calendarDefaultObjectId
+                            name = 'Default calendar record'
+                            type = 'task'
+                            properties = @{ $calendarColorPropertyKey = @{ format = 'select'; select = @{ name = 'Default' } } }
+                        },
+                        @{
+                            id = $calendarUncoloredObjectId
+                            name = 'Uncolored calendar record'
+                            type = 'page'
+                            properties = @{}
+                        }
+                    )
+                    has_more = $false
+                    limit = 100
+                    offset = $offset
+                    total = 4
+                    warnings = @()
+                }
+            }
+        }
+        else {
+            throw 'The mock API expected either the Setting type or the Calendar Color property key.'
+        }
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/properties") {
+        if ($ApiKey -eq 'no-calendar-color-key') {
             $payload = @{
-                data = @(@{ id = $generalObjectId; name = 'General Settings'; type = 'setting' })
-                has_more = $true
+                data = @()
+                has_more = $false
                 limit = 100
                 offset = 0
-                total = 2
-                warnings = @()
+                total = 0
             }
         }
         else {
             $payload = @{
-                data = @(@{ id = $spaceObjectId; name = 'Space Specific Settings'; type = 'setting' })
+                data = @(@{ id = 'bafy-calendar-color-property-id'; key = $calendarColorPropertyKey; name = 'Calendar Color'; format = 'select'; object = 'property' })
                 has_more = $false
                 limit = 100
-                offset = $offset
-                total = 2
-                warnings = @()
+                offset = 0
+                total = 1
             }
         }
     }
@@ -271,7 +350,12 @@ try {
     Assert-Equal '#DE50DE' $fetchedData.settings.accentColor 'The exported Accent Color property was not mapped.'
     Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The exported Banner property was not normalized.'
     Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
-    $settingsSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") })
+    Assert-Equal 'Blue' $fetchedData.calendarObjectColors.$calendarBlueObjectId 'The Calendar Color property was not read from the independent space search.'
+    Assert-Equal 'Blob Pink' $fetchedData.calendarObjectColors.$calendarBlobPinkObjectId 'Blob Pink was not preserved as a canonical calendar color.'
+    Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarDefaultObjectId]) 'Default did not remove its calendar color override.'
+    Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarUncoloredObjectId]) 'An object without Calendar Color received an override.'
+    Assert-True ($fetchedData.calendarObjectColors.PSObject.Properties[$calendarBlueObjectId] -and $fetchedData.settingsObjectIds -notcontains $calendarBlueObjectId) 'Calendar color collection reused selected theme settings objects instead of the space object search.'
+    $settingsSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") -and [string]$_.Body.type -ceq 'setting' })
     Assert-Equal 2 $settingsSearchCalls.Count 'The v2 settings search did not follow has_more across pages.'
     Assert-Equal 'setting' $settingsSearchCalls[0].Body.type 'The search body did not filter by the exported Setting type key.'
     Assert-True ($settingsSearchCalls[0].Path -match '[?&]limit=100&offset=0$') 'The first v2 settings search page omitted its query pagination.'
@@ -283,6 +367,9 @@ try {
     Assert-True (@($apiRequests | Where-Object { $_.Headers.ContainsKey('Anytype-Version') }).Count -eq 0) 'A v1-only Anytype-Version header was sent to API v2.'
     Assert-True (@($apiRequests | Where-Object { $_.Path -notmatch '^/v2/' }).Count -eq 0) 'The API transport made a request outside v2.'
     Assert-True (@($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' }).Count -ge 2) 'The object reads omitted the v2 properties and full-ID query parameters.'
+    $calendarSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") -and [string]::Join(',', @($_.Body.fields)) -ceq $calendarColorPropertyKey })
+    Assert-Equal 2 $calendarSearchCalls.Count 'The Calendar Color object search did not follow has_more across pages.'
+    Assert-Equal $calendarColorPropertyKey ([string]$calendarSearchCalls[0].Body.fields[0]) 'The Calendar Color search did not request the API property key resolved by name.'
 
     $emptyDataPath = Join-Path $testRoot 'empty-data.json'
     $emptyData = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $emptyDataPath -SpaceId $testSpaceId -ObjectIds @($emptyObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
@@ -306,6 +393,21 @@ try {
     Assert-Equal "$generalObjectId|$spaceObjectId" $legacyRefresh.settingsObjectIds 'Saved object IDs from the previous API version were not accepted by v2.'
     Assert-Equal $installDirectory $legacyRefresh.installDirectory 'A previous settings record did not preserve its install directory during refresh.'
 
+    $staleCalendarDataPath = Join-Path $testRoot 'stale-calendar-data.json'
+    Write-BlobUiAtomicJson -Path $staleCalendarDataPath -InputObject ([ordered]@{
+        schemaVersion = 1
+        apiVersion = 'v2'
+        selectedSpace = [ordered]@{ id = $testSpaceId; name = 'BlobUI Settings' }
+        settingsObjectIds = @($generalObjectId, $spaceObjectId)
+        settings = $fetchedData.settings
+        calendarObjectColors = [ordered]@{ $staleCalendarObjectId = 'Red' }
+        installDirectory = $installDirectory
+    })
+    $withoutCalendarPropertyPath = Join-Path $testRoot 'without-calendar-property.json'
+    $withoutCalendarProperty = Get-BlobUiSettingsData -ApiKey 'no-calendar-color-key' -OutputPath $withoutCalendarPropertyPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId, $spaceObjectId) -ExistingDataPath $staleCalendarDataPath -ApiTransport $apiTransport
+    Assert-Equal 0 $withoutCalendarProperty.calendarObjectColors.Count 'A removed Calendar Color property left stale object overrides in refreshed data.'
+    Assert-Equal $installDirectory $withoutCalendarProperty.installDirectory 'Refreshing after Calendar Color removal lost the saved install directory.'
+
     Assert-Equal 'Segoe UI' (ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI') 'A valid font name was rejected.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI; color:red' } 'Unsafe font value' 'font family'
     Assert-Equal '#12ABEF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value '#12abef') 'A valid hex color was not normalized.'
@@ -326,10 +428,77 @@ try {
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
+    Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
+    Assert-True ($css.Contains('background-color: var(--color-blue) !important;')) 'Compiled CSS did not use the existing Anytype Blue palette color.'
+    Assert-True ($css.Contains('[data-id="' + $calendarBlobPinkObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS did not map Blob Pink to the existing Blob Pink color.'
+    Assert-True (-not $css.Contains($calendarDefaultObjectId)) 'Compiled CSS emitted a selector for Default.'
+    Assert-True (-not ($css -match '\[data-id="[^"]+"\]\s+[^\{]*checkbox')) 'Calendar color CSS unexpectedly targets task checkboxes.'
     Assert-True ($css.Contains('font-family: "Libron", sans-serif !important;')) 'Compiled CSS omitted the default UI font.'
     Assert-True ($css.Contains('font-family: "Consolas", "Courier New", monospace !important;')) 'Compiled CSS omitted the default code font.'
     Assert-True ($css.Contains('file:///') -and $css.Contains('Anytype%20Data%20%C3%BC%20%231')) 'The banner file URI did not escape spaces, Unicode, and the hash character.'
     Assert-True (-not $css.Contains('{{')) 'Compiled CSS contains an unresolved placeholder.'
+
+    $paletteObjectColors = [ordered]@{
+        'bafy-calendar-palette-grey' = 'Grey'
+        'bafy-calendar-palette-yellow' = 'Yellow'
+        'bafy-calendar-palette-amber' = 'Amber'
+        'bafy-calendar-palette-red' = 'Red'
+        'bafy-calendar-palette-pink' = 'Pink'
+        'bafy-calendar-palette-purple' = 'Purple'
+        'bafy-calendar-palette-blue' = 'Blue'
+        'bafy-calendar-palette-sky' = 'Sky'
+        'bafy-calendar-palette-teal' = 'Teal'
+        'bafy-calendar-palette-green' = 'Green'
+        'bafy-calendar-palette-blob-pink' = 'Blob Pink'
+        'bafy-calendar-palette-default' = 'Default'
+    }
+    $paletteData = [ordered]@{
+        installDirectory = $installDirectory
+        settings = $fetchedData.settings
+        calendarObjectColors = $paletteObjectColors
+    }
+    $paletteCssPath = Join-Path $testRoot 'palette-compiled.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $paletteCssPath -Data $paletteData | Out-Null
+    $paletteCss = [System.IO.File]::ReadAllText($paletteCssPath)
+    foreach ($expectedColor in @(
+        'var(--color-grey)',
+        'var(--color-yellow)',
+        'var(--color-amber, var(--color-orange))',
+        'var(--color-red)',
+        'var(--color-pink)',
+        'var(--color-purple)',
+        'var(--color-blue)',
+        'var(--color-sky, var(--color-ice))',
+        'var(--color-teal)',
+        'var(--color-green, var(--color-lime))',
+        '#DE50DE'
+    )) {
+        Assert-True ($paletteCss.Contains('background-color: ' + $expectedColor + ' !important;')) "Calendar palette mapping omitted '$expectedColor'."
+    }
+    Assert-True (-not $paletteCss.Contains('bafy-calendar-palette-default')) 'The compiler emitted an override for Default.'
+
+    $badCalendarColorData = [ordered]@{
+        installDirectory = $installDirectory
+        settings = $fetchedData.settings
+        calendarObjectColors = [ordered]@{ 'bafy-calendar-bad-color' = 'red; color:blue' }
+    }
+    $badCalendarColorCssPath = Join-Path $testRoot 'bad-calendar-color.css'
+    Assert-Throws {
+        Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $badCalendarColorCssPath -Data $badCalendarColorData
+    } 'An unsafe calendar property color was accepted.' 'Calendar Color'
+    Assert-True (-not (Test-Path -LiteralPath $badCalendarColorCssPath)) 'Invalid calendar color data wrote a CSS file.'
+
+    $badCalendarIdData = [ordered]@{
+        installDirectory = $installDirectory
+        settings = $fetchedData.settings
+        calendarObjectColors = [ordered]@{ 'bafy-calendar-id"]{color:red}/*' = 'Blue' }
+    }
+    $badCalendarIdCssPath = Join-Path $testRoot 'bad-calendar-id.css'
+    Assert-Throws {
+        Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $badCalendarIdCssPath -Data $badCalendarIdData
+    } 'An unsafe calendar object ID was accepted.' 'invalid Anytype object ID'
+    Assert-True (-not (Test-Path -LiteralPath $badCalendarIdCssPath)) 'Invalid calendar object ID data wrote a CSS file.'
+
     $baselineCss = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Fixtures\legacy-custom.css'))
     $expectedBannerUri = [System.Uri]::new((Join-Path $installDirectory 'blob\assets\spacebanner\banner.png')).AbsoluteUri
     $baselineCss = $baselineCss.Replace('#de50de', '#DE50DE')
@@ -338,7 +507,8 @@ try {
         '(?m)^[ \t]*--header-image[ \t]*:.*$',
         '--header-image: url("' + $expectedBannerUri + '");'
     )
-    Assert-Equal (Get-CssSignature $baselineCss) (Get-CssSignature $css) 'Compiled CSS changed the prior cascade or default styling.'
+    $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace($css, '(?s)/\* BlobUI Calendar Color overrides \*/.*$', '')
+    Assert-Equal (Get-CssSignature $baselineCss) (Get-CssSignature $cssWithoutCalendarOverrides) 'Compiled CSS changed the prior cascade or default styling.'
     foreach ($selector in @(
         '#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg',
         '.sidebar .sidebarPage.pageWidget>.head.isDefault::after',

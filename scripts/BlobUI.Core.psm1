@@ -381,6 +381,79 @@ function Get-BlobUiObjectPropertyValue {
     return Get-BlobUiPropertyValue -PropertyValue $matches[0] -DisplayName $DisplayName
 }
 
+function ConvertTo-BlobUiCalendarColorName {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    switch ($Value.Trim().ToLowerInvariant()) {
+        'default' { return $null }
+        'grey' { return 'Grey' }
+        'yellow' { return 'Yellow' }
+        'amber' { return 'Amber' }
+        'red' { return 'Red' }
+        'pink' { return 'Pink' }
+        'purple' { return 'Purple' }
+        'blue' { return 'Blue' }
+        'sky' { return 'Sky' }
+        'teal' { return 'Teal' }
+        'green' { return 'Green' }
+        'blob pink' { return 'Blob Pink' }
+        default {
+            throw "'Calendar Color' must be Default, Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky, Teal, Green, or Blob Pink."
+        }
+    }
+}
+
+function Get-BlobUiCalendarObjectColors {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [Parameter(Mandatory = $true)][string]$SpaceId,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    $escapedSpace = [System.Uri]::EscapeDataString($SpaceId)
+    $propertyPath = "/v2/spaces/$escapedSpace/properties"
+    $propertyRows = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path $propertyPath -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    $colorProperties = @($propertyRows | Where-Object {
+        $name = Get-BlobUiPropertyField -InputObject $_ -FieldName 'name'
+        $null -ne $name -and [string]::Equals([string]$name, 'Calendar Color', [System.StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($colorProperties.Count -eq 0) {
+        return [ordered]@{}
+    }
+    if ($colorProperties.Count -gt 1) {
+        throw "The selected space has more than one property named 'Calendar Color'; give the color property a unique name before rebuilding BlobUI."
+    }
+
+    $propertyKey = [string](Get-BlobUiPropertyField -InputObject $colorProperties[0] -FieldName 'key')
+    if ([string]::IsNullOrWhiteSpace($propertyKey)) {
+        throw "The 'Calendar Color' property has no API key. Rebuild BlobUI after restoring the property."
+    }
+
+    # Search rows carry only requested property values. Resolve the display name
+    # through the space's property list because property keys can differ from names.
+    $searchBody = [ordered]@{ fields = @($propertyKey) }
+    $objects = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/search") -Method Post -Body $searchBody -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    $colors = [ordered]@{}
+    foreach ($object in $objects) {
+        $value = Get-BlobUiObjectPropertyValue -Object $object -Key $propertyKey -DisplayName 'Calendar Color'
+        if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) { continue }
+        $colorName = ConvertTo-BlobUiCalendarColorName -Value ([string]$value)
+        if ($null -eq $colorName) { continue }
+
+        $objectId = [string](Get-BlobUiPropertyField -InputObject $object -FieldName 'id')
+        if ($objectId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$') {
+            throw "An object with Calendar Color '$colorName' has an invalid Anytype object ID."
+        }
+        if ($colors.Contains($objectId)) {
+            throw "The Anytype API returned a duplicate object ID with Calendar Color: $objectId"
+        }
+        $colors[$objectId] = $colorName
+    }
+    return $colors
+}
+
 function ConvertTo-BlobUiCssPlaceholderValue {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('font', 'color', 'url', 'number', 'boolean')][string]$Type,
@@ -777,6 +850,7 @@ function Get-BlobUiSettingsData {
         throw 'At least one settings object must be selected.'
     }
     $normalizedSettings = Get-BlobUiNormalizedSettings -Objects $selectedObjects.ToArray()
+    $calendarObjectColors = Get-BlobUiCalendarObjectColors -ApiKey $ApiKey -SpaceId ([string]$selectedSpace.id) -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
     $previousData = $null
     if (-not [string]::IsNullOrWhiteSpace($ExistingDataPath) -and (Test-Path -LiteralPath $ExistingDataPath -PathType Leaf)) {
         $previousData = Read-BlobUiDataFile -Path $ExistingDataPath
@@ -798,6 +872,7 @@ function Get-BlobUiSettingsData {
         }
         settingsObjectIds = @($selectedObjects.ToArray() | ForEach-Object { [string]$_.id })
         settings = $normalizedSettings
+        calendarObjectColors = $calendarObjectColors
         installDirectory = [System.IO.Path]::GetFullPath($InstallDirectory)
     }
 
@@ -822,6 +897,42 @@ function Get-BlobUiDeclaredPlaceholders {
         throw 'CSS placeholders must have explicit @blobui-placeholder declarations.'
     }
     return $declarations
+}
+
+function New-BlobUiCalendarColorCss {
+    param([AllowNull()]$CalendarObjectColors)
+
+    if ($null -eq $CalendarObjectColors) { return '' }
+    $entries = [System.Collections.Generic.List[object]]::new()
+    if ($CalendarObjectColors -is [System.Collections.IDictionary]) {
+        foreach ($objectId in $CalendarObjectColors.Keys) {
+            $entries.Add([pscustomobject]@{ objectId = [string]$objectId; colorName = [string]$CalendarObjectColors[$objectId] })
+        }
+    }
+    else {
+        foreach ($property in $CalendarObjectColors.PSObject.Properties) {
+            $entries.Add([pscustomobject]@{ objectId = [string]$property.Name; colorName = [string]$property.Value })
+        }
+    }
+
+    $orderedEntries = @($entries.ToArray() | Sort-Object -Property objectId)
+    $rules = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in $orderedEntries) {
+        if ($entry.objectId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$') {
+            throw "Calendar Color data contains an invalid Anytype object ID: $($entry.objectId)"
+        }
+        $colorName = ConvertTo-BlobUiCalendarColorName -Value ([string]$entry.colorName)
+        if ($null -eq $colorName) { continue }
+        $cssColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value $colorName -Name 'Calendar Color'
+        $rules.Add((
+            '[data-view-type="4"][data-drop-type="record"][data-id="{0}"] {{' -f $entry.objectId
+        ))
+        $rules.Add(('    background-color: {0} !important;' -f $cssColor))
+        $rules.Add('}')
+    }
+
+    if ($rules.Count -eq 0) { return '' }
+    return "/* BlobUI Calendar Color overrides */`r`n" + [string]::Join("`r`n", $rules.ToArray())
 }
 
 function Invoke-BlobUiCssCompile {
@@ -912,6 +1023,10 @@ function Invoke-BlobUiCssCompile {
     )
     $declarationPattern = '/\*\s*@blobui-placeholder\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s+(?<type>font|color|url|number|boolean)\s*\*/'
     $compiled = [System.Text.RegularExpressions.Regex]::Replace($compiled, $declarationPattern, '')
+    $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $Data.calendarObjectColors
+    if (-not [string]::IsNullOrWhiteSpace($calendarColorCss)) {
+        $compiled = $compiled.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $calendarColorCss + [Environment]::NewLine
+    }
     if ($compiled -match '\{\{[^}]+\}\}') {
         throw 'Compiled CSS still contains an unresolved placeholder.'
     }
