@@ -37,4 +37,4 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 8. Run .\scripts\install.ps1
 	- If you didn't pick a custom instillation, just press A and Enter.
 	- Paste your Anytype API key.
-9. In Anytype, press Ctrl/Cmd + R to reload and it should be done. 
+9. In Anytype, press Ctrl/Cmd + R to reload and it should be done.
