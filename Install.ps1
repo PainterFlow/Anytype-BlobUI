@@ -91,6 +91,12 @@ function Install-BlobUi {
         throw "Space banner asset was not found: $bannerSource"
     }
 
+    $cssDestination = Join-Path $installDirectory 'custom.css'
+    $blobDirectory = Join-Path $installDirectory 'blob'
+    $assetDestination = Join-Path $blobDirectory 'assets'
+    $bannerDestination = Join-Path $assetDestination 'spacebanner\banner.png'
+    $bannerUri = [System.Uri]::new($bannerDestination).AbsoluteUri
+
     $cssContent = [System.IO.File]::ReadAllText($cssSource)
     $headerPattern = '(?m)^(?<prefix>[ \t]*--header-image[ \t]*:[ \t]*url\()[^;]*(?<suffix>\);[ \t]*\r?)$'
     $headerMatches = [regex]::Matches($cssContent, $headerPattern)
@@ -98,17 +104,13 @@ function Install-BlobUi {
         throw "Expected one --header-image URL in Dev\custom.css; found $($headerMatches.Count)."
     }
 
-    # custom.css lives at the Anytype data directory root, so this relative URL
-    # resolves to blob\assets\spacebanner\banner.png without a user-specific path.
+    # Use an absolute file URI so Anytype can resolve the banner from its data directory.
     $generatedCss = [regex]::Replace(
         $cssContent,
         $headerPattern,
-        '${prefix}"./blob/assets/spacebanner/banner.png"${suffix}'
+        ('${prefix}"' + $bannerUri + '"${suffix}')
     )
 
-    $cssDestination = Join-Path $installDirectory 'custom.css'
-    $blobDirectory = Join-Path $installDirectory 'blob'
-    $assetDestination = Join-Path $blobDirectory 'assets'
     $backupDirectory = Join-Path $blobDirectory 'backups'
 
     New-Item -ItemType Directory -Path $blobDirectory -Force | Out-Null
@@ -128,7 +130,6 @@ function Install-BlobUi {
         Copy-Item -LiteralPath $assetItem.FullName -Destination $assetDestination -Recurse -Force | Out-Null
     }
 
-    $bannerDestination = Join-Path $assetDestination 'spacebanner\banner.png'
     if (-not (Test-Path -LiteralPath $bannerDestination -PathType Leaf)) {
         throw "Banner copy failed: $bannerDestination"
     }
