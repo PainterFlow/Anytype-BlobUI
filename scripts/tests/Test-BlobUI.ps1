@@ -450,7 +450,7 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'

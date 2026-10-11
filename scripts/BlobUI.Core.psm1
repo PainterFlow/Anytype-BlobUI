@@ -1023,6 +1023,8 @@ function New-BlobUiCalendarColorCss {
             '[data-view-type="4"][data-drop-type="record"][data-id="{0}"]:not(.record *),' -f $entry.objectId
         ))
         $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] {{' -f $entry.objectId))
+        $rules.Add('    display: flex !important;')
+        $rules.Add('    align-items: center !important;')
         $rules.Add(('    background-color: {0} !important;' -f $cssColor))
         $rules.Add(('    background-color: color-mix(in srgb, {0} 18%, #1b1b1b) !important;' -f $cssColor))
         $rules.Add(('    border-left: 3px solid {0} !important;' -f $cssColor))
@@ -1030,6 +1032,9 @@ function New-BlobUiCalendarColorCss {
         $rules.Add('    padding: 3px 6px !important;')
         $rules.Add('    box-sizing: border-box;')
         $rules.Add('    color: #FFFFFF !important;')
+        $rules.Add('}')
+        $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] > .dropTarget[data-drop-type="record"] {{' -f $entry.objectId))
+        $rules.Add('    align-items: center !important;')
         $rules.Add('}')
         $rules.Add(('[data-view-type="4"][data-drop-type="record"][data-id="{0}"] .name,' -f $entry.objectId))
         $rules.Add(('[data-view-type="4"][data-drop-type="record"][data-id="{0}"] .name span,' -f $entry.objectId))

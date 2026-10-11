@@ -1,0 +1,15 @@
+/* Keep the date's upstream position and shrink only the active-day background. */
+.viewContent.viewCalendar .day.active > .head > .number > .inner {
+    position: relative;
+    z-index: 0;
+    background-color: transparent !important;
+}
+
+.viewContent.viewCalendar .day.active > .head > .number > .inner::before {
+    content: "";
+    position: absolute;
+    inset: 1px 4px 5px;
+    z-index: -1;
+    border-radius: 999px;
+    background-color: var(--color-system-accent-100);
+}
