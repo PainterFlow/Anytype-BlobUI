@@ -397,32 +397,33 @@ function ConvertTo-BlobUiCssPlaceholderValue {
             return $trimmed
         }
         'color' {
-            if ($trimmed -notmatch '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
-                $paletteVariables = @{
-                    grey = 'grey'
-                    gray = 'grey'
-                    yellow = 'yellow'
-                    amber = 'orange'
-                    orange = 'orange'
-                    red = 'red'
-                    pink = 'pink'
-                    purple = 'purple'
-                    blue = 'blue'
-                    ice = 'ice'
-                    teal = 'teal'
-                    green = 'lime'
-                    lime = 'lime'
-                }
-                $paletteName = $trimmed.ToLowerInvariant()
-                if ($paletteVariables.ContainsKey($paletteName)) {
-                    return "var(--color-$($paletteVariables[$paletteName]))"
-                }
-                if ($paletteName -in @('blob', 'blob pink', 'de50de')) {
-                    return '#DE50DE'
-                }
-                throw "'$Name' must be a three or six digit hexadecimal CSS color, an Anytype color name (Grey, Yellow, Orange, Red, Pink, Purple, Blue, Ice, Teal, or Lime), or Blob Pink."
+            $paletteVariables = @{
+                white = '#FFFFFF'
+                grey = 'var(--color-grey)'
+                yellow = 'var(--color-yellow)'
+                amber = 'var(--color-amber, var(--color-orange))'
+                red = 'var(--color-red)'
+                pink = 'var(--color-pink)'
+                purple = 'var(--color-purple)'
+                blue = 'var(--color-blue)'
+                sky = 'var(--color-sky, var(--color-ice))'
+                teal = 'var(--color-teal)'
+                green = 'var(--color-green, var(--color-lime))'
             }
-            return $trimmed.ToUpperInvariant()
+            $paletteName = $trimmed.ToLowerInvariant()
+            if ($paletteVariables.ContainsKey($paletteName)) {
+                return $paletteVariables[$paletteName]
+            }
+            if ($paletteName -ceq 'blob pink') {
+                return '#DE50DE'
+            }
+            if ($trimmed -match '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
+                return $trimmed.ToUpperInvariant()
+            }
+            if ($trimmed -in @($paletteVariables.Values) -or $trimmed -ceq '#DE50DE') {
+                return $trimmed
+            }
+            throw "'$Name' must be a three or six digit hexadecimal CSS color, an Anytype color name (White, Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky, Teal, or Green), or Blob Pink."
         }
         'url' {
             $uri = $null
