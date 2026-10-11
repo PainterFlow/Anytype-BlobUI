@@ -11,53 +11,152 @@ a[href^="blob://"]:active {
     box-shadow: none !important;
 }
 
-/* Small offsets keep the glitch inside the link's existing line boxes. */
+/* Independent cycles let the glitch components drift into and out of overlap. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
     position: relative;
     left: 0;
     top: 0;
     opacity: 1;
-    animation: blobui-glitchy-text 2.8s steps(1, end) infinite;
+    --blobui-glitch-split-mask: linear-gradient(to bottom, #000 0 calc(50% - 1px), transparent calc(50% - 1px) calc(50% + 1px), #000 calc(50% + 1px) 100%);
+    animation:
+        blobui-glitch-jitter 6.7s steps(1, end) infinite,
+        blobui-glitch-flicker 4.9s steps(1, end) infinite,
+        blobui-glitch-chroma 9.2s steps(1, end) infinite,
+        blobui-glitch-seam 12.7s steps(1, end) infinite,
+        blobui-glitch-bold 15.1s steps(1, end) infinite;
     text-shadow: none;
     -webkit-mask-image: none;
     mask-image: none;
+    font-weight: inherit;
+    -webkit-text-stroke-color: currentColor;
+    -webkit-text-stroke-width: 0;
 }
 
-@keyframes blobui-glitchy-text {
-    0%, 58%, 66%, 92%, 100% {
+@keyframes blobui-glitch-jitter {
+    0%, 13%, 14.8%, 42.1%, 43.15%, 66.6%, 68.1%, 88%, 89.1%, 100% {
         left: 0;
         top: 0;
+    }
+
+    13.1% {
+        left: -2px;
+        top: 0;
+    }
+
+    13.65% {
+        left: 1px;
+        top: 0;
+    }
+
+    14.1% {
+        left: -1px;
+        top: -1px;
+    }
+
+    42.25% {
+        left: 1px;
+        top: 0;
+    }
+
+    42.75% {
+        left: -2px;
+        top: -1px;
+    }
+
+    66.75% {
+        left: -1px;
+        top: 0;
+    }
+
+    67.55% {
+        left: 2px;
+        top: 0;
+    }
+
+    88.2% {
+        left: 0;
+        top: 1px;
+    }
+
+    88.55% {
+        left: -1px;
+        top: 0;
+    }
+}
+
+@keyframes blobui-glitch-flicker {
+    0%, 21.4%, 24.8%, 51.1%, 52.9%, 79.65%, 81%, 100% {
         opacity: 1;
+    }
+
+    21.55% {
+        opacity: 0.72;
+    }
+
+    22.8% {
+        opacity: 0.92;
+    }
+
+    23.2% {
+        opacity: 0.64;
+    }
+
+    51.2% {
+        opacity: 0.85;
+    }
+
+    51.45% {
+        opacity: 0.58;
+    }
+
+    79.9% {
+        opacity: 0.78;
+    }
+
+    80.7% {
+        opacity: 0.91;
+    }
+}
+
+@keyframes blobui-glitch-chroma {
+    0%, 19.4%, 23.3%, 37%, 40.1%, 71.5%, 75.6%, 100% {
         text-shadow: none;
+    }
+
+    19.5%, 37.25%, 71.7% {
+        text-shadow: -4px 0 rgba(255, 35, 70, 0.55), 4px 0 rgba(0, 220, 255, 0.55), -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
+    }
+
+    20.1%, 38%, 72.35% {
+        text-shadow: 5px 0 rgba(255, 35, 70, 0.5), -5px 0 rgba(0, 220, 255, 0.5), 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
+    }
+
+    20.75%, 38.45%, 73.1% {
+        text-shadow: -6px 0 rgba(255, 35, 70, 0.52), 6px 0 rgba(0, 220, 255, 0.52), -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
+    }
+}
+
+@keyframes blobui-glitch-seam {
+    0%, 31%, 32.5%, 46.7%, 48.1%, 82.7%, 85%, 100% {
         -webkit-mask-image: none;
         mask-image: none;
     }
 
-    60%, 63% {
-        left: -2px;
-        top: 0;
-        opacity: 0.78;
-        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 8px, transparent 8px 9px);
-        mask-image: repeating-linear-gradient(to bottom, #000 0 8px, transparent 8px 9px);
-        text-shadow: -4px 0 rgba(255, 35, 70, 0.55), 4px 0 rgba(0, 220, 255, 0.55), -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
+    31.1%, 46.8%, 82.8% {
+        -webkit-mask-image: var(--blobui-glitch-split-mask);
+        mask-image: var(--blobui-glitch-split-mask);
+    }
+}
+
+@keyframes blobui-glitch-bold {
+    0%, 25%, 28.5%, 64.6%, 66.8%, 90%, 92%, 100% {
+        font-weight: inherit;
+        -webkit-text-stroke-width: 0;
     }
 
-    61%, 64% {
-        left: 1px;
-        top: 1px;
-        opacity: 0.92;
-        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 6px, transparent 6px 7px);
-        mask-image: repeating-linear-gradient(to bottom, #000 0 6px, transparent 6px 7px);
-        text-shadow: 5px 0 rgba(255, 35, 70, 0.5), -5px 0 rgba(0, 220, 255, 0.5), 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
-    }
-
-    62%, 65% {
-        left: -1px;
-        top: -1px;
-        opacity: 0.68;
-        -webkit-mask-image: repeating-linear-gradient(to bottom, #000 0 4px, transparent 4px 5px);
-        mask-image: repeating-linear-gradient(to bottom, #000 0 4px, transparent 4px 5px);
-        text-shadow: -6px 0 rgba(255, 35, 70, 0.52), 6px 0 rgba(0, 220, 255, 0.52), -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
+    25.1%, 64.7%, 90.05% {
+        font-weight: 900;
+        -webkit-text-stroke-width: 0.3px;
     }
 }
 
@@ -70,5 +169,7 @@ a[href^="blob://"]:active {
         text-shadow: none;
         -webkit-mask-image: none;
         mask-image: none;
+        font-weight: inherit;
+        -webkit-text-stroke-width: 0;
     }
 }
