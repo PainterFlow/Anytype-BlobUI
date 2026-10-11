@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:BlobUiApiVersion = '2025-11-08'
+$script:BlobUiApiVersion = 'v2'
 $script:BlobUiApiBaseUri = 'http://127.0.0.1:31009'
 $script:BlobUiDefaultSettings = @{
     fontFamily = 'Libron'
@@ -34,10 +34,83 @@ function Get-BlobUiHttpStatusCode {
     return 0
 }
 
+function Get-BlobUiHttpErrorBody {
+    param([Parameter(Mandatory = $true)]$ErrorRecord)
+
+    $errorDetailsProperty = $ErrorRecord.PSObject.Properties['ErrorDetails']
+    $errorDetails = if ($null -ne $errorDetailsProperty) { $errorDetailsProperty.Value } else { $null }
+    if ($null -ne $errorDetails -and -not [string]::IsNullOrWhiteSpace([string]$errorDetails.Message)) {
+        return [string]$errorDetails.Message
+    }
+
+    $exception = $ErrorRecord.Exception
+    $responseProperty = $exception.PSObject.Properties['Response']
+    $response = if ($null -ne $responseProperty) { $responseProperty.Value } else { $null }
+    if ($null -ne $response) {
+        try {
+            $contentProperty = $response.PSObject.Properties['Content']
+            if ($null -ne $contentProperty -and $null -ne $contentProperty.Value) {
+                $content = $contentProperty.Value
+                if ($content -is [string]) { return $content }
+                $readMethod = $content.GetType().GetMethod('ReadAsStringAsync', [type[]]@())
+                if ($null -ne $readMethod) { return [string]$readMethod.Invoke($content, @()).GetAwaiter().GetResult() }
+            }
+        }
+        catch {}
+        try {
+            $stream = $response.GetResponseStream()
+            if ($null -ne $stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+            }
+        }
+        catch {}
+    }
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace([string]$exception.Data['ResponseBody'])) {
+            return [string]$exception.Data['ResponseBody']
+        }
+    }
+    catch {}
+    return ''
+}
+
+function Get-BlobUiSafeApiErrorMessage {
+    param([string]$Body, [string]$ApiKey)
+
+    if ([string]::IsNullOrWhiteSpace($Body)) { return '' }
+
+    $message = $Body.Trim()
+    try {
+        $payload = ConvertFrom-Json -InputObject $message -ErrorAction Stop
+        foreach ($fieldName in @('message', 'error', 'detail', 'title')) {
+            $field = $payload.PSObject.Properties[$fieldName]
+            if ($null -ne $field -and -not [string]::IsNullOrWhiteSpace([string]$field.Value)) {
+                $message = [string]$field.Value
+                break
+            }
+        }
+    }
+    catch {}
+
+    if (-not [string]::IsNullOrEmpty($ApiKey)) {
+        $message = $message.Replace($ApiKey, '[redacted]')
+    }
+    $message = [System.Text.RegularExpressions.Regex]::Replace($message, '(?i)authorization\s*[:=]\s*(?:bearer\s+)?[^\s"'',<>]+', 'Authorization: [redacted]')
+    $message = [System.Text.RegularExpressions.Regex]::Replace($message, '(?i)bearer\s+[^\s"'',<>]+', 'Bearer [redacted]')
+    $message = [System.Text.RegularExpressions.Regex]::Replace($message, '[\r\n\t]+', ' ')
+    $message = $message.Trim()
+    if ($message.Length -gt 400) { $message = $message.Substring(0, 400) + '…' }
+    return $message
+}
+
 function Invoke-BlobUiApiRequest {
     param(
         [Parameter(Mandatory = $true)][string]$ApiKey,
         [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateSet('Get', 'Post')][string]$Method = 'Get',
+        [AllowNull()]$Body,
         [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
         [scriptblock]$ApiTransport
     )
@@ -45,32 +118,59 @@ function Invoke-BlobUiApiRequest {
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         throw 'An Anytype API key is required.'
     }
+    if ($Method -eq 'Post' -and $null -eq $Body) {
+        throw 'A JSON body is required for the Anytype API v2 search request.'
+    }
 
     $uri = $ApiBaseUri.TrimEnd('/') + $Path
     $headers = @{
         Authorization = 'Bearer ' + $ApiKey
-        'Anytype-Version' = $script:BlobUiApiVersion
         Accept = 'application/json'
     }
 
     try {
         if ($null -ne $ApiTransport) {
-            return & $ApiTransport $ApiKey $Path
+            return & $ApiTransport $ApiKey $Method $Path $Body $headers
+        }
+        if ($Method -eq 'Post') {
+            $jsonBody = ConvertTo-Json -InputObject $Body -Depth 20 -Compress
+            return Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body $jsonBody -TimeoutSec 15 -ErrorAction Stop
         }
         return Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 15 -ErrorAction Stop
     }
     catch {
         $statusCode = Get-BlobUiHttpStatusCode -ErrorRecord $_
+        $serverMessage = Get-BlobUiSafeApiErrorMessage -Body (Get-BlobUiHttpErrorBody -ErrorRecord $_) -ApiKey $ApiKey
         if ($statusCode -eq 401) {
-            throw 'Anytype rejected the API key. Check the key and confirm it has access to the selected space.'
+            $message = 'Anytype rejected the API key (HTTP 401). Confirm the key is valid.'
+            if ($serverMessage) { $message += " Anytype said: $serverMessage" }
+            throw $message
+        }
+        if ($statusCode -eq 403) {
+            $message = 'Anytype accepted the API key but denied this API v2 read (HTTP 403). Confirm the key grants read access to the selected space.'
+            if ($serverMessage) { $message += " Anytype said: $serverMessage" }
+            throw $message
         }
         if ($statusCode -eq 404) {
-            throw 'Anytype could not find the selected space or settings object.'
+            $message = 'Anytype API v2 returned HTTP 404. Confirm this Anytype build provides API v2 and the selected space or settings object still exists.'
+            if ($serverMessage) { $message += " Anytype said: $serverMessage" }
+            throw $message
         }
         if ($statusCode -eq 400) {
-            throw 'Anytype rejected the settings query. Confirm the local API supports version 2025-11-08 and the Setting type key is available.'
+            $message = 'Anytype rejected the API v2 request (HTTP 400). Check the settings type key and request parameters.'
+            if ($serverMessage) { $message += " Anytype said: $serverMessage" }
+            throw $message
         }
-        throw 'Could not reach Anytype local API at 127.0.0.1:31009. Open Anytype and confirm its local API is enabled.'
+        if ($statusCode -gt 0) {
+            $message = "Anytype returned HTTP $statusCode while reading local API data."
+            if ($serverMessage) { $message += " Anytype said: $serverMessage" }
+            throw $message
+        }
+        $exceptionMessage = [string]$_.Exception.Message
+        if ($exceptionMessage -match '(?i)timeout|timed out') {
+            throw 'The request to Anytype local API at 127.0.0.1:31009 timed out. Confirm Anytype is open and its local API is enabled.'
+        }
+        throw 'Could not reach Anytype local API at 127.0.0.1:31009 because the connection failed. Confirm Anytype is open and its local API is enabled.'
     }
 }
 
@@ -91,11 +191,13 @@ function Get-BlobUiPagedApiItems {
     param(
         [Parameter(Mandatory = $true)][string]$ApiKey,
         [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateSet('Get', 'Post')][string]$Method = 'Get',
+        [AllowNull()]$Body,
         [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
         [scriptblock]$ApiTransport
     )
 
-    $limit = 1000
+    $limit = 100
     $offset = 0
     $allItems = [System.Collections.Generic.List[object]]::new()
 
@@ -105,7 +207,7 @@ function Get-BlobUiPagedApiItems {
             $separator = '&'
         }
         $pagePath = $Path + $separator + 'limit=' + $limit + '&offset=' + $offset
-        $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path $pagePath -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+        $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path $pagePath -Method $Method -Body $Body -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
         $items = @(Get-BlobUiResponseItems -Response $response)
         foreach ($item in $items) {
             if ($null -ne $item) {
@@ -113,14 +215,11 @@ function Get-BlobUiPagedApiItems {
             }
         }
 
-        $paginationProperty = $response.PSObject.Properties['pagination']
-        $hasMore = $false
-        if ($null -ne $paginationProperty -and $null -ne $paginationProperty.Value) {
-            $hasMoreProperty = $paginationProperty.Value.PSObject.Properties['has_more']
-            if ($null -ne $hasMoreProperty) {
-                $hasMore = [bool]$hasMoreProperty.Value
-            }
+        $hasMoreProperty = $response.PSObject.Properties['has_more']
+        if ($null -eq $hasMoreProperty) {
+            throw 'Anytype API v2 returned a paged response without the required has_more field.'
         }
+        $hasMore = [bool]$hasMoreProperty.Value
 
         if ($hasMore) {
             if ($items.Count -eq 0) {
@@ -129,11 +228,7 @@ function Get-BlobUiPagedApiItems {
             $offset += $items.Count
             continue
         }
-
-        if ($items.Count -lt $limit) {
-            break
-        }
-        $offset += $items.Count
+        break
     }
 
     return $allItems.ToArray()
@@ -144,15 +239,22 @@ function Get-BlobUiObjectTypeKey {
 
     $typeProperty = $Object.PSObject.Properties['type']
     if ($null -ne $typeProperty -and $null -ne $typeProperty.Value) {
+        if ($typeProperty.Value -is [string]) {
+            return ([string]$typeProperty.Value).ToLowerInvariant()
+        }
         $keyProperty = $typeProperty.Value.PSObject.Properties['key']
         if ($null -ne $keyProperty) {
-            return [string]$keyProperty.Value
+            return ([string]$keyProperty.Value).ToLowerInvariant()
+        }
+        $nameProperty = $typeProperty.Value.PSObject.Properties['name']
+        if ($null -ne $nameProperty) {
+            return ([string]$nameProperty.Value).ToLowerInvariant()
         }
     }
 
     $typeKeyProperty = $Object.PSObject.Properties['type_key']
     if ($null -ne $typeKeyProperty) {
-        return [string]$typeKeyProperty.Value
+        return ([string]$typeKeyProperty.Value).ToLowerInvariant()
     }
     return ''
 }
@@ -170,24 +272,50 @@ function Get-BlobUiObjectPropertyText {
     }
 
     $properties = $propertiesProperty.Value
+    $raw = $null
+    $found = $false
     if ($properties -is [System.Collections.IDictionary]) {
-        $raw = $properties[$Key]
-        if ($null -eq $raw) {
-            $raw = $properties[$DisplayName]
+        foreach ($candidateKey in @($Key, $DisplayName)) {
+            foreach ($propertyKey in $properties.Keys) {
+                if ([string]$propertyKey -ceq $candidateKey) {
+                    $raw = $properties[$propertyKey]
+                    $found = $true
+                    break
+                }
+            }
+            if ($found) { break }
         }
-        if ($null -eq $raw) {
-            return $null
+    }
+    elseif ($properties -isnot [System.Array]) {
+        foreach ($candidateKey in @($Key, $DisplayName)) {
+            foreach ($property in $properties.PSObject.Properties) {
+                if ($property.Name -ceq $candidateKey) {
+                    $raw = $property.Value
+                    $found = $true
+                    break
+                }
+            }
+            if ($found) { break }
         }
-        if ($raw -is [string]) {
-            return [string]$raw
+    }
+
+    if ($found) {
+        if ($null -eq $raw) { return $null }
+        if ($raw -is [string]) { return [string]$raw }
+
+        $formatProperty = $raw.PSObject.Properties['format']
+        if ($null -ne $formatProperty -and [string]$formatProperty.Value -cne 'text') {
+            throw "The '$DisplayName' setting must use the text property format."
         }
         $textProperty = $raw.PSObject.Properties['text']
         if ($null -ne $textProperty) {
             return [string]$textProperty.Value
         }
-        return $null
+        throw "The '$DisplayName' setting must be a text property."
     }
 
+    # Retain compatibility with the earlier typed-property representation in
+    # already-exported responses while API v2 uses a display-name/value map.
     $matches = @($properties | Where-Object {
         ($_.PSObject.Properties['key'] -and [string]$_.key -ceq $Key) -or
         ($_.PSObject.Properties['name'] -and [string]$_.name -ceq $DisplayName)
@@ -375,6 +503,11 @@ function Select-BlobUiObjectIndices {
 function Get-BlobUiObjectFromApiResponse {
     param([Parameter(Mandatory = $true)]$Response)
 
+    $objectProperty = $Response.PSObject.Properties['object']
+    if ($null -ne $objectProperty -and $null -ne $objectProperty.Value -and $objectProperty.Value -isnot [string]) {
+        return $objectProperty.Value
+    }
+
     $dataProperty = $Response.PSObject.Properties['data']
     if ($null -ne $dataProperty) {
         $value = $dataProperty.Value
@@ -400,7 +533,7 @@ function Get-BlobUiAnytypeObject {
 
     $escapedSpace = [System.Uri]::EscapeDataString($SpaceId)
     $escapedObject = [System.Uri]::EscapeDataString($ObjectId)
-    $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path ("/v1/spaces/$escapedSpace/objects/$escapedObject") -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/objects/${escapedObject}?include=properties&ids=full") -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
     return Get-BlobUiObjectFromApiResponse -Response $response
 }
 
@@ -521,7 +654,7 @@ function Get-BlobUiSettingsData {
         [scriptblock]$ApiTransport
     )
 
-    $spaces = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path '/v1/spaces' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    $spaces = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path '/v2/spaces?ids=full' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
     if ($spaces.Count -eq 0) {
         throw 'The API key cannot access any Anytype spaces.'
     }
@@ -551,7 +684,8 @@ function Get-BlobUiSettingsData {
     }
     else {
         $escapedSpace = [System.Uri]::EscapeDataString($SpaceId)
-        $settingsObjects = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v1/spaces/$escapedSpace/objects?type=setting") -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+        $settingsSearch = [ordered]@{ type = 'setting' }
+        $settingsObjects = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/search") -Method Post -Body $settingsSearch -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
         $settingsObjects = @($settingsObjects | Where-Object { (Get-BlobUiObjectTypeKey -Object $_) -ceq 'setting' } | Sort-Object -Property name)
         $indices = @(Select-BlobUiObjectIndices -Items $settingsObjects -SelectionProvider $SelectionProvider)
         foreach ($index in $indices) {

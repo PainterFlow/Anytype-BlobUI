@@ -67,58 +67,65 @@ function Get-CssSignature {
     return [System.Text.RegularExpressions.Regex]::Replace($withoutComments, '\s+', '')
 }
 
-function New-TestTextProperty {
-    param([string]$Key, [string]$Name, [string]$Text)
-    return @{
-        key = $Key
-        name = $Name
-        format = 'text'
-        object = 'property'
-        text = $Text
-    }
-}
-
 function New-TestSettingObject {
-    param([string]$Id, [string]$Name, [object[]]$Properties)
+    param([string]$Id, [string]$Name, [System.Collections.IDictionary]$Properties)
+    $documentProperties = [ordered]@{ Name = $Name }
+    foreach ($key in $Properties.Keys) {
+        $documentProperties[$key] = $Properties[$key]
+    }
     return @{
+        '$schema' = 'https://schemas.anytype.io/anyblock/2.0/object.schema.json'
+        formatVersion = '2.0'
+        etag = 'test-etag'
         id = $Id
-        name = $Name
-        type = @{ key = 'setting'; name = 'Setting' }
-        properties = $Properties
+        type = 'Setting'
+        properties = $documentProperties
+        blocks = @()
     }
 }
 
-$apiRequests = [System.Collections.Generic.List[string]]::new()
+$testSpaceId = 'bafy-space-one-cid.replication-key'
+$otherSpaceId = 'bafy-space-two-cid.replication-key'
+$generalObjectId = 'bafy-general-settings-object-id'
+$spaceObjectId = 'bafy-space-settings-object-id'
+$emptyObjectId = 'bafy-empty-settings-object-id'
+$apiRequests = [System.Collections.Generic.List[object]]::new()
 $knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key')
 $apiTransport = {
-    param($ApiKey, $Path)
+    param($ApiKey, $Method, $Path, $Body, $Headers)
 
     function ConvertTo-TestApiObject {
         param($InputObject)
         $json = ConvertTo-Json -InputObject $InputObject -Depth 20 -Compress
         return ConvertFrom-Json -InputObject $json -ErrorAction Stop
     }
-    function New-TestTextProperty {
-        param([string]$Key, [string]$Name, [string]$Text)
-        return @{
-            key = $Key
-            name = $Name
-            format = 'text'
-            object = 'property'
-            text = $Text
-        }
-    }
     function New-TestSettingObject {
-        param([string]$Id, [string]$Name, [object[]]$Properties)
+        param([string]$Id, [string]$Name, [System.Collections.IDictionary]$Properties)
+        $documentProperties = [ordered]@{ Name = $Name }
+        foreach ($key in $Properties.Keys) {
+            $documentProperties[$key] = $Properties[$key]
+        }
         return @{
+            '$schema' = 'https://schemas.anytype.io/anyblock/2.0/object.schema.json'
+            formatVersion = '2.0'
+            etag = 'test-etag'
             id = $Id
-            name = $Name
-            type = @{ key = 'setting'; name = 'Setting' }
-            properties = $Properties
+            type = 'Setting'
+            properties = $documentProperties
+            blocks = @()
         }
     }
 
-    $apiRequests.Add([string]$Path)
+    $apiRequests.Add([pscustomobject]@{
+        ApiKey = [string]$ApiKey
+        Method = [string]$Method
+        Path = [string]$Path
+        Body = $Body
+        Headers = $Headers
+    })
+    if ($Headers.ContainsKey('Anytype-Version')) {
+        throw 'The v2 mock received the v1-only Anytype-Version header.'
+    }
     if ($knownKeys -cnotcontains [string]$ApiKey) {
         $exception = [System.Exception]::new('Mock API rejected the key.')
         $exception.Data['StatusCode'] = 401
@@ -126,58 +133,92 @@ $apiTransport = {
     }
 
     $cleanPath = ([string]$Path).Split('?')[0]
-    if ($cleanPath -eq '/v1/spaces') {
-        $payload = @{
-            data = @(@{ id = 'space-1'; name = 'BlobUI Settings' })
-            pagination = @{ has_more = $false; limit = 1000; offset = 0 }
-        }
+    $offset = 0
+    if ([string]$Path -match '(?:\?|&)offset=(?<offset>\d+)') {
+        $offset = [int]$Matches.offset
     }
-    elseif ($cleanPath -eq '/v1/spaces/space-1/objects') {
-        if ([string]$Path -notmatch '\?type=setting(?:&|$)') {
-            throw 'The mock API received an unfiltered settings object query.'
+
+    if ($cleanPath -eq '/v2/spaces') {
+        if ($Method -cne 'Get' -or [string]$Path -notmatch '(?:\?|&)ids=full(?:&|$)') {
+            throw 'The mock API expected a v2 space list request with full space IDs.'
         }
-        $payload = @{
-            data = @(
-                @{ id = 'general-id'; name = 'General Settings'; type = @{ key = 'setting'; name = 'Setting' } },
-                @{ id = 'space-id'; name = 'Space Specific Settings'; type = @{ key = 'setting'; name = 'Setting' } }
-            )
-            pagination = @{ has_more = $false; limit = 1000; offset = 0 }
-        }
-    }
-    elseif ($cleanPath -eq '/v1/spaces/space-1/objects/general-id') {
-        if ($ApiKey -eq 'bad-color-key') {
-            $properties = @(
-                (New-TestTextProperty 'accent_color' 'Accent Color' '#de50de; color:red')
-            )
-        }
-        elseif ($ApiKey -eq 'bad-font-key') {
-            $properties = @(
-                (New-TestTextProperty 'font' 'Font' 'Segoe UI; background:url(x)')
-            )
+        if ($offset -eq 0) {
+            $payload = @{
+                data = @(@{ id = $testSpaceId; name = 'BlobUI Settings' })
+                has_more = $true
+                has_not_granted_spaces = $false
+                limit = 100
+                offset = 0
+                total = 2
+            }
         }
         else {
-            $properties = @(
-                (New-TestTextProperty 'font' 'Font' 'Libron'),
-                (New-TestTextProperty 'code_font' 'Code Font' 'Consolas'),
-                (New-TestTextProperty 'accent_color' 'Accent Color' '#DE50DE')
-            )
+            $payload = @{
+                data = @(@{ id = $otherSpaceId; name = 'Other Space' })
+                has_more = $false
+                has_not_granted_spaces = $false
+                limit = 100
+                offset = $offset
+                total = 2
+            }
         }
-        $payload = @{ data = (New-TestSettingObject 'general-id' 'General Settings' $properties) }
     }
-    elseif ($cleanPath -eq '/v1/spaces/space-1/objects/space-id') {
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/search") {
+        if ($Method -cne 'Post' -or $null -eq $Body -or [string]$Body.type -cne 'setting') {
+            throw 'The mock API expected a read-only v2 search POST filtered by the Setting type key.'
+        }
+        if ($offset -eq 0) {
+            $payload = @{
+                data = @(@{ id = $generalObjectId; name = 'General Settings'; type = 'setting' })
+                has_more = $true
+                limit = 100
+                offset = 0
+                total = 2
+                warnings = @()
+            }
+        }
+        else {
+            $payload = @{
+                data = @(@{ id = $spaceObjectId; name = 'Space Specific Settings'; type = 'setting' })
+                has_more = $false
+                limit = 100
+                offset = $offset
+                total = 2
+                warnings = @()
+            }
+        }
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/objects/$generalObjectId") {
+        if ($Method -cne 'Get' -or [string]$Path -notmatch '\?include=properties&ids=full$') {
+            throw 'The mock API expected a v2 full-ID property read.'
+        }
+        if ($ApiKey -eq 'bad-color-key') {
+            $properties = @{ 'Accent Color' = '#de50de; color:red' }
+        }
+        elseif ($ApiKey -eq 'bad-font-key') {
+            $properties = @{ Font = 'Segoe UI; background:url(x)' }
+        }
+        else {
+            $properties = @{
+                Font = 'Libron'
+                'Code Font' = 'Consolas'
+                'Accent Color' = '#DE50DE'
+            }
+        }
+        $payload = New-TestSettingObject $generalObjectId 'General Settings' $properties
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/objects/$spaceObjectId") {
         if ($ApiKey -eq 'bad-banner-key') {
             $bannerValue = '..\outside.png'
         }
         else {
             $bannerValue = 'assets\spacebanner\banner.png'
         }
-        $properties = @(
-            (New-TestTextProperty 'banner' 'Banner' $bannerValue)
-        )
-        $payload = @{ data = (New-TestSettingObject 'space-id' 'Space Specific Settings' $properties) }
+        $properties = @{ Banner = $bannerValue }
+        $payload = New-TestSettingObject $spaceObjectId 'Space Specific Settings' $properties
     }
-    elseif ($cleanPath -eq '/v1/spaces/space-1/objects/empty-id') {
-        $payload = @{ data = (New-TestSettingObject 'empty-id' 'Empty Settings' @()) }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/objects/$emptyObjectId") {
+        $payload = New-TestSettingObject $emptyObjectId 'Empty Settings' @{}
     }
     else {
         $exception = [System.Exception]::new('Mock API object not found.')
@@ -188,6 +229,7 @@ $apiTransport = {
 }.GetNewClosure()
 
 $unavailableApiTransport = {
+    param($ApiKey, $Method, $Path, $Body, $Headers)
     throw [System.Net.Sockets.SocketException]::new([System.Net.Sockets.SocketError]::ConnectionRefused)
 }
 
@@ -218,22 +260,48 @@ try {
     & (Join-Path $repoRoot 'Get-Data.ps1') @getArguments
     $fetchedData = Read-BlobUiDataFile -Path $candidateDataPath
 
-    Assert-Equal 'space-1' $fetchedData.selectedSpace.id 'The selected space ID was not saved.'
+    Assert-Equal $testSpaceId $fetchedData.selectedSpace.id 'The selected space ID was not saved in its full v2 form.'
     Assert-Equal 'BlobUI Settings' $fetchedData.selectedSpace.name 'The selected space name was not saved.'
+    Assert-Equal 'v2' $fetchedData.apiVersion 'The saved API version was not updated.'
     Assert-Equal 'Libron' $fetchedData.settings.fontFamily 'The exported Font property was not mapped.'
     Assert-Equal 'Consolas' $fetchedData.settings.codeFontFamily 'The exported Code Font property was not mapped.'
     Assert-Equal '#DE50DE' $fetchedData.settings.accentColor 'The exported Accent Color property was not mapped.'
     Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The exported Banner property was not normalized.'
-    Assert-Equal 'general-id|space-id' $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
-    $apiRequestText = [string]::Join([Environment]::NewLine, $apiRequests.ToArray())
-    Assert-True ($apiRequestText.Contains('/v1/spaces/space-1/objects?type=setting')) 'The selector did not query the exported Setting type key.'
+    Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
+    $settingsSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") })
+    Assert-Equal 2 $settingsSearchCalls.Count 'The v2 settings search did not follow has_more across pages.'
+    Assert-Equal 'setting' $settingsSearchCalls[0].Body.type 'The search body did not filter by the exported Setting type key.'
+    Assert-True ($settingsSearchCalls[0].Path -match '[?&]limit=100&offset=0$') 'The first v2 settings search page omitted its query pagination.'
+    Assert-True ($settingsSearchCalls[1].Path -match '[?&]offset=1$') 'The second v2 settings search page did not advance by the returned item count.'
+    $spaceListCalls = @($apiRequests | Where-Object { $_.Method -eq 'Get' -and $_.Path.StartsWith('/v2/spaces?') })
+    Assert-True ($spaceListCalls.Count -ge 2) 'The v2 space list did not follow has_more across pages.'
+    Assert-True ($spaceListCalls[0].Path -match '[?&]ids=full&limit=100&offset=0$') 'The v2 space list did not request full IDs and pagination.'
+    Assert-True ($spaceListCalls[1].Path -match '[?&]offset=1$') 'The second v2 space page did not advance by the returned item count.'
+    Assert-True (@($apiRequests | Where-Object { $_.Headers.ContainsKey('Anytype-Version') }).Count -eq 0) 'A v1-only Anytype-Version header was sent to API v2.'
+    Assert-True (@($apiRequests | Where-Object { $_.Path -notmatch '^/v2/' }).Count -eq 0) 'The API transport made a request outside v2.'
+    Assert-True (@($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' }).Count -ge 2) 'The object reads omitted the v2 properties and full-ID query parameters.'
 
     $emptyDataPath = Join-Path $testRoot 'empty-data.json'
-    $emptyData = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $emptyDataPath -SpaceId 'space-1' -ObjectIds @('empty-id') -InstallDirectory $installDirectory -ApiTransport $apiTransport
+    $emptyData = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $emptyDataPath -SpaceId $testSpaceId -ObjectIds @($emptyObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
     Assert-Equal 'Consolas' $emptyData.settings.codeFontFamily 'The Code Font default is incorrect.'
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
     Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The Banner default is incorrect.'
+
+    $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
+    Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject ([ordered]@{
+        schemaVersion = 1
+        apiVersion = '2025-11-08'
+        selectedSpace = [ordered]@{ id = $testSpaceId; name = 'BlobUI Settings' }
+        settingsObjectIds = @($generalObjectId, $spaceObjectId)
+        settings = $fetchedData.settings
+        installDirectory = $installDirectory
+    })
+    $legacyRefreshPath = Join-Path $testRoot 'legacy-refresh.json'
+    $legacyRefresh = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $legacyRefreshPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId, $spaceObjectId) -ExistingDataPath $legacyDataPath -ApiTransport $apiTransport
+    Assert-Equal $testSpaceId $legacyRefresh.selectedSpace.id 'A saved settings record from the previous API version lost its full space ID.'
+    Assert-Equal "$generalObjectId|$spaceObjectId" $legacyRefresh.settingsObjectIds 'Saved object IDs from the previous API version were not accepted by v2.'
+    Assert-Equal $installDirectory $legacyRefresh.installDirectory 'A previous settings record did not preserve its install directory during refresh.'
 
     Assert-Equal 'Segoe UI' (ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI') 'A valid font name was rejected.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type font -Value 'Segoe UI; color:red' } 'Unsafe font value' 'font family'
@@ -289,25 +357,64 @@ try {
 
     $badDataPath = Join-Path $testRoot 'bad-data.json'
     Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'bad-color-key' -OutputPath $badDataPath -SpaceId 'space-1' -ObjectIds @('general-id') -InstallDirectory $installDirectory -ApiTransport $apiTransport
+        Get-BlobUiSettingsData -ApiKey 'bad-color-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     } 'Invalid API setting' 'Accent Color'
     Assert-True (-not (Test-Path -LiteralPath $badDataPath)) 'Invalid API settings were written to the candidate data file.'
     Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'A settings validation failure changed the installed CSS.'
     Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'A settings validation failure changed saved data.'
     Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'bad-font-key' -OutputPath $badDataPath -SpaceId 'space-1' -ObjectIds @('general-id') -InstallDirectory $installDirectory -ApiTransport $apiTransport
+        Get-BlobUiSettingsData -ApiKey 'bad-font-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     } 'Invalid Font setting' 'Font'
     Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'bad-banner-key' -OutputPath $badDataPath -SpaceId 'space-1' -ObjectIds @('space-id') -InstallDirectory $installDirectory -ApiTransport $apiTransport
+        Get-BlobUiSettingsData -ApiKey 'bad-banner-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($spaceObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     } 'Invalid Banner setting' 'path segment'
     Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'An invalid font or banner changed the installed CSS.'
     Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'An invalid font or banner changed saved data.'
 
     Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'wrong-key' -OutputPath $badDataPath -SpaceId 'space-1' -ObjectIds @('general-id') -InstallDirectory $installDirectory -ApiTransport $apiTransport
+        Get-BlobUiSettingsData -ApiKey 'wrong-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     } 'Invalid API key' 'rejected the API key'
+
+    $module = Get-Module BlobUI.Core
+    $httpErrorCases = @(
+        @{ Status = 401; Body = '{"message":"invalid API key"}'; Expected = 'HTTP 401' },
+        @{ Status = 403; Body = '{"message":"space grant is read only; Authorization: Bearer secret-key"}'; Expected = 'HTTP 403' },
+        @{ Status = 404; Body = '{"message":"unknown route"}'; Expected = 'HTTP 404' },
+        @{ Status = 400; Body = 'malformed secret-key and Authorization: Bearer secret-key'; Expected = 'HTTP 400' },
+        @{ Status = 500; Body = '{"message":"server failure"}'; Expected = 'HTTP 500' }
+    )
+    foreach ($httpErrorCase in $httpErrorCases) {
+        $caseStatus = $httpErrorCase.Status
+        $caseBody = $httpErrorCase.Body
+        $failingTransport = {
+            param($ApiKey, $Method, $Path, $Body, $Headers)
+            $exception = [System.Exception]::new('Mock HTTP failure.')
+            $exception.Data['StatusCode'] = $caseStatus
+            $exception.Data['ResponseBody'] = $caseBody
+            throw $exception
+        }.GetNewClosure()
+        $caughtMessage = $null
+        try {
+            & $module { param($ApiKey, $Transport) Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path '/v2/spaces?ids=full' -ApiTransport $Transport } 'secret-key' $failingTransport | Out-Null
+        }
+        catch {
+            $caughtMessage = $_.Exception.Message
+        }
+        Assert-True ($caughtMessage -like "*$($httpErrorCase.Expected)*") "HTTP $caseStatus was not preserved in the API error."
+        Assert-True (-not $caughtMessage.Contains('secret-key')) "HTTP $caseStatus exposed the API key from an echoed error body."
+        if ($caseStatus -eq 403) {
+            Assert-True ($caughtMessage -like '*space grant is read only*') 'The server message was omitted from a 403 error.'
+        }
+        if ($caseStatus -eq 404) {
+            Assert-True ($caughtMessage -like '*Anytype build provides API v2*') 'A missing v2 route did not report the API v2 prerequisite.'
+        }
+        if ($caseStatus -eq 500) {
+            Assert-True ($caughtMessage -like '*server failure*') 'The server message was omitted from a 500 error.'
+        }
+    }
+
     Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $badDataPath -SpaceId 'space-1' -ObjectIds @('general-id') -InstallDirectory $installDirectory -ApiTransport $unavailableApiTransport
+        Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $unavailableApiTransport
     } 'Unavailable API' 'Could not reach Anytype local API'
     Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'An API failure changed the installed CSS.'
     Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'An API failure changed saved data.'
