@@ -62,3 +62,6 @@ The Base Idea is:
 ```
 The current text effects are:
 - `blob://animated.txt/glitchy`: Creates a cool glitchy effect
+
+One issue that persists is this stupid hover pop-up for links. 
+Removing it for just `blob://*` links doesn't seem to be easy as it will flicker and bug around.
