@@ -10,7 +10,9 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 
 #### *Made by @PainterFlow11 - All rights reserved, no license*
 
+
 ## Installing BlobUI
+
 
 > [!NOTE]
 > - BlobUI will not collect your data and send it to a server.
