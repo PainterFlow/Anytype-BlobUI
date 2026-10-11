@@ -6,8 +6,9 @@
 */
 
 :root {
+    --color-blob-pink: #DE50DE;
     /* @blobui-placeholder accentColor color */
-    --color-blob-pink: {{accentColor}};
+    --color-blob-accent: {{accentColor}};
     /* @blobui-placeholder bannerUrl url */
     --header-image: url("{{bannerUrl}}");
     --header-image-height: 120px;

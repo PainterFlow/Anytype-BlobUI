@@ -1,5 +1,5 @@
 #widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg {
-    color: var(--color-blob-pink) !important;
+    color: var(--color-blob-accent) !important;
 }
 
 /* One oversized image on the fixed header, behind the scrolling content. */

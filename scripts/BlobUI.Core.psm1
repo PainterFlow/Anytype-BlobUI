@@ -259,7 +259,64 @@ function Get-BlobUiObjectTypeKey {
     return ''
 }
 
-function Get-BlobUiObjectPropertyText {
+function Get-BlobUiPropertyField {
+    param(
+        [Parameter(Mandatory = $true)]$InputObject,
+        [Parameter(Mandatory = $true)][string]$FieldName
+    )
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        foreach ($key in $InputObject.Keys) {
+            if ([string]$key -ceq $FieldName) { return $InputObject[$key] }
+        }
+        return $null
+    }
+    $field = $InputObject.PSObject.Properties[$FieldName]
+    if ($null -ne $field) { return $field.Value }
+    return $null
+}
+
+function Get-BlobUiPropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]$PropertyValue,
+        [Parameter(Mandatory = $true)][string]$DisplayName
+    )
+
+    if ($null -eq $PropertyValue) { return $null }
+    if ($PropertyValue -is [string] -or $PropertyValue -is [ValueType]) { return $PropertyValue }
+
+    $format = [string](Get-BlobUiPropertyField -InputObject $PropertyValue -FieldName 'format')
+    $valuePropertyName = if (-not [string]::IsNullOrWhiteSpace($format)) { $format } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($valuePropertyName)) {
+        $formattedValue = Get-BlobUiPropertyField -InputObject $PropertyValue -FieldName $valuePropertyName
+        if ($null -ne $formattedValue) {
+            if ($valuePropertyName -ceq 'select') {
+                if ($formattedValue -is [string]) { return [string]$formattedValue }
+                $optionName = Get-BlobUiPropertyField -InputObject $formattedValue -FieldName 'name'
+                if ($null -ne $optionName) { return [string]$optionName }
+                throw "The '$DisplayName' select value has no option name."
+            }
+            return $formattedValue
+        }
+    }
+
+    # Some API v2 responses omit the format but still return a typed value.
+    foreach ($candidate in @('text', 'select', 'number', 'checkbox', 'date', 'url', 'email', 'phone', 'files')) {
+        $formattedValue = Get-BlobUiPropertyField -InputObject $PropertyValue -FieldName $candidate
+        if ($null -eq $formattedValue) { continue }
+        if ($candidate -ceq 'select') {
+            if ($formattedValue -is [string]) { return [string]$formattedValue }
+            $optionName = Get-BlobUiPropertyField -InputObject $formattedValue -FieldName 'name'
+            if ($null -ne $optionName) { return [string]$optionName }
+            throw "The '$DisplayName' select value has no option name."
+        }
+        return $formattedValue
+    }
+
+    throw "The '$DisplayName' property value has no supported typed value."
+}
+
+function Get-BlobUiObjectPropertyValue {
     param(
         [Parameter(Mandatory = $true)]$Object,
         [Parameter(Mandatory = $true)][string]$Key,
@@ -300,18 +357,7 @@ function Get-BlobUiObjectPropertyText {
     }
 
     if ($found) {
-        if ($null -eq $raw) { return $null }
-        if ($raw -is [string]) { return [string]$raw }
-
-        $formatProperty = $raw.PSObject.Properties['format']
-        if ($null -ne $formatProperty -and [string]$formatProperty.Value -cne 'text') {
-            throw "The '$DisplayName' setting must use the text property format."
-        }
-        $textProperty = $raw.PSObject.Properties['text']
-        if ($null -ne $textProperty) {
-            return [string]$textProperty.Value
-        }
-        throw "The '$DisplayName' setting must be a text property."
+        return Get-BlobUiPropertyValue -PropertyValue $raw -DisplayName $DisplayName
     }
 
     # Retain compatibility with the earlier typed-property representation in
@@ -332,14 +378,7 @@ function Get-BlobUiObjectPropertyText {
         return $null
     }
 
-    $property = $matches[0]
-    if ($property.PSObject.Properties['format'] -and [string]$property.format -ne 'text') {
-        throw "The '$DisplayName' setting must use the text property format."
-    }
-    if ($property.PSObject.Properties['text']) {
-        return [string]$property.text
-    }
-    return $null
+    return Get-BlobUiPropertyValue -PropertyValue $matches[0] -DisplayName $DisplayName
 }
 
 function ConvertTo-BlobUiCssPlaceholderValue {
@@ -359,7 +398,29 @@ function ConvertTo-BlobUiCssPlaceholderValue {
         }
         'color' {
             if ($trimmed -notmatch '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
-                throw "'$Name' must be a three or six digit hexadecimal CSS color."
+                $paletteVariables = @{
+                    grey = 'grey'
+                    gray = 'grey'
+                    yellow = 'yellow'
+                    amber = 'orange'
+                    orange = 'orange'
+                    red = 'red'
+                    pink = 'pink'
+                    purple = 'purple'
+                    blue = 'blue'
+                    ice = 'ice'
+                    teal = 'teal'
+                    green = 'lime'
+                    lime = 'lime'
+                }
+                $paletteName = $trimmed.ToLowerInvariant()
+                if ($paletteVariables.ContainsKey($paletteName)) {
+                    return "var(--color-$($paletteVariables[$paletteName]))"
+                }
+                if ($paletteName -in @('blob', 'blob pink', 'de50de')) {
+                    return '#DE50DE'
+                }
+                throw "'$Name' must be a three or six digit hexadecimal CSS color, an Anytype color name (Grey, Yellow, Orange, Red, Pink, Purple, Blue, Ice, Teal, or Lime), or Blob Pink."
             }
             return $trimmed.ToUpperInvariant()
         }
@@ -557,7 +618,7 @@ function Get-BlobUiNormalizedSettings {
             @{ key = 'banner'; name = 'Banner' }
         )
         foreach ($definition in $propertyMap) {
-            $value = Get-BlobUiObjectPropertyText -Object $object -Key $definition.key -DisplayName $definition.name
+            $value = Get-BlobUiObjectPropertyValue -Object $object -Key $definition.key -DisplayName $definition.name
             if (-not [string]::IsNullOrWhiteSpace($value)) {
                 $rawSettings[$definition.key] = $value
             }
