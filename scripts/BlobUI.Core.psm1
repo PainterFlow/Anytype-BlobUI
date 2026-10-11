@@ -1020,10 +1020,22 @@ function New-BlobUiCalendarColorCss {
         if ($null -eq $colorName) { continue }
         $cssColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value $colorName -Name 'Calendar Color'
         $rules.Add((
-            '[data-view-type="4"][data-drop-type="record"][data-id="{0}"],' -f $entry.objectId
+            '[data-view-type="4"][data-drop-type="record"][data-id="{0}"]:not(.record *),' -f $entry.objectId
         ))
         $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] {{' -f $entry.objectId))
         $rules.Add(('    background-color: {0} !important;' -f $cssColor))
+        $rules.Add(('    background-color: color-mix(in srgb, {0} 18%, #1b1b1b) !important;' -f $cssColor))
+        $rules.Add(('    border-left: 3px solid {0} !important;' -f $cssColor))
+        $rules.Add('    border-radius: 3px !important;')
+        $rules.Add('    padding: 3px 6px !important;')
+        $rules.Add('    box-sizing: border-box;')
+        $rules.Add('    color: #FFFFFF !important;')
+        $rules.Add('}')
+        $rules.Add(('[data-view-type="4"][data-drop-type="record"][data-id="{0}"] .name,' -f $entry.objectId))
+        $rules.Add(('[data-view-type="4"][data-drop-type="record"][data-id="{0}"] .name span,' -f $entry.objectId))
+        $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] .name,' -f $entry.objectId))
+        $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] .name span {{' -f $entry.objectId))
+        $rules.Add('    color: #FFFFFF !important;')
         $rules.Add('}')
     }
 
