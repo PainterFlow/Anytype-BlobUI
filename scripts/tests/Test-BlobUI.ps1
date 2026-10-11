@@ -454,6 +454,14 @@ try {
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
+    $calendarColorRulesStart = $css.IndexOf('/* BlobUI Calendar Color overrides */', [System.StringComparison]::Ordinal)
+    Assert-True ($calendarColorRulesStart -ge 0) 'Compiled CSS omitted the Calendar Color override section.'
+    $calendarColorRules = $css.Substring($calendarColorRulesStart)
+    Assert-True (-not ($calendarColorRules -match '(?m)^\s*(display|align-items|padding|min-height|height|box-sizing)\s*:')) 'Calendar color overrides changed the event row layout.'
+    $calendarMenuRowSelector = '.content > .wrap > .items > .item[id="item-' + $calendarBlueObjectId + '"]:has(> .iconObject[id="menuCalendarDay-' + $calendarBlueObjectId + '-icon"])'
+    Assert-True ($calendarColorRules.Contains($calendarMenuRowSelector)) 'Compiled CSS omitted the object-specific calendar day menu row selector.'
+    Assert-True (-not ($calendarColorRules.Contains($calendarMenuRowSelector + ' > .iconObject'))) 'Calendar menu color overrides changed the object icon color.'
+    Assert-True (-not ($calendarColorRules -match '(?m)^\s*\.menus\s+\.menu')) 'Calendar menu colors were emitted for generic menus.'
     Assert-True ($css.Contains('background-color: var(--color-blue) !important;')) 'Compiled CSS did not use the existing Anytype Blue palette color.'
     Assert-True ($css.Contains('[data-id="' + $calendarBlobPinkObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS did not map Blob Pink to the existing Blob Pink color.'
     Assert-True ($css.Contains('[data-id="' + $calendarHexObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS omitted the hexadecimal Calendar Color value.'
