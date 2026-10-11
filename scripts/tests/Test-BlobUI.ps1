@@ -96,8 +96,10 @@ $calendarHexObjectId = 'bafy-calendar-hex-object-id'
 $calendarRgbObjectId = 'bafy-calendar-rgb-object-id'
 $calendarDefaultObjectId = 'bafy-calendar-default-object-id'
 $calendarUncoloredObjectId = 'bafy-calendar-uncolored-object-id'
+$otherSpaceCalendarObjectId = 'bafy-other-space-calendar-object-id'
 $staleCalendarObjectId = 'bafy-calendar-stale-object-id'
 $calendarColorPropertyKey = 'calendar_color'
+$otherSpaceCalendarColorPropertyKey = 'calendar_tint'
 $apiRequests = [System.Collections.Generic.List[object]]::new()
 $knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
 $apiTransport = {
@@ -262,6 +264,31 @@ $apiTransport = {
             throw 'The mock API expected either the Setting type or the Calendar Color property key.'
         }
     }
+    elseif ($cleanPath -eq "/v2/spaces/$otherSpaceId/search") {
+        if ([string]$Body.type -ceq 'setting') {
+            throw 'Settings discovery ran outside the designated settings space.'
+        }
+        if ([string]::Join(',', @($Body.fields)) -ceq $otherSpaceCalendarColorPropertyKey) {
+            $payload = @{
+                data = @(
+                    @{
+                        id = $otherSpaceCalendarObjectId
+                        name = 'Other space calendar record'
+                        type = 'task'
+                        properties = @{ $otherSpaceCalendarColorPropertyKey = @{ format = 'select'; select = @{ name = 'Green' } } }
+                    }
+                )
+                has_more = $false
+                limit = 100
+                offset = 0
+                total = 1
+                warnings = @()
+            }
+        }
+        else {
+            throw 'The mock API expected the Calendar Color property key in the other space.'
+        }
+    }
     elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/properties") {
         if ($ApiKey -eq 'no-calendar-color-key') {
             $payload = @{
@@ -275,6 +302,26 @@ $apiTransport = {
         else {
             $payload = @{
                 data = @(@{ id = 'bafy-calendar-color-property-id'; key = $calendarColorPropertyKey; name = 'Calendar Color'; format = 'select'; object = 'property' })
+                has_more = $false
+                limit = 100
+                offset = 0
+                total = 1
+            }
+        }
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$otherSpaceId/properties") {
+        if ($ApiKey -eq 'no-calendar-color-key') {
+            $payload = @{
+                data = @()
+                has_more = $false
+                limit = 100
+                offset = 0
+                total = 0
+            }
+        }
+        else {
+            $payload = @{
+                data = @(@{ id = 'bafy-other-space-calendar-color-property-id'; key = $otherSpaceCalendarColorPropertyKey; name = 'Calendar Color'; format = 'select'; object = 'property' })
                 has_more = $false
                 limit = 100
                 offset = 0
@@ -368,6 +415,7 @@ try {
     Assert-Equal 'Blob Pink' $fetchedData.calendarObjectColors.$calendarBlobPinkObjectId 'Blob Pink was not preserved as a canonical calendar color.'
     Assert-Equal '#DE50DE' $fetchedData.calendarObjectColors.$calendarHexObjectId 'A hexadecimal Calendar Color value was not normalized.'
     Assert-Equal 'rgba(12, 34, 56, 0.5)' $fetchedData.calendarObjectColors.$calendarRgbObjectId 'An rgba() Calendar Color value was not preserved.'
+    Assert-Equal 'Green' $fetchedData.calendarObjectColors.$otherSpaceCalendarObjectId 'Calendar Color discovery did not include another API-accessible space.'
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarDefaultObjectId]) 'Default did not remove its calendar color override.'
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarUncoloredObjectId]) 'An object without Calendar Color received an override.'
     Assert-True ($fetchedData.calendarObjectColors.PSObject.Properties[$calendarBlueObjectId] -and $fetchedData.settingsObjectIds -notcontains $calendarBlueObjectId) 'Calendar color collection reused selected theme settings objects instead of the space object search.'
@@ -376,6 +424,8 @@ try {
     Assert-Equal 'setting' $settingsSearchCalls[0].Body.type 'The search body did not filter by the exported Setting type key.'
     Assert-True ($settingsSearchCalls[0].Path -match '[?&]limit=100&offset=0$') 'The first v2 settings search page omitted its query pagination.'
     Assert-True ($settingsSearchCalls[1].Path -match '[?&]offset=1$') 'The second v2 settings search page did not advance by the returned item count.'
+    $settingsSearchOutsideSettingsSpace = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' -and -not $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") })
+    Assert-Equal 0 $settingsSearchOutsideSettingsSpace.Count 'Settings discovery scanned a space other than the designated settings space.'
     $spaceListCalls = @($apiRequests | Where-Object { $_.Method -eq 'Get' -and $_.Path.StartsWith('/v2/spaces?') })
     Assert-True ($spaceListCalls.Count -ge 2) 'The v2 space list did not follow has_more across pages.'
     Assert-True ($spaceListCalls[0].Path -match '[?&]ids=full&limit=100&offset=0$') 'The v2 space list did not request full IDs and pagination.'
@@ -386,6 +436,8 @@ try {
     $calendarSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") -and [string]::Join(',', @($_.Body.fields)) -ceq $calendarColorPropertyKey })
     Assert-Equal 2 $calendarSearchCalls.Count 'The Calendar Color object search did not follow has_more across pages.'
     Assert-Equal $calendarColorPropertyKey ([string]$calendarSearchCalls[0].Body.fields[0]) 'The Calendar Color search did not request the API property key resolved by name.'
+    $otherSpaceCalendarSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$otherSpaceId/search") -and [string]::Join(',', @($_.Body.fields)) -ceq $otherSpaceCalendarColorPropertyKey })
+    Assert-Equal 1 $otherSpaceCalendarSearchCalls.Count 'Calendar Color was not searched in every accessible space where the property exists.'
 
     $emptyDataPath = Join-Path $testRoot 'empty-data.json'
     $emptyData = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $emptyDataPath -SpaceId $testSpaceId -ObjectIds @($emptyObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
@@ -466,6 +518,7 @@ try {
     Assert-True ($css.Contains('[data-id="' + $calendarBlobPinkObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS did not map Blob Pink to the existing Blob Pink color.'
     Assert-True ($css.Contains('[data-id="' + $calendarHexObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS omitted the hexadecimal Calendar Color value.'
     Assert-True ($css.Contains('[data-id="' + $calendarRgbObjectId + '"]') -and $css.Contains('background-color: rgba(12, 34, 56, 0.5) !important;')) 'Compiled CSS omitted the rgba() Calendar Color value.'
+    Assert-True ($css.Contains('[data-id="' + $otherSpaceCalendarObjectId + '"]') -and $css.Contains('background-color: var(--color-green, var(--color-lime)) !important;')) 'Compiled CSS omitted the Calendar Color value from another accessible space.'
     Assert-True (-not $css.Contains($calendarDefaultObjectId)) 'Compiled CSS emitted a selector for Default.'
     Assert-True (-not ($css -match '\[data-id="[^"]+"\]\s+[^\{]*checkbox')) 'Calendar color CSS unexpectedly targets task checkboxes.'
     Assert-True ($css.Contains('font-family: "Libron", sans-serif !important;')) 'Compiled CSS omitted the default UI font.'
