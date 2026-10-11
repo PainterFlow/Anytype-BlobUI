@@ -453,6 +453,7 @@ try {
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
+    Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
     Assert-True ($css.Contains('background-color: var(--color-blue) !important;')) 'Compiled CSS did not use the existing Anytype Blue palette color.'
     Assert-True ($css.Contains('[data-id="' + $calendarBlobPinkObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS did not map Blob Pink to the existing Blob Pink color.'
     Assert-True ($css.Contains('[data-id="' + $calendarHexObjectId + '"]') -and $css.Contains('background-color: #DE50DE !important;')) 'Compiled CSS omitted the hexadecimal Calendar Color value.'

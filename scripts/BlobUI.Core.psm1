@@ -1020,8 +1020,9 @@ function New-BlobUiCalendarColorCss {
         if ($null -eq $colorName) { continue }
         $cssColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value $colorName -Name 'Calendar Color'
         $rules.Add((
-            '[data-view-type="4"][data-drop-type="record"][data-id="{0}"] {{' -f $entry.objectId
+            '[data-view-type="4"][data-drop-type="record"][data-id="{0}"],' -f $entry.objectId
         ))
+        $rules.Add(('.viewContent.viewCalendar .record[id="record-{0}"] {{' -f $entry.objectId))
         $rules.Add(('    background-color: {0} !important;' -f $cssColor))
         $rules.Add('}')
     }
