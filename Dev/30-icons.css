@@ -1,0 +1,9 @@
+/* Amber star when this object is a favorite. */
+#button-header-favorite.menuActionUnfav {
+    color: var(--color-orange) !important;
+}
+
+/* Blue properties icon while its menu is selected. */
+#button-header-relation.active {
+    color: var(--color-blue, #3b82f6) !important;
+}

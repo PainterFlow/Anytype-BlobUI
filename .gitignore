@@ -1,1 +1,9 @@
 data.json
+/blob/credentials/
+/blob/staging/
+/blob/backups/
+/blob/runtime/
+/blob/assets/
+*.dpapi
+/tests/.tmp/
+/.test-run/

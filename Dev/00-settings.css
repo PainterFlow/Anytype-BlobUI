@@ -1,0 +1,14 @@
+/*
+    BlobUI V1.0.0 (Development)
+    Custom CSS made for Anytype Version 0.57.4
+    Made by @PainterFlow11
+    All rights reserved, no license.
+*/
+
+:root {
+    /* @blobui-placeholder accentColor color */
+    --color-blob-pink: {{accentColor}};
+    /* @blobui-placeholder bannerUrl url */
+    --header-image: url("{{bannerUrl}}");
+    --header-image-height: 120px;
+}

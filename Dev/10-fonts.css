@@ -1,0 +1,14 @@
+/* @blobui-placeholder fontFamily font */
+* {
+    font-family: "{{fontFamily}}", sans-serif !important;
+}
+
+/* Code blocks */
+.textCode .value,
+.textCode .value *,
+/* Inline code */
+markupcode,
+markupcode * {
+    /* @blobui-placeholder codeFontFamily font */
+    font-family: "{{codeFontFamily}}", "Courier New", monospace !important;
+}

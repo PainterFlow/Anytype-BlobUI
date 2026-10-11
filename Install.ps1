@@ -1,6 +1,5 @@
-param()
-
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
 
 function Get-InstallDirectory {
     $defaultDirectory = $null
@@ -28,11 +27,9 @@ function Get-InstallDirectory {
                     Write-Host 'Automatic detection needs APPDATA. Select M to enter the Anytype directory.'
                     continue
                 }
-
                 if (Test-Path -LiteralPath $defaultDirectory -PathType Container) {
                     return $defaultDirectory
                 }
-
                 Write-Host "The detected directory does not exist: $defaultDirectory"
                 Write-Host 'Select M to enter the Anytype directory manually.'
             }
@@ -50,104 +47,90 @@ function Get-InstallDirectory {
     }
 }
 
-function Get-UniqueBackupPath {
-    param(
-        [Parameter(Mandatory = $true)][string]$Directory,
-        [Parameter(Mandatory = $true)][string]$FileName
-    )
-
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmssfff'
-    $candidate = Join-Path $Directory "$FileName.$stamp.bak"
-    $counter = 1
-    while (Test-Path -LiteralPath $candidate) {
-        $candidate = Join-Path $Directory "$FileName.$stamp-$counter.bak"
-        $counter++
-    }
-    return $candidate
-}
-
-function Install-BlobUi {
-    param(
-        [Parameter(Mandatory = $true)][string]$InstallDirectory,
-        [Parameter(Mandatory = $true)][string]$SourceDirectory
-    )
-
-    $installDirectory = [System.IO.Path]::GetFullPath($InstallDirectory)
+Write-Host 'Anytype Instillation'
+$secureApiKey = $null
+$apiKeyPointer = [IntPtr]::Zero
+$apiKey = $null
+$runDirectory = $null
+$stagingDirectory = $null
+$blobDirectory = $null
+$blobDirectoryExisted = $false
+try {
+    $installDirectory = [System.IO.Path]::GetFullPath((Get-InstallDirectory))
     if (-not (Test-Path -LiteralPath $installDirectory -PathType Container)) {
         throw "The selected Anytype directory does not exist: $installDirectory"
     }
 
-    $cssSource = Join-Path $SourceDirectory 'Dev\custom.css'
-    $assetsSource = Join-Path $SourceDirectory 'assets'
-    $bannerSource = Join-Path $assetsSource 'spacebanner\banner.png'
+    $secureApiKey = Read-Host 'Enter your existing Anytype local API key' -AsSecureString
+    if ($null -eq $secureApiKey -or $secureApiKey.Length -eq 0) {
+        throw 'An Anytype API key is required.'
+    }
+    $apiKeyPointer = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureApiKey)
+    $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($apiKeyPointer)
+    $protectedCredential = New-BlobUiProtectedCredential -ApiKey $apiKey
 
-    if (-not (Test-Path -LiteralPath $cssSource -PathType Leaf)) {
-        throw "Development CSS was not found: $cssSource"
-    }
-    if (-not (Test-Path -LiteralPath $assetsSource -PathType Container)) {
-        throw "Assets directory was not found: $assetsSource"
-    }
-    if (-not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "Space banner asset was not found: $bannerSource"
-    }
-
-    $cssDestination = Join-Path $installDirectory 'custom.css'
     $blobDirectory = Join-Path $installDirectory 'blob'
-    $assetDestination = Join-Path $blobDirectory 'assets'
-    $bannerDestination = Join-Path $assetDestination 'spacebanner\banner.png'
-    $bannerUri = [System.Uri]::new($bannerDestination).AbsoluteUri
+    $blobDirectoryExisted = Test-Path -LiteralPath $blobDirectory -PathType Container
+    $stagingDirectory = Join-Path $blobDirectory 'staging'
+    $runDirectory = Join-Path $stagingDirectory ([System.Guid]::NewGuid().ToString('N'))
+    [System.IO.Directory]::CreateDirectory($runDirectory) | Out-Null
 
-    $cssContent = [System.IO.File]::ReadAllText($cssSource)
-    $headerPattern = '(?m)^(?<prefix>[ \t]*--header-image[ \t]*:[ \t]*url\()[^;]*(?<suffix>\);[ \t]*\r?)$'
-    $headerMatches = [regex]::Matches($cssContent, $headerPattern)
-    if ($headerMatches.Count -ne 1) {
-        throw "Expected one --header-image URL in Dev\custom.css; found $($headerMatches.Count)."
+    $candidateDataPath = Join-Path $runDirectory 'data.json'
+    $compiledCssPath = Join-Path $runDirectory 'custom.css'
+    $getDataArguments = @{
+        ApiKey = $apiKey
+        OutputPath = $candidateDataPath
+        InstallDirectory = $installDirectory
     }
+    & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
 
-    # Use an absolute file URI so Anytype can resolve the banner from its data directory.
-    $generatedCss = [regex]::Replace(
-        $cssContent,
-        $headerPattern,
-        ('${prefix}"' + $bannerUri + '"${suffix}')
-    )
-
-    $backupDirectory = Join-Path $blobDirectory 'backups'
-
-    New-Item -ItemType Directory -Path $blobDirectory -Force | Out-Null
-    if (Test-Path -LiteralPath $cssDestination -PathType Leaf) {
-        New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
-        $backupPath = Get-UniqueBackupPath -Directory $backupDirectory -FileName 'custom.css'
-        Copy-Item -LiteralPath $cssDestination -Destination $backupPath | Out-Null
-        Write-Host "Existing CSS backed up to: $backupPath"
+    $compileArguments = @{
+        DataPath = $candidateDataPath
+        OutputPath = $compiledCssPath
+        DevDirectory = Join-Path $PSScriptRoot 'Dev'
+        AssetSourceDirectory = Join-Path $PSScriptRoot 'assets'
     }
+    & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments
 
-    New-Item -ItemType Directory -Path $assetDestination -Force | Out-Null
-    $assetItems = @(Get-ChildItem -LiteralPath $assetsSource -Force)
-    if ($assetItems.Count -eq 0) {
-        throw "Assets directory is empty: $assetsSource"
+    $installArguments = @{
+        InstallDirectory = $installDirectory
+        RuntimeSourceDirectory = $PSScriptRoot
+        AssetsSourceDirectory = Join-Path $PSScriptRoot 'assets'
+        CompiledCssPath = $compiledCssPath
+        DataCandidatePath = $candidateDataPath
+        CredentialProtectedText = $protectedCredential
     }
-    foreach ($assetItem in $assetItems) {
-        Copy-Item -LiteralPath $assetItem.FullName -Destination $assetDestination -Recurse -Force | Out-Null
-    }
+    $result = Invoke-BlobUiInstall @installArguments
 
-    if (-not (Test-Path -LiteralPath $bannerDestination -PathType Leaf)) {
-        throw "Banner copy failed: $bannerDestination"
-    }
-
-    $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($cssDestination, $generatedCss, $utf8WithoutBom)
-
-    Write-Host "Installed CSS: $cssDestination"
-    Write-Host "Installed assets: $assetDestination"
-}
-
-Write-Host 'Anytype Instillation'
-try {
-    $installDirectory = Get-InstallDirectory
-    Install-BlobUi -InstallDirectory $installDirectory -SourceDirectory $PSScriptRoot
+    Write-Host "Installed CSS: $($result.cssPath)"
+    Write-Host "Installed assets: $($result.assetsPath)"
     Write-Host 'Installation complete.'
+    Write-Host 'Switch to Anytype and press Ctrl+R to reload the stylesheet. If custom CSS is not active, select Menu > File > Apply Custom CSS first.'
 }
 catch {
     Write-Host "Installation failed: $($_.Exception.Message)" -ForegroundColor Red
     throw
+}
+finally {
+    $apiKey = $null
+    $protectedCredential = $null
+    if ($apiKeyPointer -ne [IntPtr]::Zero) {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($apiKeyPointer)
+    }
+    if ($null -ne $secureApiKey) {
+        $secureApiKey.Dispose()
+    }
+    if ($null -ne $runDirectory -and (Test-Path -LiteralPath $runDirectory -PathType Container)) {
+        Remove-Item -LiteralPath $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $stagingDirectory -and
+        (Test-Path -LiteralPath $stagingDirectory -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $stagingDirectory -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $stagingDirectory -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $blobDirectory -and -not $blobDirectoryExisted -and
+        (Test-Path -LiteralPath $blobDirectory -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $blobDirectory -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $blobDirectory -Force -ErrorAction SilentlyContinue
+    }
 }
