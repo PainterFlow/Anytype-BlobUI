@@ -637,38 +637,6 @@ function ConvertTo-BlobUiCssPlaceholderValue {
     }
 }
 
-function ConvertTo-BlobUiBannerRelativePath {
-    param([AllowNull()][string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $script:BlobUiDefaultSettings.bannerPath
-    }
-
-    $normalized = $Value.Trim().Replace('/', '\')
-    if ([System.IO.Path]::IsPathRooted($normalized) -or $normalized.Contains(':')) {
-        throw "'Banner' must be a relative path inside the packaged assets folder."
-    }
-    if ($normalized.StartsWith('assets\', [System.StringComparison]::OrdinalIgnoreCase)) {
-        $normalized = $normalized.Substring(7)
-    }
-
-    $parts = $normalized -split '\\'
-    if ($parts.Count -eq 0) {
-        throw "'Banner' must name an image in the packaged assets folder."
-    }
-    foreach ($part in $parts) {
-        if ([string]::IsNullOrWhiteSpace($part) -or $part -eq '.' -or $part -eq '..' -or
-            $part -notmatch '^[\p{L}\p{N} ._-]+$') {
-            throw "'Banner' contains a path segment that is not allowed."
-        }
-    }
-    $extension = [System.IO.Path]::GetExtension($parts[$parts.Count - 1])
-    if ($extension -notmatch '^\.(?:png|jpe?g|webp|gif)$') {
-        throw "'Banner' must point to a PNG, JPEG, WebP, or GIF image."
-    }
-    return [string]::Join('\', $parts)
-}
-
 function Select-BlobUiItem {
     param(
         [Parameter(Mandatory = $true)][object[]]$Items,
@@ -783,7 +751,6 @@ function Get-BlobUiNormalizedSettings {
         font = $null
         code_font = $null
         accent_color = $null
-        banner = $null
     }
     foreach ($object in $Objects) {
         if ((Get-BlobUiObjectTypeKey -Object $object) -cne 'setting') {
@@ -792,8 +759,7 @@ function Get-BlobUiNormalizedSettings {
         $propertyMap = @(
             @{ key = 'font'; name = 'Font' },
             @{ key = 'code_font'; name = 'Code Font' },
-            @{ key = 'accent_color'; name = 'Accent Color' },
-            @{ key = 'banner'; name = 'Banner' }
+            @{ key = 'accent_color'; name = 'Accent Color' }
         )
         foreach ($definition in $propertyMap) {
             $value = Get-BlobUiObjectPropertyValue -Object $object -Key $definition.key -DisplayName $definition.name
@@ -820,7 +786,8 @@ function Get-BlobUiNormalizedSettings {
         fontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$fontValue) -Name 'Font'
         codeFontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$codeFontValue) -Name 'Code Font'
         accentColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$accentValue) -Name 'Accent Color'
-        bannerPath = ConvertTo-BlobUiBannerRelativePath -Value ([string]$rawSettings.banner)
+        # Kept in the saved schema for compatibility. The banner is no longer an Anytype setting.
+        bannerPath = $script:BlobUiDefaultSettings.bannerPath
     }
 }
 
@@ -1109,12 +1076,12 @@ function Invoke-BlobUiCssCompile {
     if ([string]::IsNullOrWhiteSpace($installDirectory)) {
         throw 'The settings data has no install directory.'
     }
-    $bannerPath = ConvertTo-BlobUiBannerRelativePath -Value ([string]$Data.settings.bannerPath)
+    $bannerPath = $script:BlobUiDefaultSettings.bannerPath
     $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetSourceDirectory $bannerPath))
     $assetRoot = [System.IO.Path]::GetFullPath($AssetSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
     if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
         -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "The selected banner image is not in the packaged assets: $bannerPath"
+        throw "The fixed banner image is missing from the packaged assets: $bannerPath"
     }
 
     $bannerDestination = Join-Path ([System.IO.Path]::GetFullPath($installDirectory)) (Join-Path 'blob\assets' $bannerPath)
@@ -1307,12 +1274,12 @@ function Invoke-BlobUiInstall {
     if ([System.IO.Path]::GetFullPath([string]$candidateData.installDirectory) -cne $installFullPath) {
         throw 'The fetched settings directory does not match the selected Anytype directory.'
     }
-    $bannerPath = ConvertTo-BlobUiBannerRelativePath -Value ([string]$candidateData.settings.bannerPath)
+    $bannerPath = $script:BlobUiDefaultSettings.bannerPath
     $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetsSourceDirectory $bannerPath))
     $assetRoot = [System.IO.Path]::GetFullPath($AssetsSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
     if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
         -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "The selected banner image is not in the packaged assets: $bannerPath"
+        throw "The fixed banner image is missing from the packaged assets: $bannerPath"
     }
 
     $blobDirectory = Join-Path $installFullPath 'blob'

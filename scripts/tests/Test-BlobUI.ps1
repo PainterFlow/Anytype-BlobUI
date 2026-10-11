@@ -409,7 +409,7 @@ try {
     Assert-Equal 'Libron' $fetchedData.settings.fontFamily 'The exported Font property was not mapped.'
     Assert-Equal 'Consolas' $fetchedData.settings.codeFontFamily 'The exported Code Font property was not mapped.'
     Assert-Equal '#DE50DE' $fetchedData.settings.accentColor 'The exported Accent Color property was not mapped.'
-    Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The exported Banner property was not normalized.'
+    Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The fixed banner asset path changed.'
     Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
     Assert-Equal 'Blue' $fetchedData.calendarObjectColors.$calendarBlueObjectId 'The Calendar Color property was not read from the independent space search.'
     Assert-Equal 'Blob Pink' $fetchedData.calendarObjectColors.$calendarBlobPinkObjectId 'Blob Pink was not preserved as a canonical calendar color.'
@@ -444,7 +444,7 @@ try {
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
     Assert-Equal 'Consolas' $emptyData.settings.codeFontFamily 'The Code Font default is incorrect.'
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
-    Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The Banner default is incorrect.'
+    Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The fixed banner asset path is incorrect.'
 
     $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
     Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject ([ordered]@{
@@ -630,11 +630,11 @@ try {
     Assert-Throws {
         Get-BlobUiSettingsData -ApiKey 'bad-font-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     } 'Invalid Font setting' 'Font'
-    Assert-Throws {
-        Get-BlobUiSettingsData -ApiKey 'bad-banner-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($spaceObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
-    } 'Invalid Banner setting' 'path segment'
-    Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'An invalid font or banner changed the installed CSS.'
-    Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'An invalid font or banner changed saved data.'
+    Get-BlobUiSettingsData -ApiKey 'bad-banner-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($spaceObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
+    $bannerIgnoredData = Read-BlobUiDataFile -Path $badDataPath
+    Assert-Equal 'spacebanner\banner.png' $bannerIgnoredData.settings.bannerPath 'An Anytype Banner property changed the fixed asset path.'
+    Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'A settings fetch changed the installed CSS.'
+    Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'A settings fetch changed saved data.'
 
     Assert-Throws {
         Get-BlobUiSettingsData -ApiKey 'wrong-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
