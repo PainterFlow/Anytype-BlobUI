@@ -51,24 +51,21 @@ a[href^="blob://"]:active {
     }
 }
 
-/* A small vertical float moves only the marked text without changing line layout. */
+/* Transform the marked text for smooth movement between pixel positions. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
-    position: relative;
-    top: 0;
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: baseline;
     animation: blobui-jumping-text 1.5s ease-in-out infinite;
 }
 
 @keyframes blobui-jumping-text {
-    0%, 50%, 100% {
-        top: 0;
+    0%, 100% {
+        transform: translate3d(0, -2px, 0);
     }
 
-    25% {
-        top: -2px;
-    }
-
-    75% {
-        top: 2px;
+    50% {
+        transform: translate3d(0, 2px, 0);
     }
 }
 
@@ -241,6 +238,7 @@ a[href^="blob://"]:active {
 
     .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
         animation: none !important;
-        top: 0;
+        display: inline;
+        transform: none;
     }
 }
