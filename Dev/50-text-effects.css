@@ -101,12 +101,17 @@ a[href^="blob://"]:active {
     }
 }
 
-/* Transform the marked text for smooth movement between pixel positions. */
+/* Transform only the marked link to keep its movement smooth. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
     display: inline-block;
     max-width: 100%;
     vertical-align: baseline;
     animation: blobui-jumping-text 1.5s ease-in-out infinite;
+}
+
+/* Anytype wraps struck links in markupstrike. Restore the line on the inline-block link. */
+.pageMain .editor .blockText .editable markupstrike a[href="blob://animated.txt/jumping"] {
+    text-decoration-line: line-through !important;
 }
 
 @keyframes blobui-jumping-text {
