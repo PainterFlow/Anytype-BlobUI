@@ -82,6 +82,13 @@ a[href^="blob://"]:active {
     animation: blobui-neon-wave 2.5s linear infinite;
 }
 
+/* Chromium repaints selected strikethrough glyphs with the selection color.
+   Keep that fill transparent so the animated gradient remains visible. */
+.pageMain .editor .blockText .editable a:is([href="blob://animated.txt/rgb"], [href="blob://animated.txt/neon"])::selection,
+.pageMain .editor .blockText .editable a:is([href="blob://animated.txt/rgb"], [href="blob://animated.txt/neon"]) *::selection {
+    color: transparent !important;
+}
+
 @keyframes blobui-rgb-wave {
     to {
         background-position: 100% 50%;
