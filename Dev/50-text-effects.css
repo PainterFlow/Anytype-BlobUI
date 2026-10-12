@@ -17,6 +17,39 @@ a[href^="blob://"]:active {
     pointer-events: none !important;
 }
 
+/* A continuous rainbow sweep colors only the marked link text. */
+.pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    background-image: linear-gradient(
+        90deg,
+        #ff355d 0%,
+        #ffdc36 8.33%,
+        #52ff88 16.67%,
+        #39eaff 25%,
+        #5273ff 33.33%,
+        #de4fff 41.67%,
+        #ff355d 50%,
+        #ffdc36 58.33%,
+        #52ff88 66.67%,
+        #39eaff 75%,
+        #5273ff 83.33%,
+        #de4fff 91.67%,
+        #ff355d 100%
+    );
+    background-size: 200% 100%;
+    background-position: 0% 50%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    animation: blobui-rgb-wave 6s linear infinite;
+}
+
+@keyframes blobui-rgb-wave {
+    to {
+        background-position: 100% 50%;
+    }
+}
+
 /* Independent cycles let the glitch components drift into and out of overlap. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
     position: relative;
@@ -167,6 +200,11 @@ a[href^="blob://"]:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
+        animation: none !important;
+        background-position: 50% 50%;
+    }
+
     .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
         animation: none !important;
         left: 0;

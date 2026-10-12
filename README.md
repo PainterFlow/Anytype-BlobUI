@@ -62,3 +62,4 @@ The Base Idea is:
 ```
 The current text effects are:
 - `blob://animated.txt/glitchy`: Creates a cool glitchy effect
+- `blob://animated.txt/rgb`: Displays a rainbow gradient that travels across the text
