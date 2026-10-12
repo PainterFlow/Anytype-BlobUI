@@ -55,7 +55,7 @@ a[href^="blob://"]:active {
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
     position: relative;
     top: 0;
-    animation: blobui-jumping-text 2.4s ease-in-out infinite;
+    animation: blobui-jumping-text 1.5s ease-in-out infinite;
 }
 
 @keyframes blobui-jumping-text {
@@ -64,11 +64,11 @@ a[href^="blob://"]:active {
     }
 
     25% {
-        top: -1px;
+        top: -2px;
     }
 
     75% {
-        top: 1px;
+        top: 2px;
     }
 }
 
