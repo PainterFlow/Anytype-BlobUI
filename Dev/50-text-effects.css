@@ -19,7 +19,8 @@ a[href^="blob://"]:active {
 
 /* A continuous rainbow sweep colors only the marked link text. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
-    color: transparent !important;
+    color: inherit !important;
+    caret-color: currentColor !important;
     -webkit-text-fill-color: transparent !important;
     background-image: linear-gradient(
         90deg,
@@ -41,7 +42,7 @@ a[href^="blob://"]:active {
     background-position: 0% 50%;
     background-clip: text;
     -webkit-background-clip: text;
-    animation: blobui-rgb-wave 6s linear infinite;
+    animation: blobui-rgb-wave 2.5s linear infinite;
 }
 
 @keyframes blobui-rgb-wave {
