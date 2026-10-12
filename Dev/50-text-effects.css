@@ -51,6 +51,27 @@ a[href^="blob://"]:active {
     }
 }
 
+/* A small vertical float moves only the marked text without changing line layout. */
+.pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
+    position: relative;
+    top: 0;
+    animation: blobui-jumping-text 2.4s ease-in-out infinite;
+}
+
+@keyframes blobui-jumping-text {
+    0%, 50%, 100% {
+        top: 0;
+    }
+
+    25% {
+        top: -1px;
+    }
+
+    75% {
+        top: 1px;
+    }
+}
+
 /* Independent cycles let the glitch components drift into and out of overlap. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
     position: relative;
@@ -216,5 +237,10 @@ a[href^="blob://"]:active {
         mask-image: none;
         font-weight: inherit;
         -webkit-text-stroke-width: 0;
+    }
+
+    .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
+        animation: none !important;
+        top: 0;
     }
 }
