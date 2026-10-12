@@ -51,17 +51,22 @@ The Base Idea is:
 }
 
 /* A specific text effect */
-.pageMain .editor .blockText .editable a[href="blob://animated.txt"] {
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"] {
 }
 
 /* The block containing that marker */
 .pageMain .editor .blockText:has(
-  .editable a[href="blob://animated.txt"]
+  .editable a[href="blob://text.sfx/spoiler"]
 ) {
 }
 ```
 The current text effects are:
-- `blob://animated.txt/glitchy`: Creates a cool glitchy effect
-- `blob://animated.txt/jumping`: Moves the marked text gently up and down
-- `blob://animated.txt/rgb`: Displays a rainbow gradient that travels across the text
-- `blob://animated.txt/neon`: Displays a neon gradient that travels across the text
+- `blob://text.sfx/spoiler`: Hides the marked text until you hover over it
+- `blob://text.sfx/glitchy`: Creates a cool glitchy effect
+- `blob://text.sfx/jumping`: Moves the marked text gently up and down
+- `blob://text.sfx/rgb`: Displays a rainbow gradient that travels across the text
+- `blob://text.sfx/neon`: Displays a neon gradient that travels across the text
+
+Apply an effect by selecting text in Anytype and setting its link to the effect URL.
+Spoilers appear as rounded gray blocks, reveal on hover or keyboard focus, and hide again when you move away.
+Existing effect links must be updated to the `blob://text.sfx/` URLs above.

@@ -17,8 +17,47 @@ a[href^="blob://"]:active {
     pointer-events: none !important;
 }
 
+/* Spoilers conceal their text while keeping the original inline dimensions. */
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"] {
+    pointer-events: auto !important;
+    background-color: #5b5b63 !important;
+    background-image: none !important;
+    border-radius: 6px;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible),
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible) * {
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    text-shadow: none !important;
+    -webkit-text-stroke-color: transparent !important;
+    -webkit-text-stroke-width: 0 !important;
+    text-decoration-color: transparent !important;
+    text-decoration-line: none !important;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible) * {
+    background-color: transparent !important;
+    background-image: none !important;
+    background-clip: border-box !important;
+    -webkit-background-clip: border-box !important;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:hover,
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible {
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+    background-color: #121212 !important;
+    border-radius: 6px;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:hover *,
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible * {
+    -webkit-text-fill-color: currentColor !important;
+}
+
 /* A continuous rainbow sweep colors only the marked link text. */
-.pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"] {
     color: inherit !important;
     caret-color: currentColor !important;
     -webkit-text-fill-color: transparent !important;
@@ -46,7 +85,7 @@ a[href^="blob://"]:active {
 }
 
 /* A neon gradient sweep colors only the marked link text. */
-.pageMain .editor .blockText .editable a[href="blob://animated.txt/neon"] {
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
     color: inherit !important;
     caret-color: currentColor !important;
     -webkit-text-fill-color: transparent !important;
@@ -84,8 +123,8 @@ a[href^="blob://"]:active {
 
 /* Chromium repaints selected strikethrough glyphs with the selection color.
    Keep that fill transparent so the animated gradient remains visible. */
-.pageMain .editor .blockText .editable a:is([href="blob://animated.txt/rgb"], [href="blob://animated.txt/neon"])::selection,
-.pageMain .editor .blockText .editable a:is([href="blob://animated.txt/rgb"], [href="blob://animated.txt/neon"]) *::selection {
+.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::selection,
+.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::selection {
     color: transparent !important;
 }
 
@@ -102,7 +141,7 @@ a[href^="blob://"]:active {
 }
 
 /* Transform only the marked link to keep its movement smooth. */
-.pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
     display: inline-block;
     max-width: 100%;
     vertical-align: baseline;
@@ -110,7 +149,7 @@ a[href^="blob://"]:active {
 }
 
 /* Anytype wraps struck links in markupstrike. Restore the line on the inline-block link. */
-.pageMain .editor .blockText .editable markupstrike a[href="blob://animated.txt/jumping"] {
+.pageMain .editor .blockText .editable markupstrike a[href="blob://text.sfx/jumping"] {
     text-decoration-line: line-through !important;
 }
 
@@ -125,7 +164,7 @@ a[href^="blob://"]:active {
 }
 
 /* Independent cycles let the glitch components drift into and out of overlap. */
-.pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
     position: relative;
     left: 0;
     top: 0;
@@ -274,17 +313,17 @@ a[href^="blob://"]:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
+    .pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"] {
         animation: none !important;
         background-position: 50% 50%;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://animated.txt/neon"] {
+    .pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
         animation: none !important;
         background-position: 50% 50%;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
+    .pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
         animation: none !important;
         left: 0;
         top: 0;
@@ -296,7 +335,7 @@ a[href^="blob://"]:active {
         -webkit-text-stroke-width: 0;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://animated.txt/jumping"] {
+    .pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
         animation: none !important;
         display: inline;
         transform: none;
