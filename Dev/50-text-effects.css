@@ -45,9 +45,52 @@ a[href^="blob://"]:active {
     animation: blobui-rgb-wave 2.5s linear infinite;
 }
 
+/* A neon gradient sweep colors only the marked link text. */
+.pageMain .editor .blockText .editable a[href="blob://animated.txt/neon"] {
+    color: inherit !important;
+    caret-color: currentColor !important;
+    -webkit-text-fill-color: transparent !important;
+    background-image: linear-gradient(
+        90deg,
+        #7c00ff 0%,
+        #7c00ff 3%,
+        #f000ff 7%,
+        #f000ff 13%,
+        #145bff 17%,
+        #145bff 23%,
+        #00d4ff 27%,
+        #00d4ff 33%,
+        #b400ff 37%,
+        #b400ff 43%,
+        #7c00ff 47%,
+        #7c00ff 53%,
+        #f000ff 57%,
+        #f000ff 63%,
+        #145bff 67%,
+        #145bff 73%,
+        #00d4ff 77%,
+        #00d4ff 83%,
+        #b400ff 87%,
+        #b400ff 93%,
+        #7c00ff 97%,
+        #7c00ff 100%
+    );
+    background-size: 300% 100%;
+    background-position: 0% 50%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    animation: blobui-neon-wave 2.5s linear infinite;
+}
+
 @keyframes blobui-rgb-wave {
     to {
         background-position: 100% 50%;
+    }
+}
+
+@keyframes blobui-neon-wave {
+    to {
+        background-position: 75% 50%;
     }
 }
 
@@ -220,6 +263,11 @@ a[href^="blob://"]:active {
 
 @media (prefers-reduced-motion: reduce) {
     .pageMain .editor .blockText .editable a[href="blob://animated.txt/rgb"] {
+        animation: none !important;
+        background-position: 50% 50%;
+    }
+
+    .pageMain .editor .blockText .editable a[href="blob://animated.txt/neon"] {
         animation: none !important;
         background-position: 50% 50%;
     }

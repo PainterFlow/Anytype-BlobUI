@@ -64,3 +64,4 @@ The current text effects are:
 - `blob://animated.txt/glitchy`: Creates a cool glitchy effect
 - `blob://animated.txt/jumping`: Moves the marked text gently up and down
 - `blob://animated.txt/rgb`: Displays a rainbow gradient that travels across the text
+- `blob://animated.txt/neon`: Displays a neon gradient that travels across the text
