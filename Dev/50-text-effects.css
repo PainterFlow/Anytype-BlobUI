@@ -17,16 +17,38 @@ a[href^="blob://"]:active {
     pointer-events: none !important;
 }
 
-/* Spoilers conceal their text while keeping the original inline dimensions. */
+/* Anytype splits formatted phrases into separate links. Equally tall
+   inline blocks join those runs and isolate inherited strike decorations.
+   Their positioned backgrounds also cover markupunderline's outer border. */
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"] {
-    pointer-events: auto !important;
-    background-color: #5b5b63 !important;
+    display: inline-block;
+    position: relative;
+    z-index: 0;
+    max-width: 100%;
+    vertical-align: baseline;
+    line-height: inherit;
+    white-space: break-spaces;
+    padding: 0.09em 0;
+    margin: -0.09em 0;
+    background-color: color-mix(in srgb, var(--color-shape-highlight-light-solid, #1e1e1e) 94%, white) !important;
     background-image: none !important;
-    border-radius: 6px;
+    border-radius: var(--blobui-spoiler-left-radius, 5px) var(--blobui-spoiler-right-radius, 5px) var(--blobui-spoiler-right-radius, 5px) var(--blobui-spoiler-left-radius, 5px);
 }
 
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible),
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible) * {
+/* Round the phrase ends while keeping adjoining formatting runs seamless. */
+.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ a[href="blob://text.sfx/spoiler"]),
+.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ * a[href="blob://text.sfx/spoiler"]) {
+    --blobui-spoiler-right-radius: 0px;
+}
+
+.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) + :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) {
+    --blobui-spoiler-left-radius: 0px;
+}
+
+/* The editable block receives hover because blob links never receive pointer
+   events. This reveals all spoilers in that block without Anytype's preview. */
+.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible),
+.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
     text-shadow: none !important;
@@ -34,26 +56,32 @@ a[href^="blob://"]:active {
     -webkit-text-stroke-width: 0 !important;
     text-decoration-color: transparent !important;
     text-decoration-line: none !important;
+    border-bottom-color: transparent !important;
 }
 
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:not(:hover):not(:focus-visible) * {
+.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
     background-color: transparent !important;
     background-image: none !important;
     background-clip: border-box !important;
     -webkit-background-clip: border-box !important;
 }
 
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:hover,
+.pageMain .editor .blockText .editable:hover a[href="blob://text.sfx/spoiler"],
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible {
     color: inherit !important;
     -webkit-text-fill-color: currentColor !important;
-    background-color: #121212 !important;
-    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--color-shape-highlight-light-solid, #1e1e1e) 70%, black) !important;
 }
 
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:hover *,
+.pageMain .editor .blockText .editable:hover a[href="blob://text.sfx/spoiler"] *,
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible * {
     -webkit-text-fill-color: currentColor !important;
+}
+
+/* Atomic inline blocks do not inherit an ancestor's strike decoration. */
+.pageMain .editor .blockText .editable:hover markupstrike a[href="blob://text.sfx/spoiler"],
+.pageMain .editor .blockText .editable markupstrike a[href="blob://text.sfx/spoiler"]:focus-visible {
+    text-decoration-line: line-through !important;
 }
 
 /* A continuous rainbow sweep colors only the marked link text. */

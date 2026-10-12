@@ -61,12 +61,12 @@ The Base Idea is:
 }
 ```
 The current text effects are:
-- `blob://text.sfx/spoiler`: Hides the marked text until you hover over it
+- `blob://text.sfx/spoiler`: Hides the marked text until you hover over its editable text block
 - `blob://text.sfx/glitchy`: Creates a cool glitchy effect
 - `blob://text.sfx/jumping`: Moves the marked text gently up and down
 - `blob://text.sfx/rgb`: Displays a rainbow gradient that travels across the text
 - `blob://text.sfx/neon`: Displays a neon gradient that travels across the text
 
 Apply an effect by selecting text in Anytype and setting its link to the effect URL.
-Spoilers appear as rounded gray blocks, reveal on hover or keyboard focus, and hide again when you move away.
+Spoilers appear as rounded blocks slightly brighter than the sidebar widgets, with a darker rounded background when revealed. Hovering anywhere in the same editable text block reveals all its spoilers; moving outside that block conceals them again. Links keep pointer events disabled to prevent Anytype hover previews. Keyboard focus also reveals an individual spoiler. Formatting fragments join seamlessly with rounded phrase ends. Each link fragment is an inline block, so line wrapping can differ from ordinary text.
 Existing effect links must be updated to the `blob://text.sfx/` URLs above.
