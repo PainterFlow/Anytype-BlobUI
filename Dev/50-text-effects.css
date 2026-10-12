@@ -11,6 +11,12 @@ a[href^="blob://"]:active {
     box-shadow: none !important;
 }
 
+/* Keep editor blob markers out of Anytype's hover and click hit testing. */
+.pageMain .editor .blockText .editable a[href^="blob://"],
+.pageMain .editor .blockText .editable a[href^="blob://"] * {
+    pointer-events: none !important;
+}
+
 /* Independent cycles let the glitch components drift into and out of overlap. */
 .pageMain .editor .blockText .editable a[href="blob://animated.txt/glitchy"] {
     position: relative;
