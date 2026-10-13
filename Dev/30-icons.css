@@ -3,7 +3,60 @@
     color: var(--color-orange) !important;
 }
 
-/* Blue properties icon while its menu is selected. */
+/* Use the configured accent for the selected properties button. */
 #button-header-relation.active {
-    color: var(--color-blue, #3b82f6) !important;
+    color: var(--color-blob-accent) !important;
+}
+
+/* Reuse the configured accent for database actions and active filters. */
+.button.accent:not(.disabled),
+.button.accent:not(.disabled):hover,
+.button.accent:not(.disabled).hover {
+    background: var(--color-blob-accent) !important;
+}
+
+.blocks .block.blockDataview .dataviewControls .icon.btn-filter.on,
+.blocks .block.blockDataview .dataviewControls .icon.btn-sort.on {
+    color: var(--color-blob-accent) !important;
+}
+
+.blocks .block.blockDataview .dataviewControls .icon.btn-filter .bullet {
+    background-color: var(--color-blob-accent) !important;
+}
+
+.blocks .block.blockDataview .dataviewFilters > .sides .filterItem.isActive {
+    color: var(--color-blob-accent) !important;
+    background-color: color-mix(in srgb, var(--color-blob-accent) 15%, transparent) !important;
+}
+
+.blocks .block.blockDataview .dataviewFilters > .sides .filterItem.isActive:hover,
+.blocks .block.blockDataview .dataviewFilters > .sides .filterItem.isActive.hover {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 22%, transparent) !important;
+}
+
+.blocks .block.blockDataview .dataviewFilters > .sides .filterItem.isActive .icon.hasSvg {
+    color: var(--color-blob-accent) !important;
+}
+
+.blocks .block.blockDataview .dataviewFilters > .sides .filterItem.isActive .icon.relation {
+    background-color: var(--color-blob-accent) !important;
+}
+
+/* Tint the sync network badge and synced status checks with the same accent. */
+.menus .menu.menuSyncStatus .icons .iconWrapper.c-accent100 {
+    color: var(--color-blob-accent) !important;
+}
+
+.menus .menu.menuSyncStatus .icons .iconWrapper.c-accent100 .iconBg {
+    background: color-mix(in srgb, var(--color-blob-accent) 15%, transparent) !important;
+}
+
+.menus .menu.menuSyncStatus .icons .iconWrapper.c-accent100 .label,
+.menus .menu.menuSyncStatus .items .sides .side.right .icon.c-synced {
+    color: var(--color-blob-accent) !important;
+}
+
+/* Only the spinning sync icon is accented; the idle header icon keeps its theme color. */
+.sync .icon.syncing {
+    color: var(--color-blob-accent) !important;
 }

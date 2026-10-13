@@ -11,7 +11,7 @@
     inset: 1px 4px 5px;
     z-index: -1;
     border-radius: 999px;
-    background-color: var(--color-system-accent-100);
+    background-color: var(--color-blob-accent);
 }
 
 /* Keep the overflow-menu date text in place while shortening only its bubble. */
@@ -28,5 +28,5 @@
     inset-inline: 0;
     z-index: -1;
     border-radius: 999px;
-    background-color: var(--color-system-accent-100);
+    background-color: var(--color-blob-accent);
 }
