@@ -67,6 +67,25 @@
     margin-top: max(0px, calc(var(--header-image-height) - 52px + 4px)) !important;
 }
 
+/* Hide the native scrollbar that can flash on the minimized vault sidebar.
+   Leave overflow behavior intact so wheel and keyboard scrolling still work. */
+#sidebarPageVault.customScrollbar.isMinimal,
+#sidebarPageVault.customScrollbar.isMinimal .body,
+#sidebarPageVault.customScrollbar.isMinimal .scrollArea,
+#sidebarPageVault.customScrollbar.isMinimal .ReactVirtualized__Grid {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+#sidebarPageVault.customScrollbar.isMinimal::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .body::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .scrollArea::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .ReactVirtualized__Grid::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
 /* Align the search and create/edit controls with the widgets' right edge. */
 .sidebar .sidebarPage .spaceName {
     padding-right: 0 !important;
