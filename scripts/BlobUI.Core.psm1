@@ -637,6 +637,18 @@ function ConvertTo-BlobUiCssPlaceholderValue {
     }
 }
 
+function ConvertTo-BlobUiAccentColorValue {
+    param([AllowNull()][string]$Value)
+
+    if ($null -ne $Value -and $Value.Trim() -ieq 'default') {
+        return 'var(--color-system-accent-100)'
+    }
+    if ($null -ne $Value -and $Value.Trim() -ceq 'var(--color-system-accent-100)') {
+        return $Value.Trim()
+    }
+    return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color'
+}
+
 function Select-BlobUiItem {
     param(
         [Parameter(Mandatory = $true)][object[]]$Items,
@@ -785,7 +797,7 @@ function Get-BlobUiNormalizedSettings {
     return [ordered]@{
         fontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$fontValue) -Name 'Font'
         codeFontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$codeFontValue) -Name 'Code Font'
-        accentColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$accentValue) -Name 'Accent Color'
+        accentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$accentValue)
         # Kept in the saved schema for compatibility. The banner is no longer an Anytype setting.
         bannerPath = $script:BlobUiDefaultSettings.bannerPath
     }
@@ -1114,6 +1126,9 @@ function Invoke-BlobUiCssCompile {
             param($match)
             $name = $match.Groups['name'].Value
             $entry = $values[$name]
+            if ($name -ceq 'accentColor') {
+                return ConvertTo-BlobUiAccentColorValue -Value ([string]$entry.value)
+            }
             return ConvertTo-BlobUiCssPlaceholderValue -Type $entry.type -Value ([string]$entry.value) -Name $name
         }
     )

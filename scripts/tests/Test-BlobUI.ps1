@@ -101,7 +101,7 @@ $staleCalendarObjectId = 'bafy-calendar-stale-object-id'
 $calendarColorPropertyKey = 'calendar_color'
 $otherSpaceCalendarColorPropertyKey = 'calendar_tint'
 $apiRequests = [System.Collections.Generic.List[object]]::new()
-$knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
+$knownKeys = @('unit-test-key', 'default-accent-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
 $apiTransport = {
     param($ApiKey, $Method, $Path, $Body, $Headers)
 
@@ -333,7 +333,10 @@ $apiTransport = {
         if ($Method -cne 'Get' -or [string]$Path -notmatch '\?include=properties&ids=full$') {
             throw 'The mock API expected a v2 full-ID property read.'
         }
-        if ($ApiKey -eq 'bad-color-key') {
+        if ($ApiKey -eq 'default-accent-key') {
+            $properties = @{ 'Accent Color' = 'Default' }
+        }
+        elseif ($ApiKey -eq 'bad-color-key') {
             $properties = @{ 'Accent Color' = '#de50de; color:red' }
         }
         elseif ($ApiKey -eq 'bad-font-key') {
@@ -446,6 +449,15 @@ try {
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
     Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The fixed banner asset path is incorrect.'
 
+    $defaultAccentDataPath = Join-Path $testRoot 'default-accent-data.json'
+    $defaultAccentData = Get-BlobUiSettingsData -ApiKey 'default-accent-key' -OutputPath $defaultAccentDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
+    Assert-Equal 'var(--color-system-accent-100)' $defaultAccentData.settings.accentColor 'Accent Color Default did not resolve to Anytype system accent blue.'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'Default' } 'Default is unavailable to generic color settings.' 'does not accept Default'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'var(--color-system-accent-100)' } 'Anytype system accent blue is unavailable to generic color settings.' 'three or six digit hexadecimal'
+    $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
+    Assert-True ([System.IO.File]::ReadAllText($defaultAccentCssPath).Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
+
     $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
     Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject ([ordered]@{
         schemaVersion = 1
@@ -502,7 +514,7 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
