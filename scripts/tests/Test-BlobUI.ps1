@@ -456,7 +456,16 @@ try {
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'var(--color-system-accent-100)' } 'Anytype system accent blue is unavailable to generic color settings.' 'three or six digit hexadecimal'
     $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
-    Assert-True ([System.IO.File]::ReadAllText($defaultAccentCssPath).Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
+    $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
+    Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
+    Assert-True (-not $defaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'Accent Color Default still overrides Anytype''s original home icon color.'
+    $literalDefaultAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $defaultAccentData -Depth 20)
+    $literalDefaultAccentData.settings.accentColor = '  dEfAuLt  '
+    $literalDefaultAccentCssPath = Join-Path $testRoot 'literal-default-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $literalDefaultAccentCssPath -Data $literalDefaultAccentData | Out-Null
+    $literalDefaultAccentCss = [System.IO.File]::ReadAllText($literalDefaultAccentCssPath)
+    Assert-True ($literalDefaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'A raw Default accent did not normalize to Anytype system accent blue.'
+    Assert-True (-not $literalDefaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A raw Default accent still overrides Anytype''s original home icon color.'
 
     $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
     Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject ([ordered]@{
@@ -516,6 +525,7 @@ try {
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
+    Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
     $calendarColorRulesStart = $css.IndexOf('/* BlobUI Calendar Color overrides */', [System.StringComparison]::Ordinal)

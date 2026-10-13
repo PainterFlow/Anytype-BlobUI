@@ -1,6 +1,8 @@
+/* @blobui-if-custom-accent */
 #widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg {
     color: var(--color-blob-accent) !important;
 }
+/* @blobui-endif-custom-accent */
 
 /* One oversized image on the fixed header, behind the scrolling content. */
 .sidebar .sidebarPage.pageWidget>.head.isDefault,

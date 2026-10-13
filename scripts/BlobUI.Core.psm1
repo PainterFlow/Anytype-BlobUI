@@ -1132,6 +1132,21 @@ function Invoke-BlobUiCssCompile {
             return ConvertTo-BlobUiCssPlaceholderValue -Type $entry.type -Value ([string]$entry.value) -Name $name
         }
     )
+    $customAccentConditionPattern = '(?s)/\*\s*@blobui-if-custom-accent\s*\*/(?<content>.*?)/\*\s*@blobui-endif-custom-accent\s*\*/'
+    $normalizedAccentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$Data.settings.accentColor)
+    $hasCustomAccent = $normalizedAccentColor -cne 'var(--color-system-accent-100)'
+    $compiled = [System.Text.RegularExpressions.Regex]::Replace(
+        $compiled,
+        $customAccentConditionPattern,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            if ($hasCustomAccent) { return $match.Groups['content'].Value }
+            return ''
+        }
+    )
+    if ($compiled -match '/\*\s*@blobui-(?:if-custom-accent|endif-custom-accent)\s*\*/') {
+        throw 'CSS contains an unmatched custom accent condition.'
+    }
     $declarationPattern = '/\*\s*@blobui-placeholder\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s+(?<type>font|color|url|number|boolean)\s*\*/'
     $compiled = [System.Text.RegularExpressions.Regex]::Replace($compiled, $declarationPattern, '')
     $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $Data.calendarObjectColors
