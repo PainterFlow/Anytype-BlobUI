@@ -9,10 +9,13 @@
 }
 
 /* Reuse the configured accent for database actions and active filters. */
-.button.accent:not(.disabled),
+.button.accent:not(.disabled) {
+    background: var(--color-blob-accent) !important;
+}
+
 .button.accent:not(.disabled):hover,
 .button.accent:not(.disabled).hover {
-    background: var(--color-blob-accent) !important;
+    background: color-mix(in srgb, var(--color-blob-accent) 85%, black) !important;
 }
 
 .blocks .block.blockDataview .dataviewControls .icon.btn-filter.on,
@@ -53,6 +56,10 @@
 
 .menus .menu.menuSyncStatus .icons .iconWrapper.c-accent100 .label,
 .menus .menu.menuSyncStatus .items .sides .side.right .icon.c-synced {
+    color: var(--color-blob-accent) !important;
+}
+
+.menus .menu.menuSyncStatus .icons .iconWrapper.c-accent100 .icon.iconColor-accent100 {
     color: var(--color-blob-accent) !important;
 }
 
