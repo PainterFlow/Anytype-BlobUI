@@ -742,6 +742,7 @@ try {
     $firstInstall = Invoke-BlobUiInstall @installArguments
     Assert-True (Test-Path -LiteralPath $firstInstall.cssPath -PathType Leaf) 'The CSS install did not create custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'The runtime install did not copy Update.ps1.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1') -PathType Leaf) 'The runtime install did not copy Uninstall.ps1.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'The install created a persistent backup directory.'
@@ -765,6 +766,8 @@ try {
     Assert-Equal 0 $backupArtifacts.Count 'A repeated install left a backup file behind.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'A repeated install damaged the encrypted API key.'
 
+    $installedBannerPath = Join-Path $firstInstall.assetsPath 'spacebanner\banner.png'
+    [System.IO.File]::WriteAllBytes($installedBannerPath, [System.Text.Encoding]::UTF8.GetBytes('custom-banner-sentinel'))
     $rebuildArguments = @{ ApiTransport = $apiTransport }
     & (Join-Path $firstInstall.runtimePath 'scripts\Rebuild.ps1') @rebuildArguments
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'Rebuild created a persistent backup directory.'
@@ -773,6 +776,7 @@ try {
     $rebuiltData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     Assert-Equal $installDirectory $rebuiltData.installDirectory 'Rebuild changed the saved install directory.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Rebuild damaged the encrypted API key.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Rebuild replaced the installed custom banner.'
 
     $rollbackInstallDirectory = Join-Path $testRoot 'Rollback Anytype Data'
     [System.IO.Directory]::CreateDirectory($rollbackInstallDirectory) | Out-Null
@@ -781,6 +785,12 @@ try {
     [System.IO.Directory]::CreateDirectory($rollbackCredentialDirectory) | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $rollbackInstallDirectory 'custom.css'), 'rollback-css-sentinel')
     [System.IO.File]::WriteAllText((Join-Path $rollbackBlobDirectory 'data.json'), 'rollback-data-sentinel')
+    $rollbackRuntimeScripts = Join-Path $rollbackBlobDirectory 'runtime\scripts'
+    $rollbackRuntimeAssetDirectory = Join-Path $rollbackBlobDirectory 'runtime\assets\spacebanner'
+    [System.IO.Directory]::CreateDirectory($rollbackRuntimeScripts) | Out-Null
+    [System.IO.Directory]::CreateDirectory($rollbackRuntimeAssetDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $rollbackRuntimeScripts 'Rebuild.ps1'), 'rollback-runtime-script-sentinel')
+    [System.IO.File]::WriteAllText((Join-Path $rollbackRuntimeAssetDirectory 'banner.png'), 'rollback-runtime-asset-sentinel')
     [System.IO.Directory]::CreateDirectory((Join-Path $rollbackCredentialDirectory 'anytype-api-key.dpapi')) | Out-Null
     $rollbackCandidatePath = Join-Path $testRoot 'rollback-data.json'
     $rollbackCandidate = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($candidateDataPath))
@@ -797,6 +807,10 @@ try {
     Assert-Throws { Invoke-BlobUiInstall @rollbackArguments } 'A credential write failure was accepted.' ''
     Assert-Equal 'rollback-css-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackInstallDirectory 'custom.css'))) 'A failed install did not restore the existing CSS.'
     Assert-Equal 'rollback-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackBlobDirectory 'data.json'))) 'A failed install did not restore existing settings data.'
+    Assert-Equal 'rollback-runtime-script-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackRuntimeScripts 'Rebuild.ps1'))) 'A failed install did not restore the runtime script.'
+    Assert-Equal 'rollback-runtime-asset-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackRuntimeAssetDirectory 'banner.png'))) 'A failed install did not restore the runtime asset.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory '.blobui-managed-files.json'))) 'A failed install recorded a release version.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory 'assets\spacebanner\banner.png'))) 'A failed install left its newly copied banner behind.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory 'backups'))) 'A failed install created a persistent backup directory.'
     $backupArtifacts = @(Get-ChildItem -LiteralPath $rollbackInstallDirectory -Recurse -File -Filter '*.bak')
     Assert-Equal 0 $backupArtifacts.Count 'A failed install left a backup file behind.'
@@ -804,17 +818,178 @@ try {
     $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
     $sourceScriptsFixture = Join-Path $sourceFixture 'scripts'
     [System.IO.Directory]::CreateDirectory($sourceScriptsFixture) | Out-Null
-    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Uninstall.ps1')) {
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $scriptsDirectory $sourceFile) -Destination $sourceScriptsFixture
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
     Copy-Item -LiteralPath (Join-Path $repoRoot 'assets') -Destination $sourceFixture -Recurse
+    [System.IO.File]::WriteAllText((Join-Path $sourceFixture 'Dev\obsolete-managed.css'), '.blobui-obsolete { color: pink; }')
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
     $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
+
+    $releaseUpdateDirectory = Join-Path (Join-Path $testRoot 'Update target\rElEaSeS') 'Anytype Data'
+    $releaseUpdateBlob = Join-Path $releaseUpdateDirectory 'blob'
+    [System.IO.Directory]::CreateDirectory($releaseUpdateBlob) | Out-Null
+    $releaseUpdateDataPath = Join-Path $releaseUpdateBlob 'data.json'
+    $releaseUpdateData = Read-BlobUiDataFile -Path $firstInstall.dataPath
+    $releaseUpdateData.installDirectory = [System.IO.Path]::GetFullPath($releaseUpdateDirectory)
+    Write-BlobUiAtomicJson -Path $releaseUpdateDataPath -InputObject $releaseUpdateData
+    $releaseUpdateDataBefore = [System.IO.File]::ReadAllText($releaseUpdateDataPath)
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $releaseUpdateDirectory -ApiTransport $apiTransport
+    } 'An update accepted an explicit target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An update contacted the API before rejecting a Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected explicit Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected explicit Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected explicit Releases update created staging files.'
+
+    Copy-Item -LiteralPath $firstInstall.runtimePath -Destination (Join-Path $releaseUpdateBlob 'runtime') -Recurse
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $releaseUpdateBlob 'runtime\scripts\Update.ps1') -ApiTransport $apiTransport
+    } 'An installed runtime update accepted a target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An installed runtime update contacted the API before rejecting a Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected installed runtime Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected installed runtime Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected installed runtime Releases update created staging files.'
+
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $releaseUpdateDirectory
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    } 'An update accepted a source-pointer target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An update contacted the API before rejecting a source-pointer Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected source-pointer Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected source-pointer Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected source-pointer Releases update created staging files.'
+
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments
     $pointerData = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
     Assert-Equal $installDirectory $pointerData.installDirectory 'The source rebuild did not resolve the saved custom install path with spaces.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css') -PathType Leaf) 'The first package install did not copy its managed Dev file.'
+
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    $updatedData = Read-BlobUiDataFile -Path $firstInstall.dataPath
+    $updatedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-Equal "$generalObjectId|$spaceObjectId" $updatedData.settingsObjectIds 'Update changed the selected object IDs or their order.'
+    Assert-Equal $installDirectory $updatedData.installDirectory 'Update changed the saved install directory.'
+    Assert-Equal 1 $updatedData.schemaVersion 'Update changed the data schema version while recording the release.'
+    Assert-Equal '1.0.0' $updatedManifest.releaseVersion 'Update did not record the installed release version.'
+    Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Update damaged or replaced the saved API key.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Update replaced the installed custom banner.'
+    $updateObjectReads = @($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' })
+    Assert-Equal 2 $updateObjectReads.Count 'Update did not fetch exactly the saved settings objects.'
+    Assert-True ($updateObjectReads[0].Path -like "*/objects/$generalObjectId?*") 'Update changed the first selected settings object.'
+    Assert-True ($updateObjectReads[1].Path -like "*/objects/$spaceObjectId?*") 'Update changed the second selected settings object.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'Update prompted to discover or reimport settings objects.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'Update did not install its bundled updater.'
+
+    $installedUserCss = Join-Path $firstInstall.runtimePath 'Dev\user-local.css'
+    [System.IO.File]::WriteAllText($installedUserCss, '.blobui-local { color: lime; }')
+    $installedNestedUserCss = Join-Path $firstInstall.runtimePath 'Dev\local-folder\nested.css'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $installedNestedUserCss)) | Out-Null
+    [System.IO.File]::WriteAllText($installedNestedUserCss, '.blobui-nested-local { color: teal; }')
+    [System.IO.File]::WriteAllText((Join-Path $sourceFixture 'Dev\update-collision.css'), '.blobui-collision-release { color: blue; }')
+    $installedCollisionCss = Join-Path $firstInstall.runtimePath 'Dev\update-collision.css'
+    [System.IO.File]::WriteAllText($installedCollisionCss, '.blobui-collision-local { color: red; }')
+    Remove-Item -LiteralPath (Join-Path $sourceFixture 'Dev\obsolete-managed.css') -Force
+    $installedUserRuntimeAsset = Join-Path $firstInstall.runtimePath 'assets\user-local.txt'
+    [System.IO.File]::WriteAllText($installedUserRuntimeAsset, 'keep-runtime-asset')
+    $installedUserBlobAsset = Join-Path $firstInstall.assetsPath 'user-added.txt'
+    [System.IO.File]::WriteAllText($installedUserBlobAsset, 'keep-installed-asset')
+    & (Join-Path $firstInstall.runtimePath 'scripts\Rebuild.ps1') @rebuildArguments
+    $rebuiltManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/Dev/user-local.css')) 'Installed rebuild adopted a local Dev file into the ownership manifest.'
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset into the ownership manifest.'
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset as an installed asset.'
+    [System.IO.File]::WriteAllText($firstInstall.cssPath, 'pre-update-css-sentinel')
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    $updatedCss = [System.IO.File]::ReadAllText($firstInstall.cssPath)
+    Assert-True ($updatedCss.Contains('.blobui-local { color: lime; }')) 'Update omitted an unowned CSS file retained under runtime/Dev.'
+    Assert-True ($updatedCss.Contains('.blobui-nested-local { color: teal; }')) 'Update omitted an unowned nested CSS file retained under runtime/Dev.'
+    Assert-True ($updatedCss.Contains('.blobui-collision-release { color: blue; }')) 'Update omitted a new release CSS file that collided with an unowned local file.'
+    Assert-True (-not $updatedCss.Contains('.blobui-collision-local')) 'A same-path local CSS file overrode the release CSS.'
+    Assert-True (-not $updatedCss.Contains('.blobui-obsolete')) 'Update compiled stale CSS that was listed in the ownership manifest.'
+    Assert-Equal '.blobui-collision-release { color: blue; }' ([System.IO.File]::ReadAllText($installedCollisionCss)) 'Update did not replace a same-path unowned local file with the release file.'
+    $updatedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-True (-not (@($updatedManifest.managedFiles) -contains 'runtime/Dev/user-local.css')) 'Update adopted a top-level local CSS file into the ownership manifest.'
+    Assert-True (-not (@($updatedManifest.managedFiles) -contains 'runtime/Dev/local-folder/nested.css')) 'Update adopted a nested local CSS file into the ownership manifest.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css'))) 'Update left a stale file listed in the ownership manifest.'
+    Assert-Equal '.blobui-local { color: lime; }' ([System.IO.File]::ReadAllText($installedUserCss)) 'Update removed a user file that was not listed in the ownership manifest.'
+    Assert-Equal 'keep-runtime-asset' ([System.IO.File]::ReadAllText($installedUserRuntimeAsset)) 'Update removed a user file under runtime/assets that was not listed in the ownership manifest.'
+    Assert-Equal 'keep-installed-asset' ([System.IO.File]::ReadAllText($installedUserBlobAsset)) 'Update removed an untracked file from the installed assets directory.'
+    Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'Update removed an untracked asset file.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'A later update replaced the installed custom banner.'
+
+    $transitionRuntime = Join-Path $testRoot 'Managed Path Transition Source'
+    Copy-Item -LiteralPath $sourceFixture -Destination $transitionRuntime -Recurse
+    $transitionInstallDirectory = Join-Path $testRoot 'Managed Path Transition Anytype'
+    [System.IO.Directory]::CreateDirectory($transitionInstallDirectory) | Out-Null
+    $transitionSourcePath = Join-Path $transitionRuntime 'Dev\transition'
+    [System.IO.Directory]::CreateDirectory($transitionSourcePath) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $transitionSourcePath 'child.css'), '.transition-child { color: orange; }')
+    $transitionCandidatePath = Join-Path $testRoot 'transition-data.json'
+    $transitionCandidate = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($candidateDataPath))
+    $transitionCandidate.installDirectory = $transitionInstallDirectory
+    Write-BlobUiAtomicJson -Path $transitionCandidatePath -InputObject $transitionCandidate
+    $transitionArguments = @{
+        InstallDirectory = $transitionInstallDirectory
+        RuntimeSourceDirectory = $transitionRuntime
+        AssetsSourceDirectory = Join-Path $transitionRuntime 'assets'
+        CompiledCssPath = $compiledCssPath
+        DataCandidatePath = $transitionCandidatePath
+    }
+    $null = Invoke-BlobUiInstall @transitionArguments
+    $transitionBlobRuntime = Join-Path $transitionInstallDirectory 'blob\runtime\Dev\transition'
+    $transitionCredentialConflict = Join-Path $transitionInstallDirectory 'blob\credentials\anytype-api-key.dpapi'
+
+    Remove-Item -LiteralPath $transitionSourcePath -Recurse -Force
+    [System.IO.File]::WriteAllText($transitionSourcePath, '.transition-file { color: purple; }')
+    [System.IO.Directory]::CreateDirectory($transitionCredentialConflict) | Out-Null
+    $transitionArguments.CredentialProtectedText = $protectedCredential
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'Directory-to-file rollback did not fail at the injected credential write.' ''
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'Directory-to-file rollback did not restore the prior directory.'
+    Assert-Equal '.transition-child { color: orange; }' ([System.IO.File]::ReadAllText((Join-Path $transitionBlobRuntime 'child.css'))) 'Directory-to-file rollback did not restore its managed child.'
+    Remove-Item -LiteralPath (Join-Path $transitionInstallDirectory 'blob\credentials') -Recurse -Force
+    $transitionArguments.Remove('CredentialProtectedText')
+    $null = Invoke-BlobUiInstall @transitionArguments
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Leaf) 'Directory-to-file update did not replace the obsolete managed tree.'
+    Assert-Equal '.transition-file { color: purple; }' ([System.IO.File]::ReadAllText($transitionBlobRuntime)) 'Directory-to-file update copied the wrong managed content.'
+
+    Remove-Item -LiteralPath $transitionSourcePath -Force
+    [System.IO.Directory]::CreateDirectory($transitionSourcePath) | Out-Null
+    $transitionNestedSourceDirectory = Join-Path $transitionSourcePath 'nested\folder'
+    [System.IO.Directory]::CreateDirectory($transitionNestedSourceDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $transitionNestedSourceDirectory 'child.css'), '.transition-tree { color: teal; }')
+    [System.IO.Directory]::CreateDirectory($transitionCredentialConflict) | Out-Null
+    $transitionArguments.CredentialProtectedText = $protectedCredential
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'File-to-directory rollback did not fail at the injected credential write.' ''
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Leaf) 'File-to-directory rollback did not restore the prior managed file.'
+    Assert-Equal '.transition-file { color: purple; }' ([System.IO.File]::ReadAllText($transitionBlobRuntime)) 'File-to-directory rollback restored the wrong prior bytes.'
+    Remove-Item -LiteralPath (Join-Path $transitionInstallDirectory 'blob\credentials') -Recurse -Force
+    $transitionArguments.Remove('CredentialProtectedText')
+    $null = Invoke-BlobUiInstall @transitionArguments
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'File-to-directory update did not replace the obsolete managed file.'
+    $transitionNestedInstalledFile = Join-Path $transitionBlobRuntime 'nested\folder\child.css'
+    Assert-Equal '.transition-tree { color: teal; }' ([System.IO.File]::ReadAllText($transitionNestedInstalledFile)) 'File-to-directory update copied the wrong managed content.'
+
+    [System.IO.File]::WriteAllText((Join-Path $transitionBlobRuntime 'nested\folder\user-added.txt'), 'keep-transition-user-file')
+    Remove-Item -LiteralPath $transitionSourcePath -Recurse -Force
+    [System.IO.File]::WriteAllText($transitionSourcePath, '.transition-replacement { color: navy; }')
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'A non-empty unowned directory was replaced by a managed file.' 'unowned or non-empty directory'
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'The collision failure removed the unowned directory.'
+    Assert-Equal 'keep-transition-user-file' ([System.IO.File]::ReadAllText((Join-Path $transitionBlobRuntime 'nested\folder\user-added.txt'))) 'The collision failure removed an unowned user file.'
+    Assert-Equal '.transition-tree { color: teal; }' ([System.IO.File]::ReadAllText($transitionNestedInstalledFile)) 'The collision failure did not roll back the stale managed file.'
+
+    $migrationFixture = [pscustomobject]@{ schemaVersion = 1; localValue = 'keep' }
+    $migrationResult = Invoke-BlobUiLocalDataMigrations -Data $migrationFixture -FromReleaseVersion '0.9.0' -ToReleaseVersion (Get-BlobUiReleaseVersion)
+    Assert-Equal 'keep' $migrationResult.localValue 'The local migration hook changed data without a migration.'
+    Assert-Equal 1 $migrationResult.schemaVersion 'The local migration hook changed schemaVersion.'
 
     $stalePointerText = [System.IO.File]::ReadAllText($pointerPath)
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory (Join-Path $testRoot 'missing install')
@@ -843,6 +1018,53 @@ try {
         $env:APPDATA = $oldAppData
     }
     Assert-True (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'custom.css') -PathType Leaf) 'The source rebuild did not discover a valid legacy default installation without a pointer.'
+
+    $defaultsInstallDirectory = Join-Path $testRoot 'Legacy Update Missing Fields'
+    $defaultsBlobDirectory = Join-Path $defaultsInstallDirectory 'blob'
+    $defaultsCredentialDirectory = Join-Path $defaultsBlobDirectory 'credentials'
+    $defaultsLegacyDevDirectory = Join-Path $defaultsBlobDirectory 'runtime\Dev'
+    [System.IO.Directory]::CreateDirectory($defaultsCredentialDirectory) | Out-Null
+    [System.IO.Directory]::CreateDirectory($defaultsLegacyDevDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'), '.legacy { color: blue; }')
+    $defaultsSavedData = [ordered]@{
+        schemaVersion = 1
+        apiVersion = 'v2'
+        selectedSpace = [ordered]@{ id = $testSpaceId; name = 'BlobUI Settings' }
+        settingsObjectIds = @($emptyObjectId)
+        settings = [ordered]@{
+            fontFamily = 'Saved Local Font'
+            codeFontFamily = 'Saved Local Code Font'
+            accentColor = '#123456'
+            bannerPath = 'spacebanner\banner.png'
+        }
+        installDirectory = [System.IO.Path]::GetFullPath($defaultsInstallDirectory)
+    }
+    Write-BlobUiAtomicJson -Path (Join-Path $defaultsBlobDirectory 'data.json') -InputObject $defaultsSavedData
+    Copy-Item -LiteralPath $firstInstall.credentialPath -Destination (Join-Path $defaultsCredentialDirectory 'anytype-api-key.dpapi')
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $defaultsBlobDirectory '.blobui-managed-files.json'))) 'A legacy update fixture unexpectedly had an ownership manifest.'
+    $defaultsRuntimeDirectory = Join-Path $defaultsBlobDirectory 'runtime'
+    [System.IO.Directory]::CreateDirectory($defaultsRuntimeDirectory) | Out-Null
+    Copy-Item -Path (Join-Path $firstInstall.runtimePath '*') -Destination $defaultsRuntimeDirectory -Recurse -Force
+    $legacyRuntimeUserAsset = Join-Path $defaultsRuntimeDirectory 'assets\legacy-user.txt'
+    [System.IO.File]::WriteAllText($legacyRuntimeUserAsset, 'keep-legacy-runtime-asset')
+    & (Join-Path $defaultsRuntimeDirectory 'scripts\Rebuild.ps1') -ApiTransport $apiTransport
+    $defaultsRebuiltManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))
+    Assert-Equal 0 @($defaultsRebuiltManifest.managedFiles).Count 'Installed rebuild claimed runtime files from a legacy install without an ownership manifest.'
+    Assert-Equal 'keep-legacy-runtime-asset' ([System.IO.File]::ReadAllText($legacyRuntimeUserAsset)) 'Installed rebuild changed a runtime asset in a legacy install without an ownership manifest.'
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $defaultsInstallDirectory -ApiTransport $apiTransport
+    $defaultsUpdatedData = Read-BlobUiDataFile -Path (Join-Path $defaultsBlobDirectory 'data.json')
+    $defaultsUpdatedCss = [System.IO.File]::ReadAllText((Join-Path $defaultsInstallDirectory 'custom.css'))
+    Assert-True ($defaultsUpdatedCss.Contains('.legacy { color: blue; }')) 'Update omitted legacy local CSS when no ownership manifest existed.'
+    Assert-Equal 'Libron' $defaultsUpdatedData.settings.fontFamily 'Update retained a stale local Font value instead of the release default for a missing Anytype field.'
+    Assert-Equal 'Consolas' $defaultsUpdatedData.settings.codeFontFamily 'Update retained a stale local Code Font value instead of the release default for a missing Anytype field.'
+    Assert-Equal '#DE50DE' $defaultsUpdatedData.settings.accentColor 'Update retained a stale local Accent Color instead of the release default for a missing Anytype field.'
+    Assert-Equal "$emptyObjectId" $defaultsUpdatedData.settingsObjectIds 'Update changed the legacy selected settings object.'
+    Assert-Equal '.legacy { color: blue; }' ([System.IO.File]::ReadAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'))) 'Update deleted an untracked file from a legacy install without a manifest.'
+    Assert-Equal 'keep-legacy-runtime-asset' ([System.IO.File]::ReadAllText($legacyRuntimeUserAsset)) 'Update deleted a runtime asset in a legacy install without a manifest.'
+    Assert-Equal '1.0.0' (ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))).releaseVersion 'A legacy update did not record its release version.'
+    Assert-Equal 1 @($apiRequests | Where-Object { $_.Path -match ("/objects/" + [System.Text.RegularExpressions.Regex]::Escape($emptyObjectId) + "\?include=properties&ids=full$") }).Count 'Update did not reuse the selected object ID from the legacy data file.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'A legacy update rediscovered settings objects.'
 
     $noInstallFixture = Join-Path $testRoot 'No Install Source'
     Copy-Item -LiteralPath $sourceFixture -Destination $noInstallFixture -Recurse
@@ -937,6 +1159,14 @@ try {
     Assert-Throws { & $sourceUninstallScript -InstallDirectory $releaseRoot } 'An uninstall accepted a Releases folder as the Anytype directory.' 'Releases path'
     Assert-Equal 'release-root-css' ([System.IO.File]::ReadAllText((Join-Path $releaseRoot 'custom.css'))) 'The Releases folder guard changed custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $releaseRoot 'blob') -PathType Container) 'The Releases folder guard changed the blob directory.'
+
+    $nestedReleaseRoot = Join-Path (Join-Path $testRoot 'Nested uninstall target\rElEaSeS') 'Anytype Data'
+    $nestedReleaseSentinel = Join-Path $nestedReleaseRoot 'blob\keep.txt'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $nestedReleaseSentinel)) | Out-Null
+    [System.IO.File]::WriteAllText($nestedReleaseSentinel, 'preserve-nested-release-data')
+    Assert-Throws { & $sourceUninstallScript -InstallDirectory $nestedReleaseRoot } 'An uninstall accepted a nested Releases target.' 'Releases path'
+    Assert-Equal 'preserve-nested-release-data' ([System.IO.File]::ReadAllText($nestedReleaseSentinel)) 'A rejected nested Releases uninstall changed blob data.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $nestedReleaseRoot 'custom.css'))) 'A rejected nested Releases uninstall created or removed custom.css.'
 
     $outsideReparseTarget = Join-Path $testRoot 'Outside reparse target'
     [System.IO.Directory]::CreateDirectory((Join-Path $outsideReparseTarget 'blob')) | Out-Null

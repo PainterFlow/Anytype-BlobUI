@@ -39,6 +39,15 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 	- Paste your Anytype API key.
 9. In Anytype, press Ctrl/Cmd + R to reload and it should be done.
 
+## Updating BlobUI
+
+1. Download and extract the newer BlobUI release.
+2. Open a terminal in the extracted folder and run .\scripts\Update.ps1.
+3. If Anytype uses a custom data directory and the extracted folder has no saved install location, pass it with .\scripts\Update.ps1 -InstallDirectory "C:\path\to\Anytype".
+4. In Anytype, press Ctrl/Cmd + R to reload the stylesheet.
+
+The updater reads the saved API key from its encrypted local file and refreshes the settings objects you selected during installation. You do not need to import the BlobUI Settings Space again. The updater does not download releases or change objects in Anytype.
+
 ## Dev Features
 
 ### Text Effects & Embeds
