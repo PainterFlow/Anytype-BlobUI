@@ -503,7 +503,7 @@ try {
     Assert-Equal 'rgb(12, 34, 56)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(12, 34, 56)') 'A comma-form rgb() color was rejected.'
     Assert-Equal 'rgba(12 34 56 / 50%)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgba(12 34 56 / 50%)') 'A modern space/slash rgba() color was rejected.'
     Assert-Equal 'rgb(100% 0 0)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100% 0 0)') 'Modern rgb() did not accept valid mixed channel units.'
-    Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'Accent Color lost White compatibility.'
+    Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'General CSS color settings lost White compatibility.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'red; color:blue' } 'Unsafe color value' 'hexadecimal'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(256, 0, 0)' } 'Out-of-range RGB channel was accepted.' 'channel outside'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100%, 0, 0)' } 'Legacy comma rgb() accepted mixed channel units.' 'mixed rgb()/rgba() channel units'
@@ -526,6 +526,10 @@ try {
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
+    $whiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+    $whiteAccentData.settings.accentColor = 'White'
+    $whiteAccentCssPath = Join-Path $testRoot 'white-accent.css'
+    Assert-Throws { Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $whiteAccentCssPath -Data $whiteAccentData | Out-Null } 'White Accent Color was accepted.' 'White is not supported for Accent Color'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
     $calendarColorRulesStart = $css.IndexOf('/* BlobUI Calendar Color overrides */', [System.StringComparison]::Ordinal)

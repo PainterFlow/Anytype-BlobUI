@@ -643,6 +643,9 @@ function ConvertTo-BlobUiAccentColorValue {
     if ($null -ne $Value -and $Value.Trim() -ieq 'default') {
         return 'var(--color-system-accent-100)'
     }
+    if ($null -ne $Value -and $Value.Trim() -ieq 'white') {
+        throw "White is not supported for Accent Color. Choose another color or enter 'default'."
+    }
     if ($null -ne $Value -and $Value.Trim() -ceq 'var(--color-system-accent-100)') {
         return $Value.Trim()
     }
