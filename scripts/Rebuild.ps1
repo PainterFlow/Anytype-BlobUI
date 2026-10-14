@@ -70,6 +70,52 @@ function Resolve-BlobUiRebuildState {
     }
 }
 
+function New-BlobUiUpdateCompileDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageDevDirectory,
+        [Parameter(Mandatory = $true)][string]$InstalledDevDirectory,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ManagedFiles
+    )
+
+    $packageRoot = [System.IO.Path]::GetFullPath($PackageDevDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not (Test-Path -LiteralPath $PackageDevDirectory -PathType Container)) {
+        throw "Development CSS directory was not found: $PackageDevDirectory"
+    }
+    [System.IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
+
+    foreach ($file in (Get-ChildItem -LiteralPath $PackageDevDirectory -Recurse -File -Filter '*.css')) {
+        if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        $relativePath = $file.FullName.Substring($packageRoot.Length)
+        $destinationPath = Join-Path $OutputDirectory $relativePath
+        [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destinationPath)) | Out-Null
+        [System.IO.File]::WriteAllBytes($destinationPath, [System.IO.File]::ReadAllBytes($file.FullName))
+    }
+
+    if (-not (Test-Path -LiteralPath $InstalledDevDirectory -PathType Container)) { return }
+    $installedRoot = [System.IO.Path]::GetFullPath($InstalledDevDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $managedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedFile in $ManagedFiles) {
+        $key = [string]$managedFile
+        if ($key.StartsWith('runtime/Dev/', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $null = $managedSet.Add($key)
+        }
+    }
+
+    foreach ($file in (Get-ChildItem -LiteralPath $InstalledDevDirectory -Recurse -File -Filter '*.css')) {
+        if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        $relativePath = $file.FullName.Substring($installedRoot.Length)
+        $managedKey = 'runtime/Dev/' + $relativePath.Replace('\', '/')
+        if ($managedSet.Contains($managedKey)) { continue }
+
+        $destinationPath = Join-Path $OutputDirectory $relativePath
+        # A release file with the same name takes precedence over a local file.
+        if (Test-Path -LiteralPath $destinationPath -PathType Leaf) { continue }
+        [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destinationPath)) | Out-Null
+        [System.IO.File]::WriteAllBytes($destinationPath, [System.IO.File]::ReadAllBytes($file.FullName))
+    }
+}
+
 $state = Resolve-BlobUiRebuildState -RequestedInstallDirectory $InstallDirectory -SourceDirectory $sourceDirectory
 $blobDirectory = $state.BlobDirectory
 $dataPath = Join-Path $blobDirectory 'data.json'
@@ -115,6 +161,7 @@ try {
 
     if ($ForUpdate) {
         $previousReleaseVersion = ''
+        $previousManagedFiles = @()
         $manifestPath = Join-Path $blobDirectory '.blobui-managed-files.json'
         if (Test-Path -LiteralPath $manifestPath) {
             $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
@@ -125,6 +172,7 @@ try {
             try {
                 $previousManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($manifestPath)) -ErrorAction Stop
                 $previousReleaseVersion = [string]$previousManifest.releaseVersion
+                $previousManagedFiles = @($previousManifest.managedFiles)
             }
             catch {
                 throw "The saved BlobUI install manifest is invalid: $manifestPath"
@@ -135,10 +183,17 @@ try {
         Write-BlobUiAtomicJson -Path $candidateDataPath -InputObject $candidateData
     }
 
+    $compileDevDirectory = Join-Path $sourceDirectory 'Dev'
+    if ($ForUpdate) {
+        $compileDevDirectory = Join-Path $runDirectory 'compile-Dev'
+        $installedDevDirectory = Join-Path (Join-Path $blobDirectory 'runtime') 'Dev'
+        New-BlobUiUpdateCompileDirectory -PackageDevDirectory (Join-Path $sourceDirectory 'Dev') -InstalledDevDirectory $installedDevDirectory -OutputDirectory $compileDevDirectory -ManagedFiles $previousManagedFiles
+    }
+
     $compileArguments = @{
         DataPath = $candidateDataPath
         OutputPath = $compiledCssPath
-        DevDirectory = Join-Path $sourceDirectory 'Dev'
+        DevDirectory = $compileDevDirectory
         AssetSourceDirectory = Join-Path $sourceDirectory 'assets'
     }
     & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments

@@ -851,6 +851,12 @@ try {
 
     $installedUserCss = Join-Path $firstInstall.runtimePath 'Dev\user-local.css'
     [System.IO.File]::WriteAllText($installedUserCss, '.blobui-local { color: lime; }')
+    $installedNestedUserCss = Join-Path $firstInstall.runtimePath 'Dev\local-folder\nested.css'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $installedNestedUserCss)) | Out-Null
+    [System.IO.File]::WriteAllText($installedNestedUserCss, '.blobui-nested-local { color: teal; }')
+    [System.IO.File]::WriteAllText((Join-Path $sourceFixture 'Dev\update-collision.css'), '.blobui-collision-release { color: blue; }')
+    $installedCollisionCss = Join-Path $firstInstall.runtimePath 'Dev\update-collision.css'
+    [System.IO.File]::WriteAllText($installedCollisionCss, '.blobui-collision-local { color: red; }')
     Remove-Item -LiteralPath (Join-Path $sourceFixture 'Dev\obsolete-managed.css') -Force
     $installedUserRuntimeAsset = Join-Path $firstInstall.runtimePath 'assets\user-local.txt'
     [System.IO.File]::WriteAllText($installedUserRuntimeAsset, 'keep-runtime-asset')
@@ -861,8 +867,19 @@ try {
     Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/Dev/user-local.css')) 'Installed rebuild adopted a local Dev file into the ownership manifest.'
     Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset into the ownership manifest.'
     Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset as an installed asset.'
+    [System.IO.File]::WriteAllText($firstInstall.cssPath, 'pre-update-css-sentinel')
     $apiRequests.Clear()
     & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    $updatedCss = [System.IO.File]::ReadAllText($firstInstall.cssPath)
+    Assert-True ($updatedCss.Contains('.blobui-local { color: lime; }')) 'Update omitted an unowned CSS file retained under runtime/Dev.'
+    Assert-True ($updatedCss.Contains('.blobui-nested-local { color: teal; }')) 'Update omitted an unowned nested CSS file retained under runtime/Dev.'
+    Assert-True ($updatedCss.Contains('.blobui-collision-release { color: blue; }')) 'Update omitted a new release CSS file that collided with an unowned local file.'
+    Assert-True (-not $updatedCss.Contains('.blobui-collision-local')) 'A same-path local CSS file overrode the release CSS.'
+    Assert-True (-not $updatedCss.Contains('.blobui-obsolete')) 'Update compiled stale CSS that was listed in the ownership manifest.'
+    Assert-Equal '.blobui-collision-release { color: blue; }' ([System.IO.File]::ReadAllText($installedCollisionCss)) 'Update did not replace a same-path unowned local file with the release file.'
+    $updatedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-True (-not (@($updatedManifest.managedFiles) -contains 'runtime/Dev/user-local.css')) 'Update adopted a top-level local CSS file into the ownership manifest.'
+    Assert-True (-not (@($updatedManifest.managedFiles) -contains 'runtime/Dev/local-folder/nested.css')) 'Update adopted a nested local CSS file into the ownership manifest.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css'))) 'Update left a stale file listed in the ownership manifest.'
     Assert-Equal '.blobui-local { color: lime; }' ([System.IO.File]::ReadAllText($installedUserCss)) 'Update removed a user file that was not listed in the ownership manifest.'
     Assert-Equal 'keep-runtime-asset' ([System.IO.File]::ReadAllText($installedUserRuntimeAsset)) 'Update removed a user file under runtime/assets that was not listed in the ownership manifest.'
@@ -938,6 +955,8 @@ try {
     $apiRequests.Clear()
     & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $defaultsInstallDirectory -ApiTransport $apiTransport
     $defaultsUpdatedData = Read-BlobUiDataFile -Path (Join-Path $defaultsBlobDirectory 'data.json')
+    $defaultsUpdatedCss = [System.IO.File]::ReadAllText((Join-Path $defaultsInstallDirectory 'custom.css'))
+    Assert-True ($defaultsUpdatedCss.Contains('.legacy { color: blue; }')) 'Update omitted legacy local CSS when no ownership manifest existed.'
     Assert-Equal 'Libron' $defaultsUpdatedData.settings.fontFamily 'Update retained a stale local Font value instead of the release default for a missing Anytype field.'
     Assert-Equal 'Consolas' $defaultsUpdatedData.settings.codeFontFamily 'Update retained a stale local Code Font value instead of the release default for a missing Anytype field.'
     Assert-Equal '#DE50DE' $defaultsUpdatedData.settings.accentColor 'Update retained a stale local Accent Color instead of the release default for a missing Anytype field.'
