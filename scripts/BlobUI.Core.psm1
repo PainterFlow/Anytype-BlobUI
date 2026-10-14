@@ -1333,7 +1333,8 @@ function Get-BlobUiPackagedFiles {
 function Get-BlobUiManagedDestinationPath {
     param(
         [Parameter(Mandatory = $true)][string]$BlobDirectory,
-        [Parameter(Mandatory = $true)][string]$ManagedPath
+        [Parameter(Mandatory = $true)][string]$ManagedPath,
+        [string[]]$AllowedManagedFileParents = @()
     )
 
     $key = ConvertTo-BlobUiManagedFileKey -Path $ManagedPath
@@ -1353,16 +1354,22 @@ function Get-BlobUiManagedDestinationPath {
     }
     $relativeParent = [System.IO.Path]::GetDirectoryName($key.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
     $current = $blobRoot
+    $allowedParentSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($allowedParent in $AllowedManagedFileParents) {
+        $null = $allowedParentSet.Add([System.IO.Path]::GetFullPath($allowedParent))
+    }
     if (-not [string]::IsNullOrWhiteSpace($relativeParent)) {
         foreach ($part in $relativeParent.Split([System.IO.Path]::DirectorySeparatorChar)) {
             $current = Join-Path $current $part
             if (Test-Path -LiteralPath $current) {
                 $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
-                if (-not $item.PSIsContainer) {
-                    throw "A BlobUI managed file parent is not a directory: $current"
-                }
                 if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                     throw "A BlobUI managed file parent is a reparse point: $current"
+                }
+                if (-not $item.PSIsContainer) {
+                    if (-not $allowedParentSet.Contains([System.IO.Path]::GetFullPath($current))) {
+                        throw "A BlobUI managed file parent is not a directory: $current"
+                    }
                 }
             }
         }
@@ -1422,11 +1429,96 @@ function Restore-BlobUiFileSnapshot {
             if (Test-Path -LiteralPath $Snapshot.path -PathType Leaf) {
                 Remove-Item -LiteralPath $Snapshot.path -Force -ErrorAction Stop
             }
+            elseif (Test-Path -LiteralPath $Snapshot.path -PathType Container) {
+                if ([System.IO.Directory]::GetFileSystemEntries($Snapshot.path).Length -eq 0) {
+                    Remove-Item -LiteralPath $Snapshot.path -Force -ErrorAction Stop
+                }
+            }
         }
         'Directory' {
             if (-not (Test-Path -LiteralPath $Snapshot.path -PathType Container)) {
                 throw "Rollback could not restore the saved directory: $($Snapshot.path)"
             }
+        }
+    }
+}
+
+function Restore-BlobUiFileSnapshots {
+    param([Parameter(Mandatory = $true)][System.Collections.Generic.List[object]]$Snapshots)
+
+    $failures = [System.Collections.Generic.List[string]]::new()
+    # Remove files created at paths that used to be directories or missing, so
+    # prior file trees and file-to-directory transitions can be restored.
+    foreach ($snapshot in $Snapshots) {
+        try {
+            if ($snapshot.kind -ne 'File' -and (Test-Path -LiteralPath $snapshot.path -PathType Leaf)) {
+                Remove-Item -LiteralPath $snapshot.path -Force -ErrorAction Stop
+            }
+        }
+        catch {
+            $failures.Add($_.Exception.Message)
+        }
+    }
+    # Restore directories before files so their saved children have parents.
+    foreach ($snapshot in @($Snapshots | Where-Object { $_.kind -eq 'Directory' } | Sort-Object { $_.path.Length })) {
+        try {
+            if (Test-Path -LiteralPath $snapshot.path -PathType Leaf) {
+                Remove-Item -LiteralPath $snapshot.path -Force -ErrorAction Stop
+            }
+            [System.IO.Directory]::CreateDirectory($snapshot.path) | Out-Null
+        }
+        catch {
+            $failures.Add($_.Exception.Message)
+        }
+    }
+    # Missing snapshots are ordered deepest-first so only directories created
+    # during this install are removed, and only when still empty.
+    foreach ($snapshot in @($Snapshots | Where-Object { $_.kind -eq 'Missing' } | Sort-Object { $_.path.Length } -Descending)) {
+        try {
+            Restore-BlobUiFileSnapshot -Snapshot $snapshot
+        }
+        catch {
+            $failures.Add($_.Exception.Message)
+        }
+    }
+    foreach ($snapshot in @($Snapshots | Where-Object { $_.kind -eq 'File' } | Sort-Object { $_.path.Length })) {
+        try {
+            if (Test-Path -LiteralPath $snapshot.path -PathType Container) {
+                Remove-Item -LiteralPath $snapshot.path -Force -ErrorAction Stop
+            }
+            Restore-BlobUiFileSnapshot -Snapshot $snapshot
+        }
+        catch {
+            $failures.Add($_.Exception.Message)
+        }
+    }
+    if ($failures.Count -gt 0) {
+        throw [string]::Join('; ', $failures)
+    }
+}
+
+function Remove-BlobUiEmptyManagedDirectories {
+    param(
+        [Parameter(Mandatory = $true)][string]$BlobDirectory,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$ManagedPaths
+    )
+
+    $blobRoot = [System.IO.Path]::GetFullPath($BlobDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $candidates = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedPath in $ManagedPaths) {
+        $current = [System.IO.Path]::GetFullPath($managedPath)
+        while ($current.StartsWith($blobRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if ($null -ne $item -and $item.PSIsContainer -and
+                (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0)) {
+                $null = $candidates.Add($current)
+            }
+            $current = Split-Path -Parent $current
+        }
+    }
+    foreach ($directory in @($candidates | Sort-Object { $_.Length } -Descending)) {
+        if ([System.IO.Directory]::GetFileSystemEntries($directory).Length -eq 0) {
+            [System.IO.Directory]::Delete($directory)
         }
     }
 }
@@ -1616,19 +1708,19 @@ function Invoke-BlobUiInstall {
     }
 
     $copyOperations = [System.Collections.Generic.List[object]]::new()
+    $staleDestinations = [System.Collections.Generic.List[string]]::new()
+    foreach ($stalePath in $stalePaths) {
+        $staleDestinations.Add((Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath $stalePath))
+    }
     foreach ($managedPath in $packagedFiles.Keys) {
         $sourcePath = [System.IO.Path]::GetFullPath([string]$packagedFiles[$managedPath])
-        $destinationPath = Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath ([string]$managedPath)
+        $destinationPath = Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath ([string]$managedPath) -AllowedManagedFileParents $staleDestinations.ToArray()
         if (-not $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             $copyOperations.Add([pscustomobject]@{
                 source = $sourcePath
                 destination = $destinationPath
             })
         }
-    }
-    $staleDestinations = [System.Collections.Generic.List[string]]::new()
-    foreach ($stalePath in $stalePaths) {
-        $staleDestinations.Add((Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath $stalePath))
     }
 
     $compiledCss = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($CompiledCssPath), [System.Text.Encoding]::UTF8)
@@ -1665,6 +1757,16 @@ function Invoke-BlobUiInstall {
     if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText) -and $snapshotPathSet.Add([string]$credentialPath)) {
         $snapshotPaths.Add([string]$credentialPath)
     }
+    $managedMutationPaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($operation in $copyOperations) { $managedMutationPaths.Add([string]$operation.destination) }
+    foreach ($staleDestination in $staleDestinations) { $managedMutationPaths.Add([string]$staleDestination) }
+    foreach ($managedPath in $managedMutationPaths) {
+        $current = Split-Path -Parent $managedPath
+        while ($current.StartsWith([System.IO.Path]::GetFullPath($blobDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($snapshotPathSet.Add($current)) { $snapshotPaths.Add($current) }
+            $current = Split-Path -Parent $current
+        }
+    }
     $snapshots = [System.Collections.Generic.List[object]]::new()
     foreach ($snapshotPath in $snapshotPaths) {
         $snapshots.Add((Get-BlobUiFileSnapshot -Path $snapshotPath))
@@ -1672,15 +1774,19 @@ function Invoke-BlobUiInstall {
 
     try {
         [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
-        foreach ($operation in $copyOperations) {
-            $parent = Split-Path -Parent $operation.destination
-            [System.IO.Directory]::CreateDirectory($parent) | Out-Null
-            [System.IO.File]::WriteAllBytes($operation.destination, [System.IO.File]::ReadAllBytes($operation.source))
-        }
         foreach ($staleDestination in $staleDestinations) {
             if (Test-Path -LiteralPath $staleDestination -PathType Leaf) {
                 Remove-Item -LiteralPath $staleDestination -Force -ErrorAction Stop
             }
+        }
+        Remove-BlobUiEmptyManagedDirectories -BlobDirectory $blobDirectory -ManagedPaths $managedMutationPaths.ToArray()
+        foreach ($operation in $copyOperations) {
+            if (Test-Path -LiteralPath $operation.destination -PathType Container) {
+                throw "A BlobUI managed file destination is an unowned or non-empty directory: $($operation.destination)"
+            }
+            $parent = Split-Path -Parent $operation.destination
+            [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+            [System.IO.File]::WriteAllBytes($operation.destination, [System.IO.File]::ReadAllBytes($operation.source))
         }
         if ($installDefaultBanner) {
             $bannerParent = Split-Path -Parent $manifestBannerPath
@@ -1700,14 +1806,7 @@ function Invoke-BlobUiInstall {
         $installFailure = $_.Exception.Message
         $rollbackFailures = [System.Collections.Generic.List[string]]::new()
         try {
-            for ($index = $snapshots.Count - 1; $index -ge 0; $index--) {
-                try {
-                    Restore-BlobUiFileSnapshot -Snapshot $snapshots[$index]
-                }
-                catch {
-                    $rollbackFailures.Add($_.Exception.Message)
-                }
-            }
+            Restore-BlobUiFileSnapshots -Snapshots $snapshots
         }
         catch {
             $rollbackFailures.Add($_.Exception.Message)

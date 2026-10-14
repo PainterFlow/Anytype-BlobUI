@@ -887,6 +887,66 @@ try {
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'Update removed an untracked asset file.'
     Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'A later update replaced the installed custom banner.'
 
+    $transitionRuntime = Join-Path $testRoot 'Managed Path Transition Source'
+    Copy-Item -LiteralPath $sourceFixture -Destination $transitionRuntime -Recurse
+    $transitionInstallDirectory = Join-Path $testRoot 'Managed Path Transition Anytype'
+    [System.IO.Directory]::CreateDirectory($transitionInstallDirectory) | Out-Null
+    $transitionSourcePath = Join-Path $transitionRuntime 'Dev\transition'
+    [System.IO.Directory]::CreateDirectory($transitionSourcePath) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $transitionSourcePath 'child.css'), '.transition-child { color: orange; }')
+    $transitionCandidatePath = Join-Path $testRoot 'transition-data.json'
+    $transitionCandidate = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($candidateDataPath))
+    $transitionCandidate.installDirectory = $transitionInstallDirectory
+    Write-BlobUiAtomicJson -Path $transitionCandidatePath -InputObject $transitionCandidate
+    $transitionArguments = @{
+        InstallDirectory = $transitionInstallDirectory
+        RuntimeSourceDirectory = $transitionRuntime
+        AssetsSourceDirectory = Join-Path $transitionRuntime 'assets'
+        CompiledCssPath = $compiledCssPath
+        DataCandidatePath = $transitionCandidatePath
+    }
+    $null = Invoke-BlobUiInstall @transitionArguments
+    $transitionBlobRuntime = Join-Path $transitionInstallDirectory 'blob\runtime\Dev\transition'
+    $transitionCredentialConflict = Join-Path $transitionInstallDirectory 'blob\credentials\anytype-api-key.dpapi'
+
+    Remove-Item -LiteralPath $transitionSourcePath -Recurse -Force
+    [System.IO.File]::WriteAllText($transitionSourcePath, '.transition-file { color: purple; }')
+    [System.IO.Directory]::CreateDirectory($transitionCredentialConflict) | Out-Null
+    $transitionArguments.CredentialProtectedText = $protectedCredential
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'Directory-to-file rollback did not fail at the injected credential write.' ''
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'Directory-to-file rollback did not restore the prior directory.'
+    Assert-Equal '.transition-child { color: orange; }' ([System.IO.File]::ReadAllText((Join-Path $transitionBlobRuntime 'child.css'))) 'Directory-to-file rollback did not restore its managed child.'
+    Remove-Item -LiteralPath (Join-Path $transitionInstallDirectory 'blob\credentials') -Recurse -Force
+    $transitionArguments.Remove('CredentialProtectedText')
+    $null = Invoke-BlobUiInstall @transitionArguments
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Leaf) 'Directory-to-file update did not replace the obsolete managed tree.'
+    Assert-Equal '.transition-file { color: purple; }' ([System.IO.File]::ReadAllText($transitionBlobRuntime)) 'Directory-to-file update copied the wrong managed content.'
+
+    Remove-Item -LiteralPath $transitionSourcePath -Force
+    [System.IO.Directory]::CreateDirectory($transitionSourcePath) | Out-Null
+    $transitionNestedSourceDirectory = Join-Path $transitionSourcePath 'nested\folder'
+    [System.IO.Directory]::CreateDirectory($transitionNestedSourceDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $transitionNestedSourceDirectory 'child.css'), '.transition-tree { color: teal; }')
+    [System.IO.Directory]::CreateDirectory($transitionCredentialConflict) | Out-Null
+    $transitionArguments.CredentialProtectedText = $protectedCredential
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'File-to-directory rollback did not fail at the injected credential write.' ''
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Leaf) 'File-to-directory rollback did not restore the prior managed file.'
+    Assert-Equal '.transition-file { color: purple; }' ([System.IO.File]::ReadAllText($transitionBlobRuntime)) 'File-to-directory rollback restored the wrong prior bytes.'
+    Remove-Item -LiteralPath (Join-Path $transitionInstallDirectory 'blob\credentials') -Recurse -Force
+    $transitionArguments.Remove('CredentialProtectedText')
+    $null = Invoke-BlobUiInstall @transitionArguments
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'File-to-directory update did not replace the obsolete managed file.'
+    $transitionNestedInstalledFile = Join-Path $transitionBlobRuntime 'nested\folder\child.css'
+    Assert-Equal '.transition-tree { color: teal; }' ([System.IO.File]::ReadAllText($transitionNestedInstalledFile)) 'File-to-directory update copied the wrong managed content.'
+
+    [System.IO.File]::WriteAllText((Join-Path $transitionBlobRuntime 'nested\folder\user-added.txt'), 'keep-transition-user-file')
+    Remove-Item -LiteralPath $transitionSourcePath -Recurse -Force
+    [System.IO.File]::WriteAllText($transitionSourcePath, '.transition-replacement { color: navy; }')
+    Assert-Throws { Invoke-BlobUiInstall @transitionArguments } 'A non-empty unowned directory was replaced by a managed file.' 'unowned or non-empty directory'
+    Assert-True (Test-Path -LiteralPath $transitionBlobRuntime -PathType Container) 'The collision failure removed the unowned directory.'
+    Assert-Equal 'keep-transition-user-file' ([System.IO.File]::ReadAllText((Join-Path $transitionBlobRuntime 'nested\folder\user-added.txt'))) 'The collision failure removed an unowned user file.'
+    Assert-Equal '.transition-tree { color: teal; }' ([System.IO.File]::ReadAllText($transitionNestedInstalledFile)) 'The collision failure did not roll back the stale managed file.'
+
     $migrationFixture = [pscustomobject]@{ schemaVersion = 1; localValue = 'keep' }
     $migrationResult = Invoke-BlobUiLocalDataMigrations -Data $migrationFixture -FromReleaseVersion '0.9.0' -ToReleaseVersion (Get-BlobUiReleaseVersion)
     Assert-Equal 'keep' $migrationResult.localValue 'The local migration hook changed data without a migration.'
