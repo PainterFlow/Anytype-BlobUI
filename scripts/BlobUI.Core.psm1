@@ -1567,6 +1567,23 @@ function Invoke-BlobUiInstall {
     $null = Get-BlobUiFileSnapshot -Path $manifestPath
     $previousManifest = Read-BlobUiInstallManifest -Path $manifestPath
     $packagedFiles = Get-BlobUiPackagedFiles -RuntimeSourceDirectory $RuntimeSourceDirectory -AssetsSourceDirectory $AssetsSourceDirectory
+    $runtimeSourcePath = [System.IO.Path]::GetFullPath($RuntimeSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $runtimeDestinationPath = [System.IO.Path]::GetFullPath($runtimeDestination).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $managedFiles = @($packagedFiles.Keys | Where-Object {
+        -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
+    } | Sort-Object -Unique)
+    if ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $managedFiles = @($previousManifest.managedFiles | Sort-Object -Unique)
+        $ownedFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($managedPath in $managedFiles) {
+            $null = $ownedFiles.Add([string]$managedPath)
+        }
+        foreach ($packagedPath in @($packagedFiles.Keys)) {
+            if (-not $ownedFiles.Contains([string]$packagedPath)) {
+                $packagedFiles.Remove($packagedPath)
+            }
+        }
+    }
     $manifestBannerPath = Join-Path (Join-Path $assetDestination 'spacebanner') 'banner.png'
     foreach ($bannerDirectory in @($assetDestination, (Split-Path -Parent $manifestBannerPath))) {
         if (Test-Path -LiteralPath $bannerDirectory) {
@@ -1587,9 +1604,6 @@ function Invoke-BlobUiInstall {
         }
     }
 
-    $managedFiles = @($packagedFiles.Keys | Where-Object {
-        -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
-    } | Sort-Object -Unique)
     $managedFileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($managedPath in $managedFiles) {
         $null = $managedFileSet.Add([string]$managedPath)

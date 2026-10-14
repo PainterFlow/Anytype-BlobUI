@@ -852,10 +852,21 @@ try {
     $installedUserCss = Join-Path $firstInstall.runtimePath 'Dev\user-local.css'
     [System.IO.File]::WriteAllText($installedUserCss, '.blobui-local { color: lime; }')
     Remove-Item -LiteralPath (Join-Path $sourceFixture 'Dev\obsolete-managed.css') -Force
+    $installedUserRuntimeAsset = Join-Path $firstInstall.runtimePath 'assets\user-local.txt'
+    [System.IO.File]::WriteAllText($installedUserRuntimeAsset, 'keep-runtime-asset')
+    $installedUserBlobAsset = Join-Path $firstInstall.assetsPath 'user-added.txt'
+    [System.IO.File]::WriteAllText($installedUserBlobAsset, 'keep-installed-asset')
+    & (Join-Path $firstInstall.runtimePath 'scripts\Rebuild.ps1') @rebuildArguments
+    $rebuiltManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/Dev/user-local.css')) 'Installed rebuild adopted a local Dev file into the ownership manifest.'
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'runtime/assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset into the ownership manifest.'
+    Assert-True (-not (@($rebuiltManifest.managedFiles) -contains 'assets/user-local.txt')) 'Installed rebuild adopted a local runtime asset as an installed asset.'
     $apiRequests.Clear()
     & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css'))) 'Update left a stale file listed in the ownership manifest.'
     Assert-Equal '.blobui-local { color: lime; }' ([System.IO.File]::ReadAllText($installedUserCss)) 'Update removed a user file that was not listed in the ownership manifest.'
+    Assert-Equal 'keep-runtime-asset' ([System.IO.File]::ReadAllText($installedUserRuntimeAsset)) 'Update removed a user file under runtime/assets that was not listed in the ownership manifest.'
+    Assert-Equal 'keep-installed-asset' ([System.IO.File]::ReadAllText($installedUserBlobAsset)) 'Update removed an untracked file from the installed assets directory.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'Update removed an untracked asset file.'
     Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'A later update replaced the installed custom banner.'
 
@@ -915,6 +926,15 @@ try {
     Write-BlobUiAtomicJson -Path (Join-Path $defaultsBlobDirectory 'data.json') -InputObject $defaultsSavedData
     Copy-Item -LiteralPath $firstInstall.credentialPath -Destination (Join-Path $defaultsCredentialDirectory 'anytype-api-key.dpapi')
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $defaultsBlobDirectory '.blobui-managed-files.json'))) 'A legacy update fixture unexpectedly had an ownership manifest.'
+    $defaultsRuntimeDirectory = Join-Path $defaultsBlobDirectory 'runtime'
+    [System.IO.Directory]::CreateDirectory($defaultsRuntimeDirectory) | Out-Null
+    Copy-Item -Path (Join-Path $firstInstall.runtimePath '*') -Destination $defaultsRuntimeDirectory -Recurse -Force
+    $legacyRuntimeUserAsset = Join-Path $defaultsRuntimeDirectory 'assets\legacy-user.txt'
+    [System.IO.File]::WriteAllText($legacyRuntimeUserAsset, 'keep-legacy-runtime-asset')
+    & (Join-Path $defaultsRuntimeDirectory 'scripts\Rebuild.ps1') -ApiTransport $apiTransport
+    $defaultsRebuiltManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))
+    Assert-Equal 0 @($defaultsRebuiltManifest.managedFiles).Count 'Installed rebuild claimed runtime files from a legacy install without an ownership manifest.'
+    Assert-Equal 'keep-legacy-runtime-asset' ([System.IO.File]::ReadAllText($legacyRuntimeUserAsset)) 'Installed rebuild changed a runtime asset in a legacy install without an ownership manifest.'
     $apiRequests.Clear()
     & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $defaultsInstallDirectory -ApiTransport $apiTransport
     $defaultsUpdatedData = Read-BlobUiDataFile -Path (Join-Path $defaultsBlobDirectory 'data.json')
@@ -923,6 +943,7 @@ try {
     Assert-Equal '#DE50DE' $defaultsUpdatedData.settings.accentColor 'Update retained a stale local Accent Color instead of the release default for a missing Anytype field.'
     Assert-Equal "$emptyObjectId" $defaultsUpdatedData.settingsObjectIds 'Update changed the legacy selected settings object.'
     Assert-Equal '.legacy { color: blue; }' ([System.IO.File]::ReadAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'))) 'Update deleted an untracked file from a legacy install without a manifest.'
+    Assert-Equal 'keep-legacy-runtime-asset' ([System.IO.File]::ReadAllText($legacyRuntimeUserAsset)) 'Update deleted a runtime asset in a legacy install without a manifest.'
     Assert-Equal '1.0.0' (ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))).releaseVersion 'A legacy update did not record its release version.'
     Assert-Equal 1 @($apiRequests | Where-Object { $_.Path -match ("/objects/" + [System.Text.RegularExpressions.Regex]::Escape($emptyObjectId) + "\?include=properties&ids=full$") }).Count 'Update did not reuse the selected object ID from the legacy data file.'
     Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'A legacy update rediscovered settings objects.'
