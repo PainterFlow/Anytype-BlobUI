@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 
 $script:BlobUiApiVersion = 'v2'
 $script:BlobUiApiBaseUri = 'http://127.0.0.1:31009'
-$script:BlobUiReleaseVersion = '1.0.0'
+$script:BlobUiReleaseVersion = '1.1.0'
 $script:BlobUiDefaultSettings = @{
     fontFamily = 'Libron'
     codeFontFamily = 'Consolas'
@@ -412,12 +412,27 @@ function Test-BlobUiCssColorAlpha {
     return $alpha -ge 0 -and $alpha -le $limit
 }
 
+function Test-BlobUiCssColorComponentIsMaximum {
+    param([Parameter(Mandatory = $true)][string]$Value, [Parameter(Mandatory = $true)][decimal]$Maximum)
+
+    $numberText = $Value.Trim()
+    $isPercentage = $numberText.EndsWith('%')
+    if ($isPercentage) { $numberText = $numberText.Substring(0, $numberText.Length - 1) }
+    $number = [decimal]0
+    if (-not [decimal]::TryParse($numberText, [System.Globalization.NumberStyles]::AllowDecimalPoint, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number)) {
+        return $false
+    }
+    $limit = if ($isPercentage) { [decimal]100 } else { $Maximum }
+    return $number -eq $limit
+}
+
 function ConvertTo-BlobUiColorValue {
     param(
         [AllowNull()][string]$Value,
         [string]$Name = 'CSS color',
         [switch]$AllowDefault,
-        [switch]$AllowWhite
+        [switch]$AllowWhite,
+        [switch]$RejectWhite
     )
 
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -445,8 +460,14 @@ function ConvertTo-BlobUiColorValue {
         throw "'$Name' does not accept Default."
     }
     if ($paletteNames.ContainsKey($lowerValue)) { return $paletteNames[$lowerValue] }
-    if ($AllowWhite -and $lowerValue -ceq 'white') { return 'White' }
+    if ($AllowWhite -and $lowerValue -ceq 'white') {
+        if ($RejectWhite) { throw "White is not supported for $Name. Choose another color or enter 'default'." }
+        return 'White'
+    }
     if ($trimmed -match '^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$') {
+        if ($RejectWhite -and $trimmed -match '^#(?:[Ff]{3}|[Ff]{6})$') {
+            throw "White is not supported for $Name. Choose another color or enter 'default'."
+        }
         return $trimmed.ToUpperInvariant()
     }
     if ($trimmed -in @(
@@ -497,6 +518,12 @@ function ConvertTo-BlobUiColorValue {
         }
         if ($null -ne $alpha -and -not (Test-BlobUiCssColorAlpha -Value $alpha)) {
             throw "'$Name' contains an rgb()/rgba() alpha outside its valid range."
+        }
+        if ($RejectWhite -and
+            (Test-BlobUiCssColorComponentIsMaximum -Value $channels[0] -Maximum ([decimal]255)) -and
+            (Test-BlobUiCssColorComponentIsMaximum -Value $channels[1] -Maximum ([decimal]255)) -and
+            (Test-BlobUiCssColorComponentIsMaximum -Value $channels[2] -Maximum ([decimal]255))) {
+            throw "White is not supported for $Name. Choose another color or enter 'default'."
         }
         return $trimmed
     }
@@ -567,7 +594,8 @@ function ConvertTo-BlobUiCssPlaceholderValue {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('font', 'color', 'url', 'number', 'boolean')][string]$Type,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
-        [string]$Name = 'CSS setting'
+        [string]$Name = 'CSS setting',
+        [switch]$RejectWhite
     )
 
     $trimmed = $Value.Trim()
@@ -592,7 +620,7 @@ function ConvertTo-BlobUiCssPlaceholderValue {
                 teal = 'var(--color-teal)'
                 green = 'var(--color-green, var(--color-lime))'
             }
-            $colorValue = ConvertTo-BlobUiColorValue -Value $trimmed -Name $Name -AllowWhite
+            $colorValue = ConvertTo-BlobUiColorValue -Value $trimmed -Name $Name -AllowWhite -RejectWhite:$RejectWhite
             $paletteName = $colorValue.ToLowerInvariant()
             if ($paletteVariables.ContainsKey($paletteName)) {
                 return $paletteVariables[$paletteName]
@@ -644,13 +672,10 @@ function ConvertTo-BlobUiAccentColorValue {
     if ($null -ne $Value -and $Value.Trim() -ieq 'default') {
         return 'var(--color-system-accent-100)'
     }
-    if ($null -ne $Value -and $Value.Trim() -ieq 'white') {
-        throw "White is not supported for Accent Color. Choose another color or enter 'default'."
-    }
     if ($null -ne $Value -and $Value.Trim() -ceq 'var(--color-system-accent-100)') {
         return $Value.Trim()
     }
-    return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color'
+    return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color' -RejectWhite
 }
 
 function Select-BlobUiItem {

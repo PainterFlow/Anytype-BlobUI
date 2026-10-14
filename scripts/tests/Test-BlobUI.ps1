@@ -504,6 +504,35 @@ try {
     Assert-Equal 'rgba(12 34 56 / 50%)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgba(12 34 56 / 50%)') 'A modern space/slash rgba() color was rejected.'
     Assert-Equal 'rgb(100% 0 0)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100% 0 0)') 'Modern rgb() did not accept valid mixed channel units.'
     Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'General CSS color settings lost White compatibility.'
+    $whiteAccentValues = @(
+        'White',
+        '#fff',
+        '#fFf',
+        '#ffffff',
+        'rgb(255, 255, 255)',
+        'rgb(255 255 255)',
+        'rgb(255.0 255.00 255)',
+        'rgb(100% 100% 100%)',
+        'rgb(100% 255 100%)',
+        'rgba(255 255 255 / 50%)',
+        'rgba(255, 255, 255, 1)'
+    )
+    foreach ($whiteAccentValue in $whiteAccentValues) {
+        $whiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+        $whiteAccentData.settings.accentColor = $whiteAccentValue
+        $whiteAccentCssPath = Join-Path $testRoot ("white-accent-{0}.css" -f [array]::IndexOf($whiteAccentValues, $whiteAccentValue))
+        Assert-Throws {
+            Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $whiteAccentCssPath -Data $whiteAccentData | Out-Null
+        } "White Accent Color '$whiteAccentValue' was accepted." 'not supported'
+    }
+    $nearWhiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+    $nearWhiteAccentData.settings.accentColor = '#FEFFFF'
+    $nearWhiteAccentCssPath = Join-Path $testRoot 'near-white-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $nearWhiteAccentCssPath -Data $nearWhiteAccentData | Out-Null
+    $nonWhiteRgbAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+    $nonWhiteRgbAccentData.settings.accentColor = 'rgb(254 255 255)'
+    $nonWhiteRgbAccentCssPath = Join-Path $testRoot 'non-white-rgb-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $nonWhiteRgbAccentCssPath -Data $nonWhiteRgbAccentData | Out-Null
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'red; color:blue' } 'Unsafe color value' 'hexadecimal'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(256, 0, 0)' } 'Out-of-range RGB channel was accepted.' 'channel outside'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100%, 0, 0)' } 'Legacy comma rgb() accepted mixed channel units.' 'mixed rgb()/rgba() channel units'
@@ -878,7 +907,7 @@ try {
     Assert-Equal "$generalObjectId|$spaceObjectId" $updatedData.settingsObjectIds 'Update changed the selected object IDs or their order.'
     Assert-Equal $installDirectory $updatedData.installDirectory 'Update changed the saved install directory.'
     Assert-Equal 1 $updatedData.schemaVersion 'Update changed the data schema version while recording the release.'
-    Assert-Equal '1.0.0' $updatedManifest.releaseVersion 'Update did not record the installed release version.'
+    Assert-Equal '1.1.0' $updatedManifest.releaseVersion 'Update did not record the installed release version.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Update damaged or replaced the saved API key.'
     Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Update replaced the installed custom banner.'
     $updateObjectReads = @($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' })
@@ -1062,7 +1091,7 @@ try {
     Assert-Equal "$emptyObjectId" $defaultsUpdatedData.settingsObjectIds 'Update changed the legacy selected settings object.'
     Assert-Equal '.legacy { color: blue; }' ([System.IO.File]::ReadAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'))) 'Update deleted an untracked file from a legacy install without a manifest.'
     Assert-Equal 'keep-legacy-runtime-asset' ([System.IO.File]::ReadAllText($legacyRuntimeUserAsset)) 'Update deleted a runtime asset in a legacy install without a manifest.'
-    Assert-Equal '1.0.0' (ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))).releaseVersion 'A legacy update did not record its release version.'
+    Assert-Equal '1.1.0' (ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))).releaseVersion 'A legacy update did not record its release version.'
     Assert-Equal 1 @($apiRequests | Where-Object { $_.Path -match ("/objects/" + [System.Text.RegularExpressions.Regex]::Escape($emptyObjectId) + "\?include=properties&ids=full$") }).Count 'Update did not reuse the selected object ID from the legacy data file.'
     Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'A legacy update rediscovered settings objects.'
 
