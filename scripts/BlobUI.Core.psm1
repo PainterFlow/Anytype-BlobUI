@@ -637,6 +637,21 @@ function ConvertTo-BlobUiCssPlaceholderValue {
     }
 }
 
+function ConvertTo-BlobUiAccentColorValue {
+    param([AllowNull()][string]$Value)
+
+    if ($null -ne $Value -and $Value.Trim() -ieq 'default') {
+        return 'var(--color-system-accent-100)'
+    }
+    if ($null -ne $Value -and $Value.Trim() -ieq 'white') {
+        throw "White is not supported for Accent Color. Choose another color or enter 'default'."
+    }
+    if ($null -ne $Value -and $Value.Trim() -ceq 'var(--color-system-accent-100)') {
+        return $Value.Trim()
+    }
+    return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color'
+}
+
 function Select-BlobUiItem {
     param(
         [Parameter(Mandatory = $true)][object[]]$Items,
@@ -785,7 +800,7 @@ function Get-BlobUiNormalizedSettings {
     return [ordered]@{
         fontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$fontValue) -Name 'Font'
         codeFontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$codeFontValue) -Name 'Code Font'
-        accentColor = ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$accentValue) -Name 'Accent Color'
+        accentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$accentValue)
         # Kept in the saved schema for compatibility. The banner is no longer an Anytype setting.
         bannerPath = $script:BlobUiDefaultSettings.bannerPath
     }
@@ -1114,9 +1129,27 @@ function Invoke-BlobUiCssCompile {
             param($match)
             $name = $match.Groups['name'].Value
             $entry = $values[$name]
+            if ($name -ceq 'accentColor') {
+                return ConvertTo-BlobUiAccentColorValue -Value ([string]$entry.value)
+            }
             return ConvertTo-BlobUiCssPlaceholderValue -Type $entry.type -Value ([string]$entry.value) -Name $name
         }
     )
+    $customAccentConditionPattern = '(?s)/\*\s*@blobui-if-custom-accent\s*\*/(?<content>.*?)/\*\s*@blobui-endif-custom-accent\s*\*/'
+    $normalizedAccentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$Data.settings.accentColor)
+    $hasCustomAccent = $normalizedAccentColor -cne 'var(--color-system-accent-100)'
+    $compiled = [System.Text.RegularExpressions.Regex]::Replace(
+        $compiled,
+        $customAccentConditionPattern,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            if ($hasCustomAccent) { return $match.Groups['content'].Value }
+            return ''
+        }
+    )
+    if ($compiled -match '/\*\s*@blobui-(?:if-custom-accent|endif-custom-accent)\s*\*/') {
+        throw 'CSS contains an unmatched custom accent condition.'
+    }
     $declarationPattern = '/\*\s*@blobui-placeholder\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s+(?<type>font|color|url|number|boolean)\s*\*/'
     $compiled = [System.Text.RegularExpressions.Regex]::Replace($compiled, $declarationPattern, '')
     $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $Data.calendarObjectColors

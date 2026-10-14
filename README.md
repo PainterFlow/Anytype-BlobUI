@@ -69,4 +69,3 @@ The current text effects are:
 
 Apply an effect by selecting text in Anytype and setting its link to the effect URL.
 Spoilers appear as rounded blocks slightly brighter than the sidebar widgets, with a darker rounded background when revealed. Hovering anywhere in the same editable text block reveals all its spoilers; moving outside that block conceals them again. Links keep pointer events disabled to prevent Anytype hover previews. Keyboard focus also reveals an individual spoiler. Formatting fragments join seamlessly with rounded phrase ends. Each link fragment is an inline block, so line wrapping can differ from ordinary text.
-Existing effect links must be updated to the `blob://text.sfx/` URLs above.

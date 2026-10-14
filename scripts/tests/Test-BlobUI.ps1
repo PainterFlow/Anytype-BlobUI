@@ -101,7 +101,7 @@ $staleCalendarObjectId = 'bafy-calendar-stale-object-id'
 $calendarColorPropertyKey = 'calendar_color'
 $otherSpaceCalendarColorPropertyKey = 'calendar_tint'
 $apiRequests = [System.Collections.Generic.List[object]]::new()
-$knownKeys = @('unit-test-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
+$knownKeys = @('unit-test-key', 'default-accent-key', 'bad-color-key', 'bad-font-key', 'bad-banner-key', 'no-calendar-color-key')
 $apiTransport = {
     param($ApiKey, $Method, $Path, $Body, $Headers)
 
@@ -333,7 +333,10 @@ $apiTransport = {
         if ($Method -cne 'Get' -or [string]$Path -notmatch '\?include=properties&ids=full$') {
             throw 'The mock API expected a v2 full-ID property read.'
         }
-        if ($ApiKey -eq 'bad-color-key') {
+        if ($ApiKey -eq 'default-accent-key') {
+            $properties = @{ 'Accent Color' = 'Default' }
+        }
+        elseif ($ApiKey -eq 'bad-color-key') {
             $properties = @{ 'Accent Color' = '#de50de; color:red' }
         }
         elseif ($ApiKey -eq 'bad-font-key') {
@@ -446,6 +449,24 @@ try {
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
     Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The fixed banner asset path is incorrect.'
 
+    $defaultAccentDataPath = Join-Path $testRoot 'default-accent-data.json'
+    $defaultAccentData = Get-BlobUiSettingsData -ApiKey 'default-accent-key' -OutputPath $defaultAccentDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
+    Assert-Equal 'var(--color-system-accent-100)' $defaultAccentData.settings.accentColor 'Accent Color Default did not resolve to Anytype system accent blue.'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'Default' } 'Default is unavailable to generic color settings.' 'does not accept Default'
+    Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'var(--color-system-accent-100)' } 'Anytype system accent blue is unavailable to generic color settings.' 'three or six digit hexadecimal'
+    $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
+    $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
+    Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
+    Assert-True (-not $defaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'Accent Color Default still overrides Anytype''s original home icon color.'
+    $literalDefaultAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $defaultAccentData -Depth 20)
+    $literalDefaultAccentData.settings.accentColor = '  dEfAuLt  '
+    $literalDefaultAccentCssPath = Join-Path $testRoot 'literal-default-accent.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $literalDefaultAccentCssPath -Data $literalDefaultAccentData | Out-Null
+    $literalDefaultAccentCss = [System.IO.File]::ReadAllText($literalDefaultAccentCssPath)
+    Assert-True ($literalDefaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'A raw Default accent did not normalize to Anytype system accent blue.'
+    Assert-True (-not $literalDefaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A raw Default accent still overrides Anytype''s original home icon color.'
+
     $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
     Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject ([ordered]@{
         schemaVersion = 1
@@ -482,7 +503,7 @@ try {
     Assert-Equal 'rgb(12, 34, 56)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(12, 34, 56)') 'A comma-form rgb() color was rejected.'
     Assert-Equal 'rgba(12 34 56 / 50%)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgba(12 34 56 / 50%)') 'A modern space/slash rgba() color was rejected.'
     Assert-Equal 'rgb(100% 0 0)' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100% 0 0)') 'Modern rgb() did not accept valid mixed channel units.'
-    Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'Accent Color lost White compatibility.'
+    Assert-Equal '#FFFFFF' (ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'White') 'General CSS color settings lost White compatibility.'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'red; color:blue' } 'Unsafe color value' 'hexadecimal'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(256, 0, 0)' } 'Out-of-range RGB channel was accepted.' 'channel outside'
     Assert-Throws { ConvertTo-BlobUiCssPlaceholderValue -Type color -Value 'rgb(100%, 0, 0)' } 'Legacy comma rgb() accepted mixed channel units.' 'mixed rgb()/rgba() channel units'
@@ -502,8 +523,13 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
+    Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
+    $whiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+    $whiteAccentData.settings.accentColor = 'White'
+    $whiteAccentCssPath = Join-Path $testRoot 'white-accent.css'
+    Assert-Throws { Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $whiteAccentCssPath -Data $whiteAccentData | Out-Null } 'White Accent Color was accepted.' 'White is not supported for Accent Color'
     Assert-True ($css.Contains('[data-view-type="4"][data-drop-type="record"][data-id="' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the same-element calendar record selector.'
     Assert-True ($css.Contains('.viewContent.viewCalendar .record[id="record-' + $calendarBlueObjectId + '"]')) 'Compiled CSS omitted the calendar wrapper selector used by non-draggable records.'
     $calendarColorRulesStart = $css.IndexOf('/* BlobUI Calendar Color overrides */', [System.StringComparison]::Ordinal)
