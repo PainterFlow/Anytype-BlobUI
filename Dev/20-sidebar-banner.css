@@ -33,6 +33,22 @@
     transition: opacity 200ms ease;
 }
 
+/* Keep the banner hidden until space content mounts, then allow Anytype's
+   initial scroll restoration and its 200ms opacity fade to finish. This
+   selector must not depend on isScrolled, so scrolling cannot restart it. */
+.sidebar .sidebarPage.pageWidget>.head.isDefault::after {
+    visibility: hidden;
+}
+
+.sidebar .sidebarPage.pageWidget:has(.widget.widgetSpace .iconHead)>.head.isDefault::after {
+    animation: blobui-sidebar-banner-ready 0s linear 500ms both;
+}
+
+@keyframes blobui-sidebar-banner-ready {
+    from { visibility: hidden; }
+    to { visibility: visible; }
+}
+
 /* Put header controls and scrollable widgets above the image. */
 .sidebar .sidebarPage.pageWidget>.head.isDefault>*,
 .sidebar .sidebarPage.pageWidgetManage>.head.isDefault>* {
