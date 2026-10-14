@@ -37,4 +37,44 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 8. Run .\scripts\install.ps1
 	- If you didn't pick a custom instillation, just press A and Enter.
 	- Paste your Anytype API key.
-9. In Anytype, press Ctrl/Cmd + R to reload and it should be done. 
+9. In Anytype, press Ctrl/Cmd + R to reload and it should be done.
+
+## Updating BlobUI
+
+1. Download and extract the newer BlobUI release.
+2. Open a terminal in the extracted folder and run .\scripts\Update.ps1.
+3. If Anytype uses a custom data directory and the extracted folder has no saved install location, pass it with .\scripts\Update.ps1 -InstallDirectory "C:\path\to\Anytype".
+4. In Anytype, press Ctrl/Cmd + R to reload the stylesheet.
+
+The updater reads the saved API key from its encrypted local file and refreshes the settings objects you selected during installation. You do not need to import the BlobUI Settings Space again. The updater does not download releases or change objects in Anytype.
+
+## Dev Features
+
+### Text Effects & Embeds
+
+I'm currently working on implementing custom text effects and embeds with the help of the href attribute
+The Base Idea is:
+```css
+/* All BlobUI markers inside object text */
+.pageMain .editor .blockText .editable a[href^="blob://"] {
+}
+
+/* A specific text effect */
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"] {
+}
+
+/* The block containing that marker */
+.pageMain .editor .blockText:has(
+  .editable a[href="blob://text.sfx/spoiler"]
+) {
+}
+```
+The current text effects are:
+- `blob://text.sfx/spoiler`: Hides the marked text until you hover over its editable text block
+- `blob://text.sfx/glitchy`: Creates a cool glitchy effect
+- `blob://text.sfx/jumping`: Moves the marked text gently up and down
+- `blob://text.sfx/rgb`: Displays a rainbow gradient that travels across the text
+- `blob://text.sfx/neon`: Displays a neon gradient that travels across the text
+
+Apply an effect by selecting text in Anytype and setting its link to the effect URL.
+Spoilers appear as rounded blocks slightly brighter than the sidebar widgets, with a darker rounded background when revealed. Hovering anywhere in the same editable text block reveals all its spoilers; moving outside that block conceals them again. Links keep pointer events disabled to prevent Anytype hover previews. Keyboard focus also reveals an individual spoiler. Formatting fragments join seamlessly with rounded phrase ends. Each link fragment is an inline block, so line wrapping can differ from ordinary text.

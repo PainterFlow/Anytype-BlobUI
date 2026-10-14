@@ -1,6 +1,8 @@
+/* @blobui-if-custom-accent */
 #widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg {
     color: var(--color-blob-accent) !important;
 }
+/* @blobui-endif-custom-accent */
 
 /* One oversized image on the fixed header, behind the scrolling content. */
 .sidebar .sidebarPage.pageWidget>.head.isDefault,
@@ -29,6 +31,31 @@
     z-index: 0;
     opacity: 1;
     transition: opacity 200ms ease;
+}
+
+/* Keep the banner hidden until space content mounts, then allow Anytype's
+   initial scroll restoration and its 200ms opacity fade to finish. This
+   selector must not depend on isScrolled, so scrolling cannot restart it. */
+.sidebar .sidebarPage.pageWidget>.head.isDefault::after {
+    visibility: hidden;
+}
+
+.sidebar .sidebarPage.pageWidget:has(.widget.widgetSpace .iconHead)>.head.isDefault::after {
+    animation:
+        blobui-sidebar-banner-ready 0s linear 500ms both,
+        blobui-sidebar-banner-fade 200ms ease 500ms both;
+}
+
+@keyframes blobui-sidebar-banner-ready {
+    from { visibility: hidden; }
+    to { visibility: visible; }
+}
+
+/* Fade the banner's pixels without replacing opacity, which Anytype uses
+   below to fade it out while the sidebar scrolls. */
+@keyframes blobui-sidebar-banner-fade {
+    from { filter: opacity(0); }
+    to { filter: opacity(1); }
 }
 
 /* Put header controls and scrollable widgets above the image. */
@@ -65,6 +92,25 @@
 .sidebar .sidebarPage.pageWidget>.body::-webkit-scrollbar-track,
 .sidebar .sidebarPage.pageWidgetManage>.body::-webkit-scrollbar-track {
     margin-top: max(0px, calc(var(--header-image-height) - 52px + 4px)) !important;
+}
+
+/* Hide the native scrollbar that can flash on the minimized vault sidebar.
+   Leave overflow behavior intact so wheel and keyboard scrolling still work. */
+#sidebarPageVault.customScrollbar.isMinimal,
+#sidebarPageVault.customScrollbar.isMinimal .body,
+#sidebarPageVault.customScrollbar.isMinimal .scrollArea,
+#sidebarPageVault.customScrollbar.isMinimal .ReactVirtualized__Grid {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+#sidebarPageVault.customScrollbar.isMinimal::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .body::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .scrollArea::-webkit-scrollbar,
+#sidebarPageVault.customScrollbar.isMinimal .ReactVirtualized__Grid::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
 }
 
 /* Align the search and create/edit controls with the widgets' right edge. */
