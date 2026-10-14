@@ -122,6 +122,12 @@ $dataPath = Join-Path $blobDirectory 'data.json'
 $credentialPath = Join-Path $blobDirectory 'credentials\anytype-api-key.dpapi'
 $data = Read-BlobUiDataFile -Path $dataPath
 $installDirectory = [System.IO.Path]::GetFullPath([string]$data.installDirectory)
+$releasePathParts = @($installDirectory -split '[\\/]+' | Where-Object {
+    $_.Equals('Releases', [System.StringComparison]::OrdinalIgnoreCase)
+})
+if ($releasePathParts.Count -gt 0) {
+    throw 'The selected directory is inside a Releases path. BlobUI will not overwrite custom.css in a Releases folder.'
+}
 if ($null -eq $state.InstallDirectory) {
     $runtimeExpectedInstallDirectory = [System.IO.Path]::GetFullPath((Join-Path $blobDirectory '..'))
     if (-not $installDirectory.Equals($runtimeExpectedInstallDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {

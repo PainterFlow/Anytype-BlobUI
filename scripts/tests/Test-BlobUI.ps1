@@ -827,6 +827,45 @@ try {
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
     $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
+
+    $releaseUpdateDirectory = Join-Path (Join-Path $testRoot 'Update target\rElEaSeS') 'Anytype Data'
+    $releaseUpdateBlob = Join-Path $releaseUpdateDirectory 'blob'
+    [System.IO.Directory]::CreateDirectory($releaseUpdateBlob) | Out-Null
+    $releaseUpdateDataPath = Join-Path $releaseUpdateBlob 'data.json'
+    $releaseUpdateData = Read-BlobUiDataFile -Path $firstInstall.dataPath
+    $releaseUpdateData.installDirectory = [System.IO.Path]::GetFullPath($releaseUpdateDirectory)
+    Write-BlobUiAtomicJson -Path $releaseUpdateDataPath -InputObject $releaseUpdateData
+    $releaseUpdateDataBefore = [System.IO.File]::ReadAllText($releaseUpdateDataPath)
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $releaseUpdateDirectory -ApiTransport $apiTransport
+    } 'An update accepted an explicit target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An update contacted the API before rejecting a Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected explicit Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected explicit Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected explicit Releases update created staging files.'
+
+    Copy-Item -LiteralPath $firstInstall.runtimePath -Destination (Join-Path $releaseUpdateBlob 'runtime') -Recurse
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $releaseUpdateBlob 'runtime\scripts\Update.ps1') -ApiTransport $apiTransport
+    } 'An installed runtime update accepted a target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An installed runtime update contacted the API before rejecting a Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected installed runtime Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected installed runtime Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected installed runtime Releases update created staging files.'
+
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $releaseUpdateDirectory
+    $apiRequests.Clear()
+    Assert-Throws {
+        & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    } 'An update accepted a source-pointer target beneath a Releases path.' 'Releases path'
+    Assert-Equal 0 $apiRequests.Count 'An update contacted the API before rejecting a source-pointer Releases target.'
+    Assert-Equal $releaseUpdateDataBefore ([System.IO.File]::ReadAllText($releaseUpdateDataPath)) 'A rejected source-pointer Releases update changed its settings.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateDirectory 'custom.css'))) 'A rejected source-pointer Releases update created or overwrote custom.css.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $releaseUpdateBlob 'staging'))) 'A rejected source-pointer Releases update created staging files.'
+
+    Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments
     $pointerData = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
     Assert-Equal $installDirectory $pointerData.installDirectory 'The source rebuild did not resolve the saved custom install path with spaces.'
@@ -1120,6 +1159,14 @@ try {
     Assert-Throws { & $sourceUninstallScript -InstallDirectory $releaseRoot } 'An uninstall accepted a Releases folder as the Anytype directory.' 'Releases path'
     Assert-Equal 'release-root-css' ([System.IO.File]::ReadAllText((Join-Path $releaseRoot 'custom.css'))) 'The Releases folder guard changed custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $releaseRoot 'blob') -PathType Container) 'The Releases folder guard changed the blob directory.'
+
+    $nestedReleaseRoot = Join-Path (Join-Path $testRoot 'Nested uninstall target\rElEaSeS') 'Anytype Data'
+    $nestedReleaseSentinel = Join-Path $nestedReleaseRoot 'blob\keep.txt'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $nestedReleaseSentinel)) | Out-Null
+    [System.IO.File]::WriteAllText($nestedReleaseSentinel, 'preserve-nested-release-data')
+    Assert-Throws { & $sourceUninstallScript -InstallDirectory $nestedReleaseRoot } 'An uninstall accepted a nested Releases target.' 'Releases path'
+    Assert-Equal 'preserve-nested-release-data' ([System.IO.File]::ReadAllText($nestedReleaseSentinel)) 'A rejected nested Releases uninstall changed blob data.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $nestedReleaseRoot 'custom.css'))) 'A rejected nested Releases uninstall created or removed custom.css.'
 
     $outsideReparseTarget = Join-Path $testRoot 'Outside reparse target'
     [System.IO.Directory]::CreateDirectory((Join-Path $outsideReparseTarget 'blob')) | Out-Null
