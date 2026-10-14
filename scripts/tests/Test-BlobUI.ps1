@@ -742,6 +742,7 @@ try {
     $firstInstall = Invoke-BlobUiInstall @installArguments
     Assert-True (Test-Path -LiteralPath $firstInstall.cssPath -PathType Leaf) 'The CSS install did not create custom.css.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'The runtime install did not copy Update.ps1.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1') -PathType Leaf) 'The runtime install did not copy Uninstall.ps1.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'The install created a persistent backup directory.'
@@ -765,6 +766,8 @@ try {
     Assert-Equal 0 $backupArtifacts.Count 'A repeated install left a backup file behind.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'A repeated install damaged the encrypted API key.'
 
+    $installedBannerPath = Join-Path $firstInstall.assetsPath 'spacebanner\banner.png'
+    [System.IO.File]::WriteAllBytes($installedBannerPath, [System.Text.Encoding]::UTF8.GetBytes('custom-banner-sentinel'))
     $rebuildArguments = @{ ApiTransport = $apiTransport }
     & (Join-Path $firstInstall.runtimePath 'scripts\Rebuild.ps1') @rebuildArguments
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'Rebuild created a persistent backup directory.'
@@ -773,6 +776,7 @@ try {
     $rebuiltData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     Assert-Equal $installDirectory $rebuiltData.installDirectory 'Rebuild changed the saved install directory.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Rebuild damaged the encrypted API key.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Rebuild replaced the installed custom banner.'
 
     $rollbackInstallDirectory = Join-Path $testRoot 'Rollback Anytype Data'
     [System.IO.Directory]::CreateDirectory($rollbackInstallDirectory) | Out-Null
@@ -781,6 +785,12 @@ try {
     [System.IO.Directory]::CreateDirectory($rollbackCredentialDirectory) | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $rollbackInstallDirectory 'custom.css'), 'rollback-css-sentinel')
     [System.IO.File]::WriteAllText((Join-Path $rollbackBlobDirectory 'data.json'), 'rollback-data-sentinel')
+    $rollbackRuntimeScripts = Join-Path $rollbackBlobDirectory 'runtime\scripts'
+    $rollbackRuntimeAssetDirectory = Join-Path $rollbackBlobDirectory 'runtime\assets\spacebanner'
+    [System.IO.Directory]::CreateDirectory($rollbackRuntimeScripts) | Out-Null
+    [System.IO.Directory]::CreateDirectory($rollbackRuntimeAssetDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $rollbackRuntimeScripts 'Rebuild.ps1'), 'rollback-runtime-script-sentinel')
+    [System.IO.File]::WriteAllText((Join-Path $rollbackRuntimeAssetDirectory 'banner.png'), 'rollback-runtime-asset-sentinel')
     [System.IO.Directory]::CreateDirectory((Join-Path $rollbackCredentialDirectory 'anytype-api-key.dpapi')) | Out-Null
     $rollbackCandidatePath = Join-Path $testRoot 'rollback-data.json'
     $rollbackCandidate = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($candidateDataPath))
@@ -797,6 +807,10 @@ try {
     Assert-Throws { Invoke-BlobUiInstall @rollbackArguments } 'A credential write failure was accepted.' ''
     Assert-Equal 'rollback-css-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackInstallDirectory 'custom.css'))) 'A failed install did not restore the existing CSS.'
     Assert-Equal 'rollback-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackBlobDirectory 'data.json'))) 'A failed install did not restore existing settings data.'
+    Assert-Equal 'rollback-runtime-script-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackRuntimeScripts 'Rebuild.ps1'))) 'A failed install did not restore the runtime script.'
+    Assert-Equal 'rollback-runtime-asset-sentinel' ([System.IO.File]::ReadAllText((Join-Path $rollbackRuntimeAssetDirectory 'banner.png'))) 'A failed install did not restore the runtime asset.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory '.blobui-managed-files.json'))) 'A failed install recorded a release version.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory 'assets\spacebanner\banner.png'))) 'A failed install left its newly copied banner behind.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $rollbackBlobDirectory 'backups'))) 'A failed install created a persistent backup directory.'
     $backupArtifacts = @(Get-ChildItem -LiteralPath $rollbackInstallDirectory -Recurse -File -Filter '*.bak')
     Assert-Equal 0 $backupArtifacts.Count 'A failed install left a backup file behind.'
@@ -804,17 +818,51 @@ try {
     $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
     $sourceScriptsFixture = Join-Path $sourceFixture 'scripts'
     [System.IO.Directory]::CreateDirectory($sourceScriptsFixture) | Out-Null
-    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Uninstall.ps1')) {
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $scriptsDirectory $sourceFile) -Destination $sourceScriptsFixture
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
     Copy-Item -LiteralPath (Join-Path $repoRoot 'assets') -Destination $sourceFixture -Recurse
+    [System.IO.File]::WriteAllText((Join-Path $sourceFixture 'Dev\obsolete-managed.css'), '.blobui-obsolete { color: pink; }')
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
     $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
     & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') @sourceRebuildArguments
     $pointerData = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($pointerPath))
     Assert-Equal $installDirectory $pointerData.installDirectory 'The source rebuild did not resolve the saved custom install path with spaces.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css') -PathType Leaf) 'The first package install did not copy its managed Dev file.'
+
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    $updatedData = Read-BlobUiDataFile -Path $firstInstall.dataPath
+    $updatedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-Equal "$generalObjectId|$spaceObjectId" $updatedData.settingsObjectIds 'Update changed the selected object IDs or their order.'
+    Assert-Equal $installDirectory $updatedData.installDirectory 'Update changed the saved install directory.'
+    Assert-Equal 1 $updatedData.schemaVersion 'Update changed the data schema version while recording the release.'
+    Assert-Equal '1.0.0' $updatedManifest.releaseVersion 'Update did not record the installed release version.'
+    Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Update damaged or replaced the saved API key.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Update replaced the installed custom banner.'
+    $updateObjectReads = @($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' })
+    Assert-Equal 2 $updateObjectReads.Count 'Update did not fetch exactly the saved settings objects.'
+    Assert-True ($updateObjectReads[0].Path -like "*/objects/$generalObjectId?*") 'Update changed the first selected settings object.'
+    Assert-True ($updateObjectReads[1].Path -like "*/objects/$spaceObjectId?*") 'Update changed the second selected settings object.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'Update prompted to discover or reimport settings objects.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'Update did not install its bundled updater.'
+
+    $installedUserCss = Join-Path $firstInstall.runtimePath 'Dev\user-local.css'
+    [System.IO.File]::WriteAllText($installedUserCss, '.blobui-local { color: lime; }')
+    Remove-Item -LiteralPath (Join-Path $sourceFixture 'Dev\obsolete-managed.css') -Force
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'Dev\obsolete-managed.css'))) 'Update left a stale file listed in the ownership manifest.'
+    Assert-Equal '.blobui-local { color: lime; }' ([System.IO.File]::ReadAllText($installedUserCss)) 'Update removed a user file that was not listed in the ownership manifest.'
+    Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'Update removed an untracked asset file.'
+    Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'A later update replaced the installed custom banner.'
+
+    $migrationFixture = [pscustomobject]@{ schemaVersion = 1; localValue = 'keep' }
+    $migrationResult = Invoke-BlobUiLocalDataMigrations -Data $migrationFixture -FromReleaseVersion '0.9.0' -ToReleaseVersion (Get-BlobUiReleaseVersion)
+    Assert-Equal 'keep' $migrationResult.localValue 'The local migration hook changed data without a migration.'
+    Assert-Equal 1 $migrationResult.schemaVersion 'The local migration hook changed schemaVersion.'
 
     $stalePointerText = [System.IO.File]::ReadAllText($pointerPath)
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory (Join-Path $testRoot 'missing install')
@@ -843,6 +891,41 @@ try {
         $env:APPDATA = $oldAppData
     }
     Assert-True (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'custom.css') -PathType Leaf) 'The source rebuild did not discover a valid legacy default installation without a pointer.'
+
+    $defaultsInstallDirectory = Join-Path $testRoot 'Legacy Update Missing Fields'
+    $defaultsBlobDirectory = Join-Path $defaultsInstallDirectory 'blob'
+    $defaultsCredentialDirectory = Join-Path $defaultsBlobDirectory 'credentials'
+    $defaultsLegacyDevDirectory = Join-Path $defaultsBlobDirectory 'runtime\Dev'
+    [System.IO.Directory]::CreateDirectory($defaultsCredentialDirectory) | Out-Null
+    [System.IO.Directory]::CreateDirectory($defaultsLegacyDevDirectory) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'), '.legacy { color: blue; }')
+    $defaultsSavedData = [ordered]@{
+        schemaVersion = 1
+        apiVersion = 'v2'
+        selectedSpace = [ordered]@{ id = $testSpaceId; name = 'BlobUI Settings' }
+        settingsObjectIds = @($emptyObjectId)
+        settings = [ordered]@{
+            fontFamily = 'Saved Local Font'
+            codeFontFamily = 'Saved Local Code Font'
+            accentColor = '#123456'
+            bannerPath = 'spacebanner\banner.png'
+        }
+        installDirectory = [System.IO.Path]::GetFullPath($defaultsInstallDirectory)
+    }
+    Write-BlobUiAtomicJson -Path (Join-Path $defaultsBlobDirectory 'data.json') -InputObject $defaultsSavedData
+    Copy-Item -LiteralPath $firstInstall.credentialPath -Destination (Join-Path $defaultsCredentialDirectory 'anytype-api-key.dpapi')
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $defaultsBlobDirectory '.blobui-managed-files.json'))) 'A legacy update fixture unexpectedly had an ownership manifest.'
+    $apiRequests.Clear()
+    & (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $defaultsInstallDirectory -ApiTransport $apiTransport
+    $defaultsUpdatedData = Read-BlobUiDataFile -Path (Join-Path $defaultsBlobDirectory 'data.json')
+    Assert-Equal 'Libron' $defaultsUpdatedData.settings.fontFamily 'Update retained a stale local Font value instead of the release default for a missing Anytype field.'
+    Assert-Equal 'Consolas' $defaultsUpdatedData.settings.codeFontFamily 'Update retained a stale local Code Font value instead of the release default for a missing Anytype field.'
+    Assert-Equal '#DE50DE' $defaultsUpdatedData.settings.accentColor 'Update retained a stale local Accent Color instead of the release default for a missing Anytype field.'
+    Assert-Equal "$emptyObjectId" $defaultsUpdatedData.settingsObjectIds 'Update changed the legacy selected settings object.'
+    Assert-Equal '.legacy { color: blue; }' ([System.IO.File]::ReadAllText((Join-Path $defaultsLegacyDevDirectory 'legacy-untracked.css'))) 'Update deleted an untracked file from a legacy install without a manifest.'
+    Assert-Equal '1.0.0' (ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $defaultsBlobDirectory '.blobui-managed-files.json')))).releaseVersion 'A legacy update did not record its release version.'
+    Assert-Equal 1 @($apiRequests | Where-Object { $_.Path -match ("/objects/" + [System.Text.RegularExpressions.Regex]::Escape($emptyObjectId) + "\?include=properties&ids=full$") }).Count 'Update did not reuse the selected object ID from the legacy data file.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'A legacy update rediscovered settings objects.'
 
     $noInstallFixture = Join-Path $testRoot 'No Install Source'
     Copy-Item -LiteralPath $sourceFixture -Destination $noInstallFixture -Recurse

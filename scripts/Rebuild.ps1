@@ -1,7 +1,8 @@
 param(
     [string]$ApiBaseUri = 'http://127.0.0.1:31009',
     [scriptblock]$ApiTransport,
-    [string]$InstallDirectory
+    [string]$InstallDirectory,
+    [switch]$ForUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -112,6 +113,28 @@ try {
     }
     & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
 
+    if ($ForUpdate) {
+        $previousReleaseVersion = ''
+        $manifestPath = Join-Path $blobDirectory '.blobui-managed-files.json'
+        if (Test-Path -LiteralPath $manifestPath) {
+            $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
+            if ($manifestItem.PSIsContainer -or
+                (($manifestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                throw "The saved BlobUI install manifest cannot be read safely: $manifestPath"
+            }
+            try {
+                $previousManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($manifestPath)) -ErrorAction Stop
+                $previousReleaseVersion = [string]$previousManifest.releaseVersion
+            }
+            catch {
+                throw "The saved BlobUI install manifest is invalid: $manifestPath"
+            }
+        }
+        $candidateData = Read-BlobUiDataFile -Path $candidateDataPath
+        $candidateData = Invoke-BlobUiLocalDataMigrations -Data $candidateData -FromReleaseVersion $previousReleaseVersion -ToReleaseVersion (Get-BlobUiReleaseVersion)
+        Write-BlobUiAtomicJson -Path $candidateDataPath -InputObject $candidateData
+    }
+
     $compileArguments = @{
         DataPath = $candidateDataPath
         OutputPath = $compiledCssPath
@@ -129,11 +152,17 @@ try {
     }
     $result = Invoke-BlobUiInstall @installArguments
 
-    Write-Host "BlobUI was rebuilt at $($result.cssPath)"
+    if ($ForUpdate) {
+        Write-Host "BlobUI was updated to release $(Get-BlobUiReleaseVersion) at $($result.cssPath)"
+    }
+    else {
+        Write-Host "BlobUI was rebuilt at $($result.cssPath)"
+    }
     Write-Host 'Switch to Anytype and press Ctrl+R to reload the stylesheet. If custom CSS is not active, select Menu > File > Apply Custom CSS first.'
 }
 catch {
-    Write-Host "BlobUI rebuild failed: $($_.Exception.Message)" -ForegroundColor Red
+    $operationName = if ($ForUpdate) { 'update' } else { 'rebuild' }
+    Write-Host "BlobUI $operationName failed: $($_.Exception.Message)" -ForegroundColor Red
     throw
 }
 finally {

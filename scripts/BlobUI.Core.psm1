@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 
 $script:BlobUiApiVersion = 'v2'
 $script:BlobUiApiBaseUri = 'http://127.0.0.1:31009'
+$script:BlobUiReleaseVersion = '1.0.0'
 $script:BlobUiDefaultSettings = @{
     fontFamily = 'Libron'
     codeFontFamily = 'Consolas'
@@ -1201,7 +1202,7 @@ function Copy-BlobUiRuntime {
     [System.IO.Directory]::CreateDirectory($runtimeFullPath) | Out-Null
     $runtimeScriptsDirectory = Join-Path $runtimeFullPath 'scripts'
     [System.IO.Directory]::CreateDirectory($runtimeScriptsDirectory) | Out-Null
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Rebuild.ps1', 'Uninstall.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
         $sourcePath = Join-Path (Join-Path $sourceFullPath 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
@@ -1210,6 +1211,238 @@ function Copy-BlobUiRuntime {
     }
     Copy-BlobUiDirectoryContents -SourceDirectory (Join-Path $sourceFullPath 'Dev') -DestinationDirectory (Join-Path $runtimeFullPath 'Dev')
     Copy-BlobUiDirectoryContents -SourceDirectory (Join-Path $sourceFullPath 'assets') -DestinationDirectory (Join-Path $runtimeFullPath 'assets')
+}
+
+function ConvertTo-BlobUiManagedFileKey {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $key = $Path.Replace('\', '/').Trim('/')
+    if ([string]::IsNullOrWhiteSpace($key) -or
+        $key.Contains(':') -or
+        $key.StartsWith('/') -or
+        @($key.Split('/') | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) {
+        throw "The BlobUI file manifest contains an unsafe path: $Path"
+    }
+    if ($key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+    if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+') {
+        throw "The BlobUI file manifest contains an unsupported path: $Path"
+    }
+    return $key
+}
+
+function Read-BlobUiInstallManifest {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{
+            exists = $false
+            releaseVersion = $null
+            managedFiles = @()
+        }
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "The BlobUI ownership manifest is not a file: $Path"
+    }
+    try {
+        $manifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)) -ErrorAction Stop
+    }
+    catch {
+        throw "The BlobUI ownership manifest is invalid: $Path"
+    }
+    if ([int]$manifest.manifestVersion -ne 1 -or $null -eq $manifest.PSObject.Properties['managedFiles']) {
+        throw "The BlobUI ownership manifest has an unsupported format: $Path"
+    }
+    $managedFiles = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($manifest.managedFiles)) {
+        $key = ConvertTo-BlobUiManagedFileKey -Path ([string]$entry)
+        if ($null -ne $key -and $seen.Add($key)) {
+            $managedFiles.Add($key)
+        }
+    }
+    return [pscustomobject]@{
+        exists = $true
+        releaseVersion = [string]$manifest.releaseVersion
+        managedFiles = $managedFiles.ToArray()
+    }
+}
+
+function Get-BlobUiPackagedFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$RuntimeSourceDirectory,
+        [Parameter(Mandatory = $true)][string]$AssetsSourceDirectory
+    )
+
+    $runtimeSource = [System.IO.Path]::GetFullPath($RuntimeSourceDirectory)
+    $assetSource = [System.IO.Path]::GetFullPath($AssetsSourceDirectory)
+    if (-not (Test-Path -LiteralPath $runtimeSource -PathType Container)) {
+        throw "BlobUI runtime source was not found: $runtimeSource"
+    }
+    if (-not (Test-Path -LiteralPath $assetSource -PathType Container)) {
+        throw "BlobUI asset source was not found: $assetSource"
+    }
+
+    $files = [ordered]@{}
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+        $sourcePath = Join-Path (Join-Path $runtimeSource 'scripts') $scriptName
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "BlobUI runtime script was not found: $scriptName"
+        }
+        $files['runtime/scripts/' + $scriptName] = [System.IO.Path]::GetFullPath($sourcePath)
+    }
+
+    foreach ($tree in @(
+        [pscustomobject]@{ name = 'Dev'; path = (Join-Path $runtimeSource 'Dev') },
+        [pscustomobject]@{ name = 'assets'; path = (Join-Path $runtimeSource 'assets') }
+    )) {
+        if (-not (Test-Path -LiteralPath $tree.path -PathType Container)) {
+            throw "BlobUI runtime content was not found: $($tree.path)"
+        }
+        $treeRoot = [System.IO.Path]::GetFullPath($tree.path).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        $treeFiles = @(Get-ChildItem -LiteralPath $tree.path -File -Force -Recurse | Where-Object {
+            ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0
+        })
+        if ($treeFiles.Count -eq 0) {
+            throw "BlobUI runtime content is empty: $($tree.path)"
+        }
+        foreach ($file in $treeFiles) {
+            $relative = $file.FullName.Substring($treeRoot.Length).Replace('\', '/')
+            $files['runtime/' + $tree.name + '/' + $relative] = [System.IO.Path]::GetFullPath($file.FullName)
+        }
+    }
+
+    $assetRoot = $assetSource.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $assetFiles = @(Get-ChildItem -LiteralPath $assetSource -File -Force -Recurse | Where-Object {
+        ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0
+    })
+    if ($assetFiles.Count -eq 0) {
+        throw "BlobUI asset source is empty: $assetSource"
+    }
+    foreach ($file in $assetFiles) {
+        $relative = $file.FullName.Substring($assetRoot.Length).Replace('\', '/')
+        $key = 'assets/' + $relative
+        if (-not $key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $files[$key] = [System.IO.Path]::GetFullPath($file.FullName)
+        }
+    }
+    return $files
+}
+
+function Get-BlobUiManagedDestinationPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BlobDirectory,
+        [Parameter(Mandatory = $true)][string]$ManagedPath
+    )
+
+    $key = ConvertTo-BlobUiManagedFileKey -Path $ManagedPath
+    if ($null -eq $key) {
+        throw 'The installed custom banner is user data and cannot be treated as an owned package file.'
+    }
+    $blobRoot = [System.IO.Path]::GetFullPath($BlobDirectory)
+    $rootWithSeparator = $blobRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $destination = [System.IO.Path]::GetFullPath((Join-Path $blobRoot ($key.Replace('/', [System.IO.Path]::DirectorySeparatorChar))))
+    if (-not $destination.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The BlobUI managed file path leaves the Anytype blob directory: $ManagedPath"
+    }
+
+    $blobItem = Get-Item -LiteralPath $blobRoot -Force -ErrorAction SilentlyContinue
+    if ($null -ne $blobItem -and (($blobItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The Anytype blob directory is a reparse point: $blobRoot"
+    }
+    $relativeParent = [System.IO.Path]::GetDirectoryName($key.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
+    $current = $blobRoot
+    if (-not [string]::IsNullOrWhiteSpace($relativeParent)) {
+        foreach ($part in $relativeParent.Split([System.IO.Path]::DirectorySeparatorChar)) {
+            $current = Join-Path $current $part
+            if (Test-Path -LiteralPath $current) {
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+                if (-not $item.PSIsContainer) {
+                    throw "A BlobUI managed file parent is not a directory: $current"
+                }
+                if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "A BlobUI managed file parent is a reparse point: $current"
+                }
+            }
+        }
+    }
+    return $destination
+}
+
+function Get-BlobUiFileSnapshot {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "BlobUI will not replace a reparse point: $Path"
+        }
+        if ($item.PSIsContainer) {
+            return [pscustomobject]@{
+                path = $Path
+                kind = 'Directory'
+                bytes = $null
+                acl = $null
+                attributes = $item.Attributes
+            }
+        }
+        return [pscustomobject]@{
+            path = $Path
+            kind = 'File'
+            bytes = [System.IO.File]::ReadAllBytes($Path)
+            acl = (Get-Acl -LiteralPath $Path -ErrorAction Stop)
+            attributes = $item.Attributes
+        }
+    }
+    return [pscustomobject]@{
+        path = $Path
+        kind = 'Missing'
+        bytes = $null
+        acl = $null
+        attributes = $null
+    }
+}
+
+function Restore-BlobUiFileSnapshot {
+    param([Parameter(Mandatory = $true)]$Snapshot)
+
+    switch ($Snapshot.kind) {
+        'File' {
+            $parent = Split-Path -Parent $Snapshot.path
+            [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+            if (Test-Path -LiteralPath $Snapshot.path -PathType Container) {
+                throw "Rollback found a directory where a file was saved: $($Snapshot.path)"
+            }
+            [System.IO.File]::WriteAllBytes($Snapshot.path, [byte[]]$Snapshot.bytes)
+            Set-Acl -LiteralPath $Snapshot.path -AclObject $Snapshot.acl -ErrorAction Stop
+            [System.IO.File]::SetAttributes($Snapshot.path, [System.IO.FileAttributes]$Snapshot.attributes)
+        }
+        'Missing' {
+            if (Test-Path -LiteralPath $Snapshot.path -PathType Leaf) {
+                Remove-Item -LiteralPath $Snapshot.path -Force -ErrorAction Stop
+            }
+        }
+        'Directory' {
+            if (-not (Test-Path -LiteralPath $Snapshot.path -PathType Container)) {
+                throw "Rollback could not restore the saved directory: $($Snapshot.path)"
+            }
+        }
+    }
+}
+
+function Invoke-BlobUiLocalDataMigrations {
+    param(
+        [Parameter(Mandatory = $true)]$Data,
+        [string]$FromReleaseVersion,
+        [string]$ToReleaseVersion = $script:BlobUiReleaseVersion
+    )
+
+    return $Data
+}
+
+function Get-BlobUiReleaseVersion {
+    return $script:BlobUiReleaseVersion
 }
 
 function Set-BlobUiCredentialAcl {
@@ -1290,12 +1523,16 @@ function Invoke-BlobUiInstall {
         [Parameter(Mandatory = $true)][string]$AssetsSourceDirectory,
         [Parameter(Mandatory = $true)][string]$CompiledCssPath,
         [Parameter(Mandatory = $true)][string]$DataCandidatePath,
-        [string]$CredentialProtectedText
+        [string]$CredentialProtectedText,
+        [string]$ReleaseVersion = $script:BlobUiReleaseVersion
     )
 
     $installFullPath = [System.IO.Path]::GetFullPath($InstallDirectory)
     if (-not (Test-Path -LiteralPath $installFullPath -PathType Container)) {
         throw "The selected Anytype directory does not exist: $installFullPath"
+    }
+    if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$') {
+        throw "The BlobUI release version is invalid: $ReleaseVersion"
     }
     if (-not (Test-Path -LiteralPath $CompiledCssPath -PathType Leaf)) {
         throw "Compiled CSS was not found: $CompiledCssPath"
@@ -1321,56 +1558,148 @@ function Invoke-BlobUiInstall {
     $credentialDirectory = Join-Path $blobDirectory 'credentials'
     $credentialPath = Join-Path $credentialDirectory 'anytype-api-key.dpapi'
     $dataPath = Join-Path $blobDirectory 'data.json'
+    $manifestPath = Join-Path $blobDirectory '.blobui-managed-files.json'
     $cssDestination = Join-Path $installFullPath 'custom.css'
-    $oldCssExists = Test-Path -LiteralPath $cssDestination -PathType Leaf
-    $oldDataExists = Test-Path -LiteralPath $dataPath -PathType Leaf
-    $oldCredentialExists = Test-Path -LiteralPath $credentialPath -PathType Leaf
-    $oldCss = $null
-    $oldData = $null
-    $oldCredential = $null
-    if ($oldCssExists) { $oldCss = [System.IO.File]::ReadAllText($cssDestination, [System.Text.Encoding]::UTF8) }
-    if ($oldDataExists) { $oldData = [System.IO.File]::ReadAllText($dataPath, [System.Text.Encoding]::UTF8) }
-    if ($oldCredentialExists) { $oldCredential = [System.IO.File]::ReadAllText($credentialPath, [System.Text.Encoding]::UTF8) }
+    $blobItem = Get-Item -LiteralPath $blobDirectory -Force -ErrorAction SilentlyContinue
+    if ($null -ne $blobItem -and (($blobItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The Anytype blob directory is a reparse point: $blobDirectory"
+    }
+    $null = Get-BlobUiFileSnapshot -Path $manifestPath
+    $previousManifest = Read-BlobUiInstallManifest -Path $manifestPath
+    $packagedFiles = Get-BlobUiPackagedFiles -RuntimeSourceDirectory $RuntimeSourceDirectory -AssetsSourceDirectory $AssetsSourceDirectory
+    $manifestBannerPath = Join-Path (Join-Path $assetDestination 'spacebanner') 'banner.png'
+    foreach ($bannerDirectory in @($assetDestination, (Split-Path -Parent $manifestBannerPath))) {
+        if (Test-Path -LiteralPath $bannerDirectory) {
+            $bannerDirectoryItem = Get-Item -LiteralPath $bannerDirectory -Force -ErrorAction Stop
+            if (-not $bannerDirectoryItem.PSIsContainer -or
+                (($bannerDirectoryItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                throw "The installed BlobUI banner directory cannot be written safely: $bannerDirectory"
+            }
+        }
+    }
+    $installDefaultBanner = -not (Test-Path -LiteralPath $manifestBannerPath -PathType Leaf)
+    if (Test-Path -LiteralPath $manifestBannerPath -PathType Container) {
+        throw "The installed BlobUI banner path is a directory: $manifestBannerPath"
+    }
+    if ($installDefaultBanner) {
+        if (Test-Path -LiteralPath $manifestBannerPath) {
+            throw "The installed BlobUI banner path is not a file: $manifestBannerPath"
+        }
+    }
 
-    [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
+    $managedFiles = @($packagedFiles.Keys | Where-Object {
+        -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
+    } | Sort-Object -Unique)
+    $managedFileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($managedPath in $managedFiles) {
+        $null = $managedFileSet.Add([string]$managedPath)
+    }
+    $stalePaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($previousPath in @($previousManifest.managedFiles)) {
+        if (-not $managedFileSet.Contains([string]$previousPath)) {
+            $stalePaths.Add([string]$previousPath)
+        }
+    }
+
+    $copyOperations = [System.Collections.Generic.List[object]]::new()
+    foreach ($managedPath in $packagedFiles.Keys) {
+        $sourcePath = [System.IO.Path]::GetFullPath([string]$packagedFiles[$managedPath])
+        $destinationPath = Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath ([string]$managedPath)
+        if (-not $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $copyOperations.Add([pscustomobject]@{
+                source = $sourcePath
+                destination = $destinationPath
+            })
+        }
+    }
+    $staleDestinations = [System.Collections.Generic.List[string]]::new()
+    foreach ($stalePath in $stalePaths) {
+        $staleDestinations.Add((Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath $stalePath))
+    }
+
+    $compiledCss = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($CompiledCssPath), [System.Text.Encoding]::UTF8)
+    $candidateDataText = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($DataCandidatePath), [System.Text.Encoding]::UTF8)
+    $manifestText = ConvertTo-Json -InputObject ([ordered]@{
+        manifestVersion = 1
+        releaseVersion = $ReleaseVersion
+        managedFiles = @($managedFiles)
+    }) -Depth 10
+    $manifestText += [Environment]::NewLine
+
+    $snapshotPaths = [System.Collections.Generic.List[string]]::new()
+    $snapshotPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($operation in $copyOperations) {
+        if ($snapshotPathSet.Add([string]$operation.destination)) {
+            $snapshotPaths.Add([string]$operation.destination)
+        }
+    }
+    if ($installDefaultBanner) {
+        if ($snapshotPathSet.Add([string]$manifestBannerPath)) {
+            $snapshotPaths.Add([string]$manifestBannerPath)
+        }
+    }
+    foreach ($staleDestination in $staleDestinations) {
+        if ($snapshotPathSet.Add([string]$staleDestination)) {
+            $snapshotPaths.Add([string]$staleDestination)
+        }
+    }
+    foreach ($fixedPath in @($cssDestination, $dataPath, $manifestPath)) {
+        if ($snapshotPathSet.Add([string]$fixedPath)) {
+            $snapshotPaths.Add([string]$fixedPath)
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText) -and $snapshotPathSet.Add([string]$credentialPath)) {
+        $snapshotPaths.Add([string]$credentialPath)
+    }
+    $snapshots = [System.Collections.Generic.List[object]]::new()
+    foreach ($snapshotPath in $snapshotPaths) {
+        $snapshots.Add((Get-BlobUiFileSnapshot -Path $snapshotPath))
+    }
+
     try {
-        Copy-BlobUiDirectoryContents -SourceDirectory $AssetsSourceDirectory -DestinationDirectory $assetDestination
-        Copy-BlobUiRuntime -SourceDirectory $RuntimeSourceDirectory -RuntimeDirectory $runtimeDestination
-
-        $compiledCss = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($CompiledCssPath), [System.Text.Encoding]::UTF8)
+        [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
+        foreach ($operation in $copyOperations) {
+            $parent = Split-Path -Parent $operation.destination
+            [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+            [System.IO.File]::WriteAllBytes($operation.destination, [System.IO.File]::ReadAllBytes($operation.source))
+        }
+        foreach ($staleDestination in $staleDestinations) {
+            if (Test-Path -LiteralPath $staleDestination -PathType Leaf) {
+                Remove-Item -LiteralPath $staleDestination -Force -ErrorAction Stop
+            }
+        }
+        if ($installDefaultBanner) {
+            $bannerParent = Split-Path -Parent $manifestBannerPath
+            [System.IO.Directory]::CreateDirectory($bannerParent) | Out-Null
+            [System.IO.File]::WriteAllBytes($manifestBannerPath, [System.IO.File]::ReadAllBytes($bannerSource))
+        }
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss
-        Write-BlobUiAtomicText -Path $dataPath -Content ([System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($DataCandidatePath), [System.Text.Encoding]::UTF8))
+        Write-BlobUiAtomicText -Path $dataPath -Content $candidateDataText
         if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
             [System.IO.Directory]::CreateDirectory($credentialDirectory) | Out-Null
             Write-BlobUiAtomicText -Path $credentialPath -Content ($CredentialProtectedText + [Environment]::NewLine)
             Set-BlobUiCredentialAcl -Path $credentialPath
         }
+        Write-BlobUiAtomicText -Path $manifestPath -Content $manifestText
     }
     catch {
         $installFailure = $_.Exception.Message
+        $rollbackFailures = [System.Collections.Generic.List[string]]::new()
         try {
-            if ($oldCssExists) {
-                Write-BlobUiAtomicText -Path $cssDestination -Content $oldCss
-            }
-            elseif (Test-Path -LiteralPath $cssDestination -PathType Leaf) {
-                Remove-Item -LiteralPath $cssDestination -Force -ErrorAction Stop
-            }
-            if ($oldDataExists) {
-                Write-BlobUiAtomicText -Path $dataPath -Content $oldData
-            }
-            elseif (Test-Path -LiteralPath $dataPath -PathType Leaf) {
-                Remove-Item -LiteralPath $dataPath -Force -ErrorAction Stop
-            }
-            if ($oldCredentialExists) {
-                Write-BlobUiAtomicText -Path $credentialPath -Content $oldCredential
-                Set-BlobUiCredentialAcl -Path $credentialPath
-            }
-            elseif (Test-Path -LiteralPath $credentialPath -PathType Leaf) {
-                Remove-Item -LiteralPath $credentialPath -Force -ErrorAction Stop
+            for ($index = $snapshots.Count - 1; $index -ge 0; $index--) {
+                try {
+                    Restore-BlobUiFileSnapshot -Snapshot $snapshots[$index]
+                }
+                catch {
+                    $rollbackFailures.Add($_.Exception.Message)
+                }
             }
         }
         catch {
-            throw "Installation failed and rollback could not restore all saved files. $installFailure"
+            $rollbackFailures.Add($_.Exception.Message)
+        }
+        if ($rollbackFailures.Count -gt 0) {
+            throw "Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))"
         }
         throw $installFailure
     }
@@ -1390,7 +1719,9 @@ Export-ModuleMember -Function @(
     'Copy-BlobUiDirectoryContents',
     'Get-BlobUiSettingsData',
     'Get-BlobUiInstallPointerPath',
+    'Get-BlobUiReleaseVersion',
     'Invoke-BlobUiInstall',
+    'Invoke-BlobUiLocalDataMigrations',
     'New-BlobUiProtectedCredential',
     'Read-BlobUiDataFile',
     'Read-BlobUiProtectedCredential',
