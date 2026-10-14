@@ -163,6 +163,11 @@ markupcode * {
     color: var(--color-blob-accent) !important;
 }
 
+/* Recolor checked relation-property icons only when a custom accent is selected. */
+.cellContent.c-checkbox .icon.markerCheckbox2.iconColor-accent100 {
+    color: var(--color-blob-accent) !important;
+}
+
 /* Reuse the configured accent for database actions and active filters. */
 .button.accent:not(.disabled) {
     background: var(--color-blob-accent) !important;
