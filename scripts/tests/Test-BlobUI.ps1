@@ -552,7 +552,7 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
     $whiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
@@ -651,6 +651,12 @@ try {
         '--header-image: url("' + $expectedBannerUri + '");'
     )
     $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace($css, '(?s)/\* BlobUI Calendar Color overrides \*/.*$', '')
+    # Compare the unchanged sources with the legacy baseline, excluding the new accent fixes.
+    $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace(
+        $cssWithoutCalendarOverrides,
+        '(?s)/\* BlobUI source: 3[1-8]-[^*]+\.css \*/.*?(?=/\* BlobUI source: |\z)',
+        ''
+    )
     Assert-Equal (Get-CssSignature $baselineCss) (Get-CssSignature $cssWithoutCalendarOverrides) 'Compiled CSS changed the prior cascade or default styling.'
     foreach ($selector in @(
         '#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg',

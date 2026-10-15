@@ -1,0 +1,4 @@
+/* Use the configured accent for active blue toggles. */
+html .switch.active.blue {
+    background-color: var(--color-blob-accent);
+}

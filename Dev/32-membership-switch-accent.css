@@ -1,0 +1,4 @@
+/* Use the configured accent for the selected membership option. */
+.settingsPageContainer > .pageSettingsMembership .membershipIntro .switchWrapper .label.active span {
+    color: var(--color-blob-accent) !important;
+}

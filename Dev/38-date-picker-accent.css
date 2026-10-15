@@ -1,0 +1,10 @@
+/* Use the configured accent for the selected date bubble. */
+#menuCalendar .calendarSelect .day.active {
+    background-color: var(--color-blob-accent) !important;
+}
+
+/* Tint the Today, Tomorrow, and Clear actions only while they are interactive and hovered. */
+#menuCalendar .calendarSelect .foot .btn:hover,
+#menuCalendar .calendarSelect .foot .btn.hover {
+    color: var(--color-blob-accent) !important;
+}
