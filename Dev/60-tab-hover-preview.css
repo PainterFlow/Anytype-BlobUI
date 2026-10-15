@@ -1,0 +1,4 @@
+/* Hide the tab hover popup while preserving regular object previews. */
+#preview.previewWrapper:has(.previewTab) {
+    display: none !important;
+}

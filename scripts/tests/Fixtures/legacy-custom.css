@@ -634,3 +634,7 @@ a[href^="blob://"]:active {
         transform: none;
     }
 }
+
+#preview.previewWrapper:has(.previewTab) {
+    display: none !important;
+}
