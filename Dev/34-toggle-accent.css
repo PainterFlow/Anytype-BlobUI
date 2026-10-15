@@ -1,4 +1,6 @@
 /* Use the configured accent for active blue toggles. */
+/* @blobui-if-custom-accent */
 html .switch.active.blue {
     background-color: var(--color-blob-accent);
 }
+/* @blobui-endif-custom-accent */

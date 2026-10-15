@@ -458,6 +458,7 @@ try {
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
     $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
     Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
+    Assert-True (-not $defaultAccentCss.Contains('html .switch.active.blue')) 'Accent Color Default overrides Anytype''s native toggle color.'
     Assert-True (-not $defaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'Accent Color Default still overrides Anytype''s original home icon color.'
     $literalDefaultAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $defaultAccentData -Depth 20)
     $literalDefaultAccentData.settings.accentColor = '  dEfAuLt  '
@@ -465,6 +466,7 @@ try {
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $literalDefaultAccentCssPath -Data $literalDefaultAccentData | Out-Null
     $literalDefaultAccentCss = [System.IO.File]::ReadAllText($literalDefaultAccentCssPath)
     Assert-True ($literalDefaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'A raw Default accent did not normalize to Anytype system accent blue.'
+    Assert-True (-not $literalDefaultAccentCss.Contains('html .switch.active.blue')) 'A raw Default accent overrides Anytype''s native toggle color.'
     Assert-True (-not $literalDefaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A raw Default accent still overrides Anytype''s original home icon color.'
 
     $legacyDataPath = Join-Path $testRoot 'legacy-data.json'
@@ -555,6 +557,7 @@ try {
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
+    Assert-True ($css.Contains('html .switch.active.blue')) 'A custom Accent Color no longer tints active blue toggles.'
     $whiteAccentData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
     $whiteAccentData.settings.accentColor = 'White'
     $whiteAccentCssPath = Join-Path $testRoot 'white-accent.css'
