@@ -41,12 +41,28 @@ Run `.\scripts\Install.ps1` to install BlobUI or `.\scripts\Rebuild.ps1` to refr
 
 ## Updating BlobUI
 
-1. Download and extract the newer BlobUI release.
-2. Open a terminal in the extracted folder and run .\scripts\Update.ps1.
-3. If Anytype uses a custom data directory and the extracted folder has no saved install location, pass it with .\scripts\Update.ps1 -InstallDirectory "C:\path\to\Anytype".
-4. In Anytype, press Ctrl/Cmd + R to reload the stylesheet.
+1. Download the newer BlobUI release for your Anytype version and extract it to a folder outside OneDrive.
+2. Keep Anytype open with its API enabled on port `31009`. The API key you used during installation must still have read access to your BlobUI settings space.
+3. Open PowerShell in the newly extracted BlobUI folder and run the updater.
+
+   ```powershell
+   .\scripts\Update.ps1
+   ```
+
+   If you use a custom Anytype data directory and the updater cannot find your installation, specify the folder that contains `custom.css` and `blob`.
+
+   ```powershell
+   .\scripts\Update.ps1 -InstallDirectory "C:\path\to\Anytype"
+   ```
+
+   The default Anytype data directory on Windows is `%APPDATA%\anytype`.
+4. Wait for the update to complete, then switch to Anytype and press `Ctrl+R` to reload the stylesheet. If the theme does not appear, enable **Apply Custom CSS** in the **File** menu and reload again.
 
 The updater reads the saved API key from its encrypted local file and refreshes the settings objects you selected during installation. You do not need to import the BlobUI Settings Space again. The updater does not download releases or change objects in Anytype.
+
+To apply changes made in your BlobUI settings objects without installing a newer release, run `.\scripts\Rebuild.ps1` from your current BlobUI source folder, then reload Anytype with `Ctrl+R`. You can also pass `-InstallDirectory` to the rebuild script for a custom data directory.
+
+If the updater reports a missing installation or saved settings, check the data directory passed to `-InstallDirectory`. If it reports an invalid API key or missing settings objects, run `.\scripts\Install.ps1` again to save a valid key and select your settings objects.
 
 ## Dev Features
 
