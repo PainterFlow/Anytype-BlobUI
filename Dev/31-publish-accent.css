@@ -1,0 +1,5 @@
+/* Tint the publish membership banner with the configured accent. */
+.menus .menu.menuPublish .incentiveBanner,
+html.themeDark .menus .menu.menuPublish .incentiveBanner {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 15%, transparent) !important;
+}
