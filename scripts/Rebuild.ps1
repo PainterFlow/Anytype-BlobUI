@@ -2,6 +2,7 @@ param(
     [string]$ApiBaseUri = 'http://127.0.0.1:31009',
     [scriptblock]$ApiTransport,
     [string]$InstallDirectory,
+    [string]$SettingsOverridePath,
     [switch]$ForUpdate
 )
 
@@ -134,12 +135,36 @@ if ($null -eq $state.InstallDirectory) {
         throw "The runtime copy's settings point to '$installDirectory', but its blob folder belongs to '$runtimeExpectedInstallDirectory'. Run the source Rebuild.ps1 with -InstallDirectory to use another installation."
     }
 }
-if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
-    throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
+$settingsV2Property = $data.PSObject.Properties['settingsV2']
+$settingsOverlay = if ($null -ne $settingsV2Property) { $settingsV2Property.Value } else { $null }
+$useSettingsV2 = $null -ne $settingsOverlay
+if (-not [string]::IsNullOrWhiteSpace($SettingsOverridePath)) {
+    $overridePath = [System.IO.Path]::GetFullPath($SettingsOverridePath)
+    $overrideRoot = [System.IO.Path]::GetFullPath((Join-Path $blobDirectory 'staging')).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $overridePath.StartsWith($overrideRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'A local settings override must be staged inside the BlobUI blob\staging directory.'
+    }
+    $overrideItem = Get-Item -LiteralPath $overridePath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $overrideItem -or $overrideItem.PSIsContainer -or
+        (($overrideItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'The staged local settings override is not a safe regular file.'
+    }
+    try {
+        $settingsOverlay = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($overridePath, [System.Text.Encoding]::UTF8)) -ErrorAction Stop
+    }
+    catch {
+        throw 'The staged local settings override is not valid JSON.'
+    }
+    $useSettingsV2 = $true
 }
-$storedObjectIds = @($data.settingsObjectIds)
-if ($storedObjectIds.Count -eq 0) {
-    throw 'The saved settings object IDs are missing. Run Install.ps1 to choose them again.'
+if (-not $useSettingsV2) {
+    if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
+        throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
+    }
+    $storedObjectIds = @($data.settingsObjectIds)
+    if ($storedObjectIds.Count -eq 0) {
+        throw 'The saved settings object IDs are missing. Run Install.ps1 to choose them again.'
+    }
 }
 if (-not (Test-Path -LiteralPath $installDirectory -PathType Container)) {
     throw "The saved Anytype directory does not exist: $installDirectory"
@@ -149,21 +174,50 @@ $runDirectory = Join-Path (Join-Path $blobDirectory 'staging') ([System.Guid]::N
 [System.IO.Directory]::CreateDirectory($runDirectory) | Out-Null
 $apiKey = $null
 try {
-    $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
     $candidateDataPath = Join-Path $runDirectory 'data.json'
     $compiledCssPath = Join-Path $runDirectory 'custom.css'
 
-    $getDataArguments = @{
-        ApiKey = $apiKey
-        OutputPath = $candidateDataPath
-        SpaceId = [string]$data.selectedSpace.id
-        ObjectIds = $storedObjectIds
-        ExistingDataPath = $dataPath
-        InstallDirectory = $installDirectory
-        ApiBaseUri = $ApiBaseUri
-        ApiTransport = $ApiTransport
+    if ($useSettingsV2) {
+        $candidateData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $data -Depth 40) -ErrorAction Stop
+        if ($null -eq $candidateData.PSObject.Properties['calendarObjectColors']) {
+            $null = $candidateData | Add-Member -MemberType NoteProperty -Name 'calendarObjectColors' -Value ([ordered]@{})
+        }
+        $calendarCacheRefreshed = $false
+        if (Test-Path -LiteralPath $credentialPath -PathType Leaf) {
+            try {
+                $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
+                $candidateData = Update-BlobUiCalendarColorCache -ApiKey $apiKey -Data $candidateData -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+                $calendarCacheRefreshed = $true
+            }
+            catch {
+                Write-Host "BlobUI_CALENDAR_CACHE=cached"
+                Write-Host "Calendar color data stayed at its last saved values because the Anytype API refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        else {
+            Write-Host 'BlobUI_CALENDAR_CACHE=cached'
+            Write-Host 'Calendar color data stayed at its last saved values because no Anytype API key is saved.' -ForegroundColor Yellow
+        }
+        if ($calendarCacheRefreshed) {
+            Write-Host 'BlobUI_CALENDAR_CACHE=refreshed'
+        }
+        $candidateData = Set-BlobUiSettingsV2Overlay -Data $candidateData -Overlay $settingsOverlay
+        Write-BlobUiAtomicJson -Path $candidateDataPath -InputObject $candidateData
     }
-    & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
+    else {
+        $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
+        $getDataArguments = @{
+            ApiKey = $apiKey
+            OutputPath = $candidateDataPath
+            SpaceId = [string]$data.selectedSpace.id
+            ObjectIds = $storedObjectIds
+            ExistingDataPath = $dataPath
+            InstallDirectory = $installDirectory
+            ApiBaseUri = $ApiBaseUri
+            ApiTransport = $ApiTransport
+        }
+        & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
+    }
 
     if ($ForUpdate) {
         $previousReleaseVersion = ''

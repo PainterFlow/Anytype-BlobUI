@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>BlobUI Settings</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
+      <span class="window-title">BlobUI Settings</span>
+      <div class="window-controls">
+        <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 8h10"/></svg></button>
+        <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
+      </div>
+    </header>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Settings navigation">
+        <nav class="sidebar-nav" aria-label="Settings">
+          <span class="nav-group-label">Application</span>
+          <button class="nav-item active" type="button" aria-current="page">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"/><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"/></svg>
+            <span>Preferences</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <span>Numpad 1 in Anytype</span>
+          <button id="open-repository" class="repository-link" type="button" aria-label="Open BlobUI on GitHub" title="https://github.com/PainterFlow/Anytype-BlobUI">
+            <span>Github</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></svg>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <section class="page-content" aria-labelledby="page-title">
+          <div class="settings-content">
+          <header class="page-heading">
+            <h1 id="page-title">Preferences</h1>
+          </header>
+
+          <section class="settings-group accent-group" aria-labelledby="accent-heading">
+            <div class="section-heading">
+              <h2 id="accent-heading">Accent color</h2>
+              <p>Choose a color for highlights and active controls.</p>
+            </div>
+
+            <div class="settings-list">
+              <label class="native-accent-control settings-row" for="native-accent">
+                <span>Use Anytype accent</span>
+                <input id="native-accent" type="checkbox" role="switch" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+              <div class="color-editor" id="color-editor">
+              <div class="color-plane" id="color-plane" role="group" aria-label="Color saturation and brightness">
+                <span class="color-cursor" id="color-cursor" aria-hidden="true"></span>
+                <input class="sr-only" id="accent-saturation" type="range" min="0" max="100" value="64" aria-label="Color saturation" />
+                <input class="sr-only" id="accent-brightness" type="range" min="0" max="100" value="87" aria-label="Color brightness" />
+              </div>
+              <div class="color-controls">
+                <label class="hue-field" for="accent-hue">Hue</label>
+                <input id="accent-hue" class="hue-slider" type="range" min="0" max="359" value="300" aria-label="Color hue" />
+                <label class="color-value-label" for="accent-value">Hex or CSS color</label>
+                <div class="color-value-row">
+                  <span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span>
+                  <input id="accent-value" class="color-text-input" type="text" spellcheck="false" autocomplete="off" aria-describedby="accent-error" />
+                </div>
+              </div>
+              </div>
+            </div>
+            <p class="field-error" id="accent-error" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-group typography-group" aria-labelledby="typography-heading">
+            <div class="section-heading">
+              <h2 id="typography-heading">Font</h2>
+              <p>Use the same fonts as your Anytype workspace.</p>
+            </div>
+
+            <div class="font-fields">
+              <label class="input-field">
+                <span>Interface font</span>
+                <input id="font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Libron" />
+              </label>
+              <label class="input-field">
+                <span>Code font</span>
+                <input id="code-font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Consolas" />
+              </label>
+            </div>
+
+            <p class="field-error" id="font-error" aria-live="polite"></p>
+          </section>
+          </div>
+        </section>
+
+        <footer class="action-bar">
+          <div class="save-status" id="save-status" role="status" aria-live="polite">
+            <span id="status-message">Loading your current settings…</span>
+          </div>
+          <button id="save-button" class="save-button" type="button" disabled>
+            <span class="save-spinner" aria-hidden="true"></span>
+            <span class="save-label">Save changes</span>
+          </button>
+        </footer>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

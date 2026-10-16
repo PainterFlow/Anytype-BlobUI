@@ -678,6 +678,119 @@ function ConvertTo-BlobUiAccentColorValue {
     return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color' -RejectWhite
 }
 
+function Set-BlobUiSettingsV2Overlay {
+    param(
+        [Parameter(Mandatory = $true)]$Data,
+        [Parameter(Mandatory = $true)]$Overlay
+    )
+
+    $version = Get-BlobUiPropertyField -InputObject $Overlay -FieldName 'version'
+    if ([int]$version -ne 2) {
+        throw 'The local BlobUI settings overlay has an unsupported version.'
+    }
+    $values = Get-BlobUiPropertyField -InputObject $Overlay -FieldName 'settings'
+    if ($null -eq $values) {
+        throw 'The local BlobUI settings overlay has no settings object.'
+    }
+
+    $fontValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'fontFamily')
+    $codeFontValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'codeFontFamily')
+    $accentValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentColor')
+    $accentMode = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentMode')
+    $accentPreset = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentPreset')
+
+    $fontValue = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value $fontValue -Name 'Font'
+    $codeFontValue = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value $codeFontValue -Name 'Code Font'
+    $accentValue = $accentValue.Trim()
+    $normalizedAccent = ConvertTo-BlobUiAccentColorValue -Value $accentValue
+
+    $presetValues = @{
+        'grey' = 'Grey'
+        'yellow' = 'Yellow'
+        'amber' = 'Amber'
+        'red' = 'Red'
+        'pink' = 'Pink'
+        'purple' = 'Purple'
+        'blue' = 'Blue'
+        'sky' = 'Sky'
+        'teal' = 'Teal'
+        'green' = 'Green'
+        'blob-pink' = 'Blob Pink'
+    }
+    switch ($accentMode) {
+        'native' {
+            if ($accentValue -notin @('Default', 'var(--color-system-accent-100)') -or $accentPreset) {
+                throw 'The native accent selection is invalid.'
+            }
+        }
+        'preset' {
+            if (-not $presetValues.ContainsKey($accentPreset) -or
+                $accentValue -cne $presetValues[$accentPreset]) {
+                throw 'The preset accent selection is invalid.'
+            }
+        }
+        'custom' {
+            if ($accentPreset) {
+                throw 'A custom accent cannot include a preset key.'
+            }
+        }
+        default {
+            throw "The accent mode '$accentMode' is not supported."
+        }
+    }
+
+    # Validate every value before touching the candidate so a malformed overlay
+    # cannot leave a partially changed data object behind.
+    if ($null -eq $Data.settings) {
+        throw 'The candidate settings record has no normalized settings object.'
+    }
+    $Data.settings.fontFamily = $fontValue
+    $Data.settings.codeFontFamily = $codeFontValue
+    $Data.settings.accentColor = $normalizedAccent
+    $settingsV2 = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = $fontValue
+            codeFontFamily = $codeFontValue
+            accentColor = $accentValue
+            accentMode = $accentMode
+            accentPreset = $accentPreset
+        }
+    }
+    if ($Data -is [System.Collections.IDictionary]) {
+        $Data['settingsV2'] = $settingsV2
+    }
+    else {
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'settingsV2' -Value $settingsV2 -Force
+    }
+    return $Data
+}
+
+function Update-BlobUiCalendarColorCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [Parameter(Mandatory = $true)]$Data,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    $spaces = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path '/v2/spaces?ids=full' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    if ($spaces.Count -eq 0) {
+        throw 'The API key cannot access any Anytype spaces.'
+    }
+    $spaceIds = @($spaces | ForEach-Object { [string](Get-BlobUiPropertyField -InputObject $_ -FieldName 'id') })
+    $calendarObjectColors = Get-BlobUiCalendarObjectColors -ApiKey $ApiKey -SpaceIds $spaceIds -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    if ($Data -is [System.Collections.IDictionary]) {
+        $Data['calendarObjectColors'] = $calendarObjectColors
+        $Data['fetchedAtUtc'] = [DateTime]::UtcNow.ToString('o')
+    }
+    else {
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'calendarObjectColors' -Value $calendarObjectColors -Force
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'fetchedAtUtc' -Value ([DateTime]::UtcNow.ToString('o')) -Force
+    }
+    return $Data
+}
+
 function Select-BlobUiItem {
     param(
         [Parameter(Mandatory = $true)][object[]]$Items,
@@ -1227,7 +1340,7 @@ function Copy-BlobUiRuntime {
     [System.IO.Directory]::CreateDirectory($runtimeFullPath) | Out-Null
     $runtimeScriptsDirectory = Join-Path $runtimeFullPath 'scripts'
     [System.IO.Directory]::CreateDirectory($runtimeScriptsDirectory) | Out-Null
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1', 'Settings.ps1')) {
         $sourcePath = Join-Path (Join-Path $sourceFullPath 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
@@ -1251,7 +1364,8 @@ function ConvertTo-BlobUiManagedFileKey {
     if ($key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
         return $null
     }
-    if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+') {
+    if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+' -and
+        $key -cne 'runtime/settings-app.exe') {
         throw "The BlobUI file manifest contains an unsupported path: $Path"
     }
     return $key
@@ -1310,7 +1424,7 @@ function Get-BlobUiPackagedFiles {
     }
 
     $files = [ordered]@{}
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1', 'Settings.ps1')) {
         $sourcePath = Join-Path (Join-Path $runtimeSource 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
@@ -1336,6 +1450,15 @@ function Get-BlobUiPackagedFiles {
             $relative = $file.FullName.Substring($treeRoot.Length).Replace('\', '/')
             $files['runtime/' + $tree.name + '/' + $relative] = [System.IO.Path]::GetFullPath($file.FullName)
         }
+    }
+
+    $settingsAppPath = Join-Path $runtimeSource 'settings-app\dist\blobui-settings.exe'
+    if (Test-Path -LiteralPath $settingsAppPath -PathType Leaf) {
+        $settingsAppItem = Get-Item -LiteralPath $settingsAppPath -Force -ErrorAction Stop
+        if (($settingsAppItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "BlobUI settings app is a reparse point: $settingsAppPath"
+        }
+        $files['runtime/settings-app.exe'] = [System.IO.Path]::GetFullPath($settingsAppPath)
     }
 
     $assetRoot = $assetSource.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -1689,6 +1812,18 @@ function Invoke-BlobUiInstall {
     $managedFiles = @($packagedFiles.Keys | Where-Object {
         -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
     } | Sort-Object -Unique)
+    # Keep a previously managed app binary when a source package is rebuilt
+    # without the optional prebuilt executable. A release that includes a newer
+    # binary replaces it explicitly through the normal copy operation.
+    $settingsAppManagedKey = 'runtime/settings-app.exe'
+    $previousOwnsSettingsApp = @($previousManifest.managedFiles | Where-Object {
+        [string]$_ -ceq $settingsAppManagedKey
+    }).Count -gt 0
+    $settingsAppDestination = Join-Path $runtimeDestination 'settings-app.exe'
+    if (-not $packagedFiles.Contains($settingsAppManagedKey) -and $previousOwnsSettingsApp -and
+        (Test-Path -LiteralPath $settingsAppDestination -PathType Leaf)) {
+        $managedFiles = @($managedFiles + $settingsAppManagedKey | Sort-Object -Unique)
+    }
     if ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
         $managedFiles = @($previousManifest.managedFiles | Sort-Object -Unique)
         $ownedFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1740,7 +1875,16 @@ function Invoke-BlobUiInstall {
     foreach ($managedPath in $packagedFiles.Keys) {
         $sourcePath = [System.IO.Path]::GetFullPath([string]$packagedFiles[$managedPath])
         $destinationPath = Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath ([string]$managedPath) -AllowedManagedFileParents $staleDestinations.ToArray()
-        if (-not $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $samePath = $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)
+        $sameContents = $false
+        if (-not $samePath -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+            $sourceItem = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+            $destinationItem = Get-Item -LiteralPath $destinationPath -Force -ErrorAction Stop
+            if ($sourceItem.Length -eq $destinationItem.Length) {
+                $sameContents = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash
+            }
+        }
+        if (-not $samePath -and -not $sameContents) {
             $copyOperations.Add([pscustomobject]@{
                 source = $sourcePath
                 destination = $destinationPath
@@ -1856,6 +2000,8 @@ Export-ModuleMember -Function @(
     'Invoke-BlobUiCssCompile',
     'Copy-BlobUiDirectoryContents',
     'Get-BlobUiSettingsData',
+    'Set-BlobUiSettingsV2Overlay',
+    'Update-BlobUiCalendarColorCache',
     'Get-BlobUiInstallPointerPath',
     'Get-BlobUiReleaseVersion',
     'Invoke-BlobUiInstall',

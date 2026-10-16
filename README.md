@@ -64,6 +64,25 @@ To apply changes made in your BlobUI settings objects without installing a newer
 
 If the updater reports a missing installation or saved settings, check the data directory passed to `-InstallDirectory`. If it reports an invalid API key or missing settings objects, run `.\scripts\Install.ps1` again to save a valid key and select your settings objects.
 
+## Settings app
+
+BlobUI Settings provides a desktop Appearance window for fonts and accent colors. Build it from the source folder with Rust and the Windows C++ build tools installed.
+
+```powershell
+.\scripts\Build-Settings.ps1
+.\scripts\Settings.ps1
+```
+
+The build places the executable in `settings-app/dist/blobui-settings.exe`. `Install.ps1` and `Update.ps1` include that executable when it is present, placing it at `blob/runtime/settings-app.exe`; the installed launcher is `blob/runtime/scripts/Settings.ps1`. A release that ships the app should include the built executable at the same `settings-app/dist` path before packaging.
+
+Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
+
+To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not register the app to start automatically with Windows.
+
+The first Settings app save migrates the current font and accent values from `data.json` into the local `settingsV2` record. After that, these local choices are authoritative, so saving no longer requires the legacy Anytype Settings objects. Anytype's Calendar Color data refreshes when its local API is available; otherwise the app keeps the saved calendar cache and reports that status. Saving rebuilds `custom.css`; press `Ctrl+R` in Anytype to apply it.
+
+The app reads the root `theme` value in `%APPDATA%\anytype\devconfig.json` and follows Anytype's light, dark, or system mode, including the native window theme. It also applies the saved interface and code fonts from BlobUI's local settings to the settings window. The layout follows Anytype's flat preferences style and reads no other Anytype preferences.
+
 ## Dev Features
 
 ### Text Effects & Embeds
