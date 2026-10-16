@@ -177,7 +177,8 @@ function Assert-BlobUiUninstallTargets {
 function Remove-BlobUiUninstallEntry {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$TreeRoot
+        [Parameter(Mandatory = $true)][string]$TreeRoot,
+        [string]$PreserveRelativePath
     )
 
     $normalizedTreeRoot = Normalize-BlobUiUninstallPath -Path $TreeRoot
@@ -188,8 +189,20 @@ function Remove-BlobUiUninstallEntry {
         throw "BlobUI refused to remove a path outside the validated uninstall target: $normalizedPath"
     }
 
+    $preservePath = $null
+    if (-not [string]::IsNullOrWhiteSpace($PreserveRelativePath)) {
+        $preservePath = Normalize-BlobUiUninstallPath -Path (Join-Path $normalizedTreeRoot $PreserveRelativePath)
+        if (-not (Test-Path -LiteralPath $preservePath)) { $preservePath = $null }
+    }
+    if ($null -ne $preservePath -and $normalizedPath.Equals($preservePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+
     $item = Get-Item -LiteralPath $normalizedPath -Force -ErrorAction Stop
     if (Test-BlobUiReparsePoint -Item $item) {
+        if ($null -ne $preservePath -and $preservePath.StartsWith($normalizedPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return
+        }
         Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
         return
     }
@@ -201,7 +214,10 @@ function Remove-BlobUiUninstallEntry {
             if (-not $childParent.Equals($normalizedPath, [System.StringComparison]::OrdinalIgnoreCase)) {
                 throw "BlobUI refused a child path outside the directory being removed: $childPath"
             }
-            Remove-BlobUiUninstallEntry -Path $childPath -TreeRoot $normalizedTreeRoot
+            Remove-BlobUiUninstallEntry -Path $childPath -TreeRoot $normalizedTreeRoot -PreserveRelativePath $PreserveRelativePath
+        }
+        if ($null -ne $preservePath -and $preservePath.StartsWith($normalizedPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return
         }
         Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
         return
@@ -264,7 +280,7 @@ if ($null -ne $blobItem) {
     $blobItem = Get-BlobUiUninstallChild -InstallRoot $installRoot -Name 'blob'
     Assert-BlobUiUninstallTargets -CssItem $null -BlobItem $blobItem
     if ($null -ne $blobItem) {
-        Remove-BlobUiUninstallEntry -Path $blobItem.FullName -TreeRoot $blobItem.FullName
+        Remove-BlobUiUninstallEntry -Path $blobItem.FullName -TreeRoot $blobItem.FullName -PreserveRelativePath 'assets\spacebanner'
     }
 }
 if (-not $isInstalledRuntime) {

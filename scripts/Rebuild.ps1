@@ -138,8 +138,8 @@ if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
     throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
 }
 $storedObjectIds = @($data.settingsObjectIds)
-if ($storedObjectIds.Count -eq 0) {
-    throw 'The saved settings object IDs are missing. Run Install.ps1 to choose them again.'
+if ([string]$data.settingsSource -ceq 'BlobID') {
+    $storedObjectIds = @()
 }
 if (-not (Test-Path -LiteralPath $installDirectory -PathType Container)) {
     throw "The saved Anytype directory does not exist: $installDirectory"

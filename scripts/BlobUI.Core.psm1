@@ -7,7 +7,6 @@ $script:BlobUiDefaultSettings = @{
     fontFamily = 'Libron'
     codeFontFamily = 'Consolas'
     accentColor = '#DE50DE'
-    bannerPath = 'spacebanner\banner.png'
 }
 
 function Get-BlobUiHttpStatusCode {
@@ -785,8 +784,72 @@ function Get-BlobUiAnytypeObject {
     return Get-BlobUiObjectFromApiResponse -Response $response
 }
 
+function Get-BlobUiMarkedSettingsObjects {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [Parameter(Mandatory = $true)]$Space,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    $spaceId = [string](Get-BlobUiPropertyField -InputObject $Space -FieldName 'id')
+    $spaceName = [string](Get-BlobUiPropertyField -InputObject $Space -FieldName 'name')
+    if ([string]::IsNullOrWhiteSpace($spaceId)) {
+        throw 'The Anytype spaces response included a space without an ID.'
+    }
+
+    $escapedSpace = [System.Uri]::EscapeDataString($spaceId)
+    $propertyRows = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/properties") -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    $markerProperties = @($propertyRows | Where-Object {
+        [string](Get-BlobUiPropertyField -InputObject $_ -FieldName 'name') -ceq 'BlobID'
+    })
+    if ($markerProperties.Count -eq 0) { return @() }
+    if ($markerProperties.Count -gt 1) {
+        throw "The Anytype space '$spaceName' ($spaceId) has more than one property named 'BlobID'; keep one text property before rebuilding BlobUI."
+    }
+
+    $markerProperty = $markerProperties[0]
+    if ([string](Get-BlobUiPropertyField -InputObject $markerProperty -FieldName 'format') -cne 'text') {
+        throw "The 'BlobID' property in Anytype space '$spaceName' ($spaceId) must use the text format."
+    }
+    $markerKey = [string](Get-BlobUiPropertyField -InputObject $markerProperty -FieldName 'key')
+    if ([string]::IsNullOrWhiteSpace($markerKey)) {
+        throw "The 'BlobID' property in Anytype space '$spaceName' ($spaceId) has no API key."
+    }
+
+    $searchBody = [ordered]@{
+        type = 'setting'
+        fields = @($markerKey)
+    }
+    $searchRows = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/search") -Method Post -Body $searchBody -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    $markedObjects = [System.Collections.Generic.List[object]]::new()
+    foreach ($row in $searchRows) {
+        $rowType = Get-BlobUiObjectTypeKey -Object $row
+        if (-not [string]::IsNullOrWhiteSpace($rowType) -and $rowType -cne 'setting') { continue }
+        $marker = [string](Get-BlobUiObjectPropertyValue -Object $row -Key $markerKey -DisplayName 'BlobID')
+        if ($marker -cnotin @('BlobUI-global-settings', 'BlobUI-space-settings')) { continue }
+
+        $objectId = [string](Get-BlobUiPropertyField -InputObject $row -FieldName 'id')
+        if ([string]::IsNullOrWhiteSpace($objectId)) {
+            throw "An Anytype Setting with BlobID '$marker' in space '$spaceName' ($spaceId) has no object ID."
+        }
+        $detail = Get-BlobUiAnytypeObject -ApiKey $ApiKey -SpaceId $spaceId -ObjectId $objectId -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+        $detailMarker = [string](Get-BlobUiObjectPropertyValue -Object $detail -Key $markerKey -DisplayName 'BlobID')
+        if ($detailMarker -cne $marker) {
+            throw "Anytype object '$objectId' changed its BlobID marker while BlobUI was rebuilding. Run the rebuild again."
+        }
+        $markedObjects.Add([pscustomobject]@{
+            marker = $marker
+            object = $detail
+            spaceId = $spaceId
+            spaceName = $spaceName
+        })
+    }
+    return $markedObjects.ToArray()
+}
+
 function Get-BlobUiNormalizedSettings {
-    param([Parameter(Mandatory = $true)][object[]]$Objects)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Objects)
 
     $rawSettings = @{
         font = $null
@@ -805,7 +868,9 @@ function Get-BlobUiNormalizedSettings {
         foreach ($definition in $propertyMap) {
             $value = Get-BlobUiObjectPropertyValue -Object $object -Key $definition.key -DisplayName $definition.name
             if (-not [string]::IsNullOrWhiteSpace($value)) {
-                $rawSettings[$definition.key] = $value
+                $targetKey = [string](Get-BlobUiPropertyField -InputObject $definition -FieldName 'setting')
+                if ([string]::IsNullOrWhiteSpace($targetKey)) { $targetKey = [string]$definition.key }
+                $rawSettings[$targetKey] = $value
             }
         }
     }
@@ -822,13 +887,10 @@ function Get-BlobUiNormalizedSettings {
     if ([string]::IsNullOrWhiteSpace($accentValue)) {
         $accentValue = $script:BlobUiDefaultSettings.accentColor
     }
-
     return [ordered]@{
         fontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$fontValue) -Name 'Font'
         codeFontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$codeFontValue) -Name 'Code Font'
         accentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$accentValue)
-        # Kept in the saved schema for compatibility. The banner is no longer an Anytype setting.
-        bannerPath = $script:BlobUiDefaultSettings.bannerPath
     }
 }
 
@@ -941,26 +1003,57 @@ function Get-BlobUiSettingsData {
         throw 'The Anytype spaces response did not include a space ID.'
     }
 
+    $markerRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($space in $spaces) {
+        foreach ($markedObject in @(Get-BlobUiMarkedSettingsObjects -ApiKey $ApiKey -Space $space -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)) {
+            $markerRows.Add($markedObject)
+        }
+    }
+
+    $globalMarkers = @($markerRows.ToArray() | Where-Object {
+        [string]::Equals([string]$_.spaceId, $SpaceId, [System.StringComparison]::Ordinal) -and
+        [string]$_.marker -ceq 'BlobUI-global-settings'
+    })
+    if ($globalMarkers.Count -gt 1) {
+        throw "Multiple BlobUI-global-settings objects were found in the selected settings space '$($selectedSpace.name)' ($SpaceId). Keep exactly one marked global settings object before rebuilding."
+    }
+
+    $spaceMarkers = @($markerRows.ToArray() | Where-Object { [string]$_.marker -ceq 'BlobUI-space-settings' })
+    $spaceMarkersById = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.List[object]]]::new([System.StringComparer]::Ordinal)
+    foreach ($markedObject in $spaceMarkers) {
+        $scopeSpaceId = [string]$markedObject.spaceId
+        if (-not $spaceMarkersById.ContainsKey($scopeSpaceId)) {
+            $spaceMarkersById[$scopeSpaceId] = [System.Collections.Generic.List[object]]::new()
+        }
+        $spaceMarkersById[$scopeSpaceId].Add($markedObject)
+    }
+    $spaceSettings = [System.Collections.Generic.List[object]]::new()
+    foreach ($scopeSpaceId in $spaceMarkersById.Keys) {
+        $spaceGroup = $spaceMarkersById[$scopeSpaceId]
+        if ($spaceGroup.Count -gt 1) {
+            $spaceName = [string]$spaceGroup[0].spaceName
+            throw "Multiple BlobUI-space-settings objects were found in Anytype space '$spaceName' ($scopeSpaceId). Keep exactly one marked space settings object there before rebuilding."
+        }
+        $markedObject = $spaceGroup[0]
+        $spaceSettings.Add([ordered]@{
+            id = [string]$markedObject.spaceId
+            name = [string]$markedObject.spaceName
+            settingsObjectId = [string]$markedObject.object.id
+        })
+    }
+
     $selectedObjects = [System.Collections.Generic.List[object]]::new()
-    if ($null -ne $ObjectIds -and $ObjectIds.Count -gt 0) {
+    $settingsSource = 'BlobID'
+    if ($globalMarkers.Count -eq 1) {
+        $selectedObjects.Add($globalMarkers[0].object)
+    }
+    elseif ($null -ne $ObjectIds -and $ObjectIds.Count -gt 0) {
+        $settingsSource = 'Legacy'
         foreach ($objectId in $ObjectIds) {
             $selectedObjects.Add((Get-BlobUiAnytypeObject -ApiKey $ApiKey -SpaceId $SpaceId -ObjectId $objectId -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport))
         }
     }
-    else {
-        $escapedSpace = [System.Uri]::EscapeDataString($SpaceId)
-        $settingsSearch = [ordered]@{ type = 'setting' }
-        $settingsObjects = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path ("/v2/spaces/$escapedSpace/search") -Method Post -Body $settingsSearch -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
-        $settingsObjects = @($settingsObjects | Where-Object { (Get-BlobUiObjectTypeKey -Object $_) -ceq 'setting' } | Sort-Object -Property name)
-        $indices = @(Select-BlobUiObjectIndices -Items $settingsObjects -SelectionProvider $SelectionProvider)
-        foreach ($index in $indices) {
-            $selectedObjects.Add((Get-BlobUiAnytypeObject -ApiKey $ApiKey -SpaceId $SpaceId -ObjectId ([string]$settingsObjects[$index - 1].id) -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport))
-        }
-    }
 
-    if ($selectedObjects.Count -eq 0) {
-        throw 'At least one settings object must be selected.'
-    }
     $normalizedSettings = Get-BlobUiNormalizedSettings -Objects $selectedObjects.ToArray()
     $calendarSpaceIds = @($spaces | ForEach-Object { [string](Get-BlobUiPropertyField -InputObject $_ -FieldName 'id') })
     $calendarObjectColors = Get-BlobUiCalendarObjectColors -ApiKey $ApiKey -SpaceIds $calendarSpaceIds -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
@@ -983,8 +1076,10 @@ function Get-BlobUiSettingsData {
             id = [string]$selectedSpace.id
             name = [string]$selectedSpace.name
         }
+        settingsSource = $settingsSource
         settingsObjectIds = @($selectedObjects.ToArray() | ForEach-Object { [string]$_.id })
         settings = $normalizedSettings
+        spaceSettings = @($spaceSettings.ToArray())
         calendarObjectColors = $calendarObjectColors
         installDirectory = [System.IO.Path]::GetFullPath($InstallDirectory)
     }
@@ -1117,15 +1212,12 @@ function Invoke-BlobUiCssCompile {
     if ([string]::IsNullOrWhiteSpace($installDirectory)) {
         throw 'The settings data has no install directory.'
     }
-    $bannerPath = $script:BlobUiDefaultSettings.bannerPath
-    $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetSourceDirectory $bannerPath))
-    $assetRoot = [System.IO.Path]::GetFullPath($AssetSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $bannerDestination = Join-Path ([System.IO.Path]::GetFullPath($installDirectory)) 'blob\assets\spacebanner\banner.png'
+    $bannerSource = Join-Path ([System.IO.Path]::GetFullPath($AssetSourceDirectory)) 'spacebanner\banner.png'
+    if (-not (Test-Path -LiteralPath $bannerDestination -PathType Leaf) -and
         -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "The fixed banner image is missing from the packaged assets: $bannerPath"
+        throw "The fixed banner image is missing from the package and installed Anytype blob directory: $bannerSource"
     }
-
-    $bannerDestination = Join-Path ([System.IO.Path]::GetFullPath($installDirectory)) (Join-Path 'blob\assets' $bannerPath)
     $bannerUri = [System.Uri]::new($bannerDestination).AbsoluteUri
     $values = @{
         fontFamily = @{ type = 'font'; value = [string]$Data.settings.fontFamily }
@@ -1248,7 +1340,7 @@ function ConvertTo-BlobUiManagedFileKey {
         @($key.Split('/') | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) {
         throw "The BlobUI file manifest contains an unsafe path: $Path"
     }
-    if ($key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($key.StartsWith('assets/spacebanner/', [System.StringComparison]::OrdinalIgnoreCase)) {
         return $null
     }
     if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+') {
@@ -1348,7 +1440,7 @@ function Get-BlobUiPackagedFiles {
     foreach ($file in $assetFiles) {
         $relative = $file.FullName.Substring($assetRoot.Length).Replace('\', '/')
         $key = 'assets/' + $relative
-        if (-not $key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (-not $key.StartsWith('assets/spacebanner/', [System.StringComparison]::OrdinalIgnoreCase)) {
             $files[$key] = [System.IO.Path]::GetFullPath($file.FullName)
         }
     }
@@ -1661,12 +1753,12 @@ function Invoke-BlobUiInstall {
     if ([System.IO.Path]::GetFullPath([string]$candidateData.installDirectory) -cne $installFullPath) {
         throw 'The fetched settings directory does not match the selected Anytype directory.'
     }
-    $bannerPath = $script:BlobUiDefaultSettings.bannerPath
-    $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetsSourceDirectory $bannerPath))
-    $assetRoot = [System.IO.Path]::GetFullPath($AssetsSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-        -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "The fixed banner image is missing from the packaged assets: $bannerPath"
+    $fixedBannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetsSourceDirectory 'spacebanner\banner.png'))
+    $sourceBannerRoot = [System.IO.Path]::GetFullPath((Join-Path $AssetsSourceDirectory 'spacebanner'))
+    $sourceBannerPrefix = $sourceBannerRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not (Test-Path -LiteralPath $fixedBannerSource -PathType Leaf) -or
+        -not $fixedBannerSource.StartsWith($sourceBannerPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The fixed banner image is missing from the package: $fixedBannerSource"
     }
 
     $blobDirectory = Join-Path $installFullPath 'blob'
@@ -1686,9 +1778,7 @@ function Invoke-BlobUiInstall {
     $packagedFiles = Get-BlobUiPackagedFiles -RuntimeSourceDirectory $RuntimeSourceDirectory -AssetsSourceDirectory $AssetsSourceDirectory
     $runtimeSourcePath = [System.IO.Path]::GetFullPath($RuntimeSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
     $runtimeDestinationPath = [System.IO.Path]::GetFullPath($runtimeDestination).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
-    $managedFiles = @($packagedFiles.Keys | Where-Object {
-        -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
-    } | Sort-Object -Unique)
+    $managedFiles = @($packagedFiles.Keys | Sort-Object -Unique)
     if ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
         $managedFiles = @($previousManifest.managedFiles | Sort-Object -Unique)
         $ownedFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1702,23 +1792,15 @@ function Invoke-BlobUiInstall {
         }
     }
     $manifestBannerPath = Join-Path (Join-Path $assetDestination 'spacebanner') 'banner.png'
-    foreach ($bannerDirectory in @($assetDestination, (Split-Path -Parent $manifestBannerPath))) {
-        if (Test-Path -LiteralPath $bannerDirectory) {
-            $bannerDirectoryItem = Get-Item -LiteralPath $bannerDirectory -Force -ErrorAction Stop
-            if (-not $bannerDirectoryItem.PSIsContainer -or
-                (($bannerDirectoryItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
-                throw "The installed BlobUI banner directory cannot be written safely: $bannerDirectory"
-            }
+    $bannerCopyOperations = [System.Collections.Generic.List[object]]::new()
+    if (-not (Test-Path -LiteralPath $manifestBannerPath -PathType Leaf)) {
+        if (Test-Path -LiteralPath $manifestBannerPath -PathType Container) {
+            throw "The installed BlobUI banner path is a directory: $manifestBannerPath"
         }
-    }
-    $installDefaultBanner = -not (Test-Path -LiteralPath $manifestBannerPath -PathType Leaf)
-    if (Test-Path -LiteralPath $manifestBannerPath -PathType Container) {
-        throw "The installed BlobUI banner path is a directory: $manifestBannerPath"
-    }
-    if ($installDefaultBanner) {
-        if (Test-Path -LiteralPath $manifestBannerPath) {
-            throw "The installed BlobUI banner path is not a file: $manifestBannerPath"
-        }
+        $bannerCopyOperations.Add([pscustomobject]@{
+            source = $fixedBannerSource
+            destination = $manifestBannerPath
+        })
     }
 
     $managedFileSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1764,9 +1846,9 @@ function Invoke-BlobUiInstall {
             $snapshotPaths.Add([string]$operation.destination)
         }
     }
-    if ($installDefaultBanner) {
-        if ($snapshotPathSet.Add([string]$manifestBannerPath)) {
-            $snapshotPaths.Add([string]$manifestBannerPath)
+    foreach ($operation in $bannerCopyOperations) {
+        if ($snapshotPathSet.Add([string]$operation.destination)) {
+            $snapshotPaths.Add([string]$operation.destination)
         }
     }
     foreach ($staleDestination in $staleDestinations) {
@@ -1785,7 +1867,10 @@ function Invoke-BlobUiInstall {
     $managedMutationPaths = [System.Collections.Generic.List[string]]::new()
     foreach ($operation in $copyOperations) { $managedMutationPaths.Add([string]$operation.destination) }
     foreach ($staleDestination in $staleDestinations) { $managedMutationPaths.Add([string]$staleDestination) }
-    foreach ($managedPath in $managedMutationPaths) {
+    $snapshotMutationPaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($managedPath in $managedMutationPaths) { $snapshotMutationPaths.Add([string]$managedPath) }
+    foreach ($operation in $bannerCopyOperations) { $snapshotMutationPaths.Add([string]$operation.destination) }
+    foreach ($managedPath in $snapshotMutationPaths) {
         $current = Split-Path -Parent $managedPath
         while ($current.StartsWith([System.IO.Path]::GetFullPath($blobDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
             if ($snapshotPathSet.Add($current)) { $snapshotPaths.Add($current) }
@@ -1813,10 +1898,11 @@ function Invoke-BlobUiInstall {
             [System.IO.Directory]::CreateDirectory($parent) | Out-Null
             [System.IO.File]::WriteAllBytes($operation.destination, [System.IO.File]::ReadAllBytes($operation.source))
         }
-        if ($installDefaultBanner) {
-            $bannerParent = Split-Path -Parent $manifestBannerPath
+        foreach ($operation in $bannerCopyOperations) {
+            if (Test-Path -LiteralPath $operation.destination) { continue }
+            $bannerParent = Split-Path -Parent $operation.destination
             [System.IO.Directory]::CreateDirectory($bannerParent) | Out-Null
-            [System.IO.File]::WriteAllBytes($manifestBannerPath, [System.IO.File]::ReadAllBytes($bannerSource))
+            [System.IO.File]::WriteAllBytes($operation.destination, [System.IO.File]::ReadAllBytes($operation.source))
         }
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss
         Write-BlobUiAtomicText -Path $dataPath -Content $candidateDataText

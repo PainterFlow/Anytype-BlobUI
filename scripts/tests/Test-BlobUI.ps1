@@ -372,6 +372,105 @@ $apiTransport = {
     return ConvertTo-TestApiObject $payload
 }.GetNewClosure()
 
+$markerApiTransport = {
+    param($ApiKey, $Method, $Path, $Body, $Headers)
+
+    function New-MarkerApiObject {
+        param($InputObject)
+        return ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $InputObject -Depth 20 -Compress) -ErrorAction Stop
+    }
+
+    $cleanPath = ([string]$Path).Split('?')[0]
+    if ($cleanPath -eq '/v2/spaces') {
+        $payload = @{
+            data = @(
+                @{ id = $testSpaceId; name = 'BlobUI Settings' },
+                @{ id = $otherSpaceId; name = 'Project Space' }
+            )
+            has_more = $false
+        }
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/properties" -or $cleanPath -eq "/v2/spaces/$otherSpaceId/properties") {
+        $payload = @{
+            data = @(@{ id = 'blob-id-property'; key = 'blob_id'; name = 'BlobID'; format = 'text' })
+            has_more = $false
+        }
+    }
+    elseif ($cleanPath -eq "/v2/spaces/$testSpaceId/search" -or $cleanPath -eq "/v2/spaces/$otherSpaceId/search") {
+        if ($Method -cne 'Post' -or [string]::Join(',', @($Body.fields)) -cne 'blob_id' -or [string]$Body.type -cne 'setting') {
+            throw 'The marker mock expected a typed BlobID field search.'
+        }
+        if ($cleanPath -eq "/v2/spaces/$testSpaceId/search") {
+            $rows = @(@{
+                id = $generalObjectId
+                type = 'setting'
+                properties = @{ blob_id = @{ format = 'text'; text = 'BlobUI-global-settings' } }
+            })
+            if ($ApiKey -eq 'marker-duplicate-global-key') {
+                $rows += @(@{
+                    id = 'bafy-duplicate-global-settings-object'
+                    type = 'setting'
+                    properties = @{ blob_id = @{ format = 'text'; text = 'BlobUI-global-settings' } }
+                })
+            }
+        }
+        else {
+            $spaceMarkerRow = @{
+                id = $spaceObjectId
+                type = 'setting'
+                properties = @{ blob_id = @{ format = 'text'; text = 'BlobUI-space-settings' } }
+            }
+            $rows = @($spaceMarkerRow)
+            if ($ApiKey -eq 'marker-duplicate-space-key') {
+                $rows += @(@{
+                    id = 'bafy-duplicate-space-settings-object'
+                    type = 'setting'
+                    properties = @{ blob_id = @{ format = 'text'; text = 'BlobUI-space-settings' } }
+                })
+            }
+        }
+        $payload = @{ data = $rows; has_more = $false }
+    }
+    elseif ($cleanPath -match '^/v2/spaces/(?<space>[^/]+)/objects/(?<id>[^/]+)$') {
+        $objectId = [string]$Matches.id
+        if ($objectId -eq $generalObjectId -or $objectId -eq 'bafy-duplicate-global-settings-object') {
+            $payload = @{
+                id = $objectId
+                type = 'setting'
+                name = 'A name that does not control discovery'
+                properties = @{
+                    blob_id = @{ format = 'text'; text = 'BlobUI-global-settings' }
+                    font = @{ format = 'text'; text = 'Aptos' }
+                    code_font = @{ format = 'text'; text = 'Cascadia Mono' }
+                    accent_color = @{ format = 'text'; text = '#336699' }
+                    banner = @{ format = 'text'; text = 'assets/spacebanner/nested/global-banner' }
+                }
+            }
+        }
+        elseif ($objectId -eq $spaceObjectId -or $objectId -eq 'bafy-duplicate-space-settings-object') {
+            $spaceBanner = if ($ApiKey -eq 'marker-empty-space-key') { '' } elseif ($ApiKey -eq 'marker-traversal-space-key') { '..\\escape.png' } else { 'nested/space-banner' }
+            $payload = @{
+                id = $objectId
+                type = 'setting'
+                name = 'Any name is allowed here'
+                properties = @{
+                    blob_id = @{ format = 'text'; text = 'BlobUI-space-settings' }
+                    banner_2 = @{ format = 'text'; text = $spaceBanner }
+                }
+            }
+        }
+        else {
+            $exception = [System.Exception]::new('Marker mock object not found.')
+            $exception.Data['StatusCode'] = 404
+            throw $exception
+        }
+    }
+    else {
+        throw "Unexpected marker mock request: $Method $Path"
+    }
+    return New-MarkerApiObject $payload
+}.GetNewClosure()
+
 $unavailableApiTransport = {
     param($ApiKey, $Method, $Path, $Body, $Headers)
     throw [System.Net.Sockets.SocketException]::new([System.Net.Sockets.SocketError]::ConnectionRefused)
@@ -412,8 +511,49 @@ try {
     Assert-Equal 'Libron' $fetchedData.settings.fontFamily 'The exported Font property was not mapped.'
     Assert-Equal 'Consolas' $fetchedData.settings.codeFontFamily 'The exported Code Font property was not mapped.'
     Assert-Equal '#DE50DE' $fetchedData.settings.accentColor 'The exported Accent Color property was not mapped.'
-    Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The fixed banner asset path changed.'
-    Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
+    Assert-Equal 'BlobID' $fetchedData.settingsSource 'A new install did not use marker-based settings discovery.'
+    Assert-True ($null -eq $fetchedData.settings.PSObject.Properties['bannerPath']) 'The new settings data retained a banner setting.'
+    Assert-Equal 0 @($fetchedData.settingsObjectIds).Count 'Marker-mode settings unexpectedly depended on manually selected object IDs.'
+
+    $markerInstallDirectory = Join-Path $testRoot 'Marker Anytype Data'
+    [System.IO.Directory]::CreateDirectory($markerInstallDirectory) | Out-Null
+    $markerDataPath = Join-Path $testRoot 'marker-settings.json'
+    Get-BlobUiSettingsData -ApiKey 'marker-key' -OutputPath $markerDataPath -SpaceId $testSpaceId -InstallDirectory $markerInstallDirectory -ApiTransport $markerApiTransport | Out-Null
+    $markerData = Read-BlobUiDataFile -Path $markerDataPath
+    Assert-Equal 'BlobID' $markerData.settingsSource 'New settings did not record marker-based discovery.'
+    Assert-Equal $generalObjectId ([string]$markerData.settingsObjectIds[0]) 'BlobUI selected settings by object name instead of the global BlobID marker.'
+    Assert-Equal 'Aptos' $markerData.settings.fontFamily 'The marked global settings object was not read.'
+    Assert-True ($null -eq $markerData.settings.PSObject.Properties['bannerPath']) 'BlobUI retained a configurable global banner setting.'
+    Assert-Equal 1 @($markerData.spaceSettings).Count 'The marked per-space settings object was not associated with its space.'
+    Assert-Equal $otherSpaceId $markerData.spaceSettings[0].id 'Per-space settings were not keyed by the actual Anytype space ID.'
+    Assert-Equal 'Project Space' $markerData.spaceSettings[0].name 'The per-space display label was not retained for diagnostics.'
+    Assert-True ($null -eq $markerData.spaceSettings[0].PSObject.Properties['bannerPath']) 'BlobUI retained a per-space Banner setting.'
+    $markerBadDataPath = Join-Path $testRoot 'marker-invalid-settings.json'
+    Assert-Throws {
+        Get-BlobUiSettingsData -ApiKey 'marker-duplicate-global-key' -OutputPath $markerBadDataPath -SpaceId $testSpaceId -InstallDirectory $markerInstallDirectory -ApiTransport $markerApiTransport
+    } 'Duplicate global settings' 'Multiple BlobUI-global-settings objects'
+    Assert-Throws {
+        Get-BlobUiSettingsData -ApiKey 'marker-duplicate-space-key' -OutputPath $markerBadDataPath -SpaceId $testSpaceId -InstallDirectory $markerInstallDirectory -ApiTransport $markerApiTransport
+    } 'Duplicate per-space settings' 'Multiple BlobUI-space-settings objects'
+    Get-BlobUiSettingsData -ApiKey 'marker-traversal-space-key' -OutputPath $markerBadDataPath -SpaceId $testSpaceId -InstallDirectory $markerInstallDirectory -ApiTransport $markerApiTransport | Out-Null
+    $markerTraversalData = Read-BlobUiDataFile -Path $markerBadDataPath
+    Assert-Equal 1 @($markerTraversalData.spaceSettings).Count 'An imported per-space Banner value affected settings discovery.'
+
+    $markerEmptyDataPath = Join-Path $testRoot 'marker-empty-space-settings.json'
+    Get-BlobUiSettingsData -ApiKey 'marker-empty-space-key' -OutputPath $markerEmptyDataPath -SpaceId $testSpaceId -InstallDirectory $markerInstallDirectory -ApiTransport $markerApiTransport | Out-Null
+    $markerEmptyData = Read-BlobUiDataFile -Path $markerEmptyDataPath
+    $markerAssetsDirectory = Join-Path $testRoot 'Marker assets'
+    [System.IO.Directory]::CreateDirectory((Join-Path $markerAssetsDirectory 'spacebanner')) | Out-Null
+    [System.IO.File]::Copy((Join-Path $repoRoot 'assets\spacebanner\banner.png'), (Join-Path $markerAssetsDirectory 'spacebanner\banner.png'))
+    $markerCompilePath = Join-Path $testRoot 'marker-compiled.css'
+    $markerCompile = Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory $markerAssetsDirectory -OutputPath $markerCompilePath -Data $markerEmptyData
+    Assert-Equal ([System.Uri]::new((Join-Path $markerInstallDirectory 'blob\assets\spacebanner\banner.png')).AbsoluteUri) $markerCompile.bannerUri 'The compiler did not use the fixed banner filename.'
+    $markerLegacyBannerData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $markerData -Depth 20)
+    $markerLegacyBannerData.settings | Add-Member -NotePropertyName bannerPath -NotePropertyValue '..\outside.png' -Force
+    $markerLegacyBannerData.spaceSettings[0] | Add-Member -NotePropertyName bannerPath -NotePropertyValue '..\outside.png' -Force
+    $markerLegacyBannerCompile = Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath (Join-Path $testRoot 'marker-legacy-banner.css') -Data $markerLegacyBannerData
+    Assert-Equal ([System.Uri]::new((Join-Path $markerInstallDirectory 'blob\assets\spacebanner\banner.png')).AbsoluteUri) $markerLegacyBannerCompile.bannerUri 'A saved per-space Banner value blocked compilation or changed the fixed image.'
+
     Assert-Equal 'Blue' $fetchedData.calendarObjectColors.$calendarBlueObjectId 'The Calendar Color property was not read from the independent space search.'
     Assert-Equal 'Blob Pink' $fetchedData.calendarObjectColors.$calendarBlobPinkObjectId 'Blob Pink was not preserved as a canonical calendar color.'
     Assert-Equal '#DE50DE' $fetchedData.calendarObjectColors.$calendarHexObjectId 'A hexadecimal Calendar Color value was not normalized.'
@@ -422,20 +562,15 @@ try {
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarDefaultObjectId]) 'Default did not remove its calendar color override.'
     Assert-True ($null -eq $fetchedData.calendarObjectColors.PSObject.Properties[$calendarUncoloredObjectId]) 'An object without Calendar Color received an override.'
     Assert-True ($fetchedData.calendarObjectColors.PSObject.Properties[$calendarBlueObjectId] -and $fetchedData.settingsObjectIds -notcontains $calendarBlueObjectId) 'Calendar color collection reused selected theme settings objects instead of the space object search.'
-    $settingsSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") -and [string]$_.Body.type -ceq 'setting' })
-    Assert-Equal 2 $settingsSearchCalls.Count 'The v2 settings search did not follow has_more across pages.'
-    Assert-Equal 'setting' $settingsSearchCalls[0].Body.type 'The search body did not filter by the exported Setting type key.'
-    Assert-True ($settingsSearchCalls[0].Path -match '[?&]limit=100&offset=0$') 'The first v2 settings search page omitted its query pagination.'
-    Assert-True ($settingsSearchCalls[1].Path -match '[?&]offset=1$') 'The second v2 settings search page did not advance by the returned item count.'
-    $settingsSearchOutsideSettingsSpace = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' -and -not $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") })
-    Assert-Equal 0 $settingsSearchOutsideSettingsSpace.Count 'Settings discovery scanned a space other than the designated settings space.'
+    $settingsSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' })
+    Assert-Equal 0 $settingsSearchCalls.Count 'Settings discovery searched by object type without resolving the BlobID property first.'
     $spaceListCalls = @($apiRequests | Where-Object { $_.Method -eq 'Get' -and $_.Path.StartsWith('/v2/spaces?') })
     Assert-True ($spaceListCalls.Count -ge 2) 'The v2 space list did not follow has_more across pages.'
     Assert-True ($spaceListCalls[0].Path -match '[?&]ids=full&limit=100&offset=0$') 'The v2 space list did not request full IDs and pagination.'
     Assert-True ($spaceListCalls[1].Path -match '[?&]offset=1$') 'The second v2 space page did not advance by the returned item count.'
     Assert-True (@($apiRequests | Where-Object { $_.Headers.ContainsKey('Anytype-Version') }).Count -eq 0) 'A v1-only Anytype-Version header was sent to API v2.'
     Assert-True (@($apiRequests | Where-Object { $_.Path -notmatch '^/v2/' }).Count -eq 0) 'The API transport made a request outside v2.'
-    Assert-True (@($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' }).Count -ge 2) 'The object reads omitted the v2 properties and full-ID query parameters.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' }).Count 'Marker mode read unmarked objects by name or position.'
     $calendarSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$testSpaceId/search") -and [string]::Join(',', @($_.Body.fields)) -ceq $calendarColorPropertyKey })
     Assert-Equal 2 $calendarSearchCalls.Count 'The Calendar Color object search did not follow has_more across pages.'
     Assert-Equal $calendarColorPropertyKey ([string]$calendarSearchCalls[0].Body.fields[0]) 'The Calendar Color search did not request the API property key resolved by name.'
@@ -447,7 +582,7 @@ try {
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
     Assert-Equal 'Consolas' $emptyData.settings.codeFontFamily 'The Code Font default is incorrect.'
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
-    Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The fixed banner asset path is incorrect.'
+    Assert-True ($null -eq $emptyData.settings.PSObject.Properties['bannerPath']) 'The default settings data retained a banner setting.'
 
     $defaultAccentDataPath = Join-Path $testRoot 'default-accent-data.json'
     $defaultAccentData = Get-BlobUiSettingsData -ApiKey 'default-accent-key' -OutputPath $defaultAccentDataPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
@@ -476,10 +611,17 @@ try {
         settings = $fetchedData.settings
         installDirectory = $installDirectory
     })
+    $legacyBannerPath = Join-Path $installDirectory 'blob\assets\spacebanner\banner.png'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $legacyBannerPath)) | Out-Null
+    [System.IO.File]::WriteAllText($legacyBannerPath, 'legacy-user-banner')
+    $legacyDataForBanner = Read-BlobUiDataFile -Path $legacyDataPath
+    $legacyDataForBanner.settings | Add-Member -NotePropertyName bannerPath -NotePropertyValue 'spacebanner\custom.png' -Force
+    Write-BlobUiAtomicJson -Path $legacyDataPath -InputObject $legacyDataForBanner
     $legacyRefreshPath = Join-Path $testRoot 'legacy-refresh.json'
     $legacyRefresh = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $legacyRefreshPath -SpaceId $testSpaceId -ObjectIds @($generalObjectId, $spaceObjectId) -ExistingDataPath $legacyDataPath -ApiTransport $apiTransport
     Assert-Equal $testSpaceId $legacyRefresh.selectedSpace.id 'A saved settings record from the previous API version lost its full space ID.'
     Assert-Equal "$generalObjectId|$spaceObjectId" $legacyRefresh.settingsObjectIds 'Saved object IDs from the previous API version were not accepted by v2.'
+    Assert-True ($null -eq $legacyRefresh.settings.PSObject.Properties['bannerPath']) 'Refreshing legacy data retained a banner setting.'
     Assert-Equal $installDirectory $legacyRefresh.installDirectory 'A previous settings record did not preserve its install directory during refresh.'
 
     $staleCalendarDataPath = Join-Path $testRoot 'stale-calendar-data.json'
@@ -687,7 +829,7 @@ try {
     } 'Invalid Font setting' 'Font'
     Get-BlobUiSettingsData -ApiKey 'bad-banner-key' -OutputPath $badDataPath -SpaceId $testSpaceId -ObjectIds @($spaceObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     $bannerIgnoredData = Read-BlobUiDataFile -Path $badDataPath
-    Assert-Equal 'spacebanner\banner.png' $bannerIgnoredData.settings.bannerPath 'An Anytype Banner property changed the fixed asset path.'
+    Assert-True ($null -eq $bannerIgnoredData.settings.PSObject.Properties['bannerPath']) 'A legacy unmarked Banner property was retained as a setting.'
     Assert-Equal 'old-css-sentinel' ([System.IO.File]::ReadAllText($oldCssPath)) 'A settings fetch changed the installed CSS.'
     Assert-Equal 'old-data-sentinel' ([System.IO.File]::ReadAllText((Join-Path $blobDirectory 'data.json'))) 'A settings fetch changed saved data.'
 
@@ -770,7 +912,7 @@ try {
     }
     $firstInstall = Invoke-BlobUiInstall @installArguments
     Assert-True (Test-Path -LiteralPath $firstInstall.cssPath -PathType Leaf) 'The CSS install did not create custom.css.'
-    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The bundled default banner was not installed.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'The runtime install did not copy Update.ps1.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1') -PathType Leaf) 'The runtime install did not copy Uninstall.ps1.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
@@ -781,6 +923,8 @@ try {
     $savedData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     Assert-Equal $installDirectory $savedData.installDirectory 'The successful install directory was not saved.'
     Assert-True (-not ([System.IO.File]::ReadAllText($firstInstall.dataPath).Contains('unit-test-key'))) 'The plaintext API key was written to data.json.'
+    $installedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
+    Assert-Equal 0 @($installedManifest.managedFiles | Where-Object { ([string]$_).StartsWith('assets/spacebanner/', [System.StringComparison]::OrdinalIgnoreCase) }).Count 'Banner assets were recorded as package-owned files.'
 
     $repeatInstallArguments = @{
         InstallDirectory = $installDirectory
@@ -904,17 +1048,15 @@ try {
     & (Join-Path $sourceScriptsFixture 'Update.ps1') -ApiTransport $apiTransport
     $updatedData = Read-BlobUiDataFile -Path $firstInstall.dataPath
     $updatedManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText((Join-Path $blobDirectory '.blobui-managed-files.json')))
-    Assert-Equal "$generalObjectId|$spaceObjectId" $updatedData.settingsObjectIds 'Update changed the selected object IDs or their order.'
+    Assert-Equal 0 @($updatedData.settingsObjectIds).Count 'Update made marker-mode configuration depend on saved object IDs.'
     Assert-Equal $installDirectory $updatedData.installDirectory 'Update changed the saved install directory.'
     Assert-Equal 1 $updatedData.schemaVersion 'Update changed the data schema version while recording the release.'
     Assert-Equal '1.1.0' $updatedManifest.releaseVersion 'Update did not record the installed release version.'
     Assert-Equal 'unit-test-key' (Read-BlobUiProtectedCredential -Path $firstInstall.credentialPath) 'Update damaged or replaced the saved API key.'
     Assert-Equal 'custom-banner-sentinel' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($installedBannerPath))) 'Update replaced the installed custom banner.'
     $updateObjectReads = @($apiRequests | Where-Object { $_.Path -match '/objects/[^?]+\?include=properties&ids=full$' })
-    Assert-Equal 2 $updateObjectReads.Count 'Update did not fetch exactly the saved settings objects.'
-    Assert-True ($updateObjectReads[0].Path -like "*/objects/$generalObjectId?*") 'Update changed the first selected settings object.'
-    Assert-True ($updateObjectReads[1].Path -like "*/objects/$spaceObjectId?*") 'Update changed the second selected settings object.'
-    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'Update prompted to discover or reimport settings objects.'
+    Assert-Equal 0 $updateObjectReads.Count 'Marker-mode update fetched settings objects by their saved IDs instead of rediscovering BlobID markers.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'Update searched for settings markers in spaces without a BlobID property.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'Update did not install its bundled updater.'
 
     $installedUserCss = Join-Path $firstInstall.runtimePath 'Dev\user-local.css'
@@ -1178,7 +1320,8 @@ try {
         $env:APPDATA = $oldAppData
     }
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'custom.css'))) 'The validated default fallback left custom.css installed.'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'blob'))) 'The validated default fallback left the blob folder.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'blob\assets\spacebanner\banner.png') -PathType Leaf) 'The validated default fallback removed the bundled user banner asset.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $legacyInstallDirectory 'blob\data.json'))) 'The validated default fallback left BlobUI settings data beside the preserved banner.'
     Assert-Equal 'keep-legacy-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $legacyInstallDirectory 'unrelated-anytype-file.txt'))) 'The validated default fallback removed another Anytype file.'
     Assert-Equal 'preserve-legacy-release-css' ([System.IO.File]::ReadAllText($legacyUninstallCss)) 'The validated default fallback removed a custom.css file in Releases.'
 
@@ -1230,7 +1373,8 @@ try {
     $runtimeUninstallScript = Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1'
     & $runtimeUninstallScript
     Assert-True (-not (Test-Path -LiteralPath $firstInstall.cssPath)) 'The installed runtime uninstaller left custom.css.'
-    Assert-True (-not (Test-Path -LiteralPath $blobDirectory)) 'The installed runtime uninstaller left the blob folder.'
+    Assert-Equal 'custom-banner-sentinel' ([System.IO.File]::ReadAllText($installedBannerPath)) 'The installed runtime uninstaller removed a user-owned banner.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'data.json'))) 'The installed runtime uninstaller left BlobUI settings data beside user banners.'
     Assert-Equal 'keep-anytype-file' ([System.IO.File]::ReadAllText((Join-Path $installDirectory 'unrelated-anytype-file.txt'))) 'The installed runtime uninstaller removed an unrelated Anytype file.'
 
     Write-Host 'BlobUI isolated workflow checks passed.'

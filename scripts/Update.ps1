@@ -15,4 +15,4 @@ if (-not [string]::IsNullOrWhiteSpace($InstallDirectory)) {
 }
 
 & (Join-Path $PSScriptRoot 'Rebuild.ps1') @rebuildArguments
-Write-Host 'BlobUI update completed. Your saved API key and settings object selections were reused.'
+Write-Host 'BlobUI update completed. Your saved API key was reused and settings were refreshed.'
