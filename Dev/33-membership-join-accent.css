@@ -1,0 +1,4 @@
+/* Use the configured accent for the Membership settings Join caption. */
+#item-membership > .caption.join {
+    color: var(--color-blob-accent) !important;
+}

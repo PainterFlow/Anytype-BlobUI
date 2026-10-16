@@ -1,0 +1,9 @@
+/* Tint the active properties button; inactive hover keeps Anytype's grey. */
+#button-header-relation.active.withBackground {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 15%, transparent) !important;
+}
+
+#button-header-relation.active.withBackground:hover,
+#button-header-relation.active.withBackground.hover {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 22%, transparent) !important;
+}
