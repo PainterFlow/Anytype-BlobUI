@@ -1,0 +1,11 @@
+/* Tint editable shortcut keycaps with the configured accent on hover. */
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing):not(.hasError):hover .symbols .label,
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing):not(.hasError).hover .symbols .label {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 22%, transparent) !important;
+}
+
+/* Keep editable shortcut errors red when the hover state is active. */
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing).hasError:hover .symbols .label,
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing).hasError.hover .symbols .label {
+    background-color: var(--color-light-red) !important;
+}

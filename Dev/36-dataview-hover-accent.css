@@ -1,0 +1,7 @@
+/* Use the configured accent for active dataview filter and sort hover backgrounds. */
+.blocks .block.blockDataview .dataviewControls .icon.btn-filter.on:hover,
+.blocks .block.blockDataview .dataviewControls .icon.btn-filter.on.hover,
+.blocks .block.blockDataview .dataviewControls .icon.btn-sort.on:hover,
+.blocks .block.blockDataview .dataviewControls .icon.btn-sort.on.hover {
+    background-color: color-mix(in srgb, var(--color-blob-accent) 22%, transparent) !important;
+}
