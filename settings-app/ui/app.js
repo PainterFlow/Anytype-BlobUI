@@ -41,6 +41,37 @@
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
+  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab")];
+  function updateAdvancedTabIndicator() {
+    if (advancedPage.hidden) return;
+    const tab = advancedTabs.find((item) => item.getAttribute("aria-selected") === "true");
+    if (!tab || !tab.offsetWidth) return;
+    advancedPage.style.setProperty("--advanced-tab-left", `${tab.offsetLeft}px`);
+    advancedPage.style.setProperty("--advanced-tab-width", `${tab.offsetWidth}px`);
+    tab.parentElement.classList.add("indicator-ready");
+  }
+  window.addEventListener("resize", updateAdvancedTabIndicator);
+  if (document.fonts) document.fonts.ready.then(updateAdvancedTabIndicator);
+  function selectAdvancedTab(index) {
+    advancedTabs.forEach((tab, position) => {
+      const selected = position === index;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      el(tab.getAttribute("aria-controls")).hidden = !selected;
+    });
+    if (index !== 0) resetAdvancedVisibility();
+    updateAdvancedTabIndicator();
+  }
+  advancedTabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectAdvancedTab(index));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? advancedTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + advancedTabs.length) % advancedTabs.length;
+      selectAdvancedTab(next);
+      advancedTabs[next].focus();
+    });
+  });
   const installDirectory = el("install-directory");
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
   const automaticChecksEnabled = el("automatic-checks-enabled");
@@ -923,6 +954,7 @@
     preferencesPage.hidden = isAccessibility || isAdvanced;
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
+    if (isAdvanced) updateAdvancedTabIndicator();
     pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
     accessibilityNav.classList.toggle("active", isAccessibility);

@@ -117,6 +117,15 @@ button:focus-visible, input:focus-visible { outline: none; }
 .settings-list, .font-fields { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
 .settings-row { padding: 14px 16px; font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .settings-page[hidden] { display: none; }
+.advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
+.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--advanced-tab-width, 0px); transform: translateX(var(--advanced-tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs [role="tab"] { margin-bottom: -1px; padding: 0 0 12px; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font-weight: 400; cursor: pointer; transition: color .2s ease; }
+.advanced-tabs [role="tab"]:hover { color: var(--text); }
+.advanced-tabs [aria-selected="true"] { color: var(--text); }
+.advanced-tabs:not(.indicator-ready) [aria-selected="true"] { border-bottom-color: var(--text); }
+:root[data-reduced-motion="true"] .advanced-tabs::after, :root[data-reduced-motion="true"] .advanced-tabs [role="tab"] { transition: none; }
+@media (prefers-reduced-motion: reduce) { .advanced-tabs::after, .advanced-tabs [role="tab"] { transition: none; } }
+.advanced-tabs [role="tab"]:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 4px; }
 
 .color-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: center; padding: 16px; }
 .color-plane { position: relative; height: 164px; border-radius: 8px; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), var(--picker-hue, #ff00ff); touch-action: none; cursor: crosshair; }

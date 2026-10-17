@@ -308,9 +308,13 @@
             </section>
           </div>
           <div id="advanced-page" class="settings-page" hidden>
-            <section class="settings-group" aria-labelledby="advanced-api-heading">
+            <div class="advanced-tabs" role="tablist" aria-label="Advanced settings">
+              <button id="advanced-api-tab" type="button" role="tab" aria-selected="true" aria-controls="advanced-api-panel">API key</button>
+              <button id="advanced-app-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-app-panel" tabindex="-1">App settings</button>
+            </div>
+            <section id="advanced-api-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-api-tab">
               <div class="section-heading">
-                <h2 id="advanced-api-heading">Anytype API</h2>
+                <h2 id="advanced-api-heading">API key</h2>
                 <p>Configure the local API connection used by BlobUI.</p>
               </div>
               <div class="settings-list advanced-fields">
@@ -345,6 +349,7 @@
               <p id="advanced-api-key-hint" class="accessibility-note">Enter a new key to replace the saved key. Clear the masked value to remove it.</p>
               <p id="advanced-api-error" class="field-error" role="alert" aria-live="polite"></p>
             </section>
+            <section id="advanced-app-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-app-tab" hidden>
               <section class="settings-group" aria-labelledby="anytype-installation-heading">
                 <div class="section-heading">
                   <h2 id="anytype-installation-heading">Anytype Folder</h2>
@@ -380,6 +385,7 @@
                   <button id="check-updates-button" class="banner-image-button update-check-button" type="button" disabled>Check for updates</button>
                 </div>
               </section>
+            </section>
           </div>
           </div>
         </section>

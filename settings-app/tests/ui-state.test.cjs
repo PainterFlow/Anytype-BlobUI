@@ -176,7 +176,8 @@ assert.match(settingsHtml, /<span>Alt\+R to rebuild custom\.css<\/span>\s*<span>
 assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="accessibility-nav"'), 'Accessibility must be the second Settings navigation page.');
 assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
 assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs inside Advanced Settings.');
-assert.doesNotMatch(settingsHtml, /role="tablist"|role="tabpanel"/);
+assert.match(settingsHtml, /role="tablist"/);
+assert.match(settingsHtml, /id="advanced-app-panel"[^>]*role="tabpanel"[^>]*hidden/);
 assert.match(settingsHtml, /Anytype data folder that contains custom\.css/);
 assert.match(settingsHtml, /id="install-directory"[^>]*readonly[^>]*aria-haspopup="dialog"/);
 for (const label of ['Anytype API key', 'API key IP', 'API key port']) {
