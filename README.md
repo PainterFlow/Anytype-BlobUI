@@ -92,10 +92,12 @@ BlobUI Settings provides a desktop Appearance window for fonts and accent colors
 
 ```powershell
 .\scripts\Build-Settings.ps1
+# Optional: close old instances and start the app after a successful build.
+.\scripts\Build-Settings.ps1 -s -c
 .\scripts\Settings.ps1
 ```
 
-The build places the executable in `settings-app/dist/blobui-settings.exe`. `Setup.ps1`, `Install.ps1` and `Update.ps1` include that executable when it is present, placing it at `blob/runtime/settings-app.exe`; the installed launcher is `blob/runtime/scripts/Settings.ps1`. A release that ships the app should include the built executable at the same `settings-app/dist` path before packaging.
+The build places the executable in `settings-app/dist/blobui-settings.exe`. Add `-s` to start the app after a successful build, or `-c` to close any running Settings app instances before the build. `Setup.ps1`, `Install.ps1` and `Update.ps1` include that executable when it is present, placing it at `blob/runtime/settings-app.exe`; the installed launcher is `blob/runtime/scripts/Settings.ps1`. A release that ships the app should include the built executable at the same `settings-app/dist` path before packaging.
 
 Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 

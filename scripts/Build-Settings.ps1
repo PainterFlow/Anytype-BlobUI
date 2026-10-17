@@ -1,4 +1,7 @@
-param()
+param(
+    [switch]$s,
+    [switch]$c
+)
 
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -10,6 +13,17 @@ $distributionExecutable = Join-Path $distributionDirectory 'blobui-settings.exe'
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "The BlobUI Settings Rust project was not found: $manifestPath"
+}
+
+if ($c) {
+    $oldInstances = @(Get-Process -Name 'blobui-settings', 'settings-app' -ErrorAction SilentlyContinue)
+    foreach ($instance in $oldInstances) {
+        Stop-Process -Id $instance.Id -Force -ErrorAction Stop
+        $instance.WaitForExit()
+    }
+    if ($oldInstances.Count -gt 0) {
+        Write-Host "Closed $($oldInstances.Count) existing BlobUI Settings instance(s)."
+    }
 }
 
 $buildEnvironment = @{}
@@ -79,3 +93,7 @@ catch [System.IO.IOException] {
 }
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run scripts/Install.ps1 or scripts/Update.ps1 to package it with BlobUI, or launch it with scripts/Settings.ps1.'
+
+if ($s) {
+    Start-Process -FilePath $distributionExecutable -WindowStyle Normal | Out-Null
+}
