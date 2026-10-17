@@ -207,7 +207,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .onboarding-copy { display: grid; justify-items: center; gap: 24px; text-align: center; }
 .onboarding-title { font-size: clamp(48px, 7.5vw, 96px); line-height: 1.15; font-weight: 600; letter-spacing: -.045em; animation: onboarding-fade-in 900ms ease-out both; }
 .onboarding-hint { color: var(--text-secondary); font-size: 16px; line-height: 24px; animation: onboarding-fade-in 900ms ease-out 250ms both; }
-.onboarding-welcome.leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
+.onboarding .leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
 .onboarding-api { display: flex; flex-direction: column; height: 100%; min-height: 0; animation: onboarding-fade-in 450ms ease-out both; }
 .onboarding-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 44px 48px 20px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .onboarding-api-heading { text-align: center; margin: 0 auto 44px; }
@@ -222,13 +222,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .onboarding-option-title { display: block; margin-bottom: 24px; font-size: 24px; line-height: 30px; font-weight: 600; }
 .onboarding-features { display: grid; gap: 16px; }
 .onboarding-feature { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; font-size: 14px; line-height: 21px; }
-.feature-mark { flex-shrink: 0; font-size: 21px; line-height: 21px; }
+.feature-mark { flex: 0 0 20px; width: 20px; height: 20px; align-self: center; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .feature-mark.available { color: var(--accent); }
-.feature-mark.unavailable { color: var(--text-muted); }
-.recommended-option { --card-background: color-mix(in srgb, var(--input-bg), var(--accent) 5%); box-shadow: inset 0 0 0 2px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent); }
-.recommended-option:hover { box-shadow: inset 0 0 0 2px var(--accent), 0 0 36px color-mix(in srgb, var(--accent) 30%, transparent); }
-.recommended-label { position: absolute; top: 2px; left: 24px; transform: translateY(-100%); padding: 5px 14px 3px; border: 2px solid var(--accent); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--card-background); color: var(--accent); font-size: 12px; line-height: 22px; font-weight: 500; transition: background 220ms ease; }
-.onboarding-selection { min-height: 22px; margin: 24px 0 0; text-align: center; color: var(--text-secondary); }
+.feature-mark.unavailable { flex-basis: 12px; width: 12px; height: 12px; color: var(--text-muted); }
+.recommended-option { --card-background: color-mix(in srgb, var(--input-bg), var(--accent) 5%); border: 2px solid var(--accent); border-top-width: 32px; box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent); }
+.onboarding-option.recommended-option { padding-top: 0; }
+.recommended-option:hover { box-shadow: 0 0 36px color-mix(in srgb, var(--accent) 30%, transparent); }
+.recommended-label { position: absolute; top: -32px; left: 0; right: 0; color: var(--bg); text-align: center; font-size: 12px; line-height: 32px; font-weight: 600; }
+.app-shell.onboarding-entering { animation: onboarding-fade-in 450ms ease-out both; }
 .onboarding-privacy { margin-top: 8px; padding: 20px 24px; background: var(--bg); color: var(--text-secondary); text-align: center; font-size: 12px; }
 @keyframes onboarding-fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes onboarding-fade-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-12px); } }
@@ -238,7 +239,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   .onboarding-option { padding: 28px 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-title, .onboarding-hint, .onboarding-welcome.leaving, .onboarding-api { animation: none; }
+  .onboarding-title, .onboarding-hint, .onboarding .leaving, .onboarding-api, .app-shell.onboarding-entering { animation: none; }
   .onboarding-option, .recommended-label { transition: none; }
   .onboarding-option:hover { transform: none; }
 }

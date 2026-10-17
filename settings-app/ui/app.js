@@ -538,50 +538,72 @@
   const onboardingApi = el("onboarding-api");
   const settingsShell = el("settings-shell");
   const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
+  // Add future pages here. Every page advances through the same transition;
+  // reaching the end always reveals the main app.
+  const onboardingSteps = [
+    { page: onboardingWelcome, focus: onboardingWelcome },
+    { page: onboardingApi, focus: el("onboarding-api-title") },
+  ];
+  let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
 
-  function showOnboarding() {
-    if (onboarding.hidden) onboardingPreviousFocus = document.activeElement;
+  function resetOnboardingTransition() {
     window.clearTimeout(onboardingTransition);
     onboardingTransition = null;
+    onboardingSteps.forEach(({ page }) => page.classList.remove("leaving"));
+    settingsShell.classList.remove("onboarding-entering");
+  }
+
+  function showOnboardingStep(index) {
+    onboardingStep = index;
+    onboardingSteps.forEach(({ page }, position) => { page.hidden = position !== index; });
+    updateOnboardingScrollbar();
+    onboardingSteps[index].focus.focus();
+  }
+
+  function showOnboarding() {
+    if (onboarding.hidden) onboardingPreviousFocus = document.activeElement;
+    resetOnboardingTransition();
     closeLogs();
+    apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
+    delete onboarding.dataset.apiChoice;
     settingsShell.inert = true;
     root.classList.add("onboarding-active");
     onboarding.hidden = false;
-    onboardingApi.hidden = true;
-    onboardingWelcome.classList.remove("leaving");
-    onboardingWelcome.hidden = false;
-    onboardingWelcome.focus();
+    showOnboardingStep(0);
   }
 
   function closeOnboarding() {
-    window.clearTimeout(onboardingTransition);
-    onboardingTransition = null;
+    resetOnboardingTransition();
     onboarding.hidden = true;
     settingsShell.inert = false;
     root.classList.remove("onboarding-active");
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
   }
 
-  onboardingWelcome.addEventListener("click", () => {
-    if (onboardingTransition !== null) return;
-    onboardingWelcome.classList.add("leaving");
+  function advanceOnboarding() {
+    if (onboarding.hidden || onboardingTransition !== null) return;
+    const current = onboardingSteps[onboardingStep].page;
+    current.classList.add("leaving");
     onboardingTransition = window.setTimeout(() => {
       onboardingTransition = null;
-      onboardingWelcome.hidden = true;
-      onboardingWelcome.classList.remove("leaving");
-      onboardingApi.hidden = false;
-      updateOnboardingScrollbar();
-      el("onboarding-api-title").focus();
+      current.classList.remove("leaving");
+      if (onboardingStep + 1 < onboardingSteps.length) {
+        showOnboardingStep(onboardingStep + 1);
+      } else {
+        closeOnboarding();
+        settingsShell.classList.add("onboarding-entering");
+      }
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
-  });
+  }
 
+  onboardingWelcome.addEventListener("click", advanceOnboarding);
   apiOptions.forEach((option) => option.addEventListener("click", () => {
+    if (onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
-    // Selection stays in the preview until the next onboarding steps are built.
     onboarding.dataset.apiChoice = option === apiOptions[1] ? "api" : "no-api";
-    el("onboarding-selection").textContent = option === apiOptions[1] ? "Use API Key selected" : "No API Key selected";
+    advanceOnboarding();
   }));
 
   document.addEventListener("keydown", (event) => {
