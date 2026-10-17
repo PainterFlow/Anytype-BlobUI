@@ -25,16 +25,17 @@
           </button>
         </nav>
 
+        <div class="sidebar-bottom">
         <div class="sidebar-actions">
-          <button id="save-button" class="sidebar-action save-button" type="button" hidden disabled>
-            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h10l3 3v11H3V3h1Zm2 0v5h7V3M6 17v-6h8v6"/></svg>
+          <button id="save-button" class="sidebar-action save-button" type="button" title="Save changes" hidden disabled>
+            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>
             <span class="save-spinner" aria-hidden="true"></span>
-            <span class="save-label">Save changes</span>
+            <span class="save-label sr-only">Save changes</span>
           </button>
           <div class="log-control" id="log-control">
-            <button id="log-button" class="sidebar-action log-button" type="button" aria-expanded="false" aria-controls="log-popup" hidden>
-              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v5m0 2v1"/></svg>
-              <span id="log-label">Logs</span>
+            <button id="log-button" class="sidebar-action log-button" type="button" title="Logs" aria-expanded="false" aria-controls="log-popup" hidden>
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg>
+              <span id="log-label" class="sr-only">Logs</span>
             </button>
             <section id="log-popup" class="log-popup" aria-labelledby="log-title" hidden>
               <div class="log-heading">
@@ -55,6 +56,7 @@
             <span>Github</span>
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></svg>
           </button>
+        </div>
         </div>
       </aside>
 

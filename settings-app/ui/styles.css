@@ -86,7 +86,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .nav-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 3px 8px; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: default; }
 .nav-icon { width: 20px; height: 20px; flex-shrink: 0; color: var(--text-secondary); }
 .nav-item:hover, .nav-item.active { background: var(--active); color: var(--text); }
-.sidebar-foot { display: grid; gap: 8px; padding: 16px 8px 0; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.sidebar-bottom { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 16px 8px 0; }
+.sidebar-foot { order: 0; flex: 1; min-width: 0; display: grid; gap: 8px; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
 .repository-link { display: flex; justify-self: start; align-items: center; gap: 10px; height: 24px; padding: 0 4px 0 0; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; }
 .repository-link:hover { color: var(--text); }
 .repository-link:hover span { text-decoration: underline; text-underline-offset: 3px; }
@@ -146,8 +147,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .input-field > span { flex-shrink: 0; font-weight: 400; }
 .input-field input { width: 54%; }
 .input-field input::placeholder { color: var(--text-muted); }
-.sidebar-actions { margin-top: auto; padding-top: 16px; }
-.sidebar-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; font-size: 14px; line-height: 20px; cursor: pointer; }
+.sidebar-actions { order: 1; flex: 0 0 28px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar-action { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .sidebar-action:hover:not(:disabled), .log-button[aria-expanded="true"] { background: var(--active); }
 .sidebar-action:disabled { cursor: default; opacity: .6; }
 .action-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
