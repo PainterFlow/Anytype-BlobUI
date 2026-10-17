@@ -134,7 +134,7 @@
         </nav>
 
         <div class="sidebar-bottom">
-        <div class="sidebar-actions">
+        <div id="sidebar-actions" class="sidebar-actions">
           <button id="save-button" class="sidebar-action save-button" type="button" title="Save changes" hidden disabled>
             <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>
             <span class="save-spinner" aria-hidden="true"></span>
@@ -142,6 +142,9 @@
           </button>
           <button id="discard-button" class="sidebar-action discard-button" type="button" title="Undo changes" aria-label="Undo changes" hidden disabled>
             <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8V3m0 5h5M4.3 7.8A7 7 0 1 1 4 12"/></svg>
+          </button>
+          <button id="update-now-button" class="sidebar-action update-now-button" type="button" title="Update now" aria-label="Update now" hidden>
+            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"/></svg>
           </button>
           <div class="log-control" id="log-control">
             <button id="log-button" class="sidebar-action log-button" type="button" title="Logs" aria-expanded="false" aria-controls="log-popup" hidden>
@@ -342,6 +345,41 @@
               <p id="advanced-api-key-hint" class="accessibility-note">Enter a new key to replace the saved key. Clear the masked value to remove it.</p>
               <p id="advanced-api-error" class="field-error" role="alert" aria-live="polite"></p>
             </section>
+              <section class="settings-group" aria-labelledby="anytype-installation-heading">
+                <div class="section-heading">
+                  <h2 id="anytype-installation-heading">Anytype Folder</h2>
+                  <p>Choose the Anytype data folder that contains custom.css.</p>
+                </div>
+                <div class="app-install-directory-row">
+                    <input id="install-directory" class="color-text-input" type="text" readonly role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+                </div>
+                <p id="updater-settings-error" class="field-error" role="alert" aria-live="polite"></p>
+              </section>
+              <section class="settings-group" aria-labelledby="updates-heading">
+                <div class="section-heading">
+                  <h2 id="updates-heading">Updates</h2>
+                  <p>Choose how BlobUI checks for and installs updates.</p>
+                </div>
+                <div class="settings-list">
+                  <label class="native-accent-control settings-row accessibility-row" for="automatic-updates-enabled">
+                    <span>Install updates automatically</span>
+                    <input id="automatic-updates-enabled" type="checkbox" role="switch" />
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </label>
+                  <label class="native-accent-control settings-row accessibility-row" for="automatic-checks-enabled">
+                    <span>Check for updates automatically</span>
+                    <input id="automatic-checks-enabled" type="checkbox" role="switch" />
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </label>
+                </div>
+                <div class="update-check-row">
+                  <div>
+                    <p id="update-version" class="update-version"></p>
+                    <p id="update-status" class="update-status" role="status" aria-live="polite">Loading update settings…</p>
+                  </div>
+                  <button id="check-updates-button" class="banner-image-button update-check-button" type="button" disabled>Check for updates</button>
+                </div>
+              </section>
           </div>
           </div>
         </section>

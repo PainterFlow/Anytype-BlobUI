@@ -29,7 +29,7 @@ You can also run setup from PowerShell with explicit paths:
 .\scripts\Setup.ps1 -AnytypeDirectory "C:\path\to\Anytype data" -AppDirectory "C:\path\to\BlobUI"
 ```
 
-Pass `-NoShortcut` to skip the Start menu entry. **Update.ps1 and Uninstall.ps1 are temporarily outdated** for the new Rust runtime; do not use them to update or remove a current installation. Setup remains the supported installer. Remove the app folder and BlobUI Start menu shortcut separately if you need to remove the launcher. Theme uninstallation also deletes `blob/backups`; copy out any CSS backup you want to keep first.
+Pass `-NoShortcut` to skip the Start menu entry. Use the Settings app to update the theme. `Uninstall.ps1` remains temporarily outdated for the Rust runtime. Remove the app folder and BlobUI Start menu shortcut separately if you need to remove the launcher. Theme uninstallation also deletes `blob/backups`; copy out any CSS backup you want to keep first.
 
 ### Optional: enable calendar color data from the Anytype API
 
@@ -46,7 +46,15 @@ Enable **File > Apply Custom CSS** in Anytype. The API is optional; theme appear
 
 ## Updating BlobUI
 
-**Temporarily unavailable:** `Update.ps1` has not been updated for the Rust runtime yet. Do not run it against a current installation. To install BlobUI, use the supported installer flow in a new empty app folder. Save changes from BlobUI Settings and press `Ctrl+R` in Anytype to reload the stylesheet.
+Open **Advanced Settings** to check for updates, choose the Anytype data folder, or change automatic update preferences. Automatic checks run every five minutes while BlobUI Settings is running, including in the background. Automatic installation starts disabled. An available update also appears in Blob Pink below Undo and Save, above Logs. The manual check button changes to **Update now** or **You're up to date** after a successful check.
+
+Updates run in Rust and use the latest published GitHub release. They preserve saved settings, encrypted credentials, and local CSS files outside BlobUI's managed files. No installer or onboarding reset is required. Press **Ctrl+R** in Anytype after updating to reload CSS. **F9** creates a simulated update so you can test the controls without downloading or installing a release.
+
+The update source is `PainterFlow/Anytype-BlobUI`. The repository and its releases must be publicly accessible. Private or inaccessible release sources show an error; the app does not store GitHub credentials.
+
+When publishing a theme release, use a semantic version tag matching `BlobUiReleaseVersion` in `scripts/BlobUI.Core.psm1`, such as `v1.1.0`. The updater validates that version against GitHub's generated source archive before installing it.
+
+This updater installs theme sources and assets. It does not replace the running Settings executable. App executable upgrades still require a separately built app. `scripts/Update.ps1` opens Settings and directs you to the Rust updater.
 
 ## Settings app
 

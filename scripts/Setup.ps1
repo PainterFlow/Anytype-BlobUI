@@ -48,7 +48,7 @@ foreach ($other in @($AnytypeDirectory, $sourceDirectory)) {
 # Never claim an arbitrary directory or overwrite an existing app install.
 if (Test-Path -LiteralPath $AppDirectory) {
     if (-not (Test-Path -LiteralPath $AppDirectory -PathType Container) -or @(Get-ChildItem -LiteralPath $AppDirectory -Force).Count) {
-        throw 'The BlobUI app folder must be empty. Choose a new folder; Update.ps1 is temporarily outdated for the Rust runtime.'
+        throw 'The BlobUI app folder must be empty. Choose a new folder, or use Advanced Settings in the existing app to update the theme.'
     }
 }
 if (-not $NoShortcut -and $env:OS -ne 'Windows_NT') { throw 'Shortcuts require Windows. Use -NoShortcut for command-line validation.' }

@@ -12,16 +12,51 @@ use tauri::{Emitter, Manager};
 mod api;
 mod css;
 mod connection;
+mod folder_dialog;
 mod hotkey;
 mod storage;
+mod updater;
 
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static UPDATER_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static SHOW_ONBOARDING: AtomicBool = AtomicBool::new(false);
 
 struct SaveGuard;
 impl Drop for SaveGuard {
     fn drop(&mut self) {
         SAVE_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
+struct UpdaterGuard;
+impl Drop for UpdaterGuard {
+    fn drop(&mut self) {
+        UPDATER_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
+fn acquire_save_guard(message: &str) -> Result<SaveGuard, String> {
+    SAVE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map(|_| SaveGuard)
+        .map_err(|_| message.to_string())
+}
+
+fn acquire_updater_guard() -> Result<UpdaterGuard, String> {
+    UPDATER_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map(|_| UpdaterGuard)
+        .map_err(|_| "An update check or installation is already in progress.".into())
+}
+
+fn acquire_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String> {
+    let save = acquire_save_guard("Wait for the current settings save to finish.")?;
+    match acquire_updater_guard() {
+        Ok(updater) => Ok((save, updater)),
+        Err(error) => {
+            drop(save);
+            Err(error)
+        }
     }
 }
 
@@ -113,13 +148,7 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
 
 #[tauri::command]
 async fn save_settings(settings: SettingsDraft) -> Result<SaveResult, String> {
-    if SAVE_IN_PROGRESS
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err("Settings are already being saved.".into());
-    }
-    let guard = SaveGuard;
+    let guard = acquire_save_guard("Settings are already being saved.")?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         save_settings_blocking(settings)
@@ -142,13 +171,7 @@ struct ConnectionDraft {
 
 #[tauri::command]
 async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult, String> {
-    if SAVE_IN_PROGRESS
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err("Wait for the current save to finish.".into());
-    }
-    let guard = SaveGuard;
+    let guard = acquire_save_guard("Wait for the current save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         configure_connection_blocking(connection)
@@ -157,12 +180,97 @@ async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult,
     .map_err(|_| "The connection task stopped unexpectedly.".to_string())?
 }
 
+#[tauri::command]
+async fn get_updater_state() -> Result<updater::UpdaterState, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::get_state(&app_data, &install, &runtime)
+    })
+    .await
+    .map_err(|_| "The updater status task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn save_updater_settings(settings: updater::UpdaterSettingsDraft) -> Result<updater::UpdaterState, String> {
+    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _save_guard = save_guard;
+        let _updater_guard = updater_guard;
+        let app_data = app_data_directory();
+        let default_install = resolve_default_install_directory(&app_data)?;
+        updater::save_settings(&app_data, settings, &default_install)
+    })
+    .await
+    .map_err(|_| "The updater settings task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn select_anytype_folder(
+    app: tauri::AppHandle,
+    current_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    let owner = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+        .map(|handle| handle.0 as isize);
+    #[cfg(not(windows))]
+    let owner = {
+        let _ = app;
+        None
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        folder_dialog::select_anytype_folder(current_directory, owner)
+    })
+    .await
+    .map_err(|_| "The folder selection dialog stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<updater::UpdaterState, String> {
+    let guard = acquire_updater_guard()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::check_for_updates(&app_data, &install, &runtime)
+    })
+    .await
+    .map_err(|_| "The update check task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn apply_update() -> Result<updater::UpdaterState, String> {
+    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _save_guard = save_guard;
+        let _updater_guard = updater_guard;
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::apply_update(&app_data, &install, &runtime)
+    })
+    .await
+    .map_err(|_| "The update installation task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+fn simulate_update() -> Result<updater::UpdaterState, String> {
+    let app_data = app_data_directory();
+    let install = resolve_install_directory(&app_data)?;
+    let runtime = resolve_runtime_directory_for_install(&install)?;
+    updater::simulate_update(&app_data, &install, &runtime)
+}
+
 fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResult, String> {
     let mut connection = normalize_connection(connection)?;
     let mut api_key = SecretString::new(std::mem::take(&mut connection.api_key));
     let install = resolve_install_directory(&app_data_directory())?;
     let (_, data_path, css_path, credential_path) = save_paths(&install)?;
-    let runtime = resolve_runtime_directory()?;
+    let runtime = resolve_runtime_directory_for_install(&install)?;
     let mut data = read_json_file(&data_path)?;
     if !data.is_object() {
         return Err("BlobUI data.json must contain a JSON object.".into());
@@ -311,8 +419,8 @@ fn open_github_link(link: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
-    if SAVE_IN_PROGRESS.load(Ordering::Acquire) {
-        return Err("Wait for the settings save to finish before quitting.".into());
+    if SAVE_IN_PROGRESS.load(Ordering::Acquire) || UPDATER_IN_PROGRESS.load(Ordering::Acquire) {
+        return Err("Wait for the current save or updater operation to finish before quitting.".into());
     }
     app.exit(0);
     Ok(())
@@ -322,7 +430,7 @@ fn load_app_state() -> Result<AppState, String> {
     let app_data = app_data_directory();
     let install_directory = resolve_install_directory(&app_data)?;
     let data_path = install_directory.join("blob").join("data.json");
-    let theme = read_anytype_theme(&app_data.join("devconfig.json"));
+    let theme = read_anytype_theme(&install_directory.join("devconfig.json"));
 
     let mut onboarding_complete = false;
     let mut api_port = 31009;
@@ -370,7 +478,7 @@ fn load_app_state() -> Result<AppState, String> {
         app_data_directory: app_data.to_string_lossy().into_owned(),
         theme,
         settings,
-        default_banner_preview: resolve_runtime_directory()
+        default_banner_preview: resolve_runtime_directory_for_install(&install_directory)
             .ok()
             .and_then(|runtime| css::default_banner_preview(&runtime).ok())
             .unwrap_or_default(),
@@ -387,7 +495,7 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     let settings = validate_settings(settings)?;
     let install = resolve_install_directory(&app_data_directory())?;
     let (_, data_path, css_path, credential_path) = save_paths(&install)?;
-    let runtime = resolve_runtime_directory()?;
+    let runtime = resolve_runtime_directory_for_install(&install)?;
     let mut data = read_json_file(&data_path)?;
     if !data.is_object() {
         return Err("BlobUI data.json must contain a JSON object.".into());
@@ -774,12 +882,48 @@ fn non_empty_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 fn resolve_install_directory(app_data: &Path) -> Result<PathBuf, String> {
-    resolve_install_directory_from(
+    let saved = updater::saved_install_directory(&updater::preferences_path(app_data))?;
+    resolve_install_directory_with_saved(
         app_data,
+        saved,
         env::var_os("BLOBUI_INSTALL_DIRECTORY"),
         argument_value("--install-directory"),
         env::current_exe().ok().as_deref(),
     )
+}
+
+fn resolve_install_directory_with_saved(
+    app_data: &Path,
+    saved: Option<PathBuf>,
+    environment_path: Option<std::ffi::OsString>,
+    argument_path: Option<String>,
+    executable: Option<&Path>,
+) -> Result<PathBuf, String> {
+    // The settings choice is persisted independently of the Setup shortcut's
+    // original --install-directory argument, so a later launch keeps the user's
+    // newly selected Anytype data folder.
+    if let Some(path) = saved {
+        return updater::validate_install_directory(&path);
+    }
+    let path = resolve_install_directory_from(
+        app_data,
+        environment_path,
+        argument_path,
+        executable,
+    )?;
+    reject_reparse_component(&path)?;
+    Ok(path)
+}
+
+fn resolve_default_install_directory(app_data: &Path) -> Result<PathBuf, String> {
+    let path = resolve_install_directory_from(
+        app_data,
+        env::var_os("BLOBUI_INSTALL_DIRECTORY"),
+        argument_value("--install-directory"),
+        env::current_exe().ok().as_deref(),
+    )?;
+    reject_reparse_component(&path)?;
+    Ok(path)
 }
 
 fn resolve_install_directory_from(
@@ -867,6 +1011,15 @@ fn resolve_runtime_directory() -> Result<PathBuf, String> {
         })
 }
 
+fn resolve_runtime_directory_for_install(install: &Path) -> Result<PathBuf, String> {
+    let installed = install.join("blob/runtime");
+    if has_runtime_files(&installed) {
+        reject_reparse_component(&installed)?;
+        return Ok(installed);
+    }
+    resolve_runtime_directory()
+}
+
 fn ensure_not_release_path(path: &Path) -> Result<(), String> {
     if path.components().any(|component| match component {
         Component::Normal(part) => part.eq_ignore_ascii_case("Releases"),
@@ -933,6 +1086,12 @@ fn main() {
             configure_connection,
             get_app_state,
             save_settings,
+            get_updater_state,
+            save_updater_settings,
+            select_anytype_folder,
+            check_for_updates,
+            apply_update,
+            simulate_update,
             minimize_window,
             hide_window,
             start_window_drag,
@@ -1106,6 +1265,61 @@ mod tests {
                 .unwrap(),
             Path::new(custom)
         );
+    }
+
+    #[test]
+    fn saved_install_folder_overrides_stale_setup_launch_arguments_after_restart() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = workspace
+            .join(".test-run")
+            .join(format!("saved-install-resolution-{}-{nonce}", std::process::id()));
+        let selected = root.join("chosen Anytype data");
+        fs::create_dir_all(selected.join("blob")).unwrap();
+        fs::write(
+            selected.join("blob/data.json"),
+            serde_json::to_vec(&json!({"installDirectory": selected})).unwrap(),
+        )
+        .unwrap();
+
+        let resolved = resolve_install_directory_with_saved(
+            &root.join("APPDATA/anytype"),
+            Some(selected.clone()),
+            Some(std::ffi::OsString::from(r"C:\Setup-selected\anytype")),
+            Some(r"D:\Setup-selected\anytype".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved, selected.canonicalize().unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn updated_installed_runtime_is_preferred_for_future_saves() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = workspace
+            .join(".test-run")
+            .join(format!("updated-runtime-resolution-{}-{nonce}", std::process::id()));
+        let install = root.join("Anytype data");
+        let installed_runtime = install.join("blob/runtime");
+        let source_fallback = root.join("source");
+        fs::create_dir_all(installed_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(installed_runtime.join("assets")).unwrap();
+        fs::create_dir_all(source_fallback.join("Dev")).unwrap();
+        fs::create_dir_all(source_fallback.join("assets")).unwrap();
+
+        assert_eq!(
+            resolve_runtime_directory_for_install(&install).unwrap(),
+            installed_runtime
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

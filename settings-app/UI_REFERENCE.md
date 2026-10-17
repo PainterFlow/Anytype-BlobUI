@@ -14,6 +14,8 @@ Colors and font sizes also match the installed Anytype stylesheet. BlobUI's save
 
 Scrollbars follow the user's Anytype screenshot, with a 12px width, rounded thumb ends, no arrow buttons, and a transparent track. Their gray thumbs match the current theme, appear while scrolling, and fade after scrolling stops. Scroll areas without overflow show no scrollbar.
 
+Advanced Settings shows API, folder, and update controls on one page. The Anytype Folder field opens the native folder picker and has no surrounding group border. The update check button keeps its width and height across all labels. The update switches reuse Accessibility's grouped settings rows. The update action sits below Save and Undo and above Logs, with a fixed Blob Pink icon independent of the selected accent.
+
 ## Reusable settings controls
 
 Load `visibility-field.js`, `modal.js`, and `edit-session.js` before `app.js`.

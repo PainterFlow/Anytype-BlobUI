@@ -47,8 +47,23 @@ function element(id) {
 }
 const calls = [];
 const savedSettings = [];
+const savedUpdaterSettings = [];
+const updaterPrefs = {
+  installDirectory: '%APPDATA%\\anytype',
+  automaticUpdatesEnabled: false,
+  automaticChecksEnabled: false,
+};
+let updaterCheckState = {
+  currentVersion: '1.0.0', latestVersion: null, updateAvailable: false,
+  lastCheckedAt: null, status: 'current', message: "You're up to date.",
+};
+let updaterApplyState = { ...updaterCheckState };
+let selectedFolder = null;
+let deferGeneralSave = false;
+let pendingGeneralSaveResolve = null;
 let rebuildListener = null;
 const timers = new Map();
+const intervals = [];
 let nextTimerId = 1;
 let saveError = null;
 let connectionError = null;
@@ -74,7 +89,7 @@ const context = {
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
-    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
+    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },
   atob,
@@ -89,7 +104,7 @@ const context = {
   window: {
     handlers: {},
     CSS: { supports: () => true },
-    setInterval() {},
+    setInterval(callback, delay) { intervals.push({ callback, delay }); return intervals.length; },
     setTimeout(callback, delay) {
       const id = nextTimerId++;
       timers.set(id, { callback, delay });
@@ -105,6 +120,7 @@ const context = {
       } },
       core: { async invoke(name, args) {
       calls.push(name);
+      if (name === 'select_anytype_folder') return selectedFolder;
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
       if (name === 'get_app_state') return {
         ready: true, theme: 'dark',
@@ -116,6 +132,21 @@ const context = {
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
         },
       };
+      if (name === 'get_updater_state') return {
+        ...updaterPrefs, currentVersion: '1.0.0', latestVersion: null, updateAvailable: false,
+        lastCheckedAt: null, status: 'idle', message: null,
+      };
+      if (name === 'save_updater_settings') {
+        Object.assign(updaterPrefs, args.settings);
+        savedUpdaterSettings.push({ ...args.settings });
+        return { ...updaterPrefs, ...updaterCheckState };
+      }
+      if (name === 'check_for_updates') return { ...updaterPrefs, ...updaterCheckState };
+      if (name === 'apply_update') return { ...updaterPrefs, ...updaterApplyState };
+      if (name === 'simulate_update') return {
+        ...updaterPrefs, currentVersion: '1.0.0', latestVersion: '1.1.0', updateAvailable: true,
+        lastCheckedAt: null, status: 'simulated', message: 'Preview update available.',
+      };
       if (name === 'configure_connection') {
         connectionRequests.push(args.connection);
         if (connectionError) throw new Error(connectionError);
@@ -123,6 +154,7 @@ const context = {
       if (name === 'save_settings') {
         savedSettings.push(args.settings);
         if (saveError) throw new Error(saveError);
+        if (deferGeneralSave) return new Promise(resolve => { pendingGeneralSaveResolve = resolve; });
         return { calendarStatus: 'cached' };
       }
     } } },
@@ -143,6 +175,10 @@ const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'u
 assert.match(settingsHtml, /<span>Alt\+R to rebuild custom\.css<\/span>\s*<span>Numpad 1 in Anytype<\/span>/, 'The rebuild note must sit immediately above the Numpad 1 note.');
 assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="accessibility-nav"'), 'Accessibility must be the second Settings navigation page.');
 assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
+assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs inside Advanced Settings.');
+assert.doesNotMatch(settingsHtml, /role="tablist"|role="tabpanel"/);
+assert.match(settingsHtml, /Anytype data folder that contains custom\.css/);
+assert.match(settingsHtml, /id="install-directory"[^>]*readonly[^>]*aria-haspopup="dialog"/);
 for (const label of ['Anytype API key', 'API key IP', 'API key port']) {
   assert(settingsHtml.includes('>' + label + '</label>'), `${label} must have a visible label.`);
 }
@@ -179,9 +215,12 @@ assert(!settingsHtml.includes('id="api-key-removal-cancel"'), 'The key removal w
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
-for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect']) {
+for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'automatic-updates-enabled', 'automatic-checks-enabled']) {
   assert.match(settingsHtml, new RegExp(`id="${id}" type="checkbox" role="switch"`), `${id} must be a native switch.`);
 }
+assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
+assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
+assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \* 60 \* 1000/);
 
 (async () => {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visibility-field.js'), 'utf8'), context);
@@ -211,6 +250,117 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
+  assert.equal(element('install-directory').value, '%APPDATA%\\anytype', 'App Settings load the configured Anytype data folder.');
+  assert.equal(element('automatic-updates-enabled').checked, false);
+  assert.equal(element('automatic-checks-enabled').checked, false);
+  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
+  const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
+  assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
+  element('advanced-nav').handlers.click();
+  assert.equal(element('advanced-page').hidden, false, 'Advanced Settings shows all controls on one page.');
+  assert.equal(element('page-title').textContent, 'Advanced Settings');
+  const initialFolder = element('install-directory').value;
+  await element('install-directory').handlers.click();
+  assert.equal(element('install-directory').value, initialFolder, 'Canceling the folder picker preserves the selected folder.');
+  selectedFolder = 'C:\\Chosen Anytype';
+  await element('install-directory').handlers.click();
+  assert.equal(element('install-directory').value, selectedFolder, 'Selecting a folder updates the field.');
+  context.window.BlobUI.discardChanges();
+  element('check-updates-button').handlers.click();
+  await flush();
+  assert.equal(calls.at(-1), 'check_for_updates', 'The manual update action checks for updates.');
+  assert.equal(element('check-updates-button').textContent, "You're up to date");
+  const generalSavesBeforeUpdaterSave = savedSettings.length;
+  await input('install-directory', 'C:\\BlobUI\\AnytypeData');
+  await changeToggle('automatic-updates-enabled', true);
+  await changeToggle('automatic-checks-enabled', true);
+  assert.equal(element('save-button').hidden, false, 'App Settings edits use the shared Save action.');
+  await element('save-button').handlers.click();
+  assert.equal(savedUpdaterSettings.length, 1);
+  assert.deepEqual(savedUpdaterSettings.at(-1), {
+    installDirectory: 'C:\\BlobUI\\AnytypeData', automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+  });
+  assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
+  assert.match(status(), /Loaded settings from the selected Anytype data folder/);
+  assert.equal(element('save-button').hidden, true);
+  await input('font-family', 'Arial');
+  await input('install-directory', 'C:\\BlobUI\\OtherProfile');
+  const updaterSavesBeforeMixedTarget = savedUpdaterSettings.length;
+  await element('save-button').handlers.click();
+  assert.match(status(), /Save or undo your appearance and Anytype API changes/);
+  assert.equal(savedUpdaterSettings.length, updaterSavesBeforeMixedTarget, 'Changing data folders cannot save a stale appearance draft into the new profile.');
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('font-family').value, 'Libron');
+  assert.equal(element('install-directory').value, 'C:\\BlobUI\\AnytypeData');
+  await changeToggle('automatic-updates-enabled', false);
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
+
+  const realApplyCallsBeforeSimulation = calls.filter(name => name === 'apply_update').length;
+  const realCheckCallsBeforeSimulation = calls.filter(name => name === 'check_for_updates').length;
+  let f9Prevented = false;
+  context.document.handlers.keydown({ key: 'F9', repeat: true, preventDefault() {} });
+  context.document.handlers.keydown({ key: 'F9', ctrlKey: true, preventDefault() {} });
+  assert.equal(calls.filter(name => name === 'simulate_update').length, 0, 'Repeated or modified F9 does not start a preview.');
+  context.document.handlers.keydown({ key: 'F9', preventDefault() { f9Prevented = true; } });
+  await flush();
+  assert(f9Prevented);
+  assert.equal(calls.at(-1), 'simulate_update', 'F9 uses the display-only update simulation command.');
+  assert.equal(element('update-now-button').hidden, false, 'A simulated update reveals the pink sidebar action.');
+  assert.equal(element('sidebar-actions').classList.contains('has-update'), true);
+  assert.equal(element('check-updates-button').textContent, 'Update now');
+  await updaterInterval.callback();
+  assert.equal(calls.filter(name => name === 'check_for_updates').length, realCheckCallsBeforeSimulation, 'Scheduled checks preserve the F9 preview.');
+  assert.equal(element('update-status').textContent, 'Preview update available.');
+  await element('update-now-button').handlers.click();
+  assert.equal(calls.filter(name => name === 'apply_update').length, realApplyCallsBeforeSimulation, 'Clicking a simulated update never invokes the installer.');
+  assert.equal(element('update-now-button').hidden, true, 'Completing the preview clears its update action.');
+  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
+  assert.equal(element('update-status').textContent, 'Preview complete. No files were changed.');
+
+  updaterCheckState = {
+    currentVersion: '1.0.0', latestVersion: '1.2.0', updateAvailable: true,
+    lastCheckedAt: null, status: 'available', message: 'Version 1.2.0 is available.',
+  };
+  updaterApplyState = {
+    currentVersion: '1.2.0', latestVersion: '1.2.0', updateAvailable: false,
+    lastCheckedAt: null, status: 'updated', message: 'Update completed.',
+  };
+  await input('font-family', 'Arial');
+  const applyCallsBeforeDirtyCheck = calls.filter(name => name === 'apply_update').length;
+  await updaterInterval.callback();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeDirtyCheck, 'Automatic updates wait while settings are unsaved.');
+  assert.match(element('update-status').textContent, /Save or undo your pending settings/);
+  await element('update-now-button').handlers.click();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeDirtyCheck, 'A manual update action also waits for unsaved settings.');
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  await flush();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeDirtyCheck + 1, 'A deferred automatic update resumes after Undo clears unsaved changes.');
+
+  updaterCheckState = { ...updaterCheckState, status: 'available' };
+  await input('font-family', 'Arial');
+  deferGeneralSave = true;
+  const busySave = element('save-button').handlers.click();
+  assert.equal(element('save-button').disabled, true, 'Save reports its busy state before awaiting the backend.');
+  const applyCallsBeforeBusyCheck = calls.filter(name => name === 'apply_update').length;
+  await updaterInterval.callback();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeBusyCheck, 'Automatic updates wait while Save is busy.');
+  deferGeneralSave = false;
+  pendingGeneralSaveResolve({ calendarStatus: 'cached' });
+  await busySave;
+  await flush();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeBusyCheck + 1, 'A deferred automatic update resumes after Save completes.');
+  await input('font-family', 'Libron');
+  await element('save-button').handlers.click();
+  assert.equal(element('save-button').hidden, true, 'The updater deferral fixture restores the original appearance baseline.');
+
+  element('preferences-nav').handlers.click();
   assert.equal(element('reduced-motion').checked, false, 'Reduced Motion must load disabled by default.');
   assert.equal(element('tab-hover-effect').checked, false, 'Tab hover previews must load disabled by default.');
   assert.equal(element('link-hover-effect').checked, false, 'Link hover previews must load disabled by default.');

@@ -266,13 +266,17 @@ name = "blobui-settings"
 version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
+ "flate2",
  "regex",
+ "semver",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
  "url",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

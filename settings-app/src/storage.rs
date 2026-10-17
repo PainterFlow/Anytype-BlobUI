@@ -14,6 +14,11 @@ pub enum CredentialChange<'a> {
     Remove,
 }
 
+pub struct FileChange {
+    pub path: PathBuf,
+    pub contents: Option<Vec<u8>>,
+}
+
 struct Snapshot {
     path: PathBuf,
     bytes: Option<Vec<u8>>,
@@ -89,6 +94,80 @@ pub fn commit_settings(
         // the destination. Reconcile all snapshots instead of trusting flags.
         for snapshot in snapshots.iter().rev() {
             if let Err(rollback) = restore(snapshot) { rollback_errors.push(rollback); }
+        }
+        if rollback_errors.is_empty() { return Err(error); }
+        return Err(format!("{error} Rollback could not restore every saved file: {}", rollback_errors.join("; ")));
+    }
+    Ok(())
+}
+
+pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
+    reject_reparse_path(path)?;
+    let before = snapshot(path, false)?;
+    preflight(path)?;
+    let candidate = prepare_temp(path, contents, before.permissions.as_ref(), false)?;
+    let result = replace_file(&candidate, path)
+        .map_err(|error| format!("Could not save {}: {error}", path.display()));
+    remove_if_exists(&candidate);
+    if let Err(error) = result {
+        return match restore(&before) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!("{error} {rollback}")),
+        };
+    }
+    Ok(())
+}
+
+pub fn commit_update(changes: Vec<FileChange>) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut snapshots = Vec::with_capacity(changes.len());
+    for change in &changes {
+        if !seen.insert(change.path.clone()) {
+            return Err(format!("The update contains a duplicate file target: {}", change.path.display()));
+        }
+        reject_reparse_path(&change.path)?;
+        snapshots.push(snapshot(&change.path, false)?);
+        if change.contents.is_some() {
+            preflight(&change.path)?;
+        }
+    }
+
+    let mut candidates = Vec::with_capacity(changes.len());
+    for (change, before) in changes.iter().zip(snapshots.iter()) {
+        if let Some(contents) = &change.contents {
+            match prepare_temp(&change.path, contents, before.permissions.as_ref(), false) {
+                Ok(path) => candidates.push(Some(path)),
+                Err(error) => {
+                    for candidate in candidates.iter().flatten() { remove_if_exists(candidate); }
+                    return Err(error);
+                }
+            }
+        } else {
+            candidates.push(None);
+        }
+    }
+
+    let result = (|| {
+        for (change, candidate) in changes.iter().zip(candidates.iter()) {
+            match (&change.contents, candidate) {
+                (Some(_), Some(candidate)) => replace_file(candidate, &change.path)
+                    .map_err(|error| format!("Could not install update file {}: {error}", change.path.display()))?,
+                (None, _) => match fs::remove_file(&change.path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(format!("Could not remove obsolete update file {}: {error}", change.path.display())),
+                },
+                _ => return Err("An update file was not prepared safely.".into()),
+            }
+        }
+        Ok(())
+    })();
+
+    for candidate in candidates.iter().flatten() { remove_if_exists(candidate); }
+    if let Err(error) = result {
+        let mut rollback_errors = Vec::new();
+        for before in snapshots.iter().rev() {
+            if let Err(rollback) = restore(before) { rollback_errors.push(rollback); }
         }
         if rollback_errors.is_empty() { return Err(error); }
         return Err(format!("{error} Rollback could not restore every saved file: {}", rollback_errors.join("; ")));
@@ -324,6 +403,45 @@ mod tests {
         assert_eq!(fs::read(&css_path).unwrap(), b"old css");
         assert_eq!(fs::read(&data_path).unwrap(), b"old data");
         assert_eq!(fs::read(&credential_path).unwrap(), b"old protected key");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_update_restores_css_manifest_managed_files_and_leaves_user_data_untouched() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = workspace.join(".test-run").join(format!("update-rollback-{}-{nonce}", std::process::id()));
+        let blob = root.join("blob");
+        let css = root.join("custom.css");
+        let data = blob.join("data.json");
+        let credential = blob.join("credentials/anytype-api-key.dpapi");
+        let managed = blob.join("runtime/Dev/theme.css");
+        let obsolete = blob.join("runtime/Dev/obsolete.css");
+        let manifest = blob.join(".blobui-managed-files.json");
+        fs::create_dir_all(credential.parent().unwrap()).unwrap();
+        fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        fs::write(&css, b"old generated css").unwrap();
+        fs::write(&data, b"unchanged Anytype data").unwrap();
+        fs::write(&credential, b"unchanged DPAPI credential").unwrap();
+        fs::write(&managed, b"old managed theme").unwrap();
+        fs::write(&obsolete, b"old obsolete managed file").unwrap();
+        fs::write(&manifest, b"old ownership manifest").unwrap();
+
+        FAIL_AFTER_REPLACE.with(|fail| *fail.borrow_mut() = Some(manifest.clone()));
+        let error = commit_update(vec![
+            FileChange { path: css.clone(), contents: Some(b"new generated css".to_vec()) },
+            FileChange { path: managed.clone(), contents: Some(b"new managed theme".to_vec()) },
+            FileChange { path: obsolete.clone(), contents: None },
+            FileChange { path: manifest.clone(), contents: Some(b"new ownership manifest".to_vec()) },
+        ]).unwrap_err();
+
+        assert!(error.contains("injected post-replacement failure"));
+        assert_eq!(fs::read(&css).unwrap(), b"old generated css");
+        assert_eq!(fs::read(&manifest).unwrap(), b"old ownership manifest");
+        assert_eq!(fs::read(&managed).unwrap(), b"old managed theme");
+        assert_eq!(fs::read(&obsolete).unwrap(), b"old obsolete managed file");
+        assert_eq!(fs::read(&data).unwrap(), b"unchanged Anytype data");
+        assert_eq!(fs::read(&credential).unwrap(), b"unchanged DPAPI credential");
         fs::remove_dir_all(root).unwrap();
     }
 }

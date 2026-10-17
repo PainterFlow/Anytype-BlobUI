@@ -41,6 +41,12 @@
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
+  const installDirectory = el("install-directory");
+  const automaticUpdatesEnabled = el("automatic-updates-enabled");
+  const automaticChecksEnabled = el("automatic-checks-enabled");
+  const checkUpdatesButton = el("check-updates-button");
+  const updateNowButton = el("update-now-button");
+  const sidebarActions = el("sidebar-actions");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
   const advancedApiPort = el("advanced-api-port");
@@ -126,6 +132,13 @@
   let initialApiDraft = { ip: "", port: "" };
   let currentApiIp = "";
   let currentApiPort = 31009;
+  let updaterDraft = null;
+  let initialUpdaterSettings = null;
+  let updaterState = null;
+  let updaterSettingsLoaded = false;
+  let updaterBusyOperation = "";
+  let pendingAutomaticUpdate = false;
+  let simulationActive = false;
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
@@ -375,6 +388,171 @@
     return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
   }
 
+  function updaterSettingsEqual(left, right) {
+    return !!left && !!right
+      && left.installDirectory === right.installDirectory
+      && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
+      && left.automaticChecksEnabled === right.automaticChecksEnabled;
+  }
+
+  function copyUpdaterSettings(settings) {
+    const directory = String(settings && settings.installDirectory || "");
+    const displayDirectory = directory.startsWith("\\\\?\\UNC\\")
+      ? "\\\\" + directory.slice(8)
+      : directory.startsWith("\\\\?\\") ? directory.slice(4) : directory;
+    return {
+      installDirectory: displayDirectory,
+      automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
+      automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
+    };
+  }
+
+  function assignUpdaterSettings(settings) {
+    updaterDraft = copyUpdaterSettings(settings);
+    initialUpdaterSettings = { ...updaterDraft };
+    installDirectory.value = updaterDraft.installDirectory;
+    automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
+    automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
+    updaterSettingsLoaded = true;
+    updateSaveButton();
+  }
+
+  function renderUpdaterState() {
+    const state = updaterState || {};
+    const updateAvailable = state.updateAvailable === true;
+    const simulated = state.status === "simulated";
+    const currentVersion = String(state.currentVersion || "");
+    const latestVersion = String(state.latestVersion || "");
+    el("update-version").textContent = currentVersion
+      ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
+      : "";
+    const fallbackMessage = state.status === "checking" ? "Checking for updates…"
+      : state.status === "updating" ? "Installing the update…"
+      : simulated ? "Preview update available. No files have been changed."
+      : updateAvailable ? (latestVersion ? "Version " + latestVersion + " is available." : "An update is available.")
+      : state.status === "current" ? "You're up to date."
+      : state.status === "updated" ? "Update completed."
+      : state.status === "error" ? "Could not check for updates."
+      : "Check for updates to see if a newer version is available.";
+    el("update-status").textContent = String(state.message || fallbackMessage);
+    el("update-status").classList.toggle("error", state.status === "error");
+    checkUpdatesButton.textContent = updaterBusyOperation === "checking" ? "Checking…"
+      : updaterBusyOperation === "updating" ? "Updating…"
+      : updateAvailable ? "Update now"
+      : state.status === "current" || state.status === "updated" ? "You're up to date"
+      : "Check for updates";
+    checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy;
+    updateNowButton.hidden = !updateAvailable;
+    sidebarActions.classList.toggle("has-update", updateAvailable);
+    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || editSession.isDirty();
+    updateNowButton.title = simulated ? "Preview update only" : "Update now";
+    updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
+  }
+
+  function maybeApplyPendingAutomaticUpdate() {
+    if (!pendingAutomaticUpdate || saveBusy || updaterBusyOperation) return;
+    if (!initialUpdaterSettings || !initialUpdaterSettings.automaticUpdatesEnabled) {
+      pendingAutomaticUpdate = false;
+      return;
+    }
+    if (simulationActive || (updaterState && updaterState.status === "simulated")) {
+      pendingAutomaticUpdate = false;
+      return;
+    }
+    if (!updaterState || updaterState.updateAvailable !== true || editSession.isDirty()) return;
+    pendingAutomaticUpdate = false;
+    applyUpdate();
+  }
+
+  function mergeUpdaterState(state) {
+    if (state && typeof state === "object") updaterState = { ...(updaterState || {}), ...state };
+    renderUpdaterState();
+  }
+
+  async function loadUpdaterState() {
+    try {
+      const state = await invoke("get_updater_state");
+      assignUpdaterSettings(state || {});
+      mergeUpdaterState(state || {});
+      if (initialUpdaterSettings.automaticChecksEnabled && window.appReady) checkForUpdates(true);
+    } catch (error) {
+      updaterState = { status: "error", message: error.message || String(error) };
+      renderUpdaterState();
+    }
+  }
+
+  async function checkForUpdates(automatic = false) {
+    if (automatic && simulationActive) return;
+    if (!updaterSettingsLoaded || !window.appReady || updaterBusyOperation) return;
+    updaterBusyOperation = "checking";
+    mergeUpdaterState({ status: "checking", message: "Checking for updates…" });
+    renderUpdaterState();
+    try {
+      const state = await invoke("check_for_updates");
+      mergeUpdaterState(state || {});
+      if (automatic && initialUpdaterSettings && initialUpdaterSettings.automaticUpdatesEnabled
+        && state && state.updateAvailable === true && state.status !== "simulated") {
+        if (saveBusy || editSession.isDirty()) {
+          pendingAutomaticUpdate = true;
+          mergeUpdaterState({ message: "An update is ready. Save or undo your pending settings to install it automatically." });
+        } else {
+          await applyUpdate(true);
+        }
+      }
+    } catch (error) {
+      mergeUpdaterState({ status: "error", message: error.message || String(error) });
+      if (!automatic) setStatus("Could not check for updates. " + (error.message || String(error)), "error");
+    } finally {
+      updaterBusyOperation = "";
+      renderUpdaterState();
+      maybeApplyPendingAutomaticUpdate();
+    }
+  }
+
+  async function applyUpdate(fromAutomaticCheck = false) {
+    if (!updaterState || updaterState.updateAvailable !== true) return;
+    if (updaterState.status === "simulated") {
+      simulationActive = false;
+      mergeUpdaterState({
+        status: "updated",
+        updateAvailable: false,
+        latestVersion: updaterState.currentVersion || null,
+        message: "Preview complete. No files were changed.",
+      });
+      return;
+    }
+    if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
+    if (saveBusy || editSession.isDirty()) {
+      if (fromAutomaticCheck) pendingAutomaticUpdate = true;
+      else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
+      return;
+    }
+    updaterBusyOperation = "updating";
+    mergeUpdaterState({ status: "updating", message: "Installing the update…" });
+    renderUpdaterState();
+    try {
+      mergeUpdaterState(await invoke("apply_update") || {});
+    } catch (error) {
+      mergeUpdaterState({ status: "error", message: error.message || String(error), updateAvailable: true });
+      setStatus("Could not install the update. " + (error.message || String(error)), "error");
+    } finally {
+      updaterBusyOperation = fromAutomaticCheck ? "checking" : "";
+      renderUpdaterState();
+    }
+  }
+
+  async function simulateUpdate() {
+    if (!window.appReady || updaterBusyOperation) return;
+    try {
+      simulationActive = true;
+      const state = await invoke("simulate_update");
+      mergeUpdaterState({ ...(state || {}), status: "simulated", updateAvailable: true });
+    } catch (error) {
+      simulationActive = false;
+      setStatus("Could not preview an update. " + (error.message || String(error)), "error");
+    }
+  }
+
   function setStatus(message, kind, record = true) {
     statusMessage.textContent = message;
     if (!record) return;
@@ -414,6 +592,7 @@
   function readEditSnapshot() {
     return {
       settings: draft ? { ...draft } : null,
+      updaterSettings: updaterDraft ? { ...updaterDraft } : null,
       connection: {
         inputIp: advancedApiIp.value.trim(),
         inputPort: advancedApiPort.value.trim(),
@@ -438,6 +617,9 @@
 
   function editSnapshotsEqual(left, right) {
     if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    if (left.updaterSettings || right.updaterSettings) {
+      if (!updaterSettingsEqual(left.updaterSettings, right.updaterSettings)) return false;
+    }
     const a = left.connection;
     const b = right.connection;
     return !!a && !!b
@@ -462,6 +644,12 @@
 
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
+    if (snapshot.updaterSettings) {
+      updaterDraft = { ...snapshot.updaterSettings };
+      installDirectory.value = updaterDraft.installDirectory;
+      automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
+      automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
+    }
     lastCustomAccent = snapshot.settings.accentMode === "native" ? null : {
       accentMode: snapshot.settings.accentMode,
       accentPreset: snapshot.settings.accentPreset,
@@ -520,6 +708,9 @@
     bannerImageInput.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
+    [installDirectory, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+      control.disabled = saveBusy || !draft || !updaterSettingsLoaded || !window.appReady;
+    });
     Object.keys(visibilityFields).forEach((inputId) => {
       visibilityFields[inputId].button.disabled = saveBusy || !draft;
     });
@@ -528,6 +719,8 @@
     apiKeyRemovalSave.disabled = saveBusy;
     apiKeyRemovalUndo.disabled = saveBusy;
     apiKeyRemovalClose.disabled = saveBusy;
+    renderUpdaterState();
+    maybeApplyPendingAutomaticUpdate();
   }
 
   function applyFontFamilies() {
@@ -577,6 +770,7 @@
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       assignAdvancedConnection(state);
       assignDraftToForm(state.settings || {});
+      await loadUpdaterState();
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
       editSession.commit();
@@ -594,6 +788,28 @@
       setStatus(error.message || String(error), "error");
       updateSaveButton();
     }
+  }
+
+  async function reloadTargetAppState() {
+    let state;
+    try {
+      state = await invoke("get_app_state");
+    } catch (error) {
+      window.appReady = false;
+      updateSaveButton();
+      throw error;
+    }
+    window.appReady = !!state.ready;
+    applyTheme(state.theme);
+    defaultBannerPreview = String(state.defaultBannerPreview || "");
+    assignAdvancedConnection(state);
+    assignDraftToForm(state.settings || {});
+    if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
+    resetVisibilityField("connection-port");
+    await loadUpdaterState();
+    clearValidationErrors();
+    editSession.commit();
+    updateSaveButton();
   }
 
   function applyTheme(theme) {
@@ -798,6 +1014,11 @@
     draft.codeFontFamily = codeFontFamily.value.trim();
     draft.accentColor = accentValue.value.trim();
     draft.accentPreset = draft.accentMode === "preset" ? draft.accentPreset : "";
+    if (updaterDraft) {
+      updaterDraft.installDirectory = installDirectory.value;
+      updaterDraft.automaticUpdatesEnabled = automaticUpdatesEnabled.checked;
+      updaterDraft.automaticChecksEnabled = automaticChecksEnabled.checked;
+    }
 
     const familyPattern = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
     let invalid = false;
@@ -820,7 +1041,21 @@
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
     const settingsChanged = !settingsEqual(draft, initialDraft);
+    const updaterSettingsChanged = !!updaterDraft && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
+    if (updaterSettingsChanged) {
+      const directory = installDirectory.value.trim();
+      const validDirectory = directory.length > 0 && directory.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(directory);
+      installDirectory.classList.toggle("invalid", !validDirectory);
+      el("updater-settings-error").textContent = validDirectory ? "" : "Enter a valid Anytype data folder.";
+      if (!validDirectory) invalid = true;
+      else updaterDraft.installDirectory = directory;
+    } else {
+      installDirectory.classList.remove("invalid");
+      el("updater-settings-error").textContent = "";
+    }
     const connectionChanged = connectionHasChanges();
+    const updaterPathChanged = updaterSettingsChanged
+      && installDirectory.value.trim() !== String(initialUpdaterSettings.installDirectory || "").trim();
     const apiIp = advancedApiIp.value.trim();
     const apiPort = advancedApiPort.value.trim();
     const apiKey = advancedApiKey.value.trim();
@@ -849,6 +1084,11 @@
       return;
     }
 
+    if (updaterPathChanged && (settingsChanged || connectionChanged)) {
+      setStatus("Save or undo your appearance and Anytype API changes before changing the Anytype data folder.", "warning", false);
+      return;
+    }
+
     const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
@@ -856,9 +1096,10 @@
       return;
     }
 
-    if (!settingsChanged && !connectionChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
+    const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
     const submittedConnection = connectionChanged ? {
       enabled: keepExistingKey || apiKey.length > 0,
       apiKey: keepExistingKey ? "" : apiKey,
@@ -868,10 +1109,14 @@
     } : null;
     saveBusy = true;
     updateSaveButton();
-    setStatus(connectionChanged && !settingsChanged
+    setStatus(updaterSettingsChanged && !settingsChanged && !connectionChanged
+      ? "Saving App Settings…"
+      : connectionChanged && !settingsChanged && !updaterSettingsChanged
       ? "Saving your Anytype connection and rebuilding custom.css…"
       : "Saving your settings and rebuilding custom.css…", "working");
     let connectionSaved = false;
+    let generalSettingsSaved = false;
+    let updaterSettingsSaved = false;
     try {
       let result = null;
       if (submittedConnection) {
@@ -882,17 +1127,40 @@
       }
       if (settingsChanged || options.forceRebuild) {
         result = await invoke("save_settings", { settings: submittedSettings });
+        generalSettingsSaved = settingsChanged;
         if (settingsChanged) {
           initialDraft = submittedSettings;
           editSession.commit({ settings: submittedSettings });
         }
       }
-      saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
+      if (submittedUpdaterSettings) {
+        const savedUpdaterState = await invoke("save_updater_settings", { settings: submittedUpdaterSettings });
+        updaterSettingsSaved = true;
+        updaterDraft = { ...submittedUpdaterSettings };
+        initialUpdaterSettings = { ...submittedUpdaterSettings };
+        installDirectory.value = updaterDraft.installDirectory;
+        editSession.commit({ updaterSettings: { ...initialUpdaterSettings } });
+        if (updaterPathChanged) await reloadTargetAppState();
+        else mergeUpdaterState(savedUpdaterState || {});
+      }
+      if (settingsChanged || options.forceRebuild) {
+        saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
+      } else if (updaterSettingsChanged && connectionChanged) {
+        setStatus("App Settings and Anytype connection saved.", "info");
+      } else if (updaterSettingsChanged) {
+        setStatus(updaterPathChanged
+          ? "App Settings saved. Loaded settings from the selected Anytype data folder."
+          : "App Settings saved.", "info");
+      } else {
+        saveStatus(result || { calendarStatus: "disabled" }, true);
+      }
     } catch (error) {
       const message = error.message || String(error);
       setStatus(connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
-        : message, "error");
+        : connectionSaved || generalSettingsSaved || updaterSettingsSaved
+          ? "Some settings were saved. Other changes could not be saved: " + message
+          : message, "error");
     } finally {
       saveBusy = false;
       updateSaveButton();
@@ -1019,6 +1287,55 @@
       markDirty();
     });
   }
+  let folderPickerBusy = false;
+  async function selectAnytypeFolder() {
+    if (folderPickerBusy || saveBusy || !updaterDraft) return;
+    folderPickerBusy = true;
+    installDirectory.setAttribute("aria-busy", "true");
+    try {
+      const selected = await invoke("select_anytype_folder", { currentDirectory: installDirectory.value });
+      if (!selected || saveBusy) return;
+      installDirectory.value = selected;
+      updaterDraft.installDirectory = selected;
+      installDirectory.classList.remove("invalid");
+      el("updater-settings-error").textContent = "";
+      markDirty();
+    } catch (error) {
+      el("updater-settings-error").textContent = error.message || String(error);
+    } finally {
+      folderPickerBusy = false;
+      installDirectory.removeAttribute("aria-busy");
+    }
+  }
+  installDirectory.addEventListener("click", selectAnytypeFolder);
+  installDirectory.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectAnytypeFolder();
+    }
+  });
+  installDirectory.addEventListener("input", () => {
+    if (!updaterDraft || saveBusy) return;
+    updaterDraft.installDirectory = installDirectory.value;
+    installDirectory.classList.remove("invalid");
+    el("updater-settings-error").textContent = "";
+    markDirty();
+  });
+  for (const [control, property] of [
+    [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
+    [automaticChecksEnabled, "automaticChecksEnabled"],
+  ]) {
+    control.addEventListener("change", () => {
+      if (!updaterDraft || saveBusy) return;
+      updaterDraft[property] = control.checked;
+      markDirty();
+    });
+  }
+  checkUpdatesButton.addEventListener("click", () => {
+    if (updaterState && updaterState.updateAvailable === true) applyUpdate();
+    else checkForUpdates(false);
+  });
+  updateNowButton.addEventListener("click", () => applyUpdate());
   saveButton.addEventListener("click", save);
   discardButton.addEventListener("click", () => window.BlobUI.openDiscardConfirmation());
   el("discard-confirmation-close").addEventListener("click", () => window.BlobUI.closeDiscardConfirmation());
@@ -1265,6 +1582,11 @@
       if (!event.repeat) showOnboarding();
       return;
     }
+    if (event.key === "F9" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+      if (!event.repeat) simulateUpdate();
+      return;
+    }
     if (event.key === "Escape" && !onboarding.hidden) {
       event.preventDefault();
       closeOnboarding();
@@ -1308,5 +1630,8 @@
   window.appReady = false;
   loadState();
   window.setInterval(refreshTheme, 2000);
+  window.setInterval(() => {
+    if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
+  }, 5 * 60 * 1000);
   window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", refreshTheme);
 }());

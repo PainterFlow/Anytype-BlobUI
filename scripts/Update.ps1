@@ -1,5 +1,4 @@
-# TEMPORARILY OUTDATED: this maintenance path still depends on the legacy
-# PowerShell runtime and is not supported for current Rust-runtime installs.
+# Compatibility launcher. Update checks and installation belong to the Rust app.
 param(
     [string]$ApiBaseUri = 'http://127.0.0.1:31009',
     [scriptblock]$ApiTransport,
@@ -7,15 +6,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Write-Warning 'TEMPORARILY OUTDATED: Update.ps1 still targets the legacy PowerShell runtime.'
-$rebuildArguments = @{
-    ApiTransport = $ApiTransport
-    ForUpdate = $true
-}
-if ($PSBoundParameters.ContainsKey('ApiBaseUri')) { $rebuildArguments.ApiBaseUri = $ApiBaseUri }
+Write-Host 'Open Advanced Settings to check for and install BlobUI updates.'
+$launchArguments = @{}
 if (-not [string]::IsNullOrWhiteSpace($InstallDirectory)) {
-    $rebuildArguments.InstallDirectory = $InstallDirectory
+    $launchArguments.InstallDirectory = $InstallDirectory
 }
 
-& (Join-Path $PSScriptRoot 'Rebuild.ps1') @rebuildArguments
-Write-Host 'BlobUI update completed. Your saved connection mode and settings were reused.'
+& (Join-Path $PSScriptRoot 'Settings.ps1') @launchArguments
