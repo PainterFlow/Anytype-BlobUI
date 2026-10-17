@@ -1,3 +1,5 @@
+# TEMPORARILY OUTDATED: this maintenance path still depends on the legacy
+# PowerShell runtime and is not supported for current Rust-runtime installs.
 param(
     [string]$ApiBaseUri = 'http://127.0.0.1:31009',
     [scriptblock]$ApiTransport,
@@ -5,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Write-Warning 'TEMPORARILY OUTDATED: Update.ps1 still targets the legacy PowerShell runtime.'
 $rebuildArguments = @{
     ApiTransport = $ApiTransport
     ForUpdate = $true

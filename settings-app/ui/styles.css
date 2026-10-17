@@ -157,8 +157,23 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .input-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 14px 16px; color: var(--text); font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .input-field + .input-field { border-top: 1px solid var(--line); }
 .input-field > span { flex-shrink: 0; font-weight: 400; }
+.input-field > label { flex: 1 1 auto; min-width: 0; }
 .input-field input { width: 54%; }
 .input-field input::placeholder { color: var(--text-muted); }
+.advanced-row input { width: 54%; }
+.advanced-row input::placeholder { color: var(--text-muted); }
+.visibility-field { display: flex; align-items: center; gap: 4px; width: 54%; min-width: 0; }
+.input-field .visibility-field input { flex: 1 1 auto; width: 100%; }
+.visibility-toggle { position: relative; isolation: isolate; flex: 0 0 28px; display: grid; place-items: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: color-mix(in srgb, var(--text-secondary) 82%, #000); opacity: 0; pointer-events: none; cursor: pointer; transition: opacity .15s ease, color .15s ease; }
+.visibility-toggle::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
+.visibility-field:hover .visibility-toggle, .visibility-field:focus-within .visibility-toggle, .visibility-field[data-filled="true"] .visibility-toggle, .visibility-toggle:focus-visible { opacity: 1; pointer-events: auto; }
+.visibility-toggle:hover:not(:disabled)::before { opacity: 1; }
+.visibility-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.visibility-toggle:disabled { cursor: wait; }
+.visibility-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.visibility-slash { opacity: 0; }
+.visibility-toggle[aria-pressed="false"] .visibility-slash { opacity: 1; }
+.advanced-fields .advanced-row:last-child { border-bottom: 0; }
 .sidebar-actions { order: 1; flex: 0 0 28px; display: grid; grid-template-rows: 28px 28px; gap: 4px; }
 .sidebar-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .sidebar-action::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
@@ -185,6 +200,27 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 [hidden] { display: none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.confirm-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .56); animation: confirm-backdrop-in .16s ease-out both; }
+.confirm-dialog { position: relative; width: min(100%, 440px); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: 0 18px 48px rgba(0, 0, 0, .36); animation: confirm-dialog-in .2s cubic-bezier(.2, .75, .25, 1) .02s both; }
+.confirm-dialog h2 { max-width: calc(100% - 24px); margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -.2px; }
+.confirm-dialog p { margin: 12px 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 22px; }
+.confirm-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.confirm-close:hover { background: var(--active); color: var(--text); }
+.confirm-close svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-actions button { min-width: 84px; height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.confirm-cancel { background: var(--active); color: var(--text); }
+.confirm-cancel:hover { background: var(--hover); }
+.confirm-save { background: var(--accent); color: #fff; }
+.confirm-save:hover { filter: brightness(.92); }
+.confirm-actions button:disabled, .confirm-close:disabled { opacity: .55; cursor: default; }
+.confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; }
+.confirm-backdrop.is-closing .confirm-dialog { animation: confirm-dialog-out .14s ease-in both; }
+@keyframes confirm-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes confirm-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes confirm-dialog-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes confirm-dialog-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(14px); } }
+
 @media (max-height: 700px) {
   .settings-content { padding-top: 26px; padding-bottom: 24px; }
   .color-plane { height: 152px; }
@@ -199,7 +235,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   .page-content, .onboarding-scroll, .log-entries { transition: none; }
   .switch-track::after { transition: none; }
   .save-spinner { animation: none; }
+  .confirm-backdrop, .confirm-dialog, .confirm-backdrop.is-closing, .confirm-backdrop.is-closing .confirm-dialog { animation: none; }
 }
+:root[data-reduced-motion="true"] .confirm-backdrop, :root[data-reduced-motion="true"] .confirm-dialog, :root[data-reduced-motion="true"] .confirm-backdrop.is-closing, :root[data-reduced-motion="true"] .confirm-backdrop.is-closing .confirm-dialog { animation: none; }
 
 
 /* The blank title bar remains a drag region without settings chrome. */
@@ -422,6 +460,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .onboarding-option:disabled { cursor: wait; }
 
 #connection-key::-ms-reveal, #connection-key::-ms-clear { display: none; }
+#advanced-api-key::-ms-reveal, #advanced-api-key::-ms-clear,
+#advanced-api-ip::-ms-reveal, #advanced-api-ip::-ms-clear,
+#advanced-api-port::-ms-reveal, #advanced-api-port::-ms-clear { display: none; }
 .connection-form .input-hint { margin: -12px 16px 0; }
 .manage-connection { padding: 10px 16px; border-radius: 10px; background: var(--input-bg); cursor: pointer; }
 .manage-connection:hover { background: var(--active); }

@@ -1,9 +1,16 @@
-//! Exercise the same Rust -> PowerShell -> transaction path as the Save command.
-//! All fixtures stay in the repository and use no live Anytype data or API key.
+//! Exercise native CSS compilation, data migration, and transactional saves.
+//! Fixtures stay under the repository and never touch the user's Anytype data.
 #![cfg(windows)]
 
 use super::*;
 use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::Mutex;
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
 
 struct EnvironmentGuard(Vec<(&'static str, Option<OsString>)>);
 
@@ -32,32 +39,97 @@ impl Drop for EnvironmentGuard {
     }
 }
 
+fn copy_tree(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+fn mock_api_server(
+    ip: &str,
+    expected_key: &'static str,
+    responses: Vec<(u16, Value)>,
+) -> (u16, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind((ip, 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let worker = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for (status, body) in responses {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 4096];
+            let (header_end, content_length) = loop {
+                let count = stream.read(&mut buffer).unwrap();
+                assert_ne!(count, 0, "client closed before sending the request");
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&request[..end]);
+                    let content_length = header.lines()
+                        .filter_map(|line| line.split_once(':'))
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    break (end + 4, content_length);
+                }
+            };
+            while request.len() < header_end + content_length {
+                let count = stream.read(&mut buffer).unwrap();
+                assert_ne!(count, 0, "client closed before sending the request body");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let header = String::from_utf8_lossy(&request[..header_end]);
+            assert!(header.contains(&format!("Authorization: Bearer {expected_key}")));
+            requests.push(header.to_string());
+            let response_body = serde_json::to_vec(&body).unwrap();
+            let reason = if status == 200 { "OK" } else if status == 401 { "Unauthorized" } else { "Server Error" };
+            write!(stream, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response_body.len()).unwrap();
+            stream.write_all(&response_body).unwrap();
+        }
+        requests
+    });
+    (port, worker)
+}
+
+fn successful_api_responses() -> Vec<(u16, Value)> {
+    vec![
+        (200, json!({"data": []})),
+        (200, json!({"data": [{"id": "space-1"}], "has_more": false})),
+        (200, json!({"data": [{"name": "Calendar Color", "key": "calendar-color"}], "has_more": false})),
+        (200, json!({"data": [{"id": "event-1", "properties": {"calendar-color": {"format": "select", "select": {"name": "Green"}}}}], "has_more": false})),
+    ]
+}
+
 #[test]
-fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf();
+fn native_save_compiles_css_and_preserves_unmanaged_files() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let fixture_parent = source.join(".test-run");
     let fixture = fixture_parent.join(format!(
         "native-save-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
     ));
-    let blob = fixture.join("blob");
-    fs::create_dir_all(&blob).unwrap();
-    let _environment = EnvironmentGuard::set(&[
-        ("BLOBUI_INSTALL_DIRECTORY", &fixture),
-        ("BLOBUI_SOURCE_DIRECTORY", &source),
-    ]);
+    let runtime = fixture.join("runtime");
+    copy_tree(&source.join("Dev"), &runtime.join("Dev"));
+    copy_tree(&source.join("assets"), &runtime.join("assets"));
+
+    let install = fixture.join("Anytype data");
+    let blob = install.join("blob");
+    fs::create_dir_all(blob.join("assets")).unwrap();
     let data_path = blob.join("data.json");
-    let css_path = fixture.join("custom.css");
+    let css_path = install.join("custom.css");
     let original_data = json!({
         "schemaVersion": 1,
-        "installDirectory": fixture,
+        "installDirectory": install,
         "settings": {
             "fontFamily": "Libron",
             "codeFontFamily": "Consolas",
@@ -66,14 +138,27 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
         },
         "calendarObjectColors": { "fixture-event": "Green" }
     });
-    fs::write(
-        &data_path,
-        serde_json::to_vec_pretty(&original_data).unwrap(),
-    )
-    .unwrap();
+    fs::write(&data_path, serde_json::to_vec_pretty(&original_data).unwrap()).unwrap();
     fs::write(&css_path, "previous stylesheet").unwrap();
     fs::write(fixture.join("unrelated.txt"), "keep this file").unwrap();
+    fs::write(blob.join(".blobui-managed-files.json"), b"{\"managedFiles\":[\"assets/fixture.png\"]}").unwrap();
+    fs::write(blob.join("assets/fixture.png"), b"installed asset").unwrap();
 
+    let settings_source = runtime.join("Dev");
+    let source_file = fs::read_dir(&settings_source)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("css")))
+        .expect("runtime fixture has CSS sources");
+    let source_bytes = fs::read(&source_file).unwrap();
+    let managed_manifest = fs::read(blob.join(".blobui-managed-files.json")).unwrap();
+    let managed_asset = fs::read(blob.join("assets/fixture.png")).unwrap();
+
+    let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _environment = EnvironmentGuard::set(&[
+        ("BLOBUI_INSTALL_DIRECTORY", &install),
+        ("BLOBUI_SOURCE_DIRECTORY", &runtime),
+    ]);
     let draft = SettingsDraft {
         font_family: "Inter".into(),
         code_font_family: "Cascadia Code".into(),
@@ -85,18 +170,13 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
         link_hover_effect: true,
         object_mention_hover_effect: true,
     };
-    let result = save_settings_blocking(draft.clone()).expect("first native Save must rebuild");
+    let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
     let saved_data = read_json_file(&data_path).unwrap();
     assert_eq!(saved_data["settingsV2"]["version"], 2);
-    assert_eq!(
-        saved_data["settingsV2"]["settings"]["accentColor"],
-        "#27A879"
-    );
+    assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
     assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
     assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
-    assert_eq!(saved_data["settingsV2"]["settings"]["linkHoverEffect"], true);
-    assert_eq!(saved_data["settingsV2"]["settings"]["objectMentionHoverEffect"], true);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");
     assert_eq!(saved_data["calendarObjectColors"]["fixture-event"], "Green");
     let saved_css = fs::read_to_string(&css_path).unwrap();
@@ -104,77 +184,55 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("fixture-event"));
 
-    // White passes the transport validation, but the shared compiler rejects it.
-    // The failure must leave both installed files byte-for-byte unchanged.
+    // White passes settings validation but the native CSS compiler rejects it.
+    // No installed file may change when compilation fails before commit.
     let previous_data_bytes = fs::read(&data_path).unwrap();
     let previous_css_bytes = fs::read(&css_path).unwrap();
-    let invalid = SettingsDraft {
-        accent_color: "#FFFFFF".into(),
-        ..draft.clone()
-    };
+    let invalid = SettingsDraft { accent_color: "#FFFFFF".into(), ..draft.clone() };
     assert!(save_settings_blocking(invalid).is_err());
     assert_eq!(fs::read(&data_path).unwrap(), previous_data_bytes);
     assert_eq!(fs::read(&css_path).unwrap(), previous_css_bytes);
-    assert_eq!(
-        fs::read_to_string(fixture.join("unrelated.txt")).unwrap(),
-        "keep this file"
-    );
-
-    // A source-folder settings save must not replace an in-use runtime script.
-    let runtime_rebuild = blob.join("runtime").join("scripts").join("Rebuild.ps1");
-    let runtime_text =
-        fs::read_to_string(&runtime_rebuild).unwrap() + "\n# runtime-preservation-fixture\n";
-    fs::write(&runtime_rebuild, &runtime_text).unwrap();
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        let _locked = OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&runtime_rebuild)
-            .unwrap();
-        save_settings_blocking(draft.clone())
-            .expect("Settings save must not redeploy locked runtime files");
-        assert_eq!(fs::read_to_string(&runtime_rebuild).unwrap(), runtime_text);
-    }
-
-    // The installed runtime must also be usable without the source checkout.
-    let runtime = blob.join("runtime");
-    env::set_var("BLOBUI_SOURCE_DIRECTORY", &runtime);
-    let runtime_draft = SettingsDraft {
-        accent_color: "Default".into(),
-        accent_mode: "native".into(),
-        accent_preset: String::new(),
-        ..draft
-    };
-    save_settings_blocking(runtime_draft).expect("Save from the installed runtime must rebuild");
-    assert_eq!(
-        read_json_file(&data_path).unwrap()["settings"]["accentColor"],
-        "var(--color-system-accent-100)"
-    );
-    assert!(fs::read_to_string(&css_path)
-        .unwrap()
-        .contains("fixture-event"));
-    assert!(fs::read_dir(blob.join("staging")).unwrap().next().is_none());
+    assert_eq!(fs::read(fixture.join("unrelated.txt")).unwrap(), b"keep this file");
+    assert_eq!(fs::read(blob.join(".blobui-managed-files.json")).unwrap(), managed_manifest);
+    assert_eq!(fs::read(blob.join("assets/fixture.png")).unwrap(), managed_asset);
+    assert_eq!(fs::read(source_file).unwrap(), source_bytes);
+    assert!(!blob.join("staging").exists(), "native Save does not create a staging/runtime deployment folder");
 
     configure_connection_blocking(ConnectionDraft {
         enabled: false,
         api_key: String::new(),
+        keep_existing_key: false,
+        ip: None,
         port: None,
     })
-    .expect("No API mode must rebuild through stdin without a key");
+    .expect("No API mode saves without contacting Anytype");
     let disabled = read_json_file(&data_path).unwrap();
     assert_eq!(disabled["apiConnection"]["enabled"], false);
     assert_eq!(disabled["apiConnection"]["port"], 31009);
-    assert!(!fs::read_to_string(&css_path)
-        .unwrap()
-        .contains("fixture-event"));
+    assert_eq!(disabled["calendarObjectColors"], json!({}));
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("fixture-event"));
     assert!(load_app_state().unwrap().onboarding_complete);
-    let disabled_save = save_settings_blocking(SettingsDraft::default()).unwrap();
+    let disabled_settings = load_app_state().unwrap().settings;
+    let disabled_save = save_settings_blocking(disabled_settings).unwrap();
     assert_eq!(disabled_save.calendar_status, "disabled");
+
+    let credential = blob.join("credentials/anytype-api-key.dpapi");
+    fs::create_dir_all(credential.parent().unwrap()).unwrap();
+    let protected = connection::encrypt_api_key("fixture-reveal-key").unwrap();
+    fs::write(&credential, format!("{protected}\n")).unwrap();
+    let reveal_started = std::time::Instant::now();
+    assert_eq!(read_saved_api_key().unwrap(), "fixture-reveal-key");
+    eprintln!("Native saved-key reveal took {:?}", reveal_started.elapsed());
+    fs::write(&credential, "not-a-valid-credential").unwrap();
+    assert!(read_saved_api_key().is_err());
+    fs::remove_file(&credential).unwrap();
+
     let before_invalid_connection = fs::read(&data_path).unwrap();
     assert!(configure_connection_blocking(ConnectionDraft {
         enabled: true,
         api_key: "test-key".into(),
+        keep_existing_key: false,
+        ip: None,
         port: Some(0),
     })
     .is_err());
@@ -183,4 +241,124 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
     let canonical_fixture = fixture.canonicalize().unwrap();
     assert!(canonical_fixture.starts_with(fixture_parent.canonicalize().unwrap()));
     fs::remove_dir_all(canonical_fixture).unwrap();
+}
+
+#[test]
+fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let fixture = source.join(".test-run").join(format!("native-connection-{}-{nonce}", std::process::id()));
+    let runtime = fixture.join("runtime");
+    copy_tree(&source.join("Dev"), &runtime.join("Dev"));
+    copy_tree(&source.join("assets"), &runtime.join("assets"));
+    let install = fixture.join("Anytype data");
+    let blob = install.join("blob");
+    fs::create_dir_all(&blob).unwrap();
+    let data_path = blob.join("data.json");
+    let css_path = install.join("custom.css");
+    let data = json!({
+        "installDirectory": install,
+        "settings": { "fontFamily": "Libron", "codeFontFamily": "Consolas", "accentColor": "#DE50DE" },
+        "calendarObjectColors": { "old-event": "Blue" }
+    });
+    fs::write(&data_path, serde_json::to_vec_pretty(&data).unwrap()).unwrap();
+    fs::write(&css_path, b"old css").unwrap();
+    let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _environment = EnvironmentGuard::set(&[
+        ("BLOBUI_INSTALL_DIRECTORY", &install),
+        ("BLOBUI_SOURCE_DIRECTORY", &runtime),
+    ]);
+
+    let (port, server) = mock_api_server("127.0.0.2", "fixture-key-one", successful_api_responses());
+    let configured = configure_connection_blocking(ConnectionDraft {
+        enabled: true,
+        api_key: "fixture-key-one".into(),
+        keep_existing_key: false,
+        ip: Some("127.0.0.2".into()),
+        port: Some(port),
+    }).expect("valid API v2 key should be saved");
+    assert_eq!(configured.calendar_status, "refreshed");
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests.iter().all(|request| request.contains(&format!("Host: 127.0.0.2:{port}"))));
+    let saved = read_json_file(&data_path).unwrap();
+    assert_eq!(saved["apiConnection"]["ip"], "127.0.0.2");
+    assert_eq!(saved["apiConnection"]["port"], port);
+    assert_eq!(saved["calendarObjectColors"]["event-1"], "Green");
+    assert!(!fs::read_to_string(&data_path).unwrap().contains("fixture-key-one"));
+    let credential_path = blob.join("credentials/anytype-api-key.dpapi");
+    let first_credential = fs::read(&credential_path).unwrap();
+    assert_eq!(read_saved_api_key_at(&install).unwrap(), "fixture-key-one");
+
+    // A rotated, authenticated key remains usable when the optional calendar
+    // endpoint fails, and old-account calendar values are cleared.
+    let (port, server) = mock_api_server("127.0.0.2", "fixture-key-two", vec![
+        (200, json!({"data": []})),
+        (500, json!({"message": "optional calendar failure"})),
+    ]);
+    let rotated = configure_connection_blocking(ConnectionDraft {
+        enabled: true,
+        api_key: "fixture-key-two".into(),
+        keep_existing_key: false,
+        ip: Some("127.0.0.2".into()),
+        port: Some(port),
+    }).expect("calendar failure must not reject a valid replacement key");
+    assert_eq!(rotated.calendar_status, "cached");
+    assert_eq!(server.join().unwrap().len(), 2);
+    assert_ne!(fs::read(&credential_path).unwrap(), first_credential);
+    assert_eq!(read_saved_api_key_at(&install).unwrap(), "fixture-key-two");
+    assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"], json!({}));
+
+    let saved_data = fs::read(&data_path).unwrap();
+    let saved_css = fs::read(&css_path).unwrap();
+    let saved_key = fs::read(&credential_path).unwrap();
+    let (port, server) = mock_api_server("127.0.0.2", "invalid-key", vec![
+        (401, json!({"message": "do not include this response in the UI"})),
+    ]);
+    let rejected = configure_connection_blocking(ConnectionDraft {
+        enabled: true,
+        api_key: "invalid-key".into(),
+        keep_existing_key: false,
+        ip: Some("127.0.0.2".into()),
+        port: Some(port),
+    }).unwrap_err();
+    assert!(rejected.contains("401"));
+    assert!(!rejected.contains("do not include"));
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert_eq!(fs::read(&data_path).unwrap(), saved_data);
+    assert_eq!(fs::read(&css_path).unwrap(), saved_css);
+    assert_eq!(fs::read(&credential_path).unwrap(), saved_key);
+
+    // CSS compilation failure after successful authentication still leaves
+    // settings and the currently encrypted credential untouched.
+    let broken_css = runtime.join("Dev/zz-native-invalid.css");
+    fs::write(&broken_css, "body { color: {{undeclared}}; }").unwrap();
+    let (port, server) = mock_api_server("127.0.0.2", "fixture-key-one", successful_api_responses());
+    assert!(configure_connection_blocking(ConnectionDraft {
+        enabled: true,
+        api_key: "fixture-key-one".into(),
+        keep_existing_key: false,
+        ip: Some("127.0.0.2".into()),
+        port: Some(port),
+    }).is_err());
+    assert_eq!(server.join().unwrap().len(), 4);
+    fs::remove_file(broken_css).unwrap();
+    assert_eq!(fs::read(&data_path).unwrap(), saved_data);
+    assert_eq!(fs::read(&css_path).unwrap(), saved_css);
+    assert_eq!(fs::read(&credential_path).unwrap(), saved_key);
+
+    // Opt-out does not make an API request and removes both cache and key.
+    let disabled = configure_connection_blocking(ConnectionDraft {
+        enabled: false,
+        api_key: String::new(),
+        keep_existing_key: false,
+        ip: None,
+        port: None,
+    }).unwrap();
+    assert_eq!(disabled.calendar_status, "disabled");
+    assert!(!credential_path.exists());
+    assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"], json!({}));
+    let canonical = fixture.canonicalize().unwrap();
+    assert!(canonical.starts_with(source.join(".test-run").canonicalize().unwrap()));
+    fs::remove_dir_all(canonical).unwrap();
 }

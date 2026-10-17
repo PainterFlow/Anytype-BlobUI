@@ -5,11 +5,15 @@ const vm = require('node:vm');
 
 // Exercise the actual event handlers without opening a browser or desktop window.
 const elements = new Map();
+let activeElement = null;
 function element(id) {
   if (!elements.has(id)) {
     const classes = new Set();
     elements.set(id, {
-      value: '', textContent: '', hidden: true, children: [], attributes: {}, style: { setProperty() {} }, dataset: {},
+      value: '', type: ['connection-key', 'advanced-api-key'].includes(id) ? 'password' : 'text',
+      selectionStart: 0, selectionEnd: 0,
+      setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+      textContent: '', hidden: true, children: [], attributes: {}, style: { setProperty() {} }, dataset: {},
       clientHeight: 500, scrollHeight: 500,
       classList: {
         add: (...names) => names.forEach(name => classes.add(name)),
@@ -18,11 +22,18 @@ function element(id) {
         toggle(name, active) { active ? classes.add(name) : classes.delete(name); },
       },
       handlers: {},
-      addEventListener(name, handler) { this.handlers[name] = handler; },
+      addEventListener(name, handler) {
+        const previous = this.handlers[name];
+        this.handlers[name] = previous ? (...args) => {
+          const previousResult = previous(...args);
+          const result = handler(...args);
+          return result === undefined ? previousResult : result;
+        } : handler;
+      },
       setAttribute(name, value) { this.attributes[name] = value; },
       appendChild(child) { this.children.push(child); },
       contains(target) { return target === this || this.children.includes(target); },
-      focus() { this.focused = true; },
+      focus() { this.focused = true; activeElement = this; },
       querySelector: selector => element(id + selector),
     });
   }
@@ -42,12 +53,13 @@ const context = {
   navigator: { clipboard: { async writeText(text) { if (copyError) throw new Error('Clipboard unavailable.'); copiedLogs = text; } } },
   document: {
     handlers: {},
+    get activeElement() { return activeElement; },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     documentElement: element('root'),
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
-    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect'].map(element),
+    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },
   window: {
@@ -64,13 +76,15 @@ const context = {
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: {
       event: { async listen(name, handler) {
-        assert.equal(name, 'blobui-rebuild-custom-css');
-        rebuildListener = handler;
+        if (name === 'blobui-rebuild-custom-css') rebuildListener = handler;
+        else assert.equal(name, 'blobui-show-onboarding');
       } },
       core: { async invoke(name, args) {
       calls.push(name);
+      if (name === 'reveal_api_key') return 'fixture-revealed-key';
       if (name === 'get_app_state') return {
         ready: true, theme: 'dark',
+        apiPort: 31009, apiIp: '', hasSavedApiKey: true,
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
@@ -99,14 +113,44 @@ const changeToggle = async (id, checked) => {
 };
 const status = () => element('status-message').textContent;
 const settingsHtml = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
 assert.match(settingsHtml, /<span>Alt\+R to rebuild custom\.css<\/span>\s*<span>Numpad 1 in Anytype<\/span>/, 'The rebuild note must sit immediately above the Numpad 1 note.');
 assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="accessibility-nav"'), 'Accessibility must be the second Settings navigation page.');
+assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
+for (const label of ['Anytype API key', 'API key IP', 'API key port']) {
+  assert(settingsHtml.includes('>' + label + '</label>'), `${label} must have a visible label.`);
+}
+for (const [inputId, buttonId] of [
+  ['connection-key', 'connection-key-visibility'], ['connection-port', 'connection-port-visibility'],
+  ['advanced-api-key', 'advanced-api-key-visibility'], ['advanced-api-ip', 'advanced-api-ip-visibility'],
+  ['advanced-api-port', 'advanced-api-port-visibility'],
+]) {
+  const fieldId = inputId + '-field';
+  assert.match(settingsHtml, new RegExp(`<div id="${fieldId}" class="visibility-field" data-filled="false">\\s*<input id="${inputId}"[\\s\\S]*?<button id="${buttonId}"`), `${inputId} must have an adjacent visibility control outside its input.`);
+  assert.match(settingsHtml, new RegExp(`id="${buttonId}"[^>]*aria-pressed="(?:true|false)"[^>]*aria-label="[^"]+"[^>]*title="[^"]+"`), `${buttonId} must expose its state and accessible name.`);
+}
+assert(!settingsHtml.includes('id="connection-ip"'), 'Onboarding must not add an IP field.');
+assert.match(settingsHtml, /id="connection-port" type="text" inputmode="numeric"/);
+assert.match(settingsHtml, /id="advanced-api-ip" type="text" inputmode="decimal"/);
+assert.match(settingsHtml, /id="advanced-api-port" type="text" inputmode="numeric"/);
+assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
+assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
+assert.match(settingsCss, /\.visibility-field:focus-within \.visibility-toggle/);
+assert.match(settingsCss, /\.visibility-field\[data-filled="true"\] \.visibility-toggle/);
+assert.match(settingsCss, /\.visibility-toggle:focus-visible/);
+assert.match(settingsHtml, /role="alertdialog" aria-modal="true"/, 'Key removal must use an accessible modal dialog.');
+assert.match(settingsHtml, /id="api-key-removal-title">Are you sure you want to do this\?<\/h2>/);
+assert.match(settingsHtml, /id="api-key-removal-message">Removing the API key will make some features unavailable\.<\/p>/);
+const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
+assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
+assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
 for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect']) {
   assert.match(settingsHtml, new RegExp(`id="${id}" type="checkbox" role="switch"`), `${id} must be a native switch.`);
 }
 
 (async () => {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
+  element('api-key-removal-dialog').children.push(element('api-key-removal-close'), element('api-key-removal-cancel'), element('api-key-removal-save'));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
@@ -120,18 +164,123 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(element('preferences-page').hidden, true, 'Opening Accessibility must hide Preferences.');
   assert.equal(element('page-title').textContent, 'Accessibility');
   assert.equal(element('accessibility-nav').attributes['aria-current'], 'page');
-  await changeToggle('reduced-motion', false);
-  assert.equal(element('save-button').hidden, false, 'Accessibility changes must make Save available.');
   await changeToggle('reduced-motion', true);
+  assert.equal(element('save-button').hidden, false, 'Accessibility changes must make Save available.');
+  await changeToggle('reduced-motion', false);
   assert.equal(element('save-button').hidden, true, 'Restoring an accessibility setting must clear its dirty state.');
   element('preferences-nav').handlers.click();
   assert.equal(element('accessibility-page').hidden, true, 'Preferences navigation must return to its page.');
   assert.equal(element('page-title').textContent, 'Preferences');
+  element('advanced-nav').handlers.click();
+  assert.equal(element('advanced-page').hidden, false, 'Advanced navigation must open its settings page.');
+  assert.equal(element('accessibility-page').hidden, true, 'Opening Advanced must hide Accessibility.');
+  assert.equal(element('preferences-page').hidden, true, 'Opening Advanced must hide Preferences.');
+  assert.equal(element('page-title').textContent, 'Advanced');
+  assert.equal(element('advanced-api-key').value, '••••••••', 'A saved key is represented by a mask instead of plaintext.');
+  assert.equal(element('save-button').hidden, true, 'Loaded API settings start clean.');
+  assert.equal(element('advanced-api-key').type, 'password', 'The saved key mask starts concealed.');
+  assert.equal(element('advanced-api-key-visibility').attributes['aria-pressed'], 'false');
+  assert.equal(element('advanced-api-ip').type, 'text', 'IP starts readable.');
+  assert.equal(element('advanced-api-ip-visibility').attributes['aria-pressed'], 'true');
+  assert.equal(element('advanced-api-port').type, 'text', 'Port starts readable.');
+  assert.equal(element('advanced-api-key-field').dataset.filled, 'true', 'A filled field keeps its eye control available.');
+  assert.equal(element('advanced-api-ip-field').dataset.filled, 'false');
+  const visibilityCallCount = calls.length;
+  const visibilityConnectionCount = connectionRequests.length;
+  element('advanced-api-key').focus();
+  element('advanced-api-key').setSelectionRange(2, 5);
+  await element('advanced-api-key-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-key').value, 'fixture-revealed-key', 'Reveal must load the saved key, not placeholder dots.');
+  assert.equal(element('advanced-api-key').type, 'text', 'The key eye reveals only the current input value.');
+  assert.equal(activeElement, element('advanced-api-key'), 'Mouse visibility toggles preserve input focus.');
+  assert.deepEqual([element('advanced-api-key').selectionStart, element('advanced-api-key').selectionEnd], [2, 5], 'Visibility toggles preserve the caret or selection.');
+  assert.equal(element('advanced-api-key-visibility').attributes['aria-pressed'], 'true');
+  element('advanced-api-key-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-key').type, 'password');
+  assert.equal(element('advanced-api-key').value, '••••••••', 'Hiding the saved key clears the revealed plaintext.');
+  element('advanced-api-ip-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-ip').type, 'password', 'The IP eye can mask the readable value.');
+  element('advanced-api-ip-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-ip').type, 'text');
+  element('advanced-api-port-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-port').type, 'password');
+  element('advanced-api-port-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-port').type, 'text');
+  assert.equal(element('save-button').hidden, true, 'Visibility toggles do not make Advanced dirty.');
+  assert.deepEqual(calls.slice(visibilityCallCount), ['reveal_api_key'], 'The eye only reads the key and does not save.');
+  assert.equal(connectionRequests.length, visibilityConnectionCount, 'Visibility toggles do not change the connection save payload.');
+  await input('advanced-api-ip', '192.168.1.24');
+  assert.equal(element('advanced-api-ip-field').dataset.filled, 'true', 'Typing keeps the eye control available.');
+  element('advanced-api-ip-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('advanced-api-ip').type, 'password');
+  assert.equal(element('advanced-api-ip').value, '192.168.1.24', 'Masking preserves the IP value used by validation and saving.');
+  assert.equal(element('save-button').hidden, false, 'Visibility does not clear unrelated dirty state.');
+  element('save-button').handlers.click();
+  await flush();
+  assert.equal(connectionRequests.at(-1).enabled, true);
+  assert.equal(connectionRequests.at(-1).apiKey, '');
+  assert.equal(connectionRequests.at(-1).keepExistingKey, true, 'Changing the IP keeps the existing encrypted key.');
+  assert.equal(connectionRequests.at(-1).ip, '192.168.1.24');
+  assert.equal(connectionRequests.at(-1).port, null, 'A blank port uses the default port.');
+  assert.equal(element('save-button').hidden, true, 'A successful connection save clears Advanced dirty state.');
+  await input('advanced-api-key', '');
+  element('save-button').handlers.click();
+  assert.equal(element('api-key-removal-backdrop').hidden, false, 'Clearing a saved key must ask before removal.');
+  element('api-key-removal-backdrop').handlers.pointerdown({ target: element('api-key-removal-dialog') });
+  assert.equal(element('api-key-removal-backdrop').hidden, false, 'Pointer input inside the dialog must not cancel it.');
+  element('api-key-removal-close').focus();
+  context.document.handlers.keydown({ key: 'Tab', shiftKey: true, preventDefault() {} });
+  assert.equal(activeElement, element('api-key-removal-save'), 'Keyboard focus must cycle inside the modal.');
+  context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(element('api-key-removal-backdrop').hidden, false, 'Escape starts the modal exit animation.');
+  function finishRemovalTransition() {
+    const pending = [...timers.entries()].find(([, timer]) => timer.delay === 140);
+    assert(pending, 'Closing the modal must schedule its fade and slide out.');
+    timers.delete(pending[0]);
+    pending[1].callback();
+  }
+  finishRemovalTransition();
+  assert.equal(element('api-key-removal-backdrop').hidden, true, 'Escape cancels the removal and closes the modal.');
+  assert.equal(element('save-button').hidden, false, 'Cancelling removal leaves the key change pending.');
+  element('save-button').handlers.click();
+  assert.equal(element('api-key-removal-backdrop').hidden, false);
+  element('api-key-removal-backdrop').handlers.pointerdown({ target: element('api-key-removal-backdrop') });
+  finishRemovalTransition();
+  assert.equal(element('api-key-removal-backdrop').hidden, true, 'Clicking the backdrop cancels saving.');
+  element('save-button').handlers.click();
+  element('api-key-removal-save').handlers.click();
+  await flush();
+  finishRemovalTransition();
+  assert.equal(connectionRequests.at(-1).enabled, false, 'Confirming removal disables API features.');
+  assert.equal(connectionRequests.at(-1).apiKey, '');
+  assert.equal(connectionRequests.at(-1).keepExistingKey, false);
+  assert.equal(element('save-button').hidden, true, 'A successful removal clears Advanced dirty state.');
+
+  const requestsAfterRemoval = connectionRequests.length;
+  await input('advanced-api-port', '31010');
+  assert.equal(element('advanced-api-port-field').dataset.filled, 'true');
+  element('save-button').handlers.click();
+  assert.equal(element('api-key-removal-backdrop').hidden, false, 'Saving connection edits with no saved key still requires confirmation.');
+  assert.equal(connectionRequests.length, requestsAfterRemoval, 'Unconfirmed empty-key saves must not reach the backend.');
+  element('api-key-removal-cancel').handlers.click();
+  finishRemovalTransition();
+  await input('advanced-api-port', '');
+
+  await input('font-family', 'Arial');
+  element('save-button').handlers.click();
+  assert.equal(element('api-key-removal-backdrop').hidden, false, 'An Advanced-page settings save with an empty key requires confirmation.');
+  assert.equal(connectionRequests.length, requestsAfterRemoval, 'Theme-only changes do not configure the API connection.');
+  element('api-key-removal-close').handlers.click();
+  finishRemovalTransition();
+  await input('font-family', 'Libron');
+
+  element('preferences-nav').handlers.click();
   assert.equal(typeof rebuildListener, 'function', 'The global rebuild shortcut must be connected to the UI save action.');
   assert.equal(element('save-button').hidden, true);
   assert.equal(element('log-button').hidden, false);
   assert.equal(element('log-button').dataset.severity, 'info');
-  assert.equal(element('log-entries').children.length, 1);
+  const logsBeforePreferenceEdits = element('log-entries').children.length;
+  assert(logsBeforePreferenceEdits > 0);
 
   const pageContent = element('page-content');
   assert.equal(pageContent.classList.contains('has-overflow'), false, 'A page without overflow starts without a scrollbar.');
@@ -170,11 +319,12 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(element('save-button').hidden, false);
   await input('accent-value', '#DE50DE');
   assert.equal(element('save-button').hidden, true);
-  assert.equal(element('log-entries').children.length, 1, 'Editing should not fill the log.');
+  assert.equal(element('log-entries').children.length, logsBeforePreferenceEdits, 'Editing should not fill the log.');
 
   await input('font-family', 'Arial');
   await changeToggle('reduced-motion', false);
   const pendingSave = element('save-button').handlers.click();
+  assert.equal(element('api-key-removal-backdrop').hidden, true, 'Ordinary Preferences saves must not ask about an empty API key.');
   assert.equal(element('save-button').hidden, false, 'Pending changes remain visible while saving.');
   assert.equal(element('save-button').disabled, true, 'Repeated saves must be blocked.');
   await pendingSave;
@@ -184,7 +334,7 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(savedSettings.at(-1).objectMentionHoverEffect, false);
   assert.match(status(), /^Saved\./);
   assert.equal(element('save-button').hidden, true);
-  assert.equal(element('log-button').dataset.severity, 'warning');
+  assert.equal(element('log-button').dataset.severity, 'info', 'Successful saves with cached calendar colors are informational.');
   await input('font-family', 'Libron');
   saveError = '<script>Rebuild failed.</script>';
   await element('save-button').handlers.click();
@@ -194,7 +344,7 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert(element('log-entries').children.at(-1).textContent.endsWith(saveError), 'Log messages must remain plain text.');
   saveError = null;
   await element('save-button').handlers.click();
-  assert.equal(element('log-button').dataset.severity, 'error', 'Retained errors take precedence over new warnings.');
+  assert.equal(element('log-button').dataset.severity, 'error', 'Retained errors take precedence over informational save messages.');
   assert.equal(element('save-button').hidden, true);
 
   let altRPrevented = false;
@@ -290,15 +440,29 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(onboarding.dataset.apiChoice, 'api', 'Ignore repeated selections during transition.');
   finishOnboardingTransition();
   assert.equal(element('onboarding-connection').hidden, false, 'API choice must open connection setup.');
+  assert.equal(element('connection-key').type, 'password', 'Onboarding keys start concealed.');
+  assert.equal(element('connection-port').type, 'text', 'Onboarding ports start readable.');
+  element('connection-key-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('connection-key').type, 'text');
+  element('connection-port-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('connection-port').type, 'password');
+  element('connection-port-visibility').handlers.click({ preventDefault() {} });
+  assert.equal(element('connection-port').type, 'text');
+  const beforeInvalidConnection = connectionRequests.length;
   const submit = () => element('connection-form').handlers.submit({ preventDefault() {} });
   submit();
   assert.match(element('connection-error').textContent, /Enter your Anytype/);
   element('connection-key').value = 'test-key';
+  await element('connection-key').handlers.input();
   element('connection-port').value = '65536';
+  await element('connection-port').handlers.input();
+  assert.equal(element('connection-key-field').dataset.filled, 'true');
+  assert.equal(element('connection-port-field').dataset.filled, 'true');
   submit();
   assert.match(element('connection-error').textContent, /Port must/);
-  assert.equal(connectionRequests.length, 0);
+  assert.equal(connectionRequests.length, beforeInvalidConnection, 'Invalid onboarding values must not start a connection request.');
   element('connection-port').value = '';
+  await element('connection-port').handlers.input();
   connectionError = 'Could not connect to Anytype.';
   submit();
   await flush();
@@ -307,12 +471,17 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(connectionRequests.at(-1).port, null, 'Blank port uses the backend default.');
   connectionError = null;
   element('connection-port').value = '31010';
+  await element('connection-port').handlers.input();
   submit();
   assert.equal(element('connection-confirm').disabled, true);
+  assert.equal(element('connection-key-visibility').disabled, true, 'Connection visibility controls disable while saving.');
   await flush();
   assert.equal(connectionRequests.at(-1).port, 31010);
   assert.equal(connectionRequests.at(-1).apiKey, 'test-key');
   assert.equal(element('connection-key').value, '', 'Clear the key after saving.');
+  assert.equal(element('connection-key').type, 'password', 'Clearing a submitted key resets it to concealed.');
+  assert.equal(element('connection-key-visibility').attributes['aria-pressed'], 'false');
+  assert.equal(element('connection-key-field').dataset.filled, 'false');
   finishOnboardingTransition();
   assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);

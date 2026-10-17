@@ -3,16 +3,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
+use std::net::IpAddr;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 
+mod api;
+mod css;
 mod connection;
 mod hotkey;
+mod storage;
 
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static SHOW_ONBOARDING: AtomicBool = AtomicBool::new(false);
@@ -27,6 +28,25 @@ impl Drop for SaveGuard {
 const DEFAULT_FONT: &str = "Libron";
 const DEFAULT_CODE_FONT: &str = "Consolas";
 const DEFAULT_ACCENT: &str = "#DE50DE";
+const DEFAULT_API_IP: &str = "127.0.0.1";
+
+struct SecretString(String);
+
+impl SecretString {
+    fn new(value: String) -> Self { Self(value) }
+}
+
+impl std::ops::Deref for SecretString {
+    type Target = str;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        // Clear the key before the allocation is released.
+        unsafe { self.0.as_mut_vec().fill(0); }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -54,12 +74,31 @@ struct AppState {
     hotkey_error: Option<String>,
     onboarding_complete: bool,
     api_port: u16,
+    api_ip: String,
+    has_saved_api_key: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveResult {
     calendar_status: String,
+}
+
+#[tauri::command]
+async fn reveal_api_key() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(read_saved_api_key)
+        .await
+        .map_err(|_| "Could not read the saved API key.".to_string())?
+}
+
+fn read_saved_api_key() -> Result<String, String> {
+    let install = resolve_install_directory(&app_data_directory())?;
+    reject_reparse_component(&install)?;
+    let credential = install.join("blob/credentials/anytype-api-key.dpapi");
+    reject_reparse_component(&credential)?;
+    let encrypted = fs::read_to_string(&credential)
+        .map_err(|_| "Could not read the saved API key.".to_string())?;
+    connection::decrypt_saved_key(encrypted.trim())
 }
 
 #[tauri::command]
@@ -91,6 +130,10 @@ async fn save_settings(settings: SettingsDraft) -> Result<SaveResult, String> {
 struct ConnectionDraft {
     enabled: bool,
     api_key: String,
+    #[serde(default)]
+    keep_existing_key: bool,
+    #[serde(default)]
+    ip: Option<String>,
     port: Option<u16>,
 }
 
@@ -111,88 +154,97 @@ async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult,
     .map_err(|_| "The connection task stopped unexpectedly.".to_string())?
 }
 
-fn configure_connection_blocking(mut connection: ConnectionDraft) -> Result<SaveResult, String> {
+fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResult, String> {
+    let mut connection = normalize_connection(connection)?;
+    let mut api_key = SecretString::new(std::mem::take(&mut connection.api_key));
+    let install = resolve_install_directory(&app_data_directory())?;
+    let (_, data_path, css_path, credential_path) = save_paths(&install)?;
+    let runtime = resolve_runtime_directory()?;
+    let mut data = read_json_file(&data_path)?;
+    if !data.is_object() {
+        return Err("BlobUI data.json must contain a JSON object.".into());
+    }
+
+    let current_settings = validate_settings(settings_from_data(&data))?;
+    apply_settings(&mut data, &install, &current_settings);
+    let port = connection.port.unwrap_or(31009);
+    let ip = connection.ip.as_deref().unwrap_or(DEFAULT_API_IP);
+    let mut protected_key = None;
+    let calendar_status;
+    if connection.enabled {
+        if connection.keep_existing_key {
+            api_key = SecretString::new(read_saved_api_key_at(&install)?);
+        }
+        let connection_result = (|| {
+            api::verify_connection(&api_key, ip, port)?;
+            if !connection.keep_existing_key {
+                protected_key = Some(connection::encrypt_api_key(&api_key)?);
+            }
+            Ok::<_, String>(api::calendar_colors(&api_key, ip, port))
+        })();
+        let colors_result = connection_result?;
+        match colors_result {
+            Ok(colors) => {
+                data["calendarObjectColors"] = colors;
+                calendar_status = "refreshed";
+            }
+            Err(_) => {
+                // A connection change must not carry calendar data forward
+                // from a different API identity or an earlier permission set.
+                data["calendarObjectColors"] = json!({});
+                calendar_status = "cached";
+            }
+        }
+    } else {
+        data["calendarObjectColors"] = json!({});
+        calendar_status = "disabled";
+    }
+
+    data["apiConnection"] = json!({
+        "enabled": connection.enabled,
+        "ip": ip,
+        "port": port,
+    });
+    let css = css::compile(&runtime, &install, &data)?;
+    let serialized = serialize_data(&data)?;
+    let credential = match protected_key.as_deref() {
+        Some(value) => storage::CredentialChange::Replace(value),
+        None if !connection.enabled => storage::CredentialChange::Remove,
+        None => storage::CredentialChange::Keep,
+    };
+    storage::commit_settings(
+        &css_path,
+        &data_path,
+        &credential_path,
+        css.as_bytes(),
+        &serialized,
+        credential,
+    )?;
+    Ok(SaveResult { calendar_status: calendar_status.into() })
+}
+
+fn normalize_connection(mut connection: ConnectionDraft) -> Result<ConnectionDraft, String> {
     if connection.port == Some(0) {
         return Err("Port must be between 1 and 65535.".into());
     }
+    connection.ip = Some(normalize_api_ip(connection.ip.as_deref())?);
     connection.api_key = connection.api_key.trim().to_string();
     if connection.enabled
+        && !connection.keep_existing_key
         && (connection.api_key.is_empty()
             || connection.api_key.len() > 4096
             || connection.api_key.chars().any(char::is_control))
     {
         return Err("Enter your Anytype API v2 key.".into());
     }
-    if !connection.enabled {
+    if connection.keep_existing_key {
         connection.api_key.clear();
     }
-    let install = resolve_install_directory(&app_data_directory())?;
-    ensure_not_release_path(&install)?;
-    reject_reparse_component(&install)?;
-    let script = resolve_source_directory()?
-        .join("scripts")
-        .join("Rebuild.ps1");
-    let payload = serde_json::to_vec(&connection)
-        .map_err(|_| "Could not encode the connection request.".to_string())?;
-    for shell in ["pwsh.exe", "powershell.exe"] {
-        let mut command = Command::new(shell);
-        command
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(&script)
-            .arg("-InstallDirectory")
-            .arg(&install)
-            .arg("-ConfigureConnectionFromStdin")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return Err("Could not start the connection setup.".into()),
-        };
-        let write_result = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Connection input is unavailable.".to_string())
-            .and_then(|mut input| {
-                input
-                    .write_all(&payload)
-                    .map_err(|_| "Could not send the connection request.".to_string())
-            });
-        let output = child
-            .wait_with_output()
-            .map_err(|_| "Could not finish connection setup.".to_string())?;
-        write_result?;
-        if !output.status.success() {
-            return Err(connection::connection_error(
-                &output.stdout,
-                connection.port.unwrap_or(31009),
-            ));
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let calendar_status = if text.contains("BlobUI_CALENDAR_CACHE=disabled") {
-            "disabled"
-        } else if text.contains("BlobUI_CALENDAR_CACHE=refreshed") {
-            "refreshed"
-        } else {
-            "cached"
-        };
-        return Ok(SaveResult {
-            calendar_status: calendar_status.into(),
-        });
+    if !connection.enabled {
+        connection.api_key.clear();
+        connection.keep_existing_key = false;
     }
-    Err("PowerShell could not be found.".into())
+    Ok(connection)
 }
 
 fn show_settings_window(app: &tauri::AppHandle) {
@@ -271,18 +323,31 @@ fn load_app_state() -> Result<AppState, String> {
 
     let mut onboarding_complete = false;
     let mut api_port = 31009;
+    let mut api_ip = String::new();
+    let mut has_saved_api_key = false;
     let (ready, settings, message) = if data_path.is_file() {
         let data = read_json_file(&data_path)?;
-        onboarding_complete = data
+        let api_connection = data.pointer("/apiConnection");
+        let credential_path = install_directory
+            .join("blob")
+            .join("credentials")
+            .join("anytype-api-key.dpapi");
+        let credential_exists = credential_path.is_file();
+        let configured_api_state = data
             .pointer("/apiConnection/enabled")
-            .and_then(Value::as_bool)
-            .is_some();
-        api_port = data
-            .pointer("/apiConnection/port")
+            .and_then(Value::as_bool);
+        onboarding_complete = configured_api_state.is_some() || credential_exists;
+        api_port = api_connection
+            .and_then(|connection| connection.get("port"))
             .and_then(Value::as_u64)
             .and_then(|port| u16::try_from(port).ok())
             .filter(|port| *port > 0)
             .unwrap_or(31009);
+        api_ip = api_connection
+            .and_then(|connection| read_string(Some(connection), "ip"))
+            .filter(|ip| ip != DEFAULT_API_IP)
+            .unwrap_or_default();
+        has_saved_api_key = credential_exists && configured_api_state.unwrap_or(true);
         let settings = settings_from_data(&data);
         (true, settings, None)
     } else {
@@ -290,7 +355,7 @@ fn load_app_state() -> Result<AppState, String> {
             false,
             SettingsDraft::default(),
             Some(format!(
-                "BlobUI settings were not found at {}. Select your Anytype folder with scripts/Settings.ps1 -InstallDirectory.",
+                "BlobUI settings were not found at {}. Install BlobUI into the selected Anytype folder, then reopen Settings.",
                 data_path.display()
             )),
         )
@@ -306,46 +371,117 @@ fn load_app_state() -> Result<AppState, String> {
         hotkey_error: hotkey::error(),
         onboarding_complete: onboarding_complete && !SHOW_ONBOARDING.load(Ordering::Acquire),
         api_port,
+        api_ip,
+        has_saved_api_key,
     })
 }
 
 fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String> {
     let settings = validate_settings(settings)?;
-    let app_data = app_data_directory();
-    let install_directory = resolve_install_directory(&app_data)?;
-    ensure_not_release_path(&install_directory)?;
+    let install = resolve_install_directory(&app_data_directory())?;
+    let (_, data_path, css_path, credential_path) = save_paths(&install)?;
+    let runtime = resolve_runtime_directory()?;
+    let mut data = read_json_file(&data_path)?;
+    if !data.is_object() {
+        return Err("BlobUI data.json must contain a JSON object.".into());
+    }
+    apply_settings(&mut data, &install, &settings);
 
-    let blob_directory = install_directory.join("blob");
-    let data_path = blob_directory.join("data.json");
-    if !data_path.is_file() {
+    let mut calendar_status = "cached";
+    let api_connection = data.get("apiConnection");
+    let api_enabled = api_connection
+        .and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        // Older installs had no apiConnection object and relied on a stored
+        // key plus the legacy selected-space settings. Preserve their cache.
+        .unwrap_or(true);
+    if !api_enabled {
+        data["calendarObjectColors"] = json!({});
+        calendar_status = "disabled";
+    } else if credential_path.is_file() {
+        let ip = api_connection
+            .and_then(|value| read_string(Some(value), "ip"))
+            .map(|value| normalize_api_ip(Some(&value)))
+            .transpose()?
+            .unwrap_or_else(|| DEFAULT_API_IP.into());
+        let port = api_connection
+            .and_then(|value| value.get("port"))
+            .and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+            .filter(|port| *port > 0)
+            .unwrap_or(31009);
+        if let Ok(api_key) = read_saved_api_key_at(&install).map(SecretString::new) {
+            if let Ok(colors) = api::calendar_colors(&api_key, &ip, port) {
+                data["calendarObjectColors"] = colors;
+                calendar_status = "refreshed";
+            }
+        }
+    }
+
+    let css = css::compile(&runtime, &install, &data)?;
+    let serialized = serialize_data(&data)?;
+    storage::commit_settings(
+        &css_path,
+        &data_path,
+        &credential_path,
+        css.as_bytes(),
+        &serialized,
+        storage::CredentialChange::Keep,
+    )?;
+    Ok(SaveResult { calendar_status: calendar_status.into() })
+}
+
+fn save_paths(install: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+    ensure_not_release_path(install)?;
+    let blob = install.join("blob");
+    let data = blob.join("data.json");
+    let css = install.join("custom.css");
+    let credential = blob.join("credentials").join("anytype-api-key.dpapi");
+    for path in [install, blob.as_path(), data.as_path(), css.as_path(), credential.as_path()] {
+        reject_reparse_component(path)?;
+    }
+    if !data.is_file() {
         return Err(format!(
-            "BlobUI settings were not found at {}. Select your Anytype folder with scripts/Settings.ps1 -InstallDirectory.",
-            data_path.display()
+            "BlobUI settings were not found at {}. Install BlobUI into the selected Anytype folder, then reopen Settings.",
+            data.display()
         ));
     }
-    let source_directory = resolve_source_directory()?;
-    let rebuild_script = source_directory.join("scripts").join("Rebuild.ps1");
-    if !rebuild_script.is_file() {
-        return Err(format!(
-            "BlobUI's Rebuild.ps1 was not found: {}",
-            rebuild_script.display()
-        ));
+    if !install.is_dir() {
+        return Err(format!("The selected Anytype folder does not exist: {}", install.display()));
     }
+    Ok((blob, data, css, credential))
+}
 
-    let staging_directory = blob_directory.join("staging");
-    ensure_safe_staging_directory(&install_directory, &blob_directory, &staging_directory)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("The system clock could not create a staging name: {error}"))?
-        .as_nanos();
-    let override_path =
-        staging_directory.join(format!("settings-v2-{}-{nonce}.json", std::process::id()));
-    let overlay = json!({
+fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
+    data["installDirectory"] = Value::String(install.to_string_lossy().into_owned());
+    let accent = if settings.accent_mode == "native" {
+        "var(--color-system-accent-100)"
+    } else {
+        settings.accent_color.as_str()
+    };
+    let values = json!({
+        "fontFamily": settings.font_family,
+        "codeFontFamily": settings.code_font_family,
+        "accentColor": accent,
+        "reducedMotion": settings.reduced_motion,
+        "tabHoverEffect": settings.tab_hover_effect,
+        "linkHoverEffect": settings.link_hover_effect,
+        "objectMentionHoverEffect": settings.object_mention_hover_effect,
+    });
+    if !data.get("settings").is_some_and(Value::is_object) {
+        data["settings"] = json!({});
+    }
+    if let (Some(target), Some(values)) = (data["settings"].as_object_mut(), values.as_object()) {
+        for (name, value) in values {
+            target.insert(name.clone(), value.clone());
+        }
+    }
+    data["settingsV2"] = json!({
         "version": 2,
         "settings": {
             "fontFamily": settings.font_family,
             "codeFontFamily": settings.code_font_family,
-            "accentColor": settings.accent_color,
+            "accentColor": accent,
             "accentMode": settings.accent_mode,
             "accentPreset": settings.accent_preset,
             "reducedMotion": settings.reduced_motion,
@@ -354,45 +490,21 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
         }
     });
+}
 
-    let result = (|| {
-        let serialized = serde_json::to_vec_pretty(&overlay)
-            .map_err(|error| format!("Could not encode the settings draft: {error}"))?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&override_path)
-            .map_err(|error| format!("Could not create a temporary settings file: {error}"))?;
-        file.write_all(&serialized)
-            .map_err(|error| format!("Could not write the temporary settings file: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("Could not flush the temporary settings file: {error}"))?;
-        drop(file);
+fn serialize_data(data: &Value) -> Result<Vec<u8>, String> {
+    let mut serialized = serde_json::to_vec_pretty(data)
+        .map_err(|error| format!("Could not encode BlobUI settings: {error}"))?;
+    serialized.push(b'\n');
+    Ok(serialized)
+}
 
-        let output = run_rebuild(&rebuild_script, &install_directory, &override_path)?;
-        let combined = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        if !output.status.success() {
-            return Err(format!("{}", summarize_process_error(&combined)));
-        }
-
-        let calendar_status = if combined.contains("BlobUI_CALENDAR_CACHE=disabled") {
-            "disabled"
-        } else if combined.contains("BlobUI_CALENDAR_CACHE=refreshed") {
-            "refreshed"
-        } else {
-            "cached"
-        };
-        Ok(SaveResult {
-            calendar_status: calendar_status.into(),
-        })
-    })();
-
-    let _ = fs::remove_file(&override_path);
-    result
+fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
+    let credential = install.join("blob/credentials/anytype-api-key.dpapi");
+    reject_reparse_component(&credential)?;
+    let encrypted = fs::read_to_string(&credential)
+        .map_err(|_| "Could not read the saved API key. Enter a new key in Advanced settings.".to_string())?;
+    connection::decrypt_saved_key(encrypted.trim())
 }
 
 fn validate_settings(mut settings: SettingsDraft) -> Result<SettingsDraft, String> {
@@ -618,6 +730,17 @@ fn read_bool(value: Option<&Value>, name: &str) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
+fn normalize_api_ip(value: Option<&str>) -> Result<String, String> {
+    let value = value.unwrap_or_default().trim();
+    if value.is_empty() {
+        return Ok(DEFAULT_API_IP.into());
+    }
+    value
+        .parse::<IpAddr>()
+        .map(|address| address.to_string())
+        .map_err(|_| "API key IP must be a valid IPv4 or IPv6 address.".into())
+}
+
 fn app_data_directory() -> PathBuf {
     non_empty_path(env::var_os("APPDATA"))
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
@@ -659,7 +782,7 @@ fn resolve_install_directory_from(
 
     if let Some(executable) = executable {
         for ancestor in executable.ancestors().skip(1) {
-            if ancestor.join("scripts").join("Rebuild.ps1").is_file() {
+            if has_runtime_files(ancestor) {
                 if let Some(pointer) = read_install_pointer(&ancestor.join(".blobui-install.json"))
                 {
                     return Ok(pointer);
@@ -706,22 +829,26 @@ fn read_install_pointer(path: &Path) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn resolve_source_directory() -> Result<PathBuf, String> {
+fn has_runtime_files(root: &Path) -> bool {
+    root.join("Dev").is_dir() && root.join("assets").is_dir()
+}
+
+fn resolve_runtime_directory() -> Result<PathBuf, String> {
     if let Some(root) = non_empty_path(env::var_os("BLOBUI_SOURCE_DIRECTORY")) {
-        if root.join("scripts").join("Rebuild.ps1").is_file() {
+        if has_runtime_files(&root) {
             return Ok(root);
         }
-        return Err("BLOBUI_SOURCE_DIRECTORY does not contain scripts/Rebuild.ps1.".into());
+        return Err("BLOBUI_SOURCE_DIRECTORY does not contain Dev and assets folders.".into());
     }
     let executable = env::current_exe()
         .map_err(|error| format!("Could not locate the settings app executable: {error}"))?;
     executable
         .ancestors()
         .skip(1)
-        .find(|ancestor| ancestor.join("scripts").join("Rebuild.ps1").is_file())
+        .find(|ancestor| has_runtime_files(ancestor))
         .map(Path::to_path_buf)
         .ok_or_else(|| {
-            "BlobUI's Rebuild.ps1 could not be found beside the app or in its source folder.".into()
+            "BlobUI's CSS source and assets could not be found beside the app or in its source folder.".into()
         })
 }
 
@@ -731,29 +858,6 @@ fn ensure_not_release_path(path: &Path) -> Result<(), String> {
         _ => false,
     }) {
         return Err("BlobUI will not write custom.css for a directory inside Releases.".into());
-    }
-    Ok(())
-}
-
-fn ensure_safe_staging_directory(
-    install: &Path,
-    blob: &Path,
-    staging: &Path,
-) -> Result<(), String> {
-    ensure_not_release_path(install)?;
-    if !blob.is_dir() {
-        return Err("The BlobUI data folder is missing.".into());
-    }
-    reject_reparse_component(blob)?;
-    fs::create_dir_all(staging)
-        .map_err(|error| format!("Could not prepare the BlobUI staging folder: {error}"))?;
-    reject_reparse_component(staging)?;
-    let canonical_blob = fs::canonicalize(blob)
-        .map_err(|error| format!("Could not resolve the BlobUI data folder: {error}"))?;
-    let canonical_staging = fs::canonicalize(staging)
-        .map_err(|error| format!("Could not resolve the BlobUI staging folder: {error}"))?;
-    if !canonical_staging.starts_with(&canonical_blob) {
-        return Err("The BlobUI staging folder resolves outside the BlobUI data folder.".into());
     }
     Ok(())
 }
@@ -783,68 +887,6 @@ fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-fn run_rebuild(script: &Path, install: &Path, override_path: &Path) -> Result<Output, String> {
-    let arguments = [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-    ];
-    for shell in ["pwsh.exe", "powershell.exe"] {
-        let mut command = Command::new(shell);
-        command
-            .args(arguments)
-            .arg(script)
-            .arg("-InstallDirectory")
-            .arg(install)
-            .arg("-SettingsOverridePath")
-            .arg(override_path);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
-        match command.output() {
-            Ok(output) => return Ok(output),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("Could not start {shell}: {error}")),
-        }
-    }
-    Err("PowerShell 7 (pwsh) or Windows PowerShell could not be found.".into())
-}
-
-fn summarize_process_error(output: &str) -> String {
-    let cleaned = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("BlobUI_CALENDAR_CACHE="))
-        .collect::<Vec<_>>();
-    let message = cleaned
-        .iter()
-        .rev()
-        .take(8)
-        .rev()
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if message.is_empty() {
-        "BlobUI could not save these settings. Check that Anytype and BlobUI are set up, then try again.".into()
-    } else if message.chars().count() > 900 {
-        let tail = message
-            .chars()
-            .rev()
-            .take(900)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect::<String>();
-        format!("BlobUI could not save these settings: {tail}")
-    } else {
-        format!("BlobUI could not save these settings: {message}")
-    }
-}
-
 fn configure_webview_profile() {
     let Some(profile) = env::var_os("BLOBUI_WEBVIEW_DATA_DIR") else {
         return;
@@ -872,6 +914,7 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            reveal_api_key,
             configure_connection,
             get_app_state,
             save_settings,
@@ -1066,5 +1109,56 @@ mod tests {
             ..SettingsDraft::default()
         };
         assert!(validate_settings(invalid_accent).is_err());
+    }
+
+    #[test]
+    fn empty_api_ip_defaults_to_this_pc_loopback() {
+        assert_eq!(normalize_api_ip(None).unwrap(), "127.0.0.1");
+        assert_eq!(normalize_api_ip(Some("  ")).unwrap(), "127.0.0.1");
+        assert_eq!(normalize_api_ip(Some("127.0.0.1")).unwrap(), "127.0.0.1");
+    }
+
+    #[test]
+    fn api_ip_accepts_ipv4_and_ipv6_and_rejects_hostnames() {
+        assert_eq!(normalize_api_ip(Some("192.168.1.12")).unwrap(), "192.168.1.12");
+        assert_eq!(normalize_api_ip(Some("0:0:0:0:0:0:0:1")).unwrap(), "::1");
+        assert!(normalize_api_ip(Some("anytype.local")).is_err());
+    }
+
+    #[test]
+    fn preserving_a_saved_key_never_puts_key_text_in_the_connection_request() {
+        let connection = normalize_connection(ConnectionDraft {
+            enabled: true,
+            api_key: String::new(),
+            keep_existing_key: true,
+            ip: None,
+            port: None,
+        })
+        .unwrap();
+
+        assert!(connection.enabled);
+        assert!(connection.keep_existing_key);
+        assert!(connection.api_key.is_empty());
+        assert_eq!(connection.ip.as_deref(), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn app_state_exposes_key_presence_without_serializing_the_key() {
+        let state = AppState {
+            ready: true,
+            install_directory: String::new(),
+            app_data_directory: String::new(),
+            theme: "dark".into(),
+            settings: SettingsDraft::default(),
+            message: None,
+            hotkey_error: None,
+            onboarding_complete: true,
+            api_port: 31009,
+            api_ip: String::new(),
+            has_saved_api_key: true,
+        };
+        let serialized = serde_json::to_value(state).unwrap();
+        assert_eq!(serialized["hasSavedApiKey"], true);
+        assert!(serialized.get("apiKey").is_none());
     }
 }

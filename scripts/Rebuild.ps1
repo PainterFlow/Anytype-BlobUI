@@ -10,6 +10,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:connectionFailureCode = 'setup'
+$defaultApiIp = '127.0.0.1'
+
+function Resolve-BlobUiConnectionIp {
+    param([object]$Value)
+
+    $text = if ($null -eq $Value) { '' } else { ([string]$Value).Trim() }
+    if ([string]::IsNullOrWhiteSpace($text)) { return $defaultApiIp }
+    try { return ([System.Net.IPAddress]::Parse($text)).ToString() }
+    catch { throw 'API key IP must be a valid IPv4 or IPv6 address.' }
+}
+
+function New-BlobUiApiBaseUri {
+    param([string]$Ip, [int]$Port)
+
+    $hostName = if ($Ip.Contains(':')) { '[' + $Ip + ']' } else { $Ip }
+    return 'http://' + $hostName + ':' + $Port
+}
+
 trap {
     if ($ConfigureConnectionFromStdin) {
         # A fixed-code protocol gives the app useful errors without exposing keys,
@@ -150,13 +168,19 @@ if ($null -eq $state.InstallDirectory) {
 # Credentials arrive over stdin from the desktop app, never in command arguments.
 $connectionCredential = $null
 $connectionApiKey = $null
+$replaceConnectionKey = $false
 if ($ConfigureConnectionFromStdin) {
     try { $ConnectionOverride = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd()) -ErrorAction Stop }
     catch { throw 'The connection request is invalid.' }
 }
 $connection = if ($data.PSObject.Properties['apiConnection']) { $data.apiConnection } else { $null }
+$connectionIp = if ($null -ne $connection) {
+    Resolve-BlobUiConnectionIp -Value $connection.ip
+} else { $defaultApiIp }
 if ($null -ne $ConnectionOverride) {
     if ($ConnectionOverride.enabled -isnot [bool]) { throw 'Choose whether to enable the Anytype API.' }
+    $script:connectionFailureCode = 'connection'
+    $connectionIp = Resolve-BlobUiConnectionIp -Value $ConnectionOverride.ip
     $connectionPort = 31009
     if ($null -ne $ConnectionOverride.port -and [string]$ConnectionOverride.port -ne '') {
         if ([string]$ConnectionOverride.port -notmatch '^\d+$' -or [long]$ConnectionOverride.port -lt 1 -or [long]$ConnectionOverride.port -gt 65535) {
@@ -166,12 +190,27 @@ if ($null -ne $ConnectionOverride) {
     }
     if ($ConnectionOverride.enabled) {
         $connectionApiKey = ([string]$ConnectionOverride.apiKey).Trim()
-        if ([string]::IsNullOrWhiteSpace($connectionApiKey) -or $connectionApiKey.Length -gt 4096 -or $connectionApiKey -match '[\x00-\x1f\x7f]') {
-            throw 'Enter a valid Anytype API v2 key.'
+        $keepExistingKey = $false
+        if ($null -ne $ConnectionOverride.PSObject.Properties['keepExistingKey']) {
+            if ($ConnectionOverride.keepExistingKey -isnot [bool]) { throw 'The saved API key choice is invalid.' }
+            $keepExistingKey = [bool]$ConnectionOverride.keepExistingKey
+        }
+        if ($keepExistingKey) {
+            if (-not [string]::IsNullOrWhiteSpace($connectionApiKey)) {
+                throw 'Choose whether to keep or replace the saved API key.'
+            }
+            $script:connectionFailureCode = 'credential-read'
+            $connectionApiKey = Read-BlobUiProtectedCredential -Path $credentialPath
+        }
+        else {
+            if ([string]::IsNullOrWhiteSpace($connectionApiKey) -or $connectionApiKey.Length -gt 4096 -or $connectionApiKey -match '[\x00-\x1f\x7f]') {
+                throw 'Enter a valid Anytype API v2 key.'
+            }
+            $replaceConnectionKey = $true
         }
 
     }
-    $connection = [pscustomobject]@{ enabled = [bool]$ConnectionOverride.enabled; port = $connectionPort }
+    $connection = [pscustomobject]@{ enabled = [bool]$ConnectionOverride.enabled; ip = $connectionIp; port = $connectionPort }
     $data | Add-Member -MemberType NoteProperty -Name apiConnection -Value $connection -Force
     # Switching connection modes migrates legacy/default settings to local settings.
     if (-not $data.PSObject.Properties['settingsV2']) {
@@ -187,7 +226,8 @@ if ($null -ne $ConnectionOverride) {
     }
 }
 if ($null -ne $connection -and -not $PSBoundParameters.ContainsKey('ApiBaseUri')) {
-    $ApiBaseUri = 'http://127.0.0.1:' + [int]$connection.port
+    $connectionIp = Resolve-BlobUiConnectionIp -Value $connection.ip
+    $ApiBaseUri = New-BlobUiApiBaseUri -Ip $connectionIp -Port ([int]$connection.port)
 }
 if ($connectionApiKey) {
     $script:connectionFailureCode = 'connection'
@@ -201,7 +241,10 @@ if ($connectionApiKey) {
         throw
     }
     $script:connectionFailureCode = 'credential'
-    $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+    if ($replaceConnectionKey) {
+        $script:connectionFailureCode = 'credential'
+        $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+    }
 }
 $script:connectionFailureCode = 'settings'
 $settingsV2Property = $data.PSObject.Properties['settingsV2']
@@ -360,6 +403,7 @@ try {
         DataCandidatePath = $candidateDataPath
     }
     if ($connectionCredential) { $installArguments.CredentialProtectedText = $connectionCredential }
+    if ($null -ne $ConnectionOverride -and -not $ConnectionOverride.enabled) { $installArguments.RemoveCredential = $true }
     $script:connectionFailureCode = 'install'
     $installOperation = 'prepare'
     $installArguments.FailureOperation = [ref]$installOperation

@@ -48,10 +48,14 @@ foreach ($other in @($AnytypeDirectory, $sourceDirectory)) {
 # Never claim an arbitrary directory or overwrite an existing app install.
 if (Test-Path -LiteralPath $AppDirectory) {
     if (-not (Test-Path -LiteralPath $AppDirectory -PathType Container) -or @(Get-ChildItem -LiteralPath $AppDirectory -Force).Count) {
-        throw 'The BlobUI app folder must be empty. Choose a new folder; use Update.ps1 to update the theme.'
+        throw 'The BlobUI app folder must be empty. Choose a new folder; Update.ps1 is temporarily outdated for the Rust runtime.'
     }
 }
 if (-not $NoShortcut -and $env:OS -ne 'Windows_NT') { throw 'Shortcuts require Windows. Use -NoShortcut for command-line validation.' }
+$settingsExecutable = Join-Path $sourceDirectory 'settings-app/dist/blobui-settings.exe'
+if (-not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) {
+    throw 'The Rust Settings app executable is missing. Run scripts/Build-Settings.ps1 before installing BlobUI.'
+}
 
 $appCreated = $false
 $installed = $false
@@ -64,12 +68,9 @@ try {
         Copy-Item -LiteralPath (Join-Path $sourceDirectory $name) -Destination $AppDirectory -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $sourceDirectory 'BlobUI.cmd') -Destination $AppDirectory
-    $settingsExecutable = Join-Path $sourceDirectory 'settings-app/dist/blobui-settings.exe'
-    if (Test-Path -LiteralPath $settingsExecutable -PathType Leaf) {
-        $appDistribution = Join-Path $AppDirectory 'settings-app/dist'
-        [IO.Directory]::CreateDirectory($appDistribution) | Out-Null
-        Copy-Item -LiteralPath $settingsExecutable -Destination $appDistribution
-    }
+    $appDistribution = Join-Path $AppDirectory 'settings-app/dist'
+    [IO.Directory]::CreateDirectory($appDistribution) | Out-Null
+    Copy-Item -LiteralPath $settingsExecutable -Destination $appDistribution
     Write-BlobUiInstallPointer -SourceDirectory $AppDirectory -InstallDirectory $AnytypeDirectory
     $dataPath = Join-Path $AnytypeDirectory 'blob\data.json'
     if (Test-Path -LiteralPath $dataPath -PathType Leaf) {
@@ -98,7 +99,7 @@ try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $shortcut.Arguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $AppDirectory 'scripts\App.ps1') + '"'
+        $shortcut.Arguments = '-NoProfile -STA -ExecutionPolicy Bypass -File "' + (Join-Path $AppDirectory 'scripts\App.ps1') + '" -InstallDirectory "' + $AnytypeDirectory + '"'
         $shortcut.WorkingDirectory = $AppDirectory
         $shortcut.Save()
         $shortcutCreated = $true

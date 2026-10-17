@@ -1,8 +1,11 @@
+# TEMPORARILY OUTDATED: validate this removal workflow against the Rust runtime
+# before using it on a current installation. Setup remains the supported installer.
 param(
     [string]$InstallDirectory
 )
 
 $ErrorActionPreference = 'Stop'
+Write-Warning 'TEMPORARILY OUTDATED: validate Uninstall.ps1 against the Rust runtime before using it.'
 Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
 
 function Normalize-BlobUiUninstallPath {

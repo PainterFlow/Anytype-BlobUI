@@ -1972,6 +1972,7 @@ function Invoke-BlobUiInstall {
         [Parameter(Mandatory = $true)][string]$CompiledCssPath,
         [Parameter(Mandatory = $true)][string]$DataCandidatePath,
         [string]$CredentialProtectedText,
+        [switch]$RemoveCredential,
         [switch]$PreserveRuntime,
         [ref]$FailureOperation,
         [string]$ReleaseVersion = $script:BlobUiReleaseVersion
@@ -1979,6 +1980,9 @@ function Invoke-BlobUiInstall {
 
     if ($null -ne $FailureOperation) { $FailureOperation.Value = 'prepare' }
     $installFullPath = [System.IO.Path]::GetFullPath($InstallDirectory)
+    if ($RemoveCredential -and -not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+        throw 'A connection save cannot replace and remove the API key at the same time.'
+    }
     if (-not (Test-Path -LiteralPath $installFullPath -PathType Container)) {
         throw "The selected Anytype directory does not exist: $installFullPath"
     }
@@ -2145,7 +2149,7 @@ function Invoke-BlobUiInstall {
             $snapshotPaths.Add([string]$fixedPath)
         }
     }
-    if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText) -and $snapshotPathSet.Add([string]$credentialPath)) {
+    if (($RemoveCredential -or -not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) -and $snapshotPathSet.Add([string]$credentialPath)) {
         $snapshotPaths.Add([string]$credentialPath)
     }
     $managedMutationPaths = [System.Collections.Generic.List[string]]::new()
@@ -2165,6 +2169,7 @@ function Invoke-BlobUiInstall {
 
     $writeTargets = @(
         if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) { [pscustomobject]@{ path = $credentialPath; operation = 'credential' } }
+        elseif ($RemoveCredential) { [pscustomobject]@{ path = $credentialPath; operation = 'credential-remove' } }
         [pscustomobject]@{ path = $cssDestination; operation = 'css' }
         [pscustomobject]@{ path = $dataPath; operation = 'settings' }
         [pscustomobject]@{ path = $manifestPath; operation = 'manifest' }
@@ -2215,6 +2220,12 @@ function Invoke-BlobUiInstall {
             if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential' }
             Move-BlobUiCredentialCandidate -Candidate $credentialCandidate -Destination $credentialPath
             $credentialCandidate = $null
+        }
+        elseif ($RemoveCredential) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential-remove' }
+            if (Test-Path -LiteralPath $credentialPath -PathType Leaf) {
+                Remove-Item -LiteralPath $credentialPath -Force -ErrorAction Stop
+            }
         }
     }
     catch {

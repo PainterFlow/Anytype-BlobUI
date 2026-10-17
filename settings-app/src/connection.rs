@@ -1,95 +1,118 @@
-//! Only fixed error codes cross the process boundary; raw output may contain keys.
-pub fn connection_error(output: &[u8], port: u16) -> String {
-    let text = String::from_utf8_lossy(output);
-    let code = text
-        .lines()
-        .rev()
-        .find_map(|line| line.trim().strip_prefix("BLOBUI_CONNECTION_ERROR="));
-    let (code, native_error) = code
-        .map(|value| value.split_once(':').unwrap_or((value, "0")))
-        .unwrap_or(("", "0"));
-    let rollback_failed = code.ends_with("-rollback-failed");
-    let code = code.strip_suffix("-rollback-failed").unwrap_or(code);
-    let message: String = match code {
-        "unauthorized" => "Anytype rejected this key (HTTP 401). Paste a current API v2 key.".into(),
-        "forbidden" => "Anytype denied API access (HTTP 403). Give this key read access to the spaces you want to use.".into(),
-        "api-version" => "This port did not provide Anytype API v2. Check the port and your Anytype version.".into(),
-        "connection" => format!("Could not reach Anytype's Local API on port {port}. Keep Anytype open and enable Local API on this port."),
-        "credential" => "The API connection succeeded, but Windows could not encrypt the key for your account.".into(),
-        "settings" => "BlobUI could not prepare the saved settings. Your connection settings were not changed. Check your local theme settings.".into(),
-        "compile" => "BlobUI could not compile CSS. Your connection settings were not changed. Check your font and accent settings.".into(),
-        "install" => "BlobUI could not finish the save. Update the source runtime scripts to get the detailed save diagnostic.".into(),
-        "install-prepare" => "BlobUI could not prepare its installed files. Check that the source folder includes scripts, Dev, and assets.".into(),
-        "install-inspect" => "BlobUI could not read an existing installed file or its manifest before saving.".into(),
-        "install-assets" => "BlobUI could not save the theme assets under blob/assets.".into(),
-        "install-runtime" => "BlobUI unexpectedly tried to update runtime files during this save. Update the Rebuild.ps1 and core module together.".into(),
-        "install-css" => "BlobUI could not replace custom.css in the selected Anytype data folder.".into(),
-        "install-settings" => "BlobUI could not replace blob/data.json. The connection was not saved.".into(),
-        "install-credential" => "BlobUI could not replace blob/credentials/anytype-api-key.dpapi. The new key was not saved.".into(),
-        "install-credential-permissions" => "Windows could not apply private access permissions to the encrypted key file.".into(),
-        "install-manifest" => "BlobUI could not save blob/.blobui-managed-files.json.".into(),
-        "install-rollback" => "The save failed and BlobUI could not restore every previous file. Check the installed files before retrying.".into(),
-        "setup" => "BlobUI could not load its installation. Check the Anytype data folder and installed runtime scripts.".into(),
-        _ => "Connection setup failed before it returned a diagnostic. Rebuild the Settings app and update its runtime scripts, then try again.".into(),
+#[cfg(windows)]
+pub fn encrypt_api_key(api_key: &str) -> Result<String, String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
-    let reason = if code.starts_with("install-") {
-        match native_error {
-            "5" => " Windows reported access denied.",
-            "19" => " Windows reported that the destination is write-protected.",
-            "32" | "33" => " Windows reported that another process is holding the file open.",
-            "112" => " Windows reported that the disk is full.",
-            _ => "",
+    let error = || "Windows could not encrypt the Anytype API key for this account.".to_string();
+    if api_key.is_empty() || api_key.len() > 4096 || api_key.chars().any(char::is_control) {
+        return Err("Enter a valid Anytype API v2 key.".into());
+    }
+    let mut plaintext = api_key.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>();
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(plaintext.len()).map_err(|_| error())?,
+        pbData: plaintext.as_mut_ptr(),
+    };
+    let description: Vec<u16> = "BlobUI Anytype API key\0".encode_utf16().collect();
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        if CryptProtectData(
+            &input,
+            description.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        ) == 0
+        {
+            for byte in &mut plaintext { std::ptr::write_volatile(byte, 0); }
+            return Err(error());
         }
-    } else {
-        ""
-    };
-    let recovery = if rollback_failed {
-        " BlobUI also could not finish restoring the previous files."
-    } else {
-        ""
-    };
-    format!("{message}{reason}{recovery}")
+        for byte in &mut plaintext { std::ptr::write_volatile(byte, 0); }
+        let protected = std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize);
+        // ConvertFrom-SecureString uses this 20-byte serialization header
+        // before the current-user DPAPI blob. Keep the existing on-disk format
+        // so the legacy installer tooling and the Rust app can read each
+        // other's credentials.
+        const POWERSHELL_DPAPI_HEADER: &str = "01000000D08C9DDF0115D1118C7A00C04FC297EB";
+        let encoded = format!("{POWERSHELL_DPAPI_HEADER}{}", protected.iter().map(|byte| format!("{byte:02X}")).collect::<String>());
+        for byte in protected { std::ptr::write_volatile(byte, 0); }
+        LocalFree(output.pbData.cast());
+        Ok(encoded)
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(not(windows))]
+pub fn encrypt_api_key(_: &str) -> Result<String, String> {
+    Err("Encrypted API key storage requires Windows DPAPI.".into())
+}
 
-    #[test]
-    fn uses_only_fixed_codes_and_never_echoes_process_output() {
-        let secret = "test-secret-key";
-        let output = format!("Authorization: Bearer {secret}\nBLOBUI_CONNECTION_ERROR=compile\n");
-        let error = connection_error(output.as_bytes(), 31010);
-        assert!(error.contains("CSS"));
-        assert!(!error.contains(secret));
-        assert!(!error.contains("Authorization"));
-        let unknown = format!("BLOBUI_CONNECTION_ERROR={secret}");
-        assert!(!connection_error(unknown.as_bytes(), 31010).contains(secret));
+#[cfg(windows)]
+pub fn decrypt_saved_key(encrypted: &str) -> Result<String, String> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+    let error = || "Could not decrypt the saved API key for this Windows account.".to_string();
+    // ConvertFrom-SecureString stores DPAPI bytes as hexadecimal. Its plaintext
+    // is UTF-16LE. Read that format directly without launching PowerShell.
+    if encrypted.is_empty() || encrypted.len() % 2 != 0 || !encrypted.is_ascii() {
+        return Err(error());
     }
+    const POWERSHELL_DPAPI_HEADER: &str = "01000000D08C9DDF0115D1118C7A00C04FC297EB";
+    let blob_text = encrypted.strip_prefix(POWERSHELL_DPAPI_HEADER)
+        .or_else(|| encrypted.strip_prefix("01000000d08c9ddf0115d1118c7a00c04fc297eb"))
+        .unwrap_or(encrypted);
+    if blob_text.is_empty() || blob_text.len() % 2 != 0 {
+        return Err(error());
+    }
+    let mut bytes = (0..blob_text.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&blob_text[index..index + 2], 16))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| error())?;
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(bytes.len()).map_err(|_| error())?,
+        pbData: bytes.as_mut_ptr(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        if CryptUnprotectData(
+            &input,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        ) == 0
+        {
+            return Err(error());
+        }
+        let plaintext = std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize);
+        let result = if plaintext.len() % 2 == 0 {
+            let mut units = plaintext
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>();
+            let decoded = String::from_utf16(&units).map_err(|_| error());
+            for unit in &mut units {
+                std::ptr::write_volatile(unit, 0);
+            }
+            decoded
+        } else {
+            Err(error())
+        };
+        for byte in plaintext {
+            std::ptr::write_volatile(byte, 0);
+        }
+        LocalFree(output.pbData.cast());
+        result
+    }
+}
 
-    #[test]
-    fn distinguishes_credentials_network_and_local_failures() {
-        assert!(connection_error(b"BLOBUI_CONNECTION_ERROR=unauthorized", 31009).contains("401"));
-        assert!(connection_error(b"BLOBUI_CONNECTION_ERROR=connection", 31010).contains("31010"));
-        assert!(connection_error(b"BLOBUI_CONNECTION_ERROR=credential", 31009).contains("encrypt"));
-        assert!(
-            connection_error(b"BLOBUI_CONNECTION_ERROR=install-css:32", 31009)
-                .contains("holding the file open")
-        );
-        assert!(connection_error(
-            b"BLOBUI_CONNECTION_ERROR=install-credential-permissions:5",
-            31009
-        )
-        .contains("access denied"));
-    }
-    #[test]
-    fn rollback_failure_preserves_the_original_save_operation() {
-        let error = connection_error(
-            b"BLOBUI_CONNECTION_ERROR=install-credential-rollback-failed:5",
-            31009,
-        );
-        assert!(error.contains("anytype-api-key.dpapi"));
-        assert!(error.contains("access denied"));
-        assert!(error.contains("restoring"));
-    }
+#[cfg(not(windows))]
+pub fn decrypt_saved_key(_: &str) -> Result<String, String> {
+    Err("Encrypted API key storage requires Windows DPAPI.".into())
 }

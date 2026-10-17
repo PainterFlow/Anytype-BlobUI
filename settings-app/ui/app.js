@@ -33,8 +33,20 @@
   const objectMentionHoverEffect = el("object-mention-hover-effect");
   const preferencesNav = el("preferences-nav");
   const accessibilityNav = el("accessibility-nav");
+  const advancedNav = el("advanced-nav");
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
+  const advancedPage = el("advanced-page");
+  const advancedApiKey = el("advanced-api-key");
+  const advancedApiIp = el("advanced-api-ip");
+  const advancedApiPort = el("advanced-api-port");
+  const apiKeyRemovalBackdrop = el("api-key-removal-backdrop");
+  const apiKeyRemovalClose = el("api-key-removal-close");
+  const apiKeyRemovalCancel = el("api-key-removal-cancel");
+  const apiKeyRemovalSave = el("api-key-removal-save");
+  const settingsShell = el("settings-shell");
+  const titlebar = el("title-drag-region");
+  const SAVED_KEY_MASK = "••••••••";
   const pageTitle = el("page-title");
   const saveButton = el("save-button");
   const saveLabel = saveButton.querySelector(".save-label");
@@ -46,9 +58,95 @@
   const logs = [];
   const root = document.documentElement;
 
+  const visibilityFields = Object.create(null);
+  function setFieldVisibility(field, visible) {
+    field.input.type = visible ? "text" : "password";
+    field.button.setAttribute("aria-pressed", String(visible));
+    const label = visible ? field.hideLabel : field.showLabel;
+    field.button.setAttribute("aria-label", label);
+    field.button.setAttribute("title", label);
+  }
+
+  function syncVisibilityField(field) {
+    el(field.fieldId).dataset.filled = String(field.input.value.length > 0);
+  }
+
+  function resetVisibilityField(inputId) {
+    const field = visibilityFields[inputId];
+    if (!field) return;
+    setFieldVisibility(field, field.defaultVisible);
+    syncVisibilityField(field);
+  }
+
+  function resetAdvancedVisibility() {
+    if (hasSavedApiKey && !advancedKeyEdited) advancedApiKey.value = SAVED_KEY_MASK;
+    ["advanced-api-key", "advanced-api-ip", "advanced-api-port"].forEach(resetVisibilityField);
+  }
+
+  function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible) {
+    const field = {
+      input: el(inputId),
+      button: el(buttonId),
+      fieldId,
+      showLabel,
+      hideLabel,
+      defaultVisible,
+    };
+    visibilityFields[inputId] = field;
+    setFieldVisibility(field, defaultVisible);
+    syncVisibilityField(field);
+    field.input.addEventListener("input", () => syncVisibilityField(field));
+    field.button.addEventListener("mousedown", (event) => {
+      if (document.activeElement === field.input) event.preventDefault();
+    });
+    field.button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (field.button.disabled) return;
+      const inputWasFocused = document.activeElement === field.input;
+      const selectionStart = inputWasFocused ? field.input.selectionStart : null;
+      const selectionEnd = inputWasFocused ? field.input.selectionEnd : null;
+      if (inputId === "advanced-api-key" && hasSavedApiKey && !advancedKeyEdited) {
+        if (field.input.type === "password") {
+          field.button.disabled = true;
+          const previousValue = field.input.value;
+          try {
+            const key = await invoke("reveal_api_key");
+            if (!hasSavedApiKey || advancedKeyEdited || field.input.value !== previousValue || advancedPage.hidden) return;
+            field.input.value = key;
+          } catch (_) {
+            setStatus("Could not reveal the saved API key. Try entering it again.", "error");
+            return;
+          } finally {
+            field.button.disabled = saveBusy || !draft;
+          }
+        } else {
+          field.input.value = SAVED_KEY_MASK;
+        }
+      }
+      setFieldVisibility(field, field.input.type !== "text");
+      if (inputWasFocused && selectionStart !== null && selectionEnd !== null && typeof field.input.setSelectionRange === "function") {
+        try { field.input.setSelectionRange(selectionStart, selectionEnd); } catch (_) { /* Some input types do not expose a selection. */ }
+      }
+    });
+    return field;
+  }
+
+  bindVisibilityField("connection-key", "connection-key-visibility", "connection-key-field", "Show API key", "Hide API key", false);
+  bindVisibilityField("connection-port", "connection-port-visibility", "connection-port-field", "Show port", "Hide port", true);
+  bindVisibilityField("advanced-api-key", "advanced-api-key-visibility", "advanced-api-key-field", "Show Anytype API key", "Hide Anytype API key", false);
+  bindVisibilityField("advanced-api-ip", "advanced-api-ip-visibility", "advanced-api-ip-field", "Show API key IP", "Hide API key IP", true);
+  bindVisibilityField("advanced-api-port", "advanced-api-port-visibility", "advanced-api-port-field", "Show API key port", "Hide API key port", true);
+
   let draft = null;
   let initialDraft = null;
   let saveBusy = false;
+  let hasSavedApiKey = false;
+  let advancedKeyEdited = false;
+  let initialApiDraft = { ip: "", port: "" };
+  let currentApiIp = "";
+  let currentApiPort = 31009;
+  let removalModalFocus = null;
+  let removalModalTimer = null;
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
@@ -313,15 +411,79 @@
     if (restoreFocus) logButton.focus();
   }
 
+  function connectionHasChanges() {
+    const keyChanged = hasSavedApiKey ? advancedKeyEdited : advancedApiKey.value.trim() !== "";
+    return advancedApiIp.value.trim() !== initialApiDraft.ip
+      || advancedApiPort.value.trim() !== initialApiDraft.port
+      || keyChanged;
+  }
+
+  function assignAdvancedConnection(state) {
+    currentApiIp = String(state.apiIp || "").trim();
+    currentApiPort = Number(state.apiPort) || 31009;
+    hasSavedApiKey = state.hasSavedApiKey === true;
+    advancedKeyEdited = false;
+    advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+    advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+    advancedApiIp.value = currentApiIp === "127.0.0.1" ? "" : currentApiIp;
+    advancedApiPort.value = currentApiPort === 31009 ? "" : String(currentApiPort);
+    resetAdvancedVisibility();
+    initialApiDraft = { ip: advancedApiIp.value.trim(), port: advancedApiPort.value.trim() };
+    el("advanced-api-key-hint").textContent = hasSavedApiKey
+      ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+      : "Enter a new read-only Anytype API v2 key.";
+    updateSaveButton();
+  }
+
+  function reducedMotionEnabled() {
+    return root.dataset.reducedMotion === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function finishKeyRemovalConfirmation(restoreFocus) {
+    apiKeyRemovalBackdrop.hidden = true;
+    apiKeyRemovalBackdrop.classList.remove("is-closing");
+    settingsShell.inert = false;
+    titlebar.inert = false;
+    if (restoreFocus && removalModalFocus && typeof removalModalFocus.focus === "function") removalModalFocus.focus();
+    removalModalFocus = null;
+    removalModalTimer = null;
+  }
+
+  function closeKeyRemovalConfirmation(restoreFocus = true) {
+    if (apiKeyRemovalBackdrop.hidden) return;
+    apiKeyRemovalBackdrop.classList.add("is-closing");
+    const delay = reducedMotionEnabled() ? 0 : 140;
+    if (removalModalTimer !== null) window.clearTimeout(removalModalTimer);
+    if (delay === 0) finishKeyRemovalConfirmation(restoreFocus);
+    else removalModalTimer = window.setTimeout(() => finishKeyRemovalConfirmation(restoreFocus), delay);
+  }
+
+  function openKeyRemovalConfirmation() {
+    if (apiKeyRemovalBackdrop.hidden) {
+      removalModalFocus = document.activeElement;
+      settingsShell.inert = true;
+      titlebar.inert = true;
+      apiKeyRemovalBackdrop.classList.remove("is-closing");
+      apiKeyRemovalBackdrop.hidden = false;
+    }
+    apiKeyRemovalCancel.focus();
+  }
+
   function updateSaveButton() {
-    const dirty = !settingsEqual(draft, initialDraft);
+    const dirty = !settingsEqual(draft, initialDraft) || connectionHasChanges();
     saveButton.hidden = !draft || !dirty;
     saveButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = saveBusy || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    Object.keys(visibilityFields).forEach((inputId) => {
+      visibilityFields[inputId].button.disabled = saveBusy || !draft;
+    });
     saveButton.classList.toggle("busy", saveBusy);
     saveLabel.textContent = saveBusy ? "Saving…" : "Save changes";
+    apiKeyRemovalSave.disabled = saveBusy;
+    apiKeyRemovalCancel.disabled = saveBusy;
+    apiKeyRemovalClose.disabled = saveBusy;
   }
 
   function applyFontFamilies() {
@@ -366,8 +528,10 @@
       const state = await invoke("get_app_state");
       window.appReady = !!state.ready;
       applyTheme(state.theme);
+      assignAdvancedConnection(state);
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
+      resetVisibilityField("connection-port");
       if (state.ready && state.onboardingComplete === false) showOnboarding();
       if (!state.ready) {
         setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
@@ -394,19 +558,28 @@
 
   function showSettingsPage(page) {
     const isAccessibility = page === "accessibility";
-    preferencesPage.hidden = isAccessibility;
+    const isAdvanced = page === "advanced";
+    if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
+      advancedApiKey.value = SAVED_KEY_MASK;
+      resetVisibilityField("advanced-api-key");
+    }
+    preferencesPage.hidden = isAccessibility || isAdvanced;
     accessibilityPage.hidden = !isAccessibility;
-    pageTitle.textContent = isAccessibility ? "Accessibility" : "Preferences";
-    preferencesNav.classList.toggle("active", !isAccessibility);
+    advancedPage.hidden = !isAdvanced;
+    pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced" : "Preferences";
+    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
     accessibilityNav.classList.toggle("active", isAccessibility);
-    preferencesNav.setAttribute("aria-current", isAccessibility ? "false" : "page");
+    advancedNav.classList.toggle("active", isAdvanced);
+    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced ? "page" : "false");
     accessibilityNav.setAttribute("aria-current", isAccessibility ? "page" : "false");
+    advancedNav.setAttribute("aria-current", isAdvanced ? "page" : "false");
     pageContent.scrollTop = 0;
     updatePageScrollbar();
   }
 
   preferencesNav.addEventListener("click", () => showSettingsPage("preferences"));
   accessibilityNav.addEventListener("click", () => showSettingsPage("accessibility"));
+  advancedNav.addEventListener("click", () => showSettingsPage("advanced"));
   showSettingsPage("preferences");
 
   async function refreshTheme() {
@@ -416,7 +589,65 @@
     } catch (_) { /* Keep the last known mode while Anytype is not readable. */ }
   }
 
-  async function save() {
+  function isValidIpv4(value) {
+    const parts = value.split(".");
+    return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+  }
+
+  function isValidIpAddress(value) {
+    const address = value.trim();
+    if (!address) return true;
+    if (!address.includes(":")) return isValidIpv4(address);
+    if (address.includes(":::") || address.split("::").length > 2) return false;
+    let groups = address;
+    let ipv4Tail = false;
+    if (address.includes(".")) {
+      const lastColon = address.lastIndexOf(":");
+      if (lastColon < 0 || !isValidIpv4(address.slice(lastColon + 1))) return false;
+      groups = address.slice(0, lastColon) + ":v4";
+      ipv4Tail = true;
+    }
+    const compressed = groups.includes("::");
+    const halves = compressed ? groups.split("::") : [groups];
+    if (halves.length > 2) return false;
+    const parts = halves.flatMap((half) => half ? half.split(":") : []);
+    const validGroups = parts.every((part) => part === "v4" || /^[\da-f]{1,4}$/i.test(part));
+    if (!validGroups) return false;
+    const groupCount = parts.filter((part) => part !== "v4").length + (ipv4Tail ? 2 : 0);
+    return compressed ? groupCount < 8 : groupCount === 8;
+  }
+
+  function saveStatus(result, connectionOnly) {
+    if (result.calendarStatus === "disabled") {
+      setStatus(connectionOnly
+        ? "Connection saved. Press Ctrl+R in Anytype to apply. API features are disabled."
+        : "Saved. Press Ctrl+R in Anytype to apply. API features are disabled.");
+    } else if (result.calendarStatus === "cached") {
+      setStatus(connectionOnly
+        ? "Connection saved. Calendar data kept its last saved values; try saving again later."
+        : "Saved. Press Ctrl+R in Anytype to apply; calendar colors kept their last saved values.", "info");
+    } else {
+      setStatus(connectionOnly
+        ? "Connection saved. Press Ctrl+R in Anytype to apply. Calendar colors refreshed."
+        : "Saved. Press Ctrl+R in Anytype to apply. Calendar colors refreshed.");
+    }
+  }
+
+  function acceptAdvancedConnectionDraft(connection) {
+    hasSavedApiKey = connection.enabled;
+    advancedKeyEdited = false;
+    advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+    advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+    currentApiIp = advancedApiIp.value.trim();
+    currentApiPort = advancedApiPort.value.trim() ? Number(advancedApiPort.value.trim()) : 31009;
+    initialApiDraft = { ip: advancedApiIp.value.trim(), port: advancedApiPort.value.trim() };
+    el("advanced-api-key-hint").textContent = hasSavedApiKey
+      ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+      : "Enter a new read-only Anytype API v2 key.";
+    resetAdvancedVisibility();
+  }
+
+  async function save(options = {}) {
     if (!draft || saveBusy || !window.appReady) return;
     draft.fontFamily = fontFamily.value.trim();
     draft.codeFontFamily = codeFontFamily.value.trim();
@@ -442,27 +673,77 @@
     accentValue.classList.toggle("invalid", !safeAccentSyntax || !supportedAccent);
     el("accent-error").textContent = !safeAccentSyntax || !supportedAccent ? "Use a 3 or 6 digit hex color, a supported rgb()/rgba() value, or an Anytype color variable. Pure white is reserved." : "";
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
+
+    const settingsChanged = !settingsEqual(draft, initialDraft);
+    const connectionChanged = connectionHasChanges();
+    const apiIp = advancedApiIp.value.trim();
+    const apiPort = advancedApiPort.value.trim();
+    const apiKey = advancedApiKey.value.trim();
+    const keepExistingKey = hasSavedApiKey && !advancedKeyEdited;
+    advancedApiIp.classList.toggle("invalid", !isValidIpAddress(apiIp));
+    if (apiIp && !isValidIpAddress(apiIp)) {
+      el("advanced-api-error").textContent = "Enter a valid IPv4 or IPv6 address, or leave the field blank to use this PC.";
+      invalid = true;
+    }
+    if (apiPort && (!/^\d+$/.test(apiPort) || Number(apiPort) < 1 || Number(apiPort) > 65535)) {
+      advancedApiPort.classList.add("invalid");
+      el("advanced-api-error").textContent = "Port must be a whole number from 1 to 65535.";
+      invalid = true;
+    } else {
+      advancedApiPort.classList.remove("invalid");
+    }
+    if (!keepExistingKey && apiKey && (apiKey.length > 4096 || /[\x00-\x1f\x7f]/.test(apiKey))) {
+      advancedApiKey.classList.add("invalid");
+      el("advanced-api-error").textContent = "Enter a valid Anytype API v2 key.";
+      invalid = true;
+    } else {
+      advancedApiKey.classList.remove("invalid");
+    }
     if (invalid) {
       setStatus("Review the highlighted fields before saving.", "error");
       return;
     }
 
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
+    const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
+    if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
+      openKeyRemovalConfirmation();
+      return;
+    }
+
+    if (!settingsChanged && !connectionChanged && !options.forceRebuild) return;
+
     const submittedSettings = { ...draft };
+    const submittedConnection = connectionChanged ? {
+      enabled: keepExistingKey || apiKey.length > 0,
+      apiKey: keepExistingKey ? "" : apiKey,
+      keepExistingKey,
+      ip: apiIp || null,
+      port: apiPort ? Number(apiPort) : null,
+    } : null;
     saveBusy = true;
     updateSaveButton();
-    setStatus("Saving your settings and rebuilding custom.css…", "working");
+    setStatus(connectionChanged && !settingsChanged
+      ? "Saving your Anytype connection and rebuilding custom.css…"
+      : "Saving your settings and rebuilding custom.css…", "working");
+    let connectionSaved = false;
     try {
-      const result = await invoke("save_settings", { settings: submittedSettings });
-      initialDraft = submittedSettings;
-      if (result.calendarStatus === "disabled") {
-        setStatus("Saved. Press Ctrl+R in Anytype to apply. API features are disabled.");
-      } else if (result.calendarStatus === "cached") {
-        setStatus("Saved. Press Ctrl+R in Anytype to apply; calendar colors kept their last saved values.", "warning");
-      } else {
-        setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar colors refreshed.");
+      let result = null;
+      if (submittedConnection) {
+        result = await invoke("configure_connection", { connection: submittedConnection });
+        connectionSaved = true;
+        acceptAdvancedConnectionDraft(submittedConnection);
       }
+      if (settingsChanged || options.forceRebuild) {
+        result = await invoke("save_settings", { settings: submittedSettings });
+        if (settingsChanged) initialDraft = submittedSettings;
+      }
+      saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
     } catch (error) {
-      setStatus(error.message || String(error), "error");
+      const message = error.message || String(error);
+      setStatus(connectionSaved && settingsChanged
+        ? "Connection saved. Other settings could not be saved: " + message
+        : message, "error");
     } finally {
       saveBusy = false;
       updateSaveButton();
@@ -542,6 +823,25 @@
     codeFontFamily.classList.remove("invalid");
     markDirty();
   });
+  advancedApiKey.addEventListener("input", () => {
+    if (!draft || saveBusy) return;
+    advancedKeyEdited = true;
+    advancedApiKey.classList.remove("invalid");
+    el("advanced-api-error").textContent = "";
+    markDirty();
+  });
+  advancedApiIp.addEventListener("input", () => {
+    if (!draft || saveBusy) return;
+    advancedApiIp.classList.remove("invalid");
+    el("advanced-api-error").textContent = "";
+    markDirty();
+  });
+  advancedApiPort.addEventListener("input", () => {
+    if (!draft || saveBusy) return;
+    advancedApiPort.classList.remove("invalid");
+    el("advanced-api-error").textContent = "";
+    markDirty();
+  });
   for (const [control, property] of [
     [reducedMotion, "reducedMotion"],
     [tabHoverEffect, "tabHoverEffect"],
@@ -556,6 +856,15 @@
     });
   }
   saveButton.addEventListener("click", save);
+  apiKeyRemovalBackdrop.addEventListener("pointerdown", (event) => {
+    if (event.target === apiKeyRemovalBackdrop) closeKeyRemovalConfirmation();
+  });
+  apiKeyRemovalClose.addEventListener("click", () => closeKeyRemovalConfirmation());
+  apiKeyRemovalCancel.addEventListener("click", () => closeKeyRemovalConfirmation());
+  apiKeyRemovalSave.addEventListener("click", () => {
+    closeKeyRemovalConfirmation(false);
+    save({ confirmKeyRemoval: true });
+  });
   logButton.addEventListener("click", () => {
     logPopup.hidden = !logPopup.hidden;
     logButton.setAttribute("aria-expanded", String(!logPopup.hidden));
@@ -595,7 +904,6 @@
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
   const onboardingApi = el("onboarding-api");
-  const settingsShell = el("settings-shell");
   const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
   // Add future pages here. Every page advances through the same transition;
   // reaching the end always reveals the main app.
@@ -632,6 +940,8 @@
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
     delete onboarding.dataset.apiChoice;
     el("connection-key").value = "";
+    resetVisibilityField("connection-key");
+    resetVisibilityField("connection-port");
     el("connection-error").textContent = "";
     el("onboarding-choice-error").textContent = "";
     settingsShell.inert = true;
@@ -642,7 +952,9 @@
 
   function closeOnboarding() {
     if (connectionBusy) return;
-    el("connection-key").value = "";    resetOnboardingTransition();
+    el("connection-key").value = "";
+    resetVisibilityField("connection-key");
+    resetOnboardingTransition();
     onboarding.hidden = true;
     settingsShell.inert = false;
     root.classList.remove("onboarding-active");
@@ -675,21 +987,50 @@
     el("connection-back").disabled = busy;
     el("connection-key").disabled = busy;
     el("connection-port").disabled = busy;
+    el("connection-key-visibility").disabled = busy;
+    el("connection-port-visibility").disabled = busy;
     el("connection-confirm").textContent = busy ? "Connecting…" : "Confirm";
   }
 
   async function applyConnection(enabled, apiKey = "", port = null) {
+    const advancedWasDirty = connectionHasChanges();
+    const appliedPort = port || 31009;
     setConnectionBusy(true);
     el("connection-error").textContent = "";
     try {
-      const result = await invoke("configure_connection", { connection: { enabled, apiKey, port } });
+      const result = await invoke("configure_connection", { connection: {
+        enabled,
+        apiKey,
+        keepExistingKey: false,
+        ip: currentApiIp || null,
+        port,
+      } });
       window.appReady = true;
+      currentApiPort = appliedPort;
+      hasSavedApiKey = enabled;
+      if (!advancedWasDirty) {
+        assignAdvancedConnection({ apiIp: currentApiIp, apiPort: currentApiPort, hasSavedApiKey });
+      } else {
+        initialApiDraft = {
+          ip: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
+          port: currentApiPort === 31009 ? "" : String(currentApiPort),
+        };
+        if (!advancedKeyEdited) {
+          advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+          advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+        }
+        el("advanced-api-key-hint").textContent = hasSavedApiKey
+          ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+          : "Enter a new read-only Anytype API v2 key.";
+      }
+      resetAdvancedVisibility();
       updateSaveButton();
       const calendarPending = enabled && result && result.calendarStatus === "cached";
       setStatus(calendarPending
         ? "Anytype connected. Calendar data could not refresh yet; try saving again later."
-        : enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", calendarPending ? "warning" : "info");
+        : enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", "info");
       el("connection-key").value = "";
+      resetVisibilityField("connection-key");
       advanceOnboarding();
     } catch (error) {
       if (enabled) {
@@ -710,7 +1051,7 @@
     const enabled = option === apiOptions[1];
     onboarding.dataset.apiChoice = enabled ? "api" : "no-api";
     if (enabled) advanceOnboarding();
-    else applyConnection(false);
+    else applyConnection(false, "", currentApiPort);
   }));
 
   el("open-connection").addEventListener("click", () => {
@@ -742,10 +1083,29 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!apiKeyRemovalBackdrop.hidden) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeKeyRemovalConfirmation();
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = [apiKeyRemovalClose, apiKeyRemovalCancel, apiKeyRemovalSave].filter((control) => !control.disabled);
+        if (focusable.length) {
+          const currentIndex = focusable.indexOf(document.activeElement);
+          const nextIndex = event.shiftKey
+            ? currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1
+            : currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+          event.preventDefault();
+          focusable[nextIndex].focus();
+        }
+      }
+      return;
+    }
     if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
       && typeof event.key === "string" && event.key.toLowerCase() === "r") {
       event.preventDefault();
-      if (!event.repeat) return save();
+      if (!event.repeat) return save({ forceRebuild: true });
       return;
     }
     if (event.key === "F8" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
@@ -785,7 +1145,7 @@
 
   const eventApi = window.__TAURI__ && window.__TAURI__.event;
   if (eventApi && typeof eventApi.listen === "function") {
-    eventApi.listen("blobui-rebuild-custom-css", () => save()).catch((error) => {
+    eventApi.listen("blobui-rebuild-custom-css", () => save({ forceRebuild: true })).catch((error) => {
       setStatus(error.message || String(error), "error");
     });
     eventApi.listen("blobui-show-onboarding", () => showOnboarding()).catch((error) => {
