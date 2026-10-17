@@ -105,6 +105,16 @@ assert.equal(document.activeElement, controls[0]);
 assert.equal(shell.inert, true);
 assert.equal(titlebar.inert, true);
 
+for (const modifiers of [{ metaKey: true }, { altKey: true }, { ctrlKey: true }]) {
+  for (const key of ['Tab', 'Escape']) {
+    const systemShortcut = { key, ...modifiers, preventDefault() { this.defaultPrevented = true; } };
+    keydown(systemShortcut);
+    assert.equal(systemShortcut.defaultPrevented, undefined, 'Modified shortcuts must pass through the modal.');
+    assert.equal(document.activeElement, controls[0], 'System shortcuts must not move modal focus.');
+    assert.equal(backdrop.classList.contains('is-closing'), false, 'System shortcuts must not dismiss the modal.');
+  }
+}
+
 const forwardTab = { key: 'Tab', shiftKey: false, preventDefault() { this.defaultPrevented = true; } };
 keydown(forwardTab);
 assert.equal(forwardTab.defaultPrevented, true);

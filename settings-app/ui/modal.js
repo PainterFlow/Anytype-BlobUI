@@ -81,6 +81,7 @@
 
     function handleKeydown(event) {
       if (backdrop.hidden || backdrop.classList.contains("is-closing") || event.defaultPrevented) return;
+      if (event.metaKey || event.altKey || event.ctrlKey) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close();
