@@ -225,10 +225,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .feature-mark { flex: 0 0 20px; width: 20px; height: 20px; align-self: center; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .feature-mark.available { color: var(--accent); }
 .feature-mark.unavailable { flex-basis: 12px; width: 12px; height: 12px; color: var(--text-muted); }
-.recommended-option { --card-background: color-mix(in srgb, var(--input-bg), var(--accent) 5%); border: 2px solid var(--accent); border-top-width: 32px; box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent); }
-.onboarding-option.recommended-option { padding-top: 0; }
+.onboarding-option.recommended-option { padding: 2px; background: var(--accent); box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent); }
 .recommended-option:hover { box-shadow: 0 0 36px color-mix(in srgb, var(--accent) 30%, transparent); }
-.recommended-label { position: absolute; top: -32px; left: 0; right: 0; color: var(--bg); text-align: center; font-size: 12px; line-height: 32px; font-weight: 600; }
+.recommended-label { display: block; padding: 10px 16px; color: var(--bg); text-align: center; font-size: 12px; line-height: 20px; font-weight: 600; }
+.recommended-panel { display: flex; flex: 1; flex-direction: column; padding: 30px 24px; border-radius: 14px; background: var(--card-background); transition: background 220ms ease; }
 .app-shell.onboarding-entering { animation: onboarding-fade-in 450ms ease-out both; }
 .onboarding-privacy { margin-top: 8px; padding: 20px 24px; background: var(--bg); color: var(--text-secondary); text-align: center; font-size: 12px; }
 @keyframes onboarding-fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -236,10 +236,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 @media (max-width: 840px) {
   .onboarding-scroll { padding: 32px 24px 16px; }
   .onboarding-options { gap: 20px; }
-  .onboarding-option { padding: 28px 20px; }
+  .onboarding-option, .recommended-panel { padding: 28px 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .onboarding-title, .onboarding-hint, .onboarding .leaving, .onboarding-api, .app-shell.onboarding-entering { animation: none; }
-  .onboarding-option, .recommended-label { transition: none; }
+  .onboarding-option, .recommended-panel { transition: none; }
   .onboarding-option:hover { transform: none; }
 }
