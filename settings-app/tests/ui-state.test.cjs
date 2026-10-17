@@ -9,7 +9,7 @@ function element(id) {
   if (!elements.has(id)) {
     const classes = new Set();
     elements.set(id, {
-      value: '', textContent: '', style: { setProperty() {} }, dataset: {},
+      value: '', textContent: '', hidden: true, children: [], attributes: {}, style: { setProperty() {} }, dataset: {},
       classList: {
         add: (...names) => names.forEach(name => classes.add(name)),
         remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -18,29 +18,32 @@ function element(id) {
       },
       handlers: {},
       addEventListener(name, handler) { this.handlers[name] = handler; },
-      setAttribute() {},
+      setAttribute(name, value) { this.attributes[name] = value; },
+      appendChild(child) { this.children.push(child); },
+      contains(target) { return target === this || this.children.includes(target); },
+      focus() { this.focused = true; },
       querySelector: selector => element(id + selector),
     });
   }
   return elements.get(id);
 }
-const timers = new Map();
 const calls = [];
-let nextTimer = 0;
 let saveError = null;
+let copiedLogs = '';
+let copyError = false;
 const context = {
+  navigator: { clipboard: { async writeText(text) { if (copyError) throw new Error('Clipboard unavailable.'); copiedLogs = text; } } },
   document: {
     handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; },
     documentElement: element('root'),
     getElementById: element,
+    createElement: () => element('row-' + elements.size),
     querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family'].map(element),
   },
   CSS: { supports: () => true },
   window: {
     CSS: { supports: () => true },
-    setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
-    clearTimeout: id => timers.delete(id),
     setInterval() {},
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: { core: { async invoke(name) {
@@ -65,38 +68,69 @@ const status = () => element('status-message').textContent;
 
 (async () => {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
+  assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
-  assert.equal(timers.size, 1);
-  const timer = [...timers.values()][0];
-  assert.equal(timer.delay, 5000);
-  timer.callback();
-  assert(element('save-status').classList.contains('faded'));
+  assert.equal(element('save-button').hidden, true);
+  assert.equal(element('log-button').hidden, false);
+  assert.equal(element('log-button').dataset.severity, 'info');
+  assert.equal(element('log-entries').children.length, 1);
 
   await input('font-family', 'Arial');
   assert.match(status(), /Unsaved changes/);
   assert.equal(element('save-button').disabled, false);
-  assert(!element('save-status').classList.contains('faded'));
+  assert.equal(element('save-button').hidden, false);
   await input('font-family', 'Libron');
   assert.equal(status(), 'No unsaved changes.');
-  assert.equal(element('save-button').disabled, true);
+  assert.equal(element('save-button').hidden, true);
   await input('accent-value', '#123456');
-  assert.equal(element('save-button').disabled, false);
+  assert.equal(element('save-button').hidden, false);
   await input('accent-value', '#DE50DE');
-  assert.equal(element('save-button').disabled, true);
-  assert.equal(status(), 'No unsaved changes.');
+  assert.equal(element('save-button').hidden, true);
+  assert.equal(element('log-entries').children.length, 1, 'Editing should not fill the log.');
 
   await input('font-family', 'Arial');
-  saveError = 'Rebuild failed.';
+  const pendingSave = element('save-button').handlers.click();
+  assert.equal(element('save-button').hidden, false, 'Pending changes remain visible while saving.');
+  assert.equal(element('save-button').disabled, true, 'Repeated saves must be blocked.');
+  await pendingSave;
+  assert.match(status(), /^Saved\./);
+  assert.equal(element('save-button').hidden, true);
+  assert.equal(element('log-button').dataset.severity, 'warning');
+  await input('font-family', 'Libron');
+  saveError = '<script>Rebuild failed.</script>';
   await element('save-button').handlers.click();
   assert.equal(status(), saveError);
-  assert.equal(timers.size, 0, 'Errors must cancel pending fades and remain visible.');
-  assert(element('save-status').classList.contains('error'));
-  assert(!element('save-status').classList.contains('faded'));
+  assert.equal(element('save-button').hidden, false);
+  assert.equal(element('log-button').dataset.severity, 'error');
+  assert(element('log-entries').children.at(-1).textContent.endsWith(saveError), 'Log messages must remain plain text.');
   saveError = null;
   await element('save-button').handlers.click();
-  assert.match(status(), /^Saved\./);
-  assert.equal(timers.size, 1);
+  assert.equal(element('log-button').dataset.severity, 'error', 'Retained errors take precedence over new warnings.');
+  assert.equal(element('save-button').hidden, true);
+
+  element('log-button').handlers.click();
+  assert.equal(element('log-popup').hidden, false);
+  assert.equal(element('log-button').attributes['aria-expanded'], 'true');
+  assert(element('copy-logs').focused);
+  await element('copy-logs').handlers.click();
+  assert(copiedLogs.includes('Rebuild failed.'));
+  assert.equal(copiedLogs.split('\n').length, element('log-entries').children.length);
+  context.document.handlers.pointerdown({ target: element('log-control') });
+  assert.equal(element('log-popup').hidden, false);
+  context.document.handlers.pointerdown({ target: element('font-family') });
+  assert.equal(element('log-popup').hidden, true);
+  element('log-button').handlers.click();
+  context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(element('log-popup').hidden, true);
+  assert(element('log-button').focused);
+  element('log-button').handlers.click();
+  context.document.handlers.focusin({ target: element('font-family') });
+  assert.equal(element('log-popup').hidden, true);
+  copyError = true;
+  await element('copy-logs').handlers.click();
+  assert.match(element('copy-status').textContent, /Could not copy/);
+  assert.match(element('log-entries').children.at(-1).textContent, /Clipboard unavailable/);
 
   for (const [id, command] of [
     ['window-minimize', 'minimize_window'], ['window-close', 'hide_window'],
@@ -121,5 +155,5 @@ const status = () => element('status-message').textContent;
   const count = calls.length;
   element('title-drag-region').handlers.pointerdown({ button: 0, target: { closest: () => ({}) } });
   assert.equal(calls.length, count, 'Window control clicks must not start a drag.');
-  console.log('UI status, revert, save error, and window action tests passed.');
+  console.log('UI save visibility, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

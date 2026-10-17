@@ -25,6 +25,27 @@
           </button>
         </nav>
 
+        <div class="sidebar-actions">
+          <button id="save-button" class="sidebar-action save-button" type="button" hidden disabled>
+            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h10l3 3v11H3V3h1Zm2 0v5h7V3M6 17v-6h8v6"/></svg>
+            <span class="save-spinner" aria-hidden="true"></span>
+            <span class="save-label">Save changes</span>
+          </button>
+          <div class="log-control" id="log-control">
+            <button id="log-button" class="sidebar-action log-button" type="button" aria-expanded="false" aria-controls="log-popup" hidden>
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 6v5m0 2v1"/></svg>
+              <span id="log-label">Logs</span>
+            </button>
+            <section id="log-popup" class="log-popup" aria-labelledby="log-title" hidden>
+              <div class="log-heading">
+                <h2 id="log-title">Logs</h2>
+                <button id="copy-logs" class="copy-logs" type="button" aria-label="Copy all logs" title="Copy all logs"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 4V3H3v9h1"/></svg></button>
+              </div>
+              <div id="log-entries" class="log-entries" role="log" aria-live="polite"></div>
+              <span id="copy-status" class="sr-only" role="status"></span>
+            </section>
+          </div>
+        </div>
         <div class="sidebar-foot">
           <span>Numpad 1 in Anytype</span>
           <button id="open-author" class="repository-link" type="button" aria-label="Open PainterFlow11 on GitHub" title="https://github.com/PainterFlow">
@@ -98,15 +119,9 @@
           </div>
         </section>
 
-        <footer class="action-bar">
-          <div class="save-status" id="save-status" role="status" aria-live="polite">
-            <span id="status-message">Loading your current settings…</span>
-          </div>
-          <button id="save-button" class="save-button" type="button" disabled>
-            <span class="save-spinner" aria-hidden="true"></span>
-            <span class="save-label">Save changes</span>
-          </button>
-        </footer>
+        <div class="sr-only" id="save-status" role="status" aria-live="polite">
+          <span id="status-message">Loading your current settings…</span>
+        </div>
       </main>
     </div>
     <script src="./app.js"></script>

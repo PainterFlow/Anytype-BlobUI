@@ -29,8 +29,11 @@
   const codeFontFamily = el("code-font-family");
   const saveButton = el("save-button");
   const saveLabel = saveButton.querySelector(".save-label");
-  const saveStatus = el("save-status");
   const statusMessage = el("status-message");
+  const logButton = el("log-button");
+  const logPopup = el("log-popup");
+  const logEntries = el("log-entries");
+  const logs = [];
   const root = document.documentElement;
 
   let draft = null;
@@ -39,7 +42,6 @@
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
-  let statusTimer = null;
 
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;
@@ -232,28 +234,43 @@
     return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right);
   }
 
-  function setStatus(message, kind) {
-    window.clearTimeout(statusTimer);
-    statusTimer = null;
+  function setStatus(message, kind, record = true) {
     statusMessage.textContent = message;
-    saveStatus.classList.remove("error", "working", "faded");
-    if (kind) saveStatus.classList.add(kind);
-    if (kind !== "error") {
-      statusTimer = window.setTimeout(() => {
-        saveStatus.classList.add("faded");
-      }, 5000);
-    }
+    if (!record) return;
+    const level = kind === "error" || kind === "warning" ? kind : "info";
+    const entry = { message: String(message), level, time: new Date().toLocaleTimeString() };
+    logs.push(entry);
+    const row = document.createElement("p");
+    row.className = "log-entry " + level;
+    row.textContent = formatLog(entry);
+    logEntries.appendChild(row);
+    logEntries.scrollTop = logEntries.scrollHeight;
+    const severity = logs.some((item) => item.level === "error") ? "error"
+      : logs.some((item) => item.level === "warning") ? "warning" : "info";
+    logButton.dataset.severity = severity;
+    logButton.hidden = logs.length === 0;
+    el("log-label").textContent = severity === "error" ? "Errors and logs" : severity === "warning" ? "Warnings and logs" : "Logs";
+  }
+
+  function formatLog(entry) {
+    return "[" + entry.time + "] " + entry.level.toUpperCase() + " " + entry.message;
+  }
+
+  function closeLogs(restoreFocus = false) {
+    logPopup.hidden = true;
+    logButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) logButton.focus();
   }
 
   function updateSaveButton() {
     const dirty = !settingsEqual(draft, initialDraft);
+    saveButton.hidden = !draft || !dirty;
     saveButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = saveBusy || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     saveButton.classList.toggle("busy", saveBusy);
-    saveButton.classList.toggle("saved", !dirty && !!initialDraft);
-    saveLabel.textContent = saveBusy ? "Saving and rebuilding…" : (dirty ? "Save changes" : "Saved");
+    saveLabel.textContent = saveBusy ? "Saving…" : "Save changes";
   }
 
   function applyFontFamilies() {
@@ -359,11 +376,10 @@
       const result = await invoke("save_settings", { settings: submittedSettings });
       initialDraft = submittedSettings;
       if (result.calendarStatus === "cached") {
-        setStatus("Saved. Press Ctrl+R in Anytype to apply; calendar colors kept their last saved values.");
+        setStatus("Saved. Press Ctrl+R in Anytype to apply; calendar colors kept their last saved values.", "warning");
       } else {
         setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar colors refreshed.");
       }
-      saveButton.classList.add("saved");
     } catch (error) {
       setStatus(error.message || String(error), "error");
     } finally {
@@ -446,6 +462,27 @@
     markDirty();
   });
   saveButton.addEventListener("click", save);
+  logButton.addEventListener("click", () => {
+    logPopup.hidden = !logPopup.hidden;
+    logButton.setAttribute("aria-expanded", String(!logPopup.hidden));
+    if (!logPopup.hidden) el("copy-logs").focus();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!el("log-control").contains(event.target)) closeLogs();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (!el("log-control").contains(event.target)) closeLogs();
+  });
+  el("copy-logs").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(logs.map(formatLog).join("\n"));
+      el("copy-status").textContent = "All logs copied.";
+      el("copy-logs").title = "All logs copied";
+    } catch (error) {
+      setStatus("Could not copy logs. " + (error.message || String(error)), "error");
+      el("copy-status").textContent = "Could not copy logs.";
+    }
+  });
 
   async function windowAction(command) {
     try {
@@ -459,6 +496,10 @@
   el("open-author").addEventListener("click", () => windowAction("open_author_profile"));
   el("open-repository").addEventListener("click", () => windowAction("open_project_repository"));
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !logPopup.hidden) {
+      event.preventDefault();
+      closeLogs(true);
+    }
     if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {
       event.preventDefault();
       if (!event.repeat) windowAction("quit_app");
@@ -476,7 +517,7 @@
     if (!saveBusy && window.appReady) {
       setStatus(settingsEqual(draft, initialDraft)
         ? "No unsaved changes."
-        : "Unsaved changes are ready to apply.");
+        : "Unsaved changes are ready to apply.", "info", false);
     }
   }
 
