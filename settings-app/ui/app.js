@@ -529,7 +529,31 @@
   el("window-close").addEventListener("click", () => windowAction("hide_window"));
   el("open-author").addEventListener("click", () => windowAction("open_author_profile"));
   el("open-repository").addEventListener("click", () => windowAction("open_project_repository"));
+  const onboardingWelcome = el("onboarding-welcome");
+  const settingsShell = el("settings-shell");
+  let onboardingPreviousFocus = null;
+
+  function showOnboarding() {
+    if (!onboardingWelcome.hidden) return;
+    onboardingPreviousFocus = document.activeElement;
+    closeLogs();
+    settingsShell.inert = true;
+    onboardingWelcome.hidden = false;
+    onboardingWelcome.focus();
+  }
+
+  onboardingWelcome.addEventListener("click", () => {
+    onboardingWelcome.hidden = true;
+    settingsShell.inert = false;
+    if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
+  });
+
   document.addEventListener("keydown", (event) => {
+    if (event.key === "F8" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+      if (!event.repeat) showOnboarding();
+      return;
+    }
     if (event.key === "Escape" && !logPopup.hidden) {
       event.preventDefault();
       closeLogs(true);

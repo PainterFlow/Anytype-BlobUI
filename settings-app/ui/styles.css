@@ -195,3 +195,39 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   .switch-track::after { transition: none; }
   .save-spinner { animation: none; }
 }
+
+/* Welcome covers the settings content while keeping native window controls available. */
+.onboarding-welcome {
+  position: fixed;
+  inset: 36px 0 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 32px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.onboarding-welcome[hidden] { display: none; }
+.onboarding-copy { display: grid; justify-items: center; gap: 20px; }
+.onboarding-title {
+  font-size: clamp(72px, 12vw, 128px);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -.045em;
+  animation: onboarding-fade-in 900ms ease-out both;
+}
+.onboarding-hint {
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 24px;
+  animation: onboarding-fade-in 900ms ease-out 250ms both;
+}
+@keyframes onboarding-fade-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-title, .onboarding-hint { animation: none; }
+}

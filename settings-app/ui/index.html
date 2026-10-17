@@ -15,7 +15,13 @@
         <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
       </div>
     </header>
-    <div class="app-shell">
+    <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint" hidden>
+      <span class="onboarding-copy">
+        <span id="onboarding-title" class="onboarding-title">Hello</span>
+        <span id="onboarding-hint" class="onboarding-hint">Press anywhere to continue</span>
+      </span>
+    </button>
+    <div class="app-shell" id="settings-shell">
       <aside class="sidebar" aria-label="Settings navigation">
         <nav class="sidebar-nav" aria-label="Settings">
           <span class="nav-group-label">Application</span>

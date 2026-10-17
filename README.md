@@ -99,6 +99,8 @@ The build places the executable in `settings-app/dist/blobui-settings.exe`. `Ins
 
 Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 
+While the Settings window is focused, press **F8** to preview the onboarding welcome screen. “Hello” and “Press anywhere to continue” fade in; click anywhere on the welcome screen or press Enter/Space to return to Settings. F8 can reopen the preview without changing your settings. Reduced-motion preferences skip the animation.
+
 To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not register the app to start automatically with Windows.
 
 The first Settings app save migrates the current font and accent values from `data.json` into the local `settingsV2` record. After that, these local choices are authoritative, so saving no longer requires the legacy Anytype Settings objects. Anytype's Calendar Color data refreshes when its local API is available; otherwise the app keeps the saved calendar cache and reports that status. Saving rebuilds `custom.css`; press `Ctrl+R` in Anytype to apply it.
