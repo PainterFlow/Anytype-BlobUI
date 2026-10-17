@@ -157,6 +157,20 @@ if (-not [string]::IsNullOrWhiteSpace($SettingsOverridePath)) {
     }
     $useSettingsV2 = $true
 }
+# Default-theme installations work without API setup or an encrypted key.
+if (-not $useSettingsV2 -and $data.PSObject.Properties['setupMode'] -and $data.setupMode -eq 'defaults') {
+    $defaultRun = Join-Path (Join-Path $blobDirectory 'staging') ([Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($defaultRun) | Out-Null
+    try {
+        $defaultCss = Join-Path $defaultRun 'custom.css'
+        & (Join-Path $PSScriptRoot 'Compile.ps1') -DataPath $dataPath -OutputPath $defaultCss
+        $null = Invoke-BlobUiInstall -InstallDirectory $installDirectory -RuntimeSourceDirectory $sourceDirectory -AssetsSourceDirectory (Join-Path $sourceDirectory 'assets') -CompiledCssPath $defaultCss -DataCandidatePath $dataPath
+        Write-Host 'CSS rebuilt with default settings. Press Ctrl+R in Anytype.'
+    }
+    finally { Remove-Item -LiteralPath $defaultRun -Recurse -Force -ErrorAction SilentlyContinue }
+    return
+}
+
 if (-not $useSettingsV2) {
     if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
         throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
