@@ -29,6 +29,7 @@ function element(id) {
   return elements.get(id);
 }
 const calls = [];
+let rebuildListener = null;
 const timers = new Map();
 let nextTimerId = 1;
 let saveError = null;
@@ -60,7 +61,12 @@ const context = {
     clearTimeout(id) { timers.delete(id); },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
-    __TAURI__: { core: { async invoke(name, args) {
+    __TAURI__: {
+      event: { async listen(name, handler) {
+        assert.equal(name, 'blobui-rebuild-custom-css');
+        rebuildListener = handler;
+      } },
+      core: { async invoke(name, args) {
       calls.push(name);
       if (name === 'get_app_state') return {
         ready: true, theme: 'dark',
@@ -83,12 +89,15 @@ const input = async (id, value) => {
   await element(id).handlers.input();
 };
 const status = () => element('status-message').textContent;
+const settingsHtml = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+assert.match(settingsHtml, /<span>Alt\+R to rebuild custom\.css<\/span>\s*<span>Numpad 1 in Anytype<\/span>/, 'The rebuild note must sit immediately above the Numpad 1 note.');
 
 (async () => {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
+  assert.equal(typeof rebuildListener, 'function', 'The global rebuild shortcut must be connected to the UI save action.');
   assert.equal(element('save-button').hidden, true);
   assert.equal(element('log-button').hidden, false);
   assert.equal(element('log-button').dataset.severity, 'info');
@@ -152,6 +161,18 @@ const status = () => element('status-message').textContent;
   await element('save-button').handlers.click();
   assert.equal(element('log-button').dataset.severity, 'error', 'Retained errors take precedence over new warnings.');
   assert.equal(element('save-button').hidden, true);
+
+  let altRPrevented = false;
+  const saveCallsBeforeAltR = calls.filter(name => name === 'save_settings').length;
+  await context.document.handlers.keydown({
+    key: 'r', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
+    preventDefault() { altRPrevented = true; },
+  });
+  assert(altRPrevented, 'Alt+R must stay out of the focused input.');
+  assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeAltR + 1, 'The in-window shortcut must use the existing save/rebuild action.');
+  const saveCallsBeforeGlobalEvent = calls.filter(name => name === 'save_settings').length;
+  await Promise.all([rebuildListener(), rebuildListener()]);
+  assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeGlobalEvent + 1, 'A background hotkey event must start only one rebuild.');
 
   element('log-button').handlers.click();
   assert.equal(element('log-popup').hidden, false);
@@ -292,5 +313,5 @@ const status = () => element('status-message').textContent;
   finishOnboardingTransition();
   assert.equal(onboarding.hidden, true);
   assert(calls.slice(beforeOnboarding).every(name => name === 'configure_connection'), 'Only connection setup should be invoked.');
-  console.log('UI save visibility, log severity, popup, copy, and window action tests passed.');
+  console.log('UI save, Alt+R rebuild, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

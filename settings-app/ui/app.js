@@ -689,6 +689,12 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && typeof event.key === "string" && event.key.toLowerCase() === "r") {
+      event.preventDefault();
+      if (!event.repeat) return save();
+      return;
+    }
     if (event.key === "F8" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
       event.preventDefault();
       if (!event.repeat) showOnboarding();
@@ -722,6 +728,13 @@
         ? "No unsaved changes."
         : "Unsaved changes are ready to apply.", "info", false);
     }
+  }
+
+  const eventApi = window.__TAURI__ && window.__TAURI__.event;
+  if (eventApi && typeof eventApi.listen === "function") {
+    eventApi.listen("blobui-rebuild-custom-css", () => save()).catch((error) => {
+      setStatus(error.message || String(error), "error");
+    });
   }
 
   window.appReady = false;
