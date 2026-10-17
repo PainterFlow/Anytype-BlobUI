@@ -1586,9 +1586,27 @@ function Restore-BlobUiFileSnapshot {
             if (Test-Path -LiteralPath $Snapshot.path -PathType Container) {
                 throw "Rollback found a directory where a file was saved: $($Snapshot.path)"
             }
-            [System.IO.File]::WriteAllBytes($Snapshot.path, [byte[]]$Snapshot.bytes)
-            Set-Acl -LiteralPath $Snapshot.path -AclObject $Snapshot.acl -ErrorAction Stop
-            [System.IO.File]::SetAttributes($Snapshot.path, [System.IO.FileAttributes]$Snapshot.attributes)
+            # Failed atomic replacements often leave the original file intact.
+            # Do not try to rewrite that file (it may be locked or read-only).
+            $current = Get-Item -LiteralPath $Snapshot.path -Force -ErrorAction SilentlyContinue
+            $sameBytes = $false
+            if ($null -ne $current) {
+                if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Rollback will not follow a reparse point: $($Snapshot.path)"
+                }
+                if ($current.Length -eq $Snapshot.bytes.Length) {
+                    $sameBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($Snapshot.path)) -ceq [Convert]::ToBase64String([byte[]]$Snapshot.bytes)
+                }
+            }
+            if (-not $sameBytes) { [IO.File]::WriteAllBytes($Snapshot.path, [byte[]]$Snapshot.bytes) }
+            $currentAcl = Get-Acl -LiteralPath $Snapshot.path -ErrorAction Stop
+            $currentSddl = $currentAcl.PSObject.Properties['Sddl']
+            $savedSddl = $Snapshot.acl.PSObject.Properties['Sddl']
+            $sameAcl = if ($null -ne $currentSddl -and $null -ne $savedSddl) { $currentSddl.Value -ceq $savedSddl.Value } else { [object]::Equals($currentAcl, $Snapshot.acl) }
+            if (-not $sameAcl) { Set-Acl -LiteralPath $Snapshot.path -AclObject $Snapshot.acl -ErrorAction Stop }
+            if ((Get-Item -LiteralPath $Snapshot.path -Force).Attributes -ne $Snapshot.attributes) {
+                [IO.File]::SetAttributes($Snapshot.path, [IO.FileAttributes]$Snapshot.attributes)
+            }
         }
         'Missing' {
             if (Test-Path -LiteralPath $Snapshot.path -PathType Leaf) {
@@ -1721,7 +1739,7 @@ function Set-BlobUiCredentialAcl {
         Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
     }
     catch {
-        throw 'Could not restrict the encrypted API key file to the current Windows user.'
+        throw [InvalidOperationException]::new('Could not restrict the encrypted API key file to the current Windows user.', $_.Exception)
     }
 }
 
@@ -1770,6 +1788,82 @@ function Read-BlobUiProtectedCredential {
         if ($null -ne $secureString) {
             $secureString.Dispose()
         }
+    }
+}
+
+function Assert-BlobUiWritableTarget {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.PSIsContainer) { throw "A file save target is a directory: $Path" }
+        if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) {
+            throw [IO.IOException]::new('The save target is read-only.', -2147024877)
+        }
+        $handle = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Write, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $handle.Dispose()
+    }
+    # Atomic replacements need create/delete access in the destination folder.
+    # Check before changing CSS, data or credentials; no existing contents change.
+    $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    while (-not (Test-Path -LiteralPath $parent -PathType Container)) { $parent = Split-Path -Parent $parent }
+    $probe = Join-Path $parent ('.blobui-write-check-' + [Guid]::NewGuid().ToString('N'))
+    $handle = [IO.FileStream]::new($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
+    $handle.Dispose()
+}
+
+function New-BlobUiCredentialCandidate {
+    param([string]$Path, [string]$ProtectedText)
+
+    Initialize-BlobUiPrivateFileMove
+    $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $candidate = Join-Path $directory ('.blobui-key-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($candidate, $ProtectedText + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        # Set permissions while this is a new file owned by the current user,
+        # before modifying any installed CSS, settings, or existing credential.
+        Set-BlobUiCredentialAcl -Path $candidate
+        return $candidate
+    }
+    catch {
+        if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+}
+
+function Initialize-BlobUiPrivateFileMove {
+    if ($env:OS -eq 'Windows_NT') {
+        if (-not ('BlobUiPrivateFileMove' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class BlobUiPrivateFileMove {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern bool MoveFileExW(string source, string destination, uint flags);
+    public static void Replace(string source, string destination) {
+        // Both paths are in the same folder/volume. The new file keeps its
+        // private DACL instead of merging the old file's ACL via ReplaceFile.
+        if (!MoveFileExW(source, destination, 0x1 | 0x8))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+}
+'@
+        }
+    }
+}
+
+function Move-BlobUiCredentialCandidate {
+    param([string]$Candidate, [string]$Destination)
+
+    if ($env:OS -eq 'Windows_NT') {
+        Initialize-BlobUiPrivateFileMove
+        [BlobUiPrivateFileMove]::Replace($Candidate, $Destination)
+    }
+    else {
+        # Only fixture tests reach this branch; production credentials require DPAPI.
+        [IO.File]::Move($Candidate, $Destination, $true)
     }
 }
 
@@ -1972,6 +2066,23 @@ function Invoke-BlobUiInstall {
         $snapshots.Add((Get-BlobUiFileSnapshot -Path $snapshotPath))
     }
 
+    $writeTargets = @(
+        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) { [pscustomobject]@{ path = $credentialPath; operation = 'credential' } }
+        [pscustomobject]@{ path = $cssDestination; operation = 'css' }
+        [pscustomobject]@{ path = $dataPath; operation = 'settings' }
+        [pscustomobject]@{ path = $manifestPath; operation = 'manifest' }
+    )
+    foreach ($target in $writeTargets) {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = $target.operation }
+        Assert-BlobUiWritableTarget -Path $target.path
+    }
+
+    $credentialCandidate = $null
+    if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential-permissions' }
+        $credentialCandidate = New-BlobUiCredentialCandidate -Path $credentialPath -ProtectedText $CredentialProtectedText
+    }
+
     try {
         if ($null -ne $FailureOperation) { $FailureOperation.Value = 'assets' }
         [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
@@ -1999,15 +2110,15 @@ function Invoke-BlobUiInstall {
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss
         if ($null -ne $FailureOperation) { $FailureOperation.Value = 'settings' }
         Write-BlobUiAtomicText -Path $dataPath -Content $candidateDataText
-        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
-            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential' }
-            [System.IO.Directory]::CreateDirectory($credentialDirectory) | Out-Null
-            Write-BlobUiAtomicText -Path $credentialPath -Content ($CredentialProtectedText + [Environment]::NewLine)
-            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential-permissions' }
-            Set-BlobUiCredentialAcl -Path $credentialPath
-        }
         if ($null -ne $FailureOperation) { $FailureOperation.Value = 'manifest' }
         Write-BlobUiAtomicText -Path $manifestPath -Content $manifestText
+        # Commit the already protected key last: no later file write can
+        # force a rollback of a successfully replaced credential.
+        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential' }
+            Move-BlobUiCredentialCandidate -Candidate $credentialCandidate -Destination $credentialPath
+            $credentialCandidate = $null
+        }
     }
     catch {
         $installException = $_.Exception
@@ -2020,10 +2131,15 @@ function Invoke-BlobUiInstall {
             $rollbackFailures.Add($_.Exception.Message)
         }
         if ($rollbackFailures.Count -gt 0) {
-            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'rollback' }
-            throw "Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))"
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = $FailureOperation.Value + '-rollback-failed' }
+            throw [InvalidOperationException]::new("Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))", $installException)
         }
         throw $installException
+    }
+    finally {
+        if ($credentialCandidate -and (Test-Path -LiteralPath $credentialCandidate)) {
+            Remove-Item -LiteralPath $credentialCandidate -Force -ErrorAction SilentlyContinue
+        }
     }
 
     return [ordered]@{

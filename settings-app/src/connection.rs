@@ -8,6 +8,8 @@ pub fn connection_error(output: &[u8], port: u16) -> String {
     let (code, native_error) = code
         .map(|value| value.split_once(':').unwrap_or((value, "0")))
         .unwrap_or(("", "0"));
+    let rollback_failed = code.ends_with("-rollback-failed");
+    let code = code.strip_suffix("-rollback-failed").unwrap_or(code);
     let message: String = match code {
         "unauthorized" => "Anytype rejected this key (HTTP 401). Paste a current API v2 key.".into(),
         "forbidden" => "Anytype denied API access (HTTP 403). Give this key read access to the spaces you want to use.".into(),
@@ -41,7 +43,12 @@ pub fn connection_error(output: &[u8], port: u16) -> String {
     } else {
         ""
     };
-    format!("{message}{reason}")
+    let recovery = if rollback_failed {
+        " BlobUI also could not finish restoring the previous files."
+    } else {
+        ""
+    };
+    format!("{message}{reason}{recovery}")
 }
 
 #[cfg(test)]
@@ -74,5 +81,15 @@ mod tests {
             31009
         )
         .contains("access denied"));
+    }
+    #[test]
+    fn rollback_failure_preserves_the_original_save_operation() {
+        let error = connection_error(
+            b"BLOBUI_CONNECTION_ERROR=install-credential-rollback-failed:5",
+            31009,
+        );
+        assert!(error.contains("anytype-api-key.dpapi"));
+        assert!(error.contains("access denied"));
+        assert!(error.contains("restoring"));
     }
 }

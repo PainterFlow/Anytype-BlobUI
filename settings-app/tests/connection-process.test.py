@@ -80,6 +80,26 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
                 'apiKey': key, 'port': port if port is not None else server.server_port}),
             text=True, capture_output=True, cwd=source, timeout=60)
     try:
+        readonly_fixture = fixture / 'unchanged-readonly.css'
+        readonly_fixture.write_text('unchanged stylesheet')
+        readonly_fixture.chmod(0o400)
+        rollback_script = fixture / 'Test-UnchangedRollback.ps1'
+        rollback_script.write_text("""param([string]$ModulePath, [string]$FilePath)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+& (Get-Module BlobUI.Core) {
+    param($Path)
+    $snapshot = Get-BlobUiFileSnapshot -Path $Path
+    Restore-BlobUiFileSnapshot -Snapshot $snapshot
+} $FilePath
+""")
+        try:
+            restored = subprocess.run([POWERSHELL, '-NoProfile', '-NonInteractive', '-File',
+                str(rollback_script), '-ModulePath', str(source / 'scripts/BlobUI.Core.psm1'),
+                '-FilePath', str(readonly_fixture)], text=True, capture_output=True, timeout=30)
+            assert restored.returncode == 0, 'Rollback tried to rewrite an unchanged read-only file.'
+        finally:
+            readonly_fixture.chmod(0o600)
         first = configure('fixture-key-one')
         assert first.returncode == 0, 'Valid key was rejected when optional calendar refresh failed.'
         assert 'BlobUI_CALENDAR_CACHE=cached' in first.stdout
@@ -114,6 +134,20 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
         assert 'BLOBUI_CONNECTION_ERROR=compile' in compile_failed.stdout
         assert data_path.read_bytes() == saved_data and credential.read_bytes() == saved_key
         broken_css.unlink()
+        # Read-only credentials must fail before touching any installed files,
+        # and must not be reported as a failed rollback of an unchanged file.
+        css_path = install / 'custom.css'
+        saved_css = css_path.read_bytes()
+        credential.chmod(0o400)
+        try:
+            readonly = configure('fixture-key-one')
+            assert readonly.returncode != 0
+            assert 'BLOBUI_CONNECTION_ERROR=install-credential:19' in readonly.stdout
+            assert 'rollback-failed' not in readonly.stdout
+            assert css_path.read_bytes() == saved_css
+            assert data_path.read_bytes() == saved_data and credential.read_bytes() == saved_key
+        finally:
+            credential.chmod(0o600)
         # An ACL failure must identify credential permissions and roll back.
         module = source / 'scripts/BlobUI.Core.psm1'
         original_module = module.read_text()
@@ -124,6 +158,8 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
             assert permission_failed.returncode != 0
             assert 'BLOBUI_CONNECTION_ERROR=install-credential-permissions:' in permission_failed.stdout
             assert data_path.read_bytes() == saved_data and credential.read_bytes() == saved_key
+            assert css_path.read_bytes() == saved_css
+            assert not list((blob / 'credentials').glob('.blobui-key-*.tmp')), 'Failed preparation left a candidate key.'
         finally:
             module.write_text(original_module)
         count = len(requests)
@@ -132,6 +168,6 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
         assert json.loads(data_path.read_text())['apiConnection']['enabled'] is False
     finally:
         server.shutdown()
-print('Connection process checks passed: valid key with calendar failure, key rotation, custom port, locked runtime preservation, 401 rollback, compile/credential-permission diagnostics, and no API mode.')
+print('Connection process checks passed: valid key with calendar failure, key rotation, custom port, locked runtime preservation, 401 rollback, read-only preflight and credential-permission preparation diagnostics, and no API mode.')
 if os.name != 'nt':
     print('Windows DPAPI/ACL operations used fixture-only stubs on this host.')

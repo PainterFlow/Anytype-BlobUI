@@ -371,7 +371,7 @@ try {
     catch {
         $cause = $_.Exception
         while ($null -ne $cause.InnerException) { $cause = $cause.InnerException }
-        $nativeCode = $cause.HResult -band 0xffff
+        $nativeCode = if ($cause -is [ComponentModel.Win32Exception]) { $cause.NativeErrorCode } else { $cause.HResult -band 0xffff }
         if ($nativeCode -notin @(5, 19, 32, 33, 112)) { $nativeCode = 0 }
         $script:connectionFailureCode = 'install-' + $installOperation + ':' + $nativeCode
         throw
