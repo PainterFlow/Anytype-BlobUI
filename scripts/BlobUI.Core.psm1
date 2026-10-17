@@ -173,9 +173,9 @@ function Invoke-BlobUiApiRequest {
         }
         $exceptionMessage = [string]$_.Exception.Message
         if ($exceptionMessage -match '(?i)timeout|timed out') {
-            throw 'The request to Anytype local API at 127.0.0.1:31009 timed out. Confirm Anytype is open and its local API is enabled.'
+            throw "The request to Anytype local API at $($ApiBaseUri.TrimEnd('/')) timed out. Confirm Anytype is open and its local API is enabled."
         }
-        throw 'Could not reach Anytype local API at 127.0.0.1:31009 because the connection failed. Confirm Anytype is open and its local API is enabled.'
+        throw "Could not reach Anytype local API at $($ApiBaseUri.TrimEnd('/')) because the connection failed. Confirm Anytype is open and its local API is enabled."
     }
 }
 
@@ -702,6 +702,161 @@ function ConvertTo-BlobUiAccentColorValue {
         return $Value.Trim()
     }
     return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color' -RejectWhite
+}
+
+function Set-BlobUiSettingsV2Overlay {
+    param(
+        [Parameter(Mandatory = $true)]$Data,
+        [Parameter(Mandatory = $true)]$Overlay
+    )
+
+    $version = Get-BlobUiPropertyField -InputObject $Overlay -FieldName 'version'
+    if ([int]$version -ne 2) {
+        throw 'The local BlobUI settings overlay has an unsupported version.'
+    }
+    $values = Get-BlobUiPropertyField -InputObject $Overlay -FieldName 'settings'
+    if ($null -eq $values) {
+        throw 'The local BlobUI settings overlay has no settings object.'
+    }
+
+    $fontValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'fontFamily')
+    $codeFontValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'codeFontFamily')
+    $accentValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentColor')
+    $accentMode = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentMode')
+    $accentPreset = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentPreset')
+    $reducedMotion = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'reducedMotion') -Default $script:BlobUiDefaultSettings.reducedMotion -Name 'Reduced Motion'
+    $tabHoverEffect = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'tabHoverEffect') -Default $script:BlobUiDefaultSettings.tabHoverEffect -Name 'Tab Hover Effect'
+    $linkHoverEffect = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'linkHoverEffect') -Default $script:BlobUiDefaultSettings.linkHoverEffect -Name 'Links Hover Effect'
+    $objectMentionHoverEffect = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'objectMentionHoverEffect') -Default $script:BlobUiDefaultSettings.objectMentionHoverEffect -Name 'Object Mention Hover Effect'
+
+    $fontValue = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value $fontValue -Name 'Font'
+    $codeFontValue = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value $codeFontValue -Name 'Code Font'
+    $accentValue = $accentValue.Trim()
+    $normalizedAccent = ConvertTo-BlobUiAccentColorValue -Value $accentValue
+
+    $presetValues = @{
+        'grey' = 'Grey'
+        'yellow' = 'Yellow'
+        'amber' = 'Amber'
+        'red' = 'Red'
+        'pink' = 'Pink'
+        'purple' = 'Purple'
+        'blue' = 'Blue'
+        'sky' = 'Sky'
+        'teal' = 'Teal'
+        'green' = 'Green'
+        'blob-pink' = 'Blob Pink'
+    }
+    switch ($accentMode) {
+        'native' {
+            if ($accentValue -notin @('Default', 'var(--color-system-accent-100)') -or $accentPreset) {
+                throw 'The native accent selection is invalid.'
+            }
+        }
+        'preset' {
+            if (-not $presetValues.ContainsKey($accentPreset) -or
+                $accentValue -cne $presetValues[$accentPreset]) {
+                throw 'The preset accent selection is invalid.'
+            }
+        }
+        'custom' {
+            if ($accentPreset) {
+                throw 'A custom accent cannot include a preset key.'
+            }
+        }
+        default {
+            throw "The accent mode '$accentMode' is not supported."
+        }
+    }
+
+    # Validate every value before touching the candidate so a malformed overlay
+    # cannot leave a partially changed data object behind.
+    if ($null -eq $Data.settings) {
+        throw 'The candidate settings record has no normalized settings object.'
+    }
+    $Data.settings.fontFamily = $fontValue
+    $Data.settings.codeFontFamily = $codeFontValue
+    $Data.settings.accentColor = $normalizedAccent
+    foreach ($setting in @(
+        @{ name = 'reducedMotion'; value = $reducedMotion },
+        @{ name = 'tabHoverEffect'; value = $tabHoverEffect },
+        @{ name = 'linkHoverEffect'; value = $linkHoverEffect },
+        @{ name = 'objectMentionHoverEffect'; value = $objectMentionHoverEffect }
+    )) {
+        if ($Data.settings -is [System.Collections.IDictionary]) {
+            $Data.settings[$setting.name] = $setting.value
+        }
+        else {
+            $existing = $Data.settings.PSObject.Properties[$setting.name]
+            if ($null -ne $existing) {
+                $existing.Value = $setting.value
+            }
+            else {
+                $null = $Data.settings | Add-Member -MemberType NoteProperty -Name $setting.name -Value $setting.value
+            }
+        }
+    }
+    $settingsV2 = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = $fontValue
+            codeFontFamily = $codeFontValue
+            accentColor = $accentValue
+            accentMode = $accentMode
+            accentPreset = $accentPreset
+            reducedMotion = $reducedMotion
+            tabHoverEffect = $tabHoverEffect
+            linkHoverEffect = $linkHoverEffect
+            objectMentionHoverEffect = $objectMentionHoverEffect
+        }
+    }
+    if ($Data -is [System.Collections.IDictionary]) {
+        $Data['settingsV2'] = $settingsV2
+    }
+    else {
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'settingsV2' -Value $settingsV2 -Force
+    }
+    return $Data
+}
+
+function Test-BlobUiApiConnection {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    # Authentication must not depend on optional calendar properties or caches.
+    $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path '/v2/spaces?limit=1' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    if ($null -eq $response -or $null -eq $response.PSObject.Properties['data']) {
+        throw 'The selected port did not return an Anytype API v2 spaces response.'
+    }
+    return $true
+}
+
+function Update-BlobUiCalendarColorCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [Parameter(Mandatory = $true)]$Data,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    $spaces = @(Get-BlobUiPagedApiItems -ApiKey $ApiKey -Path '/v2/spaces?ids=full' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport)
+    if ($spaces.Count -eq 0) {
+        throw 'The API key cannot access any Anytype spaces.'
+    }
+    $spaceIds = @($spaces | ForEach-Object { [string](Get-BlobUiPropertyField -InputObject $_ -FieldName 'id') })
+    $calendarObjectColors = Get-BlobUiCalendarObjectColors -ApiKey $ApiKey -SpaceIds $spaceIds -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    if ($Data -is [System.Collections.IDictionary]) {
+        $Data['calendarObjectColors'] = $calendarObjectColors
+        $Data['fetchedAtUtc'] = [DateTime]::UtcNow.ToString('o')
+    }
+    else {
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'calendarObjectColors' -Value $calendarObjectColors -Force
+        $null = $Data | Add-Member -MemberType NoteProperty -Name 'fetchedAtUtc' -Value ([DateTime]::UtcNow.ToString('o')) -Force
+    }
+    return $Data
 }
 
 function Select-BlobUiItem {
@@ -1248,7 +1403,9 @@ function Invoke-BlobUiCssCompile {
     }
     $declarationPattern = '/\*\s*@blobui-placeholder\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s+(?<type>font|color|url|number|boolean)\s*\*/'
     $compiled = [System.Text.RegularExpressions.Regex]::Replace($compiled, $declarationPattern, '')
-    $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $Data.calendarObjectColors
+    $apiConnection = Get-BlobUiPropertyField -InputObject $Data -FieldName 'apiConnection'
+    $calendarColors = if ($null -ne $apiConnection -and (Get-BlobUiPropertyField -InputObject $apiConnection -FieldName 'enabled') -eq $false) { @{} } else { $Data.calendarObjectColors }
+    $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $calendarColors
     if (-not [string]::IsNullOrWhiteSpace($calendarColorCss)) {
         $compiled = $compiled.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $calendarColorCss + [Environment]::NewLine
     }
@@ -1297,7 +1454,7 @@ function Copy-BlobUiRuntime {
     [System.IO.Directory]::CreateDirectory($runtimeFullPath) | Out-Null
     $runtimeScriptsDirectory = Join-Path $runtimeFullPath 'scripts'
     [System.IO.Directory]::CreateDirectory($runtimeScriptsDirectory) | Out-Null
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1', 'Settings.ps1')) {
         $sourcePath = Join-Path (Join-Path $sourceFullPath 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
@@ -1321,7 +1478,8 @@ function ConvertTo-BlobUiManagedFileKey {
     if ($key.Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)) {
         return $null
     }
-    if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+') {
+    if ($key -notmatch '^(assets|runtime/(scripts|Dev|assets))/.+' -and
+        $key -cne 'runtime/settings-app.exe') {
         throw "The BlobUI file manifest contains an unsupported path: $Path"
     }
     return $key
@@ -1380,7 +1538,7 @@ function Get-BlobUiPackagedFiles {
     }
 
     $files = [ordered]@{}
-    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+    foreach ($scriptName in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1', 'Settings.ps1')) {
         $sourcePath = Join-Path (Join-Path $runtimeSource 'scripts') $scriptName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw "BlobUI runtime script was not found: $scriptName"
@@ -1406,6 +1564,15 @@ function Get-BlobUiPackagedFiles {
             $relative = $file.FullName.Substring($treeRoot.Length).Replace('\', '/')
             $files['runtime/' + $tree.name + '/' + $relative] = [System.IO.Path]::GetFullPath($file.FullName)
         }
+    }
+
+    $settingsAppPath = Join-Path $runtimeSource 'settings-app\dist\blobui-settings.exe'
+    if (Test-Path -LiteralPath $settingsAppPath -PathType Leaf) {
+        $settingsAppItem = Get-Item -LiteralPath $settingsAppPath -Force -ErrorAction Stop
+        if (($settingsAppItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "BlobUI settings app is a reparse point: $settingsAppPath"
+        }
+        $files['runtime/settings-app.exe'] = [System.IO.Path]::GetFullPath($settingsAppPath)
     }
 
     $assetRoot = $assetSource.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -1516,9 +1683,27 @@ function Restore-BlobUiFileSnapshot {
             if (Test-Path -LiteralPath $Snapshot.path -PathType Container) {
                 throw "Rollback found a directory where a file was saved: $($Snapshot.path)"
             }
-            [System.IO.File]::WriteAllBytes($Snapshot.path, [byte[]]$Snapshot.bytes)
-            Set-Acl -LiteralPath $Snapshot.path -AclObject $Snapshot.acl -ErrorAction Stop
-            [System.IO.File]::SetAttributes($Snapshot.path, [System.IO.FileAttributes]$Snapshot.attributes)
+            # Failed atomic replacements often leave the original file intact.
+            # Do not try to rewrite that file (it may be locked or read-only).
+            $current = Get-Item -LiteralPath $Snapshot.path -Force -ErrorAction SilentlyContinue
+            $sameBytes = $false
+            if ($null -ne $current) {
+                if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Rollback will not follow a reparse point: $($Snapshot.path)"
+                }
+                if ($current.Length -eq $Snapshot.bytes.Length) {
+                    $sameBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($Snapshot.path)) -ceq [Convert]::ToBase64String([byte[]]$Snapshot.bytes)
+                }
+            }
+            if (-not $sameBytes) { [IO.File]::WriteAllBytes($Snapshot.path, [byte[]]$Snapshot.bytes) }
+            $currentAcl = Get-Acl -LiteralPath $Snapshot.path -ErrorAction Stop
+            $currentSddl = $currentAcl.PSObject.Properties['Sddl']
+            $savedSddl = $Snapshot.acl.PSObject.Properties['Sddl']
+            $sameAcl = if ($null -ne $currentSddl -and $null -ne $savedSddl) { $currentSddl.Value -ceq $savedSddl.Value } else { [object]::Equals($currentAcl, $Snapshot.acl) }
+            if (-not $sameAcl) { Set-Acl -LiteralPath $Snapshot.path -AclObject $Snapshot.acl -ErrorAction Stop }
+            if ((Get-Item -LiteralPath $Snapshot.path -Force).Attributes -ne $Snapshot.attributes) {
+                [IO.File]::SetAttributes($Snapshot.path, [IO.FileAttributes]$Snapshot.attributes)
+            }
         }
         'Missing' {
             if (Test-Path -LiteralPath $Snapshot.path -PathType Leaf) {
@@ -1651,7 +1836,7 @@ function Set-BlobUiCredentialAcl {
         Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
     }
     catch {
-        throw 'Could not restrict the encrypted API key file to the current Windows user.'
+        throw [InvalidOperationException]::new('Could not restrict the encrypted API key file to the current Windows user.', $_.Exception)
     }
 }
 
@@ -1703,6 +1888,82 @@ function Read-BlobUiProtectedCredential {
     }
 }
 
+function Assert-BlobUiWritableTarget {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.PSIsContainer) { throw "A file save target is a directory: $Path" }
+        if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) {
+            throw [IO.IOException]::new('The save target is read-only.', -2147024877)
+        }
+        $handle = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Write, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $handle.Dispose()
+    }
+    # Atomic replacements need create/delete access in the destination folder.
+    # Check before changing CSS, data or credentials; no existing contents change.
+    $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    while (-not (Test-Path -LiteralPath $parent -PathType Container)) { $parent = Split-Path -Parent $parent }
+    $probe = Join-Path $parent ('.blobui-write-check-' + [Guid]::NewGuid().ToString('N'))
+    $handle = [IO.FileStream]::new($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
+    $handle.Dispose()
+}
+
+function New-BlobUiCredentialCandidate {
+    param([string]$Path, [string]$ProtectedText)
+
+    Initialize-BlobUiPrivateFileMove
+    $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $candidate = Join-Path $directory ('.blobui-key-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($candidate, $ProtectedText + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        # Set permissions while this is a new file owned by the current user,
+        # before modifying any installed CSS, settings, or existing credential.
+        Set-BlobUiCredentialAcl -Path $candidate
+        return $candidate
+    }
+    catch {
+        if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue }
+        throw
+    }
+}
+
+function Initialize-BlobUiPrivateFileMove {
+    if ($env:OS -eq 'Windows_NT') {
+        if (-not ('BlobUiPrivateFileMove' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class BlobUiPrivateFileMove {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern bool MoveFileExW(string source, string destination, uint flags);
+    public static void Replace(string source, string destination) {
+        // Both paths are in the same folder/volume. The new file keeps its
+        // private DACL instead of merging the old file's ACL via ReplaceFile.
+        if (!MoveFileExW(source, destination, 0x1 | 0x8))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+}
+'@
+        }
+    }
+}
+
+function Move-BlobUiCredentialCandidate {
+    param([string]$Candidate, [string]$Destination)
+
+    if ($env:OS -eq 'Windows_NT') {
+        Initialize-BlobUiPrivateFileMove
+        [BlobUiPrivateFileMove]::Replace($Candidate, $Destination)
+    }
+    else {
+        # Only fixture tests reach this branch; production credentials require DPAPI.
+        [IO.File]::Move($Candidate, $Destination, $true)
+    }
+}
+
 function Invoke-BlobUiInstall {
     param(
         [Parameter(Mandatory = $true)][string]$InstallDirectory,
@@ -1711,9 +1972,12 @@ function Invoke-BlobUiInstall {
         [Parameter(Mandatory = $true)][string]$CompiledCssPath,
         [Parameter(Mandatory = $true)][string]$DataCandidatePath,
         [string]$CredentialProtectedText,
+        [switch]$PreserveRuntime,
+        [ref]$FailureOperation,
         [string]$ReleaseVersion = $script:BlobUiReleaseVersion
     )
 
+    if ($null -ne $FailureOperation) { $FailureOperation.Value = 'prepare' }
     $installFullPath = [System.IO.Path]::GetFullPath($InstallDirectory)
     if (-not (Test-Path -LiteralPath $installFullPath -PathType Container)) {
         throw "The selected Anytype directory does not exist: $installFullPath"
@@ -1751,15 +2015,38 @@ function Invoke-BlobUiInstall {
     if ($null -ne $blobItem -and (($blobItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "The Anytype blob directory is a reparse point: $blobDirectory"
     }
+    if ($null -ne $FailureOperation) { $FailureOperation.Value = 'inspect' }
     $null = Get-BlobUiFileSnapshot -Path $manifestPath
     $previousManifest = Read-BlobUiInstallManifest -Path $manifestPath
     $packagedFiles = Get-BlobUiPackagedFiles -RuntimeSourceDirectory $RuntimeSourceDirectory -AssetsSourceDirectory $AssetsSourceDirectory
     $runtimeSourcePath = [System.IO.Path]::GetFullPath($RuntimeSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
     $runtimeDestinationPath = [System.IO.Path]::GetFullPath($runtimeDestination).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    if ($PreserveRuntime) {
+        # Changing settings or credentials is not an application deployment.
+        # In particular, never hash, replace, or delete the running executable.
+        foreach ($key in @($packagedFiles.Keys)) {
+            if ([string]$key -like 'runtime/*') { $packagedFiles.Remove($key) }
+        }
+    }
     $managedFiles = @($packagedFiles.Keys | Where-Object {
         -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
     } | Sort-Object -Unique)
-    if ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    # Keep a previously managed app binary when a source package is rebuilt
+    # without the optional prebuilt executable. A release that includes a newer
+    # binary replaces it explicitly through the normal copy operation.
+    $settingsAppManagedKey = 'runtime/settings-app.exe'
+    $previousOwnsSettingsApp = @($previousManifest.managedFiles | Where-Object {
+        [string]$_ -ceq $settingsAppManagedKey
+    }).Count -gt 0
+    $settingsAppDestination = Join-Path $runtimeDestination 'settings-app.exe'
+    if (-not $packagedFiles.Contains($settingsAppManagedKey) -and $previousOwnsSettingsApp -and
+        (Test-Path -LiteralPath $settingsAppDestination -PathType Leaf)) {
+        $managedFiles = @($managedFiles + $settingsAppManagedKey | Sort-Object -Unique)
+    }
+    if ($PreserveRuntime) {
+        $managedFiles = @($managedFiles + @($previousManifest.managedFiles | Where-Object { [string]$_ -like 'runtime/*' }) | Sort-Object -Unique)
+    }
+    elseif ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
         $managedFiles = @($previousManifest.managedFiles | Sort-Object -Unique)
         $ownedFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($managedPath in $managedFiles) {
@@ -1810,7 +2097,16 @@ function Invoke-BlobUiInstall {
     foreach ($managedPath in $packagedFiles.Keys) {
         $sourcePath = [System.IO.Path]::GetFullPath([string]$packagedFiles[$managedPath])
         $destinationPath = Get-BlobUiManagedDestinationPath -BlobDirectory $blobDirectory -ManagedPath ([string]$managedPath) -AllowedManagedFileParents $staleDestinations.ToArray()
-        if (-not $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $samePath = $sourcePath.Equals($destinationPath, [System.StringComparison]::OrdinalIgnoreCase)
+        $sameContents = $false
+        if (-not $samePath -and (Test-Path -LiteralPath $destinationPath -PathType Leaf)) {
+            $sourceItem = Get-Item -LiteralPath $sourcePath -Force -ErrorAction Stop
+            $destinationItem = Get-Item -LiteralPath $destinationPath -Force -ErrorAction Stop
+            if ($sourceItem.Length -eq $destinationItem.Length) {
+                $sameContents = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash
+            }
+        }
+        if (-not $samePath -and -not $sameContents) {
             $copyOperations.Add([pscustomobject]@{
                 source = $sourcePath
                 destination = $destinationPath
@@ -1867,7 +2163,25 @@ function Invoke-BlobUiInstall {
         $snapshots.Add((Get-BlobUiFileSnapshot -Path $snapshotPath))
     }
 
+    $writeTargets = @(
+        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) { [pscustomobject]@{ path = $credentialPath; operation = 'credential' } }
+        [pscustomobject]@{ path = $cssDestination; operation = 'css' }
+        [pscustomobject]@{ path = $dataPath; operation = 'settings' }
+        [pscustomobject]@{ path = $manifestPath; operation = 'manifest' }
+    )
+    foreach ($target in $writeTargets) {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = $target.operation }
+        Assert-BlobUiWritableTarget -Path $target.path
+    }
+
+    $credentialCandidate = $null
+    if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential-permissions' }
+        $credentialCandidate = New-BlobUiCredentialCandidate -Path $credentialPath -ProtectedText $CredentialProtectedText
+    }
+
     try {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'assets' }
         [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
         foreach ($staleDestination in $staleDestinations) {
             if (Test-Path -LiteralPath $staleDestination -PathType Leaf) {
@@ -1876,6 +2190,7 @@ function Invoke-BlobUiInstall {
         }
         Remove-BlobUiEmptyManagedDirectories -BlobDirectory $blobDirectory -ManagedPaths $managedMutationPaths.ToArray()
         foreach ($operation in $copyOperations) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = if ($operation.destination.StartsWith($runtimeDestination + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { 'runtime' } else { 'assets' } }
             if (Test-Path -LiteralPath $operation.destination -PathType Container) {
                 throw "A BlobUI managed file destination is an unowned or non-empty directory: $($operation.destination)"
             }
@@ -1888,17 +2203,23 @@ function Invoke-BlobUiInstall {
             [System.IO.Directory]::CreateDirectory($bannerParent) | Out-Null
             [System.IO.File]::WriteAllBytes($manifestBannerPath, [System.IO.File]::ReadAllBytes($bannerSource))
         }
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'css' }
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'settings' }
         Write-BlobUiAtomicText -Path $dataPath -Content $candidateDataText
-        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
-            [System.IO.Directory]::CreateDirectory($credentialDirectory) | Out-Null
-            Write-BlobUiAtomicText -Path $credentialPath -Content ($CredentialProtectedText + [Environment]::NewLine)
-            Set-BlobUiCredentialAcl -Path $credentialPath
-        }
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'manifest' }
         Write-BlobUiAtomicText -Path $manifestPath -Content $manifestText
+        # Commit the already protected key last: no later file write can
+        # force a rollback of a successfully replaced credential.
+        if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential' }
+            Move-BlobUiCredentialCandidate -Candidate $credentialCandidate -Destination $credentialPath
+            $credentialCandidate = $null
+        }
     }
     catch {
-        $installFailure = $_.Exception.Message
+        $installException = $_.Exception
+        $installFailure = $installException.Message
         $rollbackFailures = [System.Collections.Generic.List[string]]::new()
         try {
             Restore-BlobUiFileSnapshots -Snapshots $snapshots
@@ -1907,9 +2228,15 @@ function Invoke-BlobUiInstall {
             $rollbackFailures.Add($_.Exception.Message)
         }
         if ($rollbackFailures.Count -gt 0) {
-            throw "Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))"
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = $FailureOperation.Value + '-rollback-failed' }
+            throw [InvalidOperationException]::new("Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))", $installException)
         }
-        throw $installFailure
+        throw $installException
+    }
+    finally {
+        if ($credentialCandidate -and (Test-Path -LiteralPath $credentialCandidate)) {
+            Remove-Item -LiteralPath $credentialCandidate -Force -ErrorAction SilentlyContinue
+        }
     }
 
     return [ordered]@{
@@ -1926,6 +2253,9 @@ Export-ModuleMember -Function @(
     'Invoke-BlobUiCssCompile',
     'Copy-BlobUiDirectoryContents',
     'Get-BlobUiSettingsData',
+    'Set-BlobUiSettingsV2Overlay',
+    'Update-BlobUiCalendarColorCache',
+    'Test-BlobUiApiConnection',
     'Get-BlobUiInstallPointerPath',
     'Get-BlobUiReleaseVersion',
     'Invoke-BlobUiInstall',

@@ -1,4 +1,4 @@
-/* Keep BlobUI's animated text effects still when Reduced Motion is enabled. */
+/* Stop BlobUI text animations when Reduced Motion is enabled. */
 /* @blobui-if reducedMotion */
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"],
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
@@ -25,56 +25,24 @@
 }
 /* @blobui-endif reducedMotion */
 
-/* Link, mention, and tab hover styling remains available when its toggle is on. */
+/* Keep link previews off only while a non-BlobUI link is hovered. Anytype
+   renders external links with .previewLink and internal routes with its
+   default object preview, so the hovered link is the reliable source marker. */
 /* @blobui-if-not linkHoverEffect */
-a:not([href^="blob://"]):not(.mention):not(.objectMention):not(.object-mention):not([data-type="mention"]):not(:has(mention, .mention, .objectMention, .object-mention, [data-type="mention"])),
-a:not([href^="blob://"]):not(.mention):not(.objectMention):not(.object-mention):not([data-type="mention"]):not(:has(mention, .mention, .objectMention, .object-mention, [data-type="mention"])):is(:hover, .hover) {
-    color: inherit !important;
-    text-decoration: underline !important;
-    text-decoration-line: underline !important;
-    text-decoration-color: currentColor !important;
-    border-bottom-color: transparent !important;
-    box-shadow: none !important;
-    background-color: transparent !important;
-    background-image: none !important;
-    filter: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-    transition: none !important;
+body:has(a:not([href^="blob://"]):hover):not(:has(markupmention:hover)) #preview.previewWrapper:not(:has(.previewTab)) {
+    display: none !important;
 }
 /* @blobui-endif-not linkHoverEffect */
 
-/* Anytype can render object mentions as a custom element, a class, or a link
-   containing a mention element. Cover each form without disabling its click. */
+/* Anytype renders @ mentions as <markupmention> marks. The preview itself is
+   mounted elsewhere in the document, so match the source element on hover. */
 /* @blobui-if-not objectMentionHoverEffect */
-:is(mention, .mention, .objectMention, .object-mention, [data-type="mention"]),
-:is(mention, .mention, .objectMention, .object-mention, [data-type="mention"]):is(:hover, .hover),
-a:not([href^="blob://"]):has(mention, .mention, .objectMention, .object-mention, [data-type="mention"]),
-a:not([href^="blob://"]):has(mention, .mention, .objectMention, .object-mention, [data-type="mention"]):is(:hover, .hover) {
-    color: inherit !important;
-    text-decoration: underline !important;
-    text-decoration-line: underline !important;
-    text-decoration-color: currentColor !important;
-    border-bottom-color: transparent !important;
-    box-shadow: none !important;
-    background-color: transparent !important;
-    background-image: none !important;
-    filter: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-    transition: none !important;
+body:has(markupmention:hover) #preview.previewWrapper:not(:has(.previewTab)) {
+    display: none !important;
 }
 /* @blobui-endif-not objectMentionHoverEffect */
 
-/* Keep tab labels visually steady while preserving their selected state. */
-/* @blobui-if-not tabHoverEffect */
-:where([role="tab"], .tab, .tabs .item, .tabs .tab):not(.active):not(.selected):not(.isActive):not([aria-selected="true"]),
-:where([role="tab"], .tab, .tabs .item, .tabs .tab):not(.active):not(.selected):not(.isActive):not([aria-selected="true"]):is(:hover, .hover) {
-    color: inherit !important;
-    box-shadow: none !important;
-    background-color: transparent !important;
-    background-image: none !important;
-    filter: none !important;
-    transition: none !important;
+/* blob:// markers never open hover previews, independently of the toggles. */
+body:has(a[href^="blob://"]:hover) #preview.previewWrapper:not(:has(.previewTab)) {
+    display: none !important;
 }
-/* @blobui-endif-not tabHoverEffect */

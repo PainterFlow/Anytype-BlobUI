@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>BlobUI Settings</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
+      <span class="window-title">BlobUI Settings</span>
+      <div class="window-controls">
+        <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 8h10"/></svg></button>
+        <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
+      </div>
+    </header>
+    <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden>
+      <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
+        <span class="onboarding-copy">
+          <span id="onboarding-title" class="onboarding-title">Welcome to BlobUI</span>
+          <span id="onboarding-hint" class="onboarding-hint">Press anywhere to continue</span>
+        </span>
+      </button>
+      <section id="onboarding-api" class="onboarding-api" aria-labelledby="onboarding-api-title" hidden>
+        <div class="onboarding-scroll" id="onboarding-scroll">
+          <header class="onboarding-api-heading">
+            <h1 id="onboarding-api-title" tabindex="-1">Would you like to use an API key?</h1>
+            <p>Choose how you want to use BlobUI.</p>
+          </header>
+          <div class="onboarding-options" role="group" aria-label="API key preference">
+            <button id="onboarding-no-api-option" class="onboarding-option" type="button" aria-pressed="false" data-api="false">
+              <span class="onboarding-option-title">No API Key</span>
+              <span class="onboarding-features" role="list">
+                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Read and use your Data for BlobUI features</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+              </span>
+            </button>
+            <button id="onboarding-api-option" class="onboarding-option recommended-option" type="button" aria-pressed="false" data-api="true">
+              <span class="recommended-label">Recommended</span>
+              <span class="recommended-panel">
+              <span class="onboarding-option-title">Use API Key</span>
+              <span class="onboarding-features" role="list">
+                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Read and use your Data for BlobUI features</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
+              </span>
+              </span>
+            </button>
+          </div>
+          <p id="onboarding-choice-error" class="field-error" role="alert"></p>
+        </div>
+      </section>
+      <section id="onboarding-connection" class="onboarding-api" aria-labelledby="connection-title" hidden>
+        <div class="onboarding-scroll" id="connection-scroll">
+          <div class="connection-content">
+            <header class="onboarding-api-heading">
+              <h1 id="connection-title" tabindex="-1">Connect to Anytype</h1>
+              <p>Add your read-only API key to enable Calendar Colors and data-powered features.</p>
+            </header>
+            <form id="connection-form" class="connection-form" novalidate>
+              <div class="font-fields">
+                <label class="input-field"><span>API key</span>
+                  <input id="connection-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API v2 key" aria-describedby="connection-error" required />
+                </label>
+                <label class="input-field"><span>Port <span class="optional-label">(optional)</span></span>
+                  <input id="connection-port" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="31009" aria-describedby="connection-port-hint connection-error" />
+                </label>
+              </div>
+              <p id="connection-port-hint" class="input-hint">Leave the port blank to use 31009.</p>
+              <section class="connection-guide" aria-labelledby="connection-guide-title">
+                <h2 id="connection-guide-title">Create an API key</h2>
+                <ol>
+                  <li>Open Anytype’s settings and choose <strong>Local API</strong>.</li>
+                  <li>Turn on <strong>Enabled</strong>. Keep the port at <strong>31009</strong>, or enter your custom port above.</li>
+                  <li>Click <strong>Create new</strong> and name the app <strong>BlobUI</strong>.</li>
+                  <li>Choose the spaces BlobUI can read. Select <strong>Allow access to all spaces</strong> for features across your workspace.</li>
+                  <li>Set <strong>Access</strong> to <strong>Read only</strong> and <strong>Expires</strong> to <strong>Never</strong>.</li>
+                  <li>Click <strong>Create key</strong>, copy the API v2 key, and paste it above.</li>
+                </ol>
+                <p>Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.</p>
+              </section>
+              <p id="connection-error" class="field-error" role="alert"></p>
+              <div class="connection-actions">
+                <button id="connection-back" class="connection-back" type="button">Back</button>
+                <button id="connection-confirm" class="connection-confirm" type="submit">Confirm</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+    </section>
+    <div class="app-shell" id="settings-shell">
+      <aside class="sidebar" aria-label="Settings navigation">
+        <nav class="sidebar-nav" aria-label="Settings">
+          <span class="nav-group-label">Application</span>
+          <button id="preferences-nav" class="nav-item active" type="button" aria-current="page" data-settings-page="preferences">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"/><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"/></svg>
+            <span>Preferences</span>
+          </button>
+          <button id="accessibility-nav" class="nav-item" type="button" data-settings-page="accessibility">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="6" r="1.2" fill="currentColor"/><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Accessibility</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+        <div class="sidebar-actions">
+          <button id="save-button" class="sidebar-action save-button" type="button" title="Save changes" hidden disabled>
+            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>
+            <span class="save-spinner" aria-hidden="true"></span>
+            <span class="save-label sr-only">Save changes</span>
+          </button>
+          <div class="log-control" id="log-control">
+            <button id="log-button" class="sidebar-action log-button" type="button" title="Logs" aria-expanded="false" aria-controls="log-popup" hidden>
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg>
+              <span id="log-label" class="sr-only">Logs</span>
+            </button>
+            <section id="log-popup" class="log-popup" aria-labelledby="log-title" hidden>
+              <div class="log-heading">
+                <h2 id="log-title">Logs</h2>
+                <button id="copy-logs" class="copy-logs" type="button" aria-label="Copy all logs" title="Copy all logs"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 4V3H3v9h1"/></svg></button>
+              </div>
+              <div id="log-entries" class="log-entries" role="log" aria-live="polite"></div>
+              <span id="copy-status" class="sr-only" role="status"></span>
+            </section>
+          </div>
+        </div>
+        <div class="sidebar-foot">
+          <span>Alt+R to rebuild custom.css</span>
+          <span>Numpad 1 in Anytype</span>
+          <button id="open-author" class="repository-link" type="button" aria-label="Open PainterFlow11 on GitHub" title="https://github.com/PainterFlow">
+            <span>Made by PainterFlow11</span>
+          </button>
+          <button id="open-repository" class="repository-link" type="button" aria-label="Open BlobUI on GitHub" title="https://github.com/PainterFlow/Anytype-BlobUI">
+            <span>Github</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></svg>
+          </button>
+        </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <section class="page-content" aria-labelledby="page-title">
+          <div class="settings-content">
+          <header class="page-heading">
+            <h1 id="page-title">Preferences</h1>
+          </header>
+
+          <div id="preferences-page" class="settings-page">
+          <section class="settings-group accent-group" aria-labelledby="accent-heading">
+            <div class="section-heading">
+              <h2 id="accent-heading">Accent color</h2>
+              <p>Choose a color for highlights and active controls.</p>
+            </div>
+
+            <div class="settings-list">
+              <label class="native-accent-control settings-row" for="native-accent">
+                <span>Use Anytype accent</span>
+                <input id="native-accent" type="checkbox" role="switch" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+              <div class="color-editor" id="color-editor">
+              <div class="color-plane" id="color-plane" role="group" aria-label="Color saturation and brightness">
+                <span class="color-cursor" id="color-cursor" aria-hidden="true"></span>
+                <input class="sr-only" id="accent-saturation" type="range" min="0" max="100" value="64" aria-label="Color saturation" />
+                <input class="sr-only" id="accent-brightness" type="range" min="0" max="100" value="87" aria-label="Color brightness" />
+              </div>
+              <div class="color-controls">
+                <label class="hue-field" for="accent-hue">Hue</label>
+                <input id="accent-hue" class="hue-slider" type="range" min="0" max="359" value="300" aria-label="Color hue" />
+                <label class="color-value-label" for="accent-value">Hex or CSS color</label>
+                <div class="color-value-row">
+                  <span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span>
+                  <input id="accent-value" class="color-text-input" type="text" spellcheck="false" autocomplete="off" aria-describedby="accent-error" />
+                </div>
+              </div>
+              </div>
+            </div>
+            <p class="field-error" id="accent-error" aria-live="polite"></p>
+          </section>
+
+          <section class="settings-group typography-group" aria-labelledby="typography-heading">
+            <div class="section-heading">
+              <h2 id="typography-heading">Font</h2>
+              <p>Use the same fonts as your Anytype workspace.</p>
+            </div>
+
+            <div class="font-fields">
+              <label class="input-field">
+                <span>Interface font</span>
+                <input id="font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Libron" />
+              </label>
+              <label class="input-field">
+                <span>Code font</span>
+                <input id="code-font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Consolas" />
+              </label>
+            </div>
+
+            <p class="field-error" id="font-error" aria-live="polite"></p>
+          </section>
+          <section class="settings-group" aria-labelledby="api-settings-heading">
+            <div class="section-heading">
+              <h2 id="api-settings-heading">Anytype API</h2>
+              <p>Change your API key or port, or use BlobUI without an API key.</p>
+            </div>
+            <button id="open-connection" class="manage-connection" type="button">Manage connection</button>
+          </section>
+          </div>
+          <div id="accessibility-page" class="settings-page" hidden>
+            <section class="settings-group" aria-labelledby="reduced-motion-heading">
+              <div class="section-heading">
+                <h2 id="reduced-motion-heading">Reduced Motion</h2>
+                <p>Stops BlobUI’s animated text effects to reduce motion.</p>
+              </div>
+              <div class="settings-list">
+                <label class="native-accent-control settings-row accessibility-row" for="reduced-motion">
+                  <span>Reduced Motion</span>
+                  <input id="reduced-motion" type="checkbox" role="switch" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+            </section>
+            <section class="settings-group" aria-labelledby="hover-effects-heading">
+              <div class="section-heading">
+                <h2 id="hover-effects-heading">Hover Effects</h2>
+                <p>Choose which hover previews appear in Anytype.</p>
+              </div>
+              <div class="settings-list">
+                <label class="native-accent-control settings-row accessibility-row" for="tab-hover-effect">
+                  <span>Tab hover effect</span>
+                  <input id="tab-hover-effect" type="checkbox" role="switch" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+                <label class="native-accent-control settings-row accessibility-row" for="link-hover-effect">
+                  <span>Links hover effect</span>
+                  <input id="link-hover-effect" type="checkbox" role="switch" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+                <label class="native-accent-control settings-row accessibility-row" for="object-mention-hover-effect">
+                  <span>Object mention hover effect</span>
+                  <input id="object-mention-hover-effect" type="checkbox" role="switch" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="accessibility-note">BlobUI’s <code>blob://</code> links never show hover previews.</p>
+            </section>
+          </div>
+          </div>
+        </section>
+
+        <div class="sr-only" id="save-status" role="status" aria-live="polite">
+          <span id="status-message">Loading your current settings…</span>
+        </div>
+      </main>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>

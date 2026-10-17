@@ -8,3 +8,6 @@ data.json
 *.dpapi
 /scripts/tests/.tmp/
 /.test-run/
+/settings-app/target/
+/settings-app/gen/
+/settings-app/dist/blobui-settings.exe

@@ -450,6 +450,54 @@ try {
     $otherSpaceCalendarSearchCalls = @($apiRequests | Where-Object { $_.Method -eq 'Post' -and $_.Path.StartsWith("/v2/spaces/$otherSpaceId/search") -and [string]::Join(',', @($_.Body.fields)) -ceq $otherSpaceCalendarColorPropertyKey })
     Assert-Equal 1 $otherSpaceCalendarSearchCalls.Count 'Calendar Color was not searched in every accessible space where the property exists.'
 
+    $v1OverlayFixture = [pscustomobject]@{
+        selectedSpace = [pscustomobject]@{ id = $testSpaceId; name = 'BlobUI Settings' }
+        settingsObjectIds = @($generalObjectId, $spaceObjectId)
+        settings = [pscustomobject]@{
+            fontFamily = 'Legacy Font'
+            codeFontFamily = 'Legacy Code'
+            accentColor = '#123456'
+            bannerPath = 'spacebanner\banner.png'
+        }
+        calendarObjectColors = [pscustomobject]@{ $staleCalendarObjectId = 'Red' }
+        installDirectory = $installDirectory
+    }
+    $v2OverlayFixture = [pscustomobject]@{
+        version = 2
+        settings = [pscustomobject]@{
+            fontFamily = 'Inter'
+            codeFontFamily = 'Cascadia Code'
+            accentColor = 'rgba(12 34 56 / 50%)'
+            accentMode = 'custom'
+            accentPreset = ''
+        }
+    }
+    $v1OverlayResult = Set-BlobUiSettingsV2Overlay -Data $v1OverlayFixture -Overlay $v2OverlayFixture
+    Assert-Equal 2 $v1OverlayResult.settingsV2.version 'The first v2 save did not add settingsV2 to a version 1 PSCustomObject.'
+    Assert-Equal 'Inter' $v1OverlayResult.settings.fontFamily 'The v2 save did not override the normalized font.'
+    Assert-Equal 'rgba(12 34 56 / 50%)' $v1OverlayResult.settings.accentColor 'The v2 save changed a valid custom rgba accent.'
+    Assert-Equal $true $v1OverlayResult.settings.reducedMotion 'The local settings overlay did not default Reduced Motion on.'
+    Assert-Equal $false $v1OverlayResult.settings.tabHoverEffect 'The local settings overlay did not default Tab Hover Effect off.'
+    Assert-Equal $false $v1OverlayResult.settings.linkHoverEffect 'The local settings overlay did not default Links Hover Effect off.'
+    Assert-Equal $false $v1OverlayResult.settings.objectMentionHoverEffect 'The local settings overlay did not default Object Mention Hover Effect off.'
+    Assert-Equal "$generalObjectId|$spaceObjectId" $v1OverlayResult.settingsObjectIds 'The v2 overlay changed selected legacy object IDs.'
+    Assert-Equal $testSpaceId $v1OverlayResult.selectedSpace.id 'The v2 overlay changed the selected settings space.'
+    Assert-Equal 'Red' $v1OverlayResult.calendarObjectColors.$staleCalendarObjectId 'The v2 overlay changed cached calendar colors.'
+    $invalidPresetFixture = ConvertTo-TestApiObject $v1OverlayFixture
+    $invalidPresetBefore = ConvertTo-Json -InputObject $invalidPresetFixture -Depth 20 -Compress
+    $invalidPresetOverlay = [pscustomobject]@{
+        version = 2
+        settings = [pscustomobject]@{
+            fontFamily = 'Should Stay Old'
+            codeFontFamily = 'Cascadia Code'
+            accentColor = 'Blue'
+            accentMode = 'preset'
+            accentPreset = 'amber'
+        }
+    }
+    Assert-Throws { Set-BlobUiSettingsV2Overlay -Data $invalidPresetFixture -Overlay $invalidPresetOverlay } 'A mismatched preset key was accepted.' 'preset accent selection'
+    Assert-Equal $invalidPresetBefore (ConvertTo-Json -InputObject $invalidPresetFixture -Depth 20 -Compress) 'An invalid v2 preset partially mutated the data object.'
+
     $emptyDataPath = Join-Path $testRoot 'empty-data.json'
     $emptyData = Get-BlobUiSettingsData -ApiKey 'unit-test-key' -OutputPath $emptyDataPath -SpaceId $testSpaceId -ObjectIds @($emptyObjectId) -InstallDirectory $installDirectory -ApiTransport $apiTransport
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
@@ -469,6 +517,8 @@ try {
     $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
     $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
+    Assert-True ($defaultAccentCss.Contains('background-position: 50% 50%;')) 'Default Reduced Motion did not suppress the animated effects.'
+    Assert-True ($defaultAccentCss.Contains('#preview.previewWrapper:has(.previewTab)')) 'The default Tab Hover Effect was not suppressed.'
     Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
     Assert-True (-not $defaultAccentCss.Contains('html .switch.active.blue')) 'Accent Color Default overrides Anytype''s native toggle color.'
     Assert-True (-not $defaultAccentCss.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'Accent Color Default still overrides Anytype''s original home icon color.'
@@ -566,10 +616,11 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css|60-accessibility.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
-    Assert-True ($css.Contains('a:not([href^="blob://"])')) 'Links Hover Effect suppression did not compile.'
-    Assert-True ($css.Contains(':is(mention, .mention, .objectMention, .object-mention, [data-type="mention"])')) 'Object mention hover suppression did not compile.'
-    Assert-True (-not $css.Contains(':where([role="tab"], .tab, .tabs .item, .tabs .tab)')) 'The enabled Tab Hover Effect was suppressed.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css|60-accessibility.css|60-tab-hover-preview.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-True ($css.Contains('body:has(a:not([href^="blob://"]):not(:has(markupmention)):hover)')) 'Links Hover Effect suppression did not compile.'
+    Assert-True ($css.Contains('body:has(markupmention:hover)')) 'Object mention hover suppression did not compile.'
+    Assert-True (-not $css.Contains('#preview.previewWrapper:has(.previewTab)')) 'The enabled Tab Hover Effect was suppressed.'
+    Assert-True (-not $css.Contains('background-position: 50% 50%;')) 'Disabled Reduced Motion still suppresses RGB/Neon effects.'
     Assert-True (-not $css.Contains('@blobui-if')) 'Compiled CSS retained an accessibility setting condition.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
@@ -700,7 +751,7 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $nestedDev 'nested\05-first.css'), '.first { order: 1; }')
     $nestedCompilePath = Join-Path $testRoot 'nested.css'
     $nestedResult = Invoke-BlobUiCssCompile -DevDirectory $nestedDev -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $nestedCompilePath -Data $fetchedData
-    Assert-Equal '10-later.css|nested\05-first.css' ([string[]]@($nestedResult.sourceFiles | ForEach-Object { $_.Substring($nestedDev.Length + 1) })) 'Recursive CSS discovery or ordinal path order failed.'
+    Assert-Equal '10-later.css|nested/05-first.css' ([string[]]@($nestedResult.sourceFiles | ForEach-Object { $_.Substring($nestedDev.Length + 1).Replace('\', '/') })) 'Recursive CSS discovery or ordinal path order failed.'
     $nestedCss = [System.IO.File]::ReadAllText($nestedCompilePath)
     Assert-True ($nestedCss.IndexOf('.10-later') -lt 0) 'Unexpected test selector was introduced.'
     Assert-True ($nestedCss.IndexOf('.later') -lt $nestedCss.IndexOf('.first')) 'Nested CSS was not concatenated in deterministic path order.'
@@ -803,6 +854,7 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.assetsPath 'spacebanner\banner.png') -PathType Leaf) 'The banner asset was not installed.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Update.ps1') -PathType Leaf) 'The runtime install did not copy Update.ps1.'
     Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Uninstall.ps1') -PathType Leaf) 'The runtime install did not copy Uninstall.ps1.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $firstInstall.runtimePath 'scripts\Settings.ps1') -PathType Leaf) 'The runtime install did not copy the Settings app launcher.'
     Assert-Equal 'keep-me' ([System.IO.File]::ReadAllText((Join-Path $firstInstall.assetsPath 'user-file.txt'))) 'The install removed an unrelated asset.'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $blobDirectory 'backups'))) 'The install created a persistent backup directory.'
     $backupArtifacts = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter '*.bak')
@@ -877,7 +929,7 @@ try {
     $sourceFixture = Join-Path $testRoot 'Source Folder With Spaces'
     $sourceScriptsFixture = Join-Path $sourceFixture 'scripts'
     [System.IO.Directory]::CreateDirectory($sourceScriptsFixture) | Out-Null
-    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1')) {
+    foreach ($sourceFile in @('BlobUI.Core.psm1', 'Get-Data.ps1', 'Compile.ps1', 'Install.ps1', 'Rebuild.ps1', 'Update.ps1', 'Uninstall.ps1', 'Settings.ps1')) {
         Copy-Item -LiteralPath (Join-Path $scriptsDirectory $sourceFile) -Destination $sourceScriptsFixture
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dev') -Destination $sourceFixture -Recurse
@@ -886,6 +938,139 @@ try {
     Write-BlobUiInstallPointer -SourceDirectory $sourceFixture -InstallDirectory $installDirectory
     $pointerPath = Get-BlobUiInstallPointerPath -SourceDirectory $sourceFixture
     $sourceRebuildArguments = @{ ApiTransport = $apiTransport }
+
+    $settingsV2InstallDirectory = Join-Path $testRoot 'Settings V2 Anytype Data'
+    $settingsV2BlobDirectory = Join-Path $settingsV2InstallDirectory 'blob'
+    $settingsV2StagingDirectory = Join-Path $settingsV2BlobDirectory 'staging'
+    [System.IO.Directory]::CreateDirectory($settingsV2StagingDirectory) | Out-Null
+    [System.IO.Directory]::CreateDirectory((Join-Path $settingsV2BlobDirectory 'credentials')) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $settingsV2InstallDirectory 'custom.css'), 'old-v2-css-sentinel')
+    $settingsV2DataPath = Join-Path $settingsV2BlobDirectory 'data.json'
+    $settingsV2Data = [ordered]@{
+        schemaVersion = 1
+        apiVersion = 'v2'
+        selectedSpace = [ordered]@{ id = ''; name = '' }
+        settingsObjectIds = @()
+        settings = [ordered]@{
+            fontFamily = 'Migrated Local Font'
+            codeFontFamily = 'Migrated Local Code Font'
+            accentColor = '#123456'
+            bannerPath = 'spacebanner\banner.png'
+        }
+        calendarObjectColors = [ordered]@{ $staleCalendarObjectId = 'Red' }
+        fetchedAtUtc = '2025-01-02T03:04:05.0000000Z'
+        installDirectory = [System.IO.Path]::GetFullPath($settingsV2InstallDirectory)
+    }
+    Write-BlobUiAtomicJson -Path $settingsV2DataPath -InputObject $settingsV2Data
+    $settingsV2OverridePath = Join-Path $settingsV2StagingDirectory 'settings-v2.json'
+    $settingsV2FirstSave = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = 'Migrated Local Font'
+            codeFontFamily = 'Migrated Local Code Font'
+            accentColor = 'Amber'
+            accentMode = 'preset'
+            accentPreset = 'amber'
+        }
+    }
+    Write-BlobUiAtomicJson -Path $settingsV2OverridePath -InputObject $settingsV2FirstSave
+    $apiRequests.Clear()
+    $firstV2SaveOutput = (& (Join-Path $sourceScriptsFixture 'Rebuild.ps1') -InstallDirectory $settingsV2InstallDirectory -SettingsOverridePath $settingsV2OverridePath -ApiTransport $apiTransport 6>&1 | Out-String)
+    Assert-True ($firstV2SaveOutput.Contains('BlobUI_CALENDAR_CACHE=cached')) 'A v2 save without a credential did not report its cached Calendar Color status.'
+    $firstV2SavedData = Read-BlobUiDataFile -Path $settingsV2DataPath
+    Assert-Equal 2 $firstV2SavedData.settingsV2.version 'The first v2 Rebuild did not migrate the local overlay.'
+    Assert-Equal 'Amber' $firstV2SavedData.settingsV2.settings.accentColor 'The first v2 Rebuild did not save the selected preset.'
+    Assert-Equal 'var(--color-amber, var(--color-orange))' $firstV2SavedData.settings.accentColor 'The v2 preset was not normalized for CSS compilation.'
+    Assert-Equal 'Migrated Local Font' $firstV2SavedData.settingsV2.settings.fontFamily 'The v2 save lost migrated local settings before applying the edit.'
+    Assert-Equal 0 @($firstV2SavedData.settingsObjectIds).Count 'The v2 save required or invented legacy Settings object IDs.'
+    Assert-Equal '' $firstV2SavedData.selectedSpace.id 'The v2 save required or changed a legacy settings space.'
+    Assert-Equal 'Red' $firstV2SavedData.calendarObjectColors.$staleCalendarObjectId 'The no-credential save discarded cached calendar colors.'
+    Assert-Equal ([DateTime]::Parse('2025-01-02T03:04:05.0000000Z').ToUniversalTime().Ticks) ([DateTime]$firstV2SavedData.fetchedAtUtc).ToUniversalTime().Ticks 'The no-credential save changed the Calendar Color cache timestamp.'
+    Assert-Equal 0 $apiRequests.Count 'The first v2 save made API calls without a saved credential.'
+    $firstV2SavedCss = [System.IO.File]::ReadAllText((Join-Path $settingsV2InstallDirectory 'custom.css'))
+    Assert-True ($firstV2SavedCss.Contains('--color-blob-accent: var(--color-amber, var(--color-orange));')) 'The v2 rebuild did not compile the selected preset.'
+
+    $settingsV2CredentialPath = Join-Path (Join-Path $settingsV2BlobDirectory 'credentials') 'anytype-api-key.dpapi'
+    Copy-Item -LiteralPath $firstInstall.credentialPath -Destination $settingsV2CredentialPath
+    $cachedCalendarBeforeFailure = Read-BlobUiDataFile -Path $settingsV2DataPath
+    $settingsV2OfflineSave = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = 'Offline Save Font'
+            codeFontFamily = 'Cascadia Code'
+            accentColor = 'rgba(12 34 56 / 50%)'
+            accentMode = 'custom'
+            accentPreset = ''
+        }
+    }
+    Write-BlobUiAtomicJson -Path $settingsV2OverridePath -InputObject $settingsV2OfflineSave
+    $apiRequests.Clear()
+    $offlineV2SaveOutput = (& (Join-Path $sourceScriptsFixture 'Rebuild.ps1') -InstallDirectory $settingsV2InstallDirectory -SettingsOverridePath $settingsV2OverridePath -ApiTransport $unavailableApiTransport 6>&1 | Out-String)
+    Assert-True ($offlineV2SaveOutput.Contains('BlobUI_CALENDAR_CACHE=cached')) 'A failed Calendar Color refresh did not report the cached-data status.'
+    $offlineV2SavedData = Read-BlobUiDataFile -Path $settingsV2DataPath
+    Assert-Equal 'Offline Save Font' $offlineV2SavedData.settingsV2.settings.fontFamily 'An unavailable Anytype API blocked a local v2 save.'
+    Assert-Equal 'rgba(12 34 56 / 50%)' $offlineV2SavedData.settingsV2.settings.accentColor 'A local rgba accent was narrowed during a v2 save.'
+    Assert-Equal 'Red' $offlineV2SavedData.calendarObjectColors.$staleCalendarObjectId 'Calendar refresh failure discarded the last saved color values.'
+    Assert-Equal $cachedCalendarBeforeFailure.fetchedAtUtc $offlineV2SavedData.fetchedAtUtc 'Calendar refresh failure changed the cache timestamp.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Body -and [string]$_.Body.type -ceq 'setting' }).Count 'A v2 save fetched legacy Settings objects.'
+
+    $offlineDataBeforeInvalidSave = [System.IO.File]::ReadAllText($settingsV2DataPath)
+    $offlineCssBeforeInvalidSave = [System.IO.File]::ReadAllText((Join-Path $settingsV2InstallDirectory 'custom.css'))
+    $invalidV2Save = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = 'Must Not Persist'
+            codeFontFamily = 'Cascadia Code'
+            accentColor = '#FFFFFF'
+            accentMode = 'custom'
+            accentPreset = ''
+        }
+    }
+    Write-BlobUiAtomicJson -Path $settingsV2OverridePath -InputObject $invalidV2Save
+    Assert-Throws {
+        & (Join-Path $sourceScriptsFixture 'Rebuild.ps1') -InstallDirectory $settingsV2InstallDirectory -SettingsOverridePath $settingsV2OverridePath -ApiTransport $unavailableApiTransport 6>&1 | Out-Null
+    } 'An invalid v2 save was accepted.' 'White is not supported for Accent Color'
+    Assert-Equal $offlineDataBeforeInvalidSave ([System.IO.File]::ReadAllText($settingsV2DataPath)) 'A rejected v2 save changed data.json.'
+    Assert-Equal $offlineCssBeforeInvalidSave ([System.IO.File]::ReadAllText((Join-Path $settingsV2InstallDirectory 'custom.css'))) 'A rejected v2 save changed custom.css.'
+
+    $settingsV2RefreshSave = [ordered]@{
+        version = 2
+        settings = [ordered]@{
+            fontFamily = 'Refreshed Local Font'
+            codeFontFamily = 'Cascadia Code'
+            accentColor = 'Blue'
+            accentMode = 'preset'
+            accentPreset = 'blue'
+        }
+    }
+    Write-BlobUiAtomicJson -Path $settingsV2OverridePath -InputObject $settingsV2RefreshSave
+    $apiRequests.Clear()
+    $refreshedV2SaveOutput = (& (Join-Path $sourceScriptsFixture 'Rebuild.ps1') -InstallDirectory $settingsV2InstallDirectory -SettingsOverridePath $settingsV2OverridePath -ApiTransport $apiTransport 6>&1 | Out-String)
+    Assert-True ($refreshedV2SaveOutput.Contains('BlobUI_CALENDAR_CACHE=refreshed')) 'A successful Anytype API refresh was not reported after a v2 save.'
+    $refreshedV2Data = Read-BlobUiDataFile -Path $settingsV2DataPath
+    Assert-Equal 'Refreshed Local Font' $refreshedV2Data.settingsV2.settings.fontFamily 'A successful calendar refresh replaced the local font selection.'
+    Assert-Equal 'Blue' $refreshedV2Data.settingsV2.settings.accentColor 'A successful calendar refresh replaced the local accent selection.'
+    Assert-Equal 'Blue' $refreshedV2Data.calendarObjectColors.$calendarBlueObjectId 'A v2 save did not refresh Calendar Color data.'
+    Assert-True ($null -eq $refreshedV2Data.calendarObjectColors.PSObject.Properties[$staleCalendarObjectId]) 'A successful Calendar Color refresh retained a stale object override.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Body -and [string]$_.Body.type -ceq 'setting' }).Count 'A successful v2 save fetched legacy Settings objects.'
+
+    $apiRequests.Clear()
+    $v2UpdateOfflineOutput = (& (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $settingsV2InstallDirectory -ApiTransport $unavailableApiTransport 6>&1 | Out-String)
+    Assert-True ($v2UpdateOfflineOutput.Contains('BlobUI_CALENDAR_CACHE=cached')) 'A v2 update did not report its cached Calendar Color status when the API was unavailable.'
+    $v2UpdatedOfflineData = Read-BlobUiDataFile -Path $settingsV2DataPath
+    Assert-Equal 'Refreshed Local Font' $v2UpdatedOfflineData.settingsV2.settings.fontFamily 'An offline v2 update lost the local font selection.'
+    Assert-Equal 'Blue' $v2UpdatedOfflineData.settingsV2.settings.accentColor 'An offline v2 update lost the local accent selection.'
+    Assert-Equal $refreshedV2Data.fetchedAtUtc $v2UpdatedOfflineData.fetchedAtUtc 'An offline v2 update changed the Calendar Color cache timestamp.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Body -and [string]$_.Body.type -ceq 'setting' }).Count 'An offline v2 update fetched legacy Settings objects.'
+
+    $apiRequests.Clear()
+    $v2UpdateRefreshedOutput = (& (Join-Path $sourceScriptsFixture 'Update.ps1') -InstallDirectory $settingsV2InstallDirectory -ApiTransport $apiTransport 6>&1 | Out-String)
+    Assert-True ($v2UpdateRefreshedOutput.Contains('BlobUI_CALENDAR_CACHE=refreshed')) 'A v2 update did not report a successful Calendar Color refresh.'
+    $v2UpdatedData = Read-BlobUiDataFile -Path $settingsV2DataPath
+    Assert-Equal 'Refreshed Local Font' $v2UpdatedData.settingsV2.settings.fontFamily 'A successful v2 update replaced the local font selection.'
+    Assert-Equal 'Blue' $v2UpdatedData.settingsV2.settings.accentColor 'A successful v2 update replaced the local accent selection.'
+    Assert-Equal 'Blue' $v2UpdatedData.calendarObjectColors.$calendarBlueObjectId 'A v2 update did not refresh Calendar Color data.'
+    Assert-Equal 0 @($apiRequests | Where-Object { $_.Body -and [string]$_.Body.type -ceq 'setting' }).Count 'A successful v2 update fetched legacy Settings objects.'
 
     $releaseUpdateDirectory = Join-Path (Join-Path $testRoot 'Update target\rElEaSeS') 'Anytype Data'
     $releaseUpdateBlob = Join-Path $releaseUpdateDirectory 'blob'
@@ -1125,6 +1310,47 @@ try {
     Assert-Equal 1 @($apiRequests | Where-Object { $_.Path -match ("/objects/" + [System.Text.RegularExpressions.Regex]::Escape($emptyObjectId) + "\?include=properties&ids=full$") }).Count 'Update did not reuse the selected object ID from the legacy data file.'
     Assert-Equal 0 @($apiRequests | Where-Object { $_.Method -eq 'Post' -and [string]$_.Body.type -ceq 'setting' }).Count 'A legacy update rediscovered settings objects.'
 
+    $settingsPackageFixture = Join-Path $testRoot 'Settings App Package Source'
+    Copy-Item -LiteralPath $sourceFixture -Destination $settingsPackageFixture -Recurse
+    $settingsPackageAppDirectory = Join-Path $settingsPackageFixture 'settings-app\dist'
+    [System.IO.Directory]::CreateDirectory($settingsPackageAppDirectory) | Out-Null
+    $settingsPackageAppSource = Join-Path $settingsPackageAppDirectory 'blobui-settings.exe'
+    [System.IO.File]::WriteAllBytes($settingsPackageAppSource, [System.Text.Encoding]::UTF8.GetBytes('fixture-settings-app-binary'))
+    $settingsPackageInstallDirectory = Join-Path $testRoot 'Settings App Package Target'
+    [System.IO.Directory]::CreateDirectory($settingsPackageInstallDirectory) | Out-Null
+    $settingsPackageData = ConvertTo-TestApiObject $fetchedData
+    $settingsPackageData.installDirectory = [System.IO.Path]::GetFullPath($settingsPackageInstallDirectory)
+    $settingsPackageDataPath = Join-Path $testRoot 'settings-app-package-data.json'
+    Write-BlobUiAtomicJson -Path $settingsPackageDataPath -InputObject $settingsPackageData
+    $settingsPackageCssPath = Join-Path $testRoot 'settings-app-package.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $settingsPackageFixture 'Dev') -AssetSourceDirectory (Join-Path $settingsPackageFixture 'assets') -OutputPath $settingsPackageCssPath -Data $settingsPackageData | Out-Null
+    $settingsPackageArguments = @{
+        InstallDirectory = $settingsPackageInstallDirectory
+        RuntimeSourceDirectory = $settingsPackageFixture
+        AssetsSourceDirectory = Join-Path $settingsPackageFixture 'assets'
+        CompiledCssPath = $settingsPackageCssPath
+        DataCandidatePath = $settingsPackageDataPath
+    }
+    $null = Invoke-BlobUiInstall @settingsPackageArguments
+    $settingsPackageAppDestination = Join-Path $settingsPackageInstallDirectory 'blob\runtime\settings-app.exe'
+    Assert-Equal 'fixture-settings-app-binary' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($settingsPackageAppDestination))) 'The settings app executable was not packaged in the runtime.'
+    $settingsPackageManifestPath = Join-Path $settingsPackageInstallDirectory 'blob\.blobui-managed-files.json'
+    $settingsPackageManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($settingsPackageManifestPath))
+    Assert-True (@($settingsPackageManifest.managedFiles) -contains 'runtime/settings-app.exe') 'The settings app executable was omitted from the ownership manifest.'
+    $settingsPackageLock = [System.IO.File]::Open($settingsPackageAppDestination, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+        $null = Invoke-BlobUiInstall @settingsPackageArguments
+    }
+    finally {
+        $settingsPackageLock.Dispose()
+    }
+    Assert-Equal 'fixture-settings-app-binary' ([System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($settingsPackageAppDestination))) 'An identical running settings app binary was replaced during rebuild.'
+    Remove-Item -LiteralPath $settingsPackageAppSource -Force
+    $null = Invoke-BlobUiInstall @settingsPackageArguments
+    Assert-True (Test-Path -LiteralPath $settingsPackageAppDestination -PathType Leaf) 'A source rebuild without a packaged app removed the installed launcher.'
+    $settingsPackageManifest = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($settingsPackageManifestPath))
+    Assert-True (@($settingsPackageManifest.managedFiles) -contains 'runtime/settings-app.exe') 'A source rebuild without an app dropped the managed launcher from its manifest.'
+
     $noInstallFixture = Join-Path $testRoot 'No Install Source'
     Copy-Item -LiteralPath $sourceFixture -Destination $noInstallFixture -Recurse
     $noInstallPointer = Get-BlobUiInstallPointerPath -SourceDirectory $noInstallFixture
@@ -1253,7 +1479,7 @@ try {
         $nestedJunctionPath = Join-Path $nestedBlob 'external'
         New-Item -ItemType Junction -Path $nestedJunctionPath -Target $outsideReparseTarget -ErrorAction Stop | Out-Null
         & $sourceUninstallScript -InstallDirectory $nestedJunctionRoot
-        Assert-True (-not (Test-Path -LiteralPath $nestedJunctionRoot)) 'Uninstall left a blob tree containing a junction.'
+        Assert-True (-not (Test-Path -LiteralPath $nestedBlob)) 'Uninstall left a blob tree containing a junction.'
         Assert-Equal 'preserve-outside' ([System.IO.File]::ReadAllText((Join-Path $outsideReparseTarget 'blob\outside-sentinel.txt'))) 'Uninstall traversed a junction and removed external blob contents.'
     }
 

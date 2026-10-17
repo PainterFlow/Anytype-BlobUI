@@ -2,10 +2,23 @@ param(
     [string]$ApiBaseUri = 'http://127.0.0.1:31009',
     [scriptblock]$ApiTransport,
     [string]$InstallDirectory,
+    [string]$SettingsOverridePath,
+    [switch]$ConfigureConnectionFromStdin,
+    [object]$ConnectionOverride,
     [switch]$ForUpdate
 )
 
 $ErrorActionPreference = 'Stop'
+$script:connectionFailureCode = 'setup'
+trap {
+    if ($ConfigureConnectionFromStdin) {
+        # A fixed-code protocol gives the app useful errors without exposing keys,
+        # exception dumps, request headers, or arbitrary server response text.
+        Write-Output ('BLOBUI_CONNECTION_ERROR=' + $script:connectionFailureCode)
+        exit 1
+    }
+    throw
+}
 Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
 $sourceDirectory = Split-Path -Parent $PSScriptRoot
 
@@ -134,12 +147,107 @@ if ($null -eq $state.InstallDirectory) {
         throw "The runtime copy's settings point to '$installDirectory', but its blob folder belongs to '$runtimeExpectedInstallDirectory'. Run the source Rebuild.ps1 with -InstallDirectory to use another installation."
     }
 }
-if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
-    throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
+# Credentials arrive over stdin from the desktop app, never in command arguments.
+$connectionCredential = $null
+$connectionApiKey = $null
+if ($ConfigureConnectionFromStdin) {
+    try { $ConnectionOverride = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd()) -ErrorAction Stop }
+    catch { throw 'The connection request is invalid.' }
 }
-$storedObjectIds = @($data.settingsObjectIds)
-if ($storedObjectIds.Count -eq 0) {
-    throw 'The saved settings object IDs are missing. Run Install.ps1 to choose them again.'
+$connection = if ($data.PSObject.Properties['apiConnection']) { $data.apiConnection } else { $null }
+if ($null -ne $ConnectionOverride) {
+    if ($ConnectionOverride.enabled -isnot [bool]) { throw 'Choose whether to enable the Anytype API.' }
+    $connectionPort = 31009
+    if ($null -ne $ConnectionOverride.port -and [string]$ConnectionOverride.port -ne '') {
+        if ([string]$ConnectionOverride.port -notmatch '^\d+$' -or [long]$ConnectionOverride.port -lt 1 -or [long]$ConnectionOverride.port -gt 65535) {
+            throw 'Port must be a whole number from 1 to 65535.'
+        }
+        $connectionPort = [int]$ConnectionOverride.port
+    }
+    if ($ConnectionOverride.enabled) {
+        $connectionApiKey = ([string]$ConnectionOverride.apiKey).Trim()
+        if ([string]::IsNullOrWhiteSpace($connectionApiKey) -or $connectionApiKey.Length -gt 4096 -or $connectionApiKey -match '[\x00-\x1f\x7f]') {
+            throw 'Enter a valid Anytype API v2 key.'
+        }
+
+    }
+    $connection = [pscustomobject]@{ enabled = [bool]$ConnectionOverride.enabled; port = $connectionPort }
+    $data | Add-Member -MemberType NoteProperty -Name apiConnection -Value $connection -Force
+    # Switching connection modes migrates legacy/default settings to local settings.
+    if (-not $data.PSObject.Properties['settingsV2']) {
+        $data | Add-Member -MemberType NoteProperty -Name settingsV2 -Value ([pscustomobject]@{
+            version = 2
+            settings = [pscustomobject]@{
+                fontFamily = $data.settings.fontFamily; codeFontFamily = $data.settings.codeFontFamily
+                accentColor = $data.settings.accentColor
+                accentMode = if ($data.settings.accentColor -in @('Default', 'var(--color-system-accent-100)')) { 'native' } else { 'custom' }
+                accentPreset = ''
+            }
+        })
+    }
+}
+if ($null -ne $connection -and -not $PSBoundParameters.ContainsKey('ApiBaseUri')) {
+    $ApiBaseUri = 'http://127.0.0.1:' + [int]$connection.port
+}
+if ($connectionApiKey) {
+    $script:connectionFailureCode = 'connection'
+    try {
+        $null = Test-BlobUiApiConnection -ApiKey $connectionApiKey -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    }
+    catch {
+        if ($_.Exception.Message -match 'HTTP 401') { $script:connectionFailureCode = 'unauthorized' }
+        elseif ($_.Exception.Message -match 'HTTP 403') { $script:connectionFailureCode = 'forbidden' }
+        elseif ($_.Exception.Message -match 'HTTP 404|API v2 spaces response') { $script:connectionFailureCode = 'api-version' }
+        throw
+    }
+    $script:connectionFailureCode = 'credential'
+    $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+}
+$script:connectionFailureCode = 'settings'
+$settingsV2Property = $data.PSObject.Properties['settingsV2']
+$settingsOverlay = if ($null -ne $settingsV2Property) { $settingsV2Property.Value } else { $null }
+$useSettingsV2 = $null -ne $settingsOverlay
+if (-not [string]::IsNullOrWhiteSpace($SettingsOverridePath)) {
+    $overridePath = [System.IO.Path]::GetFullPath($SettingsOverridePath)
+    $overrideRoot = [System.IO.Path]::GetFullPath((Join-Path $blobDirectory 'staging')).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $overridePath.StartsWith($overrideRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'A local settings override must be staged inside the BlobUI blob\staging directory.'
+    }
+    $overrideItem = Get-Item -LiteralPath $overridePath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $overrideItem -or $overrideItem.PSIsContainer -or
+        (($overrideItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'The staged local settings override is not a safe regular file.'
+    }
+    try {
+        $settingsOverlay = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($overridePath, [System.Text.Encoding]::UTF8)) -ErrorAction Stop
+    }
+    catch {
+        throw 'The staged local settings override is not valid JSON.'
+    }
+    $useSettingsV2 = $true
+}
+# Default-theme installations work without API setup or an encrypted key.
+if (-not $useSettingsV2 -and $data.PSObject.Properties['setupMode'] -and $data.setupMode -eq 'defaults') {
+    $defaultRun = Join-Path (Join-Path $blobDirectory 'staging') ([Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($defaultRun) | Out-Null
+    try {
+        $defaultCss = Join-Path $defaultRun 'custom.css'
+        & (Join-Path $PSScriptRoot 'Compile.ps1') -DataPath $dataPath -OutputPath $defaultCss
+        $null = Invoke-BlobUiInstall -InstallDirectory $installDirectory -RuntimeSourceDirectory $sourceDirectory -AssetsSourceDirectory (Join-Path $sourceDirectory 'assets') -CompiledCssPath $defaultCss -DataCandidatePath $dataPath
+        Write-Host 'CSS rebuilt with default settings. Press Ctrl+R in Anytype.'
+    }
+    finally { Remove-Item -LiteralPath $defaultRun -Recurse -Force -ErrorAction SilentlyContinue }
+    return
+}
+
+if (-not $useSettingsV2) {
+    if ([string]::IsNullOrWhiteSpace([string]$data.selectedSpace.id)) {
+        throw 'The saved settings space is missing. Run Install.ps1 to choose it again.'
+    }
+    $storedObjectIds = @($data.settingsObjectIds)
+    if ($storedObjectIds.Count -eq 0) {
+        throw 'The saved settings object IDs are missing. Run Install.ps1 to choose them again.'
+    }
 }
 if (-not (Test-Path -LiteralPath $installDirectory -PathType Container)) {
     throw "The saved Anytype directory does not exist: $installDirectory"
@@ -149,21 +257,60 @@ $runDirectory = Join-Path (Join-Path $blobDirectory 'staging') ([System.Guid]::N
 [System.IO.Directory]::CreateDirectory($runDirectory) | Out-Null
 $apiKey = $null
 try {
-    $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
     $candidateDataPath = Join-Path $runDirectory 'data.json'
     $compiledCssPath = Join-Path $runDirectory 'custom.css'
 
-    $getDataArguments = @{
-        ApiKey = $apiKey
-        OutputPath = $candidateDataPath
-        SpaceId = [string]$data.selectedSpace.id
-        ObjectIds = $storedObjectIds
-        ExistingDataPath = $dataPath
-        InstallDirectory = $installDirectory
-        ApiBaseUri = $ApiBaseUri
-        ApiTransport = $ApiTransport
+    if ($useSettingsV2) {
+        $candidateData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $data -Depth 40) -ErrorAction Stop
+        if ($null -eq $candidateData.PSObject.Properties['calendarObjectColors']) {
+            $null = $candidateData | Add-Member -MemberType NoteProperty -Name 'calendarObjectColors' -Value ([ordered]@{})
+        }
+        $calendarCacheRefreshed = $false
+        $apiDisabled = $null -ne $connection -and -not $connection.enabled
+        if ($apiDisabled) {
+            $candidateData | Add-Member -MemberType NoteProperty -Name calendarObjectColors -Value ([pscustomobject]@{}) -Force
+            Write-Host 'BlobUI_CALENDAR_CACHE=disabled'
+        }
+        elseif ($connectionApiKey -or (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
+            try {
+                $apiKey = if ($connectionApiKey) { $connectionApiKey } else { Read-BlobUiProtectedCredential -Path $credentialPath }
+                $candidateData = Update-BlobUiCalendarColorCache -ApiKey $apiKey -Data $candidateData -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+                $calendarCacheRefreshed = $true
+            }
+            catch {
+                if ($null -ne $ConnectionOverride) {
+                    # A new key is already authenticated. Optional calendar data
+                    # must not block saving it, or carry over a previous key's data.
+                    $candidateData | Add-Member -MemberType NoteProperty -Name calendarObjectColors -Value ([pscustomobject]@{}) -Force
+                }
+                Write-Host "BlobUI_CALENDAR_CACHE=cached"
+                Write-Host "Calendar color data stayed at its last saved values because the Anytype API refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        else {
+            Write-Host 'BlobUI_CALENDAR_CACHE=cached'
+            Write-Host 'Calendar color data stayed at its last saved values because no Anytype API key is saved.' -ForegroundColor Yellow
+        }
+        if ($calendarCacheRefreshed) {
+            Write-Host 'BlobUI_CALENDAR_CACHE=refreshed'
+        }
+        $candidateData = Set-BlobUiSettingsV2Overlay -Data $candidateData -Overlay $settingsOverlay
+        Write-BlobUiAtomicJson -Path $candidateDataPath -InputObject $candidateData
     }
-    & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
+    else {
+        $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
+        $getDataArguments = @{
+            ApiKey = $apiKey
+            OutputPath = $candidateDataPath
+            SpaceId = [string]$data.selectedSpace.id
+            ObjectIds = $storedObjectIds
+            ExistingDataPath = $dataPath
+            InstallDirectory = $installDirectory
+            ApiBaseUri = $ApiBaseUri
+            ApiTransport = $ApiTransport
+        }
+        & (Join-Path $PSScriptRoot 'Get-Data.ps1') @getDataArguments
+    }
 
     if ($ForUpdate) {
         $previousReleaseVersion = ''
@@ -202,6 +349,7 @@ try {
         DevDirectory = $compileDevDirectory
         AssetSourceDirectory = Join-Path $sourceDirectory 'assets'
     }
+    $script:connectionFailureCode = 'compile'
     & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments
 
     $installArguments = @{
@@ -211,7 +359,23 @@ try {
         CompiledCssPath = $compiledCssPath
         DataCandidatePath = $candidateDataPath
     }
-    $result = Invoke-BlobUiInstall @installArguments
+    if ($connectionCredential) { $installArguments.CredentialProtectedText = $connectionCredential }
+    $script:connectionFailureCode = 'install'
+    $installOperation = 'prepare'
+    $installArguments.FailureOperation = [ref]$installOperation
+    if (($null -ne $ConnectionOverride -or -not [string]::IsNullOrWhiteSpace($SettingsOverridePath)) -and
+        (Test-Path -LiteralPath (Join-Path $blobDirectory 'runtime') -PathType Container)) {
+        $installArguments.PreserveRuntime = $true
+    }
+    try { $result = Invoke-BlobUiInstall @installArguments }
+    catch {
+        $cause = $_.Exception
+        while ($null -ne $cause.InnerException) { $cause = $cause.InnerException }
+        $nativeCode = if ($cause -is [ComponentModel.Win32Exception]) { $cause.NativeErrorCode } else { $cause.HResult -band 0xffff }
+        if ($nativeCode -notin @(5, 19, 32, 33, 112)) { $nativeCode = 0 }
+        $script:connectionFailureCode = 'install-' + $installOperation + ':' + $nativeCode
+        throw
+    }
 
     if ($ForUpdate) {
         Write-Host "BlobUI was updated to release $(Get-BlobUiReleaseVersion) at $($result.cssPath)"
@@ -228,6 +392,9 @@ catch {
 }
 finally {
     $apiKey = $null
+    $connectionApiKey = $null
+    $connectionCredential = $null
+    $ConnectionOverride = $null
     if (Test-Path -LiteralPath $runDirectory -PathType Container) {
         Remove-Item -LiteralPath $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
