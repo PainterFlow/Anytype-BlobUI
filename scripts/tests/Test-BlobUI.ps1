@@ -68,6 +68,16 @@ function Get-CssSignature {
     return [System.Text.RegularExpressions.Regex]::Replace($withoutComments, '\s+', '')
 }
 
+function Get-CompiledCssSource {
+    param([string]$CssText, [string]$RelativePath)
+    $marker = "/* BlobUI source: $RelativePath */"
+    $start = $CssText.IndexOf($marker, [System.StringComparison]::Ordinal)
+    if ($start -lt 0) { throw "Compiled CSS omitted source marker '$RelativePath'." }
+    $next = $CssText.IndexOf('/* BlobUI source:', $start + $marker.Length, [System.StringComparison]::Ordinal)
+    if ($next -lt 0) { return $CssText.Substring($start) }
+    return $CssText.Substring($start, $next - $start)
+}
+
 function New-TestSettingObject {
     param([string]$Id, [string]$Name, [System.Collections.IDictionary]$Properties)
     $documentProperties = [ordered]@{ Name = $Name }
@@ -517,7 +527,8 @@ try {
     $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
     $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
-    Assert-True (-not $defaultAccentCss.Contains('background-position: 50% 50%;')) 'Default Reduced Motion incorrectly suppressed the animated effects.'
+    $defaultAccessibilityCss = Get-CompiledCssSource -CssText $defaultAccentCss -RelativePath '60-accessibility.css'
+    Assert-True (-not $defaultAccessibilityCss.Contains('background-position: 50% 50%;')) 'Default Reduced Motion incorrectly suppressed the animated effects.'
     Assert-True ($defaultAccentCss.Contains('#preview.previewWrapper:has(.previewTab)')) 'The default Tab Hover Effect was not suppressed.'
     Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
     Assert-True (-not $defaultAccentCss.Contains('html .switch.active.blue')) 'Accent Color Default overrides Anytype''s native toggle color.'
@@ -617,10 +628,29 @@ try {
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
     Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css|60-accessibility.css|60-tab-hover-preview.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
-    Assert-True ($css.Contains('body:has(a:not([href^="blob://"]):not(:has(markupmention)):hover)')) 'Links Hover Effect suppression did not compile.'
-    Assert-True ($css.Contains('body:has(markupmention:hover)')) 'Object mention hover suppression did not compile.'
+    $linkDisabledSelector = '.pageMain .editor .blockText .editable a[href]:not([href^="blob://"]):not(:has(markupmention)):not(markupmention a)'
+    $mentionDisabledSelector = '.pageMain .editor .blockText .editable markupmention'
+    Assert-True ($css.Contains($linkDisabledSelector)) 'Disabled Links Hover Effect did not remove editor links from pointer hit testing.'
+    Assert-True ($css.Contains($mentionDisabledSelector)) 'Disabled Object Mention Hover Effect did not remove mentions from pointer hit testing.'
+    Assert-True ($css.Contains('.pageMain .editor .blockText .editable a:has(markupmention)')) 'Mention suppression did not cover a containing anchor.'
+    foreach ($hoverCase in @(
+        [pscustomobject]@{ Name = 'both-disabled'; Link = $false; Mention = $false },
+        [pscustomobject]@{ Name = 'links-enabled'; Link = $true; Mention = $false },
+        [pscustomobject]@{ Name = 'mentions-enabled'; Link = $false; Mention = $true },
+        [pscustomobject]@{ Name = 'both-enabled'; Link = $true; Mention = $true }
+    )) {
+        $hoverData = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $fetchedData -Depth 20)
+        $hoverData.settings.linkHoverEffect = $hoverCase.Link
+        $hoverData.settings.objectMentionHoverEffect = $hoverCase.Mention
+        $hoverCssPath = Join-Path $testRoot ("hover-{0}.css" -f $hoverCase.Name)
+        Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $hoverCssPath -Data $hoverData | Out-Null
+        $hoverCss = [System.IO.File]::ReadAllText($hoverCssPath)
+        Assert-Equal (-not $hoverCase.Link) $hoverCss.Contains($linkDisabledSelector) "Link hover selector does not match the '$($hoverCase.Name)' setting combination."
+        Assert-Equal (-not $hoverCase.Mention) $hoverCss.Contains($mentionDisabledSelector) "Mention hover selector does not match the '$($hoverCase.Name)' setting combination."
+    }
     Assert-True (-not $css.Contains('#preview.previewWrapper:has(.previewTab)')) 'The enabled Tab Hover Effect was suppressed.'
-    Assert-True (-not $css.Contains('background-position: 50% 50%;')) 'Disabled Reduced Motion still suppresses RGB/Neon effects.'
+    $accessibilityCss = Get-CompiledCssSource -CssText $css -RelativePath '60-accessibility.css'
+    Assert-True (-not $accessibilityCss.Contains('background-position: 50% 50%;')) 'Disabled Reduced Motion still suppresses RGB/Neon effects.'
     Assert-True (-not $css.Contains('@blobui-if')) 'Compiled CSS retained an accessibility setting condition.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'

@@ -25,20 +25,24 @@
 }
 /* @blobui-endif reducedMotion */
 
-/* Keep link previews off only while a non-BlobUI link is hovered. Anytype
-   renders external links with .previewLink and internal routes with its
-   default object preview, so the hovered link is the reliable source marker. */
+/* Prevent Anytype's delayed link preview from opening after the pointer leaves
+   its source. Keep this within editor text so app navigation stays interactive.
+   Anchors inside or containing a mention are controlled by the mention setting. */
 /* @blobui-if-not linkHoverEffect */
-body:has(a:not([href^="blob://"]):hover):not(:has(markupmention:hover)) #preview.previewWrapper:not(:has(.previewTab)) {
-    display: none !important;
+.pageMain .editor .blockText .editable a[href]:not([href^="blob://"]):not(:has(markupmention)):not(markupmention a),
+.pageMain .editor .blockText .editable a[href]:not([href^="blob://"]):not(:has(markupmention)):not(markupmention a) * {
+    pointer-events: none !important;
 }
 /* @blobui-endif-not linkHoverEffect */
 
-/* Anytype renders @ mentions as <markupmention> marks. The preview itself is
-   mounted elsewhere in the document, so match the source element on hover. */
+/* Mentions may contain links or sit inside one, so disable the whole target
+   subtree when their independent preview setting is off. */
 /* @blobui-if-not objectMentionHoverEffect */
-body:has(markupmention:hover) #preview.previewWrapper:not(:has(.previewTab)) {
-    display: none !important;
+.pageMain .editor .blockText .editable markupmention,
+.pageMain .editor .blockText .editable markupmention *,
+.pageMain .editor .blockText .editable a:has(markupmention),
+.pageMain .editor .blockText .editable a:has(markupmention) * {
+    pointer-events: none !important;
 }
 /* @blobui-endif-not objectMentionHoverEffect */
 
