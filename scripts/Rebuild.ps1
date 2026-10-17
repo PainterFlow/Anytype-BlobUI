@@ -361,7 +361,21 @@ try {
     }
     if ($connectionCredential) { $installArguments.CredentialProtectedText = $connectionCredential }
     $script:connectionFailureCode = 'install'
-    $result = Invoke-BlobUiInstall @installArguments
+    $installOperation = 'prepare'
+    $installArguments.FailureOperation = [ref]$installOperation
+    if (($null -ne $ConnectionOverride -or -not [string]::IsNullOrWhiteSpace($SettingsOverridePath)) -and
+        (Test-Path -LiteralPath (Join-Path $blobDirectory 'runtime') -PathType Container)) {
+        $installArguments.PreserveRuntime = $true
+    }
+    try { $result = Invoke-BlobUiInstall @installArguments }
+    catch {
+        $cause = $_.Exception
+        while ($null -ne $cause.InnerException) { $cause = $cause.InnerException }
+        $nativeCode = $cause.HResult -band 0xffff
+        if ($nativeCode -notin @(5, 19, 32, 33, 112)) { $nativeCode = 0 }
+        $script:connectionFailureCode = 'install-' + $installOperation + ':' + $nativeCode
+        throw
+    }
 
     if ($ForUpdate) {
         Write-Host "BlobUI was updated to release $(Get-BlobUiReleaseVersion) at $($result.cssPath)"

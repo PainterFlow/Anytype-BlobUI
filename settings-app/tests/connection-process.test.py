@@ -61,6 +61,9 @@ function Set-BlobUiCredentialAcl { param($Path) }
 function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' + $ApiKey) }
 '''
         module.write_text(text.replace('Export-ModuleMember -Function @(', stubs + '\nExport-ModuleMember -Function @('))
+    packaged_executable = source / 'settings-app/dist/blobui-settings.exe'
+    packaged_executable.parent.mkdir(parents=True)
+    packaged_executable.write_bytes(b'fixture-executable-v1')
     install = fixture / 'Anytype Data'
     blob = install / 'blob'
     blob.mkdir(parents=True)
@@ -83,7 +86,18 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
         assert json.loads(data_path.read_text())['apiConnection']['port'] == server.server_port
         credential = blob / 'credentials/anytype-api-key.dpapi'
         first_credential = credential.read_bytes()
-        rotated = configure('fixture-key-two')
+        runtime_executable = blob / 'runtime/settings-app.exe'
+        previous_runtime = runtime_executable.read_bytes()
+        packaged_executable.write_bytes(b'fixture-executable-v2')
+        # Source-folder key changes must not inspect or replace runtime binaries.
+        if os.name != 'nt':
+            runtime_executable.chmod(0)
+        try:
+            rotated = configure('fixture-key-two')
+        finally:
+            if os.name != 'nt':
+                runtime_executable.chmod(0o600)
+        assert runtime_executable.read_bytes() == previous_runtime, 'Changing a key redeployed the runtime executable.'
         assert rotated.returncode == 0, 'Replacing an existing valid key failed.'
         assert credential.read_bytes() != first_credential, 'Key rotation left the old credential unchanged.'
         assert 'fixture-key-two' not in data_path.read_text(), 'Key leaked into settings data.'
@@ -100,12 +114,24 @@ function New-BlobUiProtectedCredential { param($ApiKey) return ('fixture-only:' 
         assert 'BLOBUI_CONNECTION_ERROR=compile' in compile_failed.stdout
         assert data_path.read_bytes() == saved_data and credential.read_bytes() == saved_key
         broken_css.unlink()
+        # An ACL failure must identify credential permissions and roll back.
+        module = source / 'scripts/BlobUI.Core.psm1'
+        original_module = module.read_text()
+        permission_failure = "function Set-BlobUiCredentialAcl { param($Path) throw [UnauthorizedAccessException]::new('Fixture permission failure') }\n"
+        module.write_text(original_module.replace('Export-ModuleMember -Function @(', permission_failure + 'Export-ModuleMember -Function @('))
+        try:
+            permission_failed = configure('fixture-key-one')
+            assert permission_failed.returncode != 0
+            assert 'BLOBUI_CONNECTION_ERROR=install-credential-permissions:' in permission_failed.stdout
+            assert data_path.read_bytes() == saved_data and credential.read_bytes() == saved_key
+        finally:
+            module.write_text(original_module)
         count = len(requests)
         disabled = configure(enabled=False, port=31009)
         assert disabled.returncode == 0 and len(requests) == count, 'No API mode made an API request.'
         assert json.loads(data_path.read_text())['apiConnection']['enabled'] is False
     finally:
         server.shutdown()
-print('Connection process checks passed: valid key with calendar failure, key rotation, custom port, 401 rollback, compile diagnostics, and no API mode.')
+print('Connection process checks passed: valid key with calendar failure, key rotation, custom port, locked runtime preservation, 401 rollback, compile/credential-permission diagnostics, and no API mode.')
 if os.name != 'nt':
     print('Windows DPAPI/ACL operations used fixture-only stubs on this host.')

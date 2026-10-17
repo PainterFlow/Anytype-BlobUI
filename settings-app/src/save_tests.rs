@@ -112,6 +112,23 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
         "keep this file"
     );
 
+    // A source-folder settings save must not replace an in-use runtime script.
+    let runtime_rebuild = blob.join("runtime").join("scripts").join("Rebuild.ps1");
+    let runtime_text =
+        fs::read_to_string(&runtime_rebuild).unwrap() + "\n# runtime-preservation-fixture\n";
+    fs::write(&runtime_rebuild, &runtime_text).unwrap();
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _locked = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&runtime_rebuild)
+            .unwrap();
+        save_settings_blocking(draft.clone())
+            .expect("Settings save must not redeploy locked runtime files");
+        assert_eq!(fs::read_to_string(&runtime_rebuild).unwrap(), runtime_text);
+    }
+
     // The installed runtime must also be usable without the source checkout.
     let runtime = blob.join("runtime");
     env::set_var("BLOBUI_SOURCE_DIRECTORY", &runtime);

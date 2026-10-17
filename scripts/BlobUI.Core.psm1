@@ -1781,9 +1781,12 @@ function Invoke-BlobUiInstall {
         [Parameter(Mandatory = $true)][string]$CompiledCssPath,
         [Parameter(Mandatory = $true)][string]$DataCandidatePath,
         [string]$CredentialProtectedText,
+        [switch]$PreserveRuntime,
+        [ref]$FailureOperation,
         [string]$ReleaseVersion = $script:BlobUiReleaseVersion
     )
 
+    if ($null -ne $FailureOperation) { $FailureOperation.Value = 'prepare' }
     $installFullPath = [System.IO.Path]::GetFullPath($InstallDirectory)
     if (-not (Test-Path -LiteralPath $installFullPath -PathType Container)) {
         throw "The selected Anytype directory does not exist: $installFullPath"
@@ -1821,11 +1824,19 @@ function Invoke-BlobUiInstall {
     if ($null -ne $blobItem -and (($blobItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "The Anytype blob directory is a reparse point: $blobDirectory"
     }
+    if ($null -ne $FailureOperation) { $FailureOperation.Value = 'inspect' }
     $null = Get-BlobUiFileSnapshot -Path $manifestPath
     $previousManifest = Read-BlobUiInstallManifest -Path $manifestPath
     $packagedFiles = Get-BlobUiPackagedFiles -RuntimeSourceDirectory $RuntimeSourceDirectory -AssetsSourceDirectory $AssetsSourceDirectory
     $runtimeSourcePath = [System.IO.Path]::GetFullPath($RuntimeSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
     $runtimeDestinationPath = [System.IO.Path]::GetFullPath($runtimeDestination).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    if ($PreserveRuntime) {
+        # Changing settings or credentials is not an application deployment.
+        # In particular, never hash, replace, or delete the running executable.
+        foreach ($key in @($packagedFiles.Keys)) {
+            if ([string]$key -like 'runtime/*') { $packagedFiles.Remove($key) }
+        }
+    }
     $managedFiles = @($packagedFiles.Keys | Where-Object {
         -not ([string]$_).Equals('assets/spacebanner/banner.png', [System.StringComparison]::OrdinalIgnoreCase)
     } | Sort-Object -Unique)
@@ -1841,7 +1852,10 @@ function Invoke-BlobUiInstall {
         (Test-Path -LiteralPath $settingsAppDestination -PathType Leaf)) {
         $managedFiles = @($managedFiles + $settingsAppManagedKey | Sort-Object -Unique)
     }
-    if ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($PreserveRuntime) {
+        $managedFiles = @($managedFiles + @($previousManifest.managedFiles | Where-Object { [string]$_ -like 'runtime/*' }) | Sort-Object -Unique)
+    }
+    elseif ($runtimeSourcePath.Equals($runtimeDestinationPath, [System.StringComparison]::OrdinalIgnoreCase)) {
         $managedFiles = @($previousManifest.managedFiles | Sort-Object -Unique)
         $ownedFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($managedPath in $managedFiles) {
@@ -1959,6 +1973,7 @@ function Invoke-BlobUiInstall {
     }
 
     try {
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'assets' }
         [System.IO.Directory]::CreateDirectory($blobDirectory) | Out-Null
         foreach ($staleDestination in $staleDestinations) {
             if (Test-Path -LiteralPath $staleDestination -PathType Leaf) {
@@ -1967,6 +1982,7 @@ function Invoke-BlobUiInstall {
         }
         Remove-BlobUiEmptyManagedDirectories -BlobDirectory $blobDirectory -ManagedPaths $managedMutationPaths.ToArray()
         foreach ($operation in $copyOperations) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = if ($operation.destination.StartsWith($runtimeDestination + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { 'runtime' } else { 'assets' } }
             if (Test-Path -LiteralPath $operation.destination -PathType Container) {
                 throw "A BlobUI managed file destination is an unowned or non-empty directory: $($operation.destination)"
             }
@@ -1979,17 +1995,23 @@ function Invoke-BlobUiInstall {
             [System.IO.Directory]::CreateDirectory($bannerParent) | Out-Null
             [System.IO.File]::WriteAllBytes($manifestBannerPath, [System.IO.File]::ReadAllBytes($bannerSource))
         }
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'css' }
         Write-BlobUiAtomicText -Path $cssDestination -Content $compiledCss
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'settings' }
         Write-BlobUiAtomicText -Path $dataPath -Content $candidateDataText
         if (-not [string]::IsNullOrWhiteSpace($CredentialProtectedText)) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential' }
             [System.IO.Directory]::CreateDirectory($credentialDirectory) | Out-Null
             Write-BlobUiAtomicText -Path $credentialPath -Content ($CredentialProtectedText + [Environment]::NewLine)
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'credential-permissions' }
             Set-BlobUiCredentialAcl -Path $credentialPath
         }
+        if ($null -ne $FailureOperation) { $FailureOperation.Value = 'manifest' }
         Write-BlobUiAtomicText -Path $manifestPath -Content $manifestText
     }
     catch {
-        $installFailure = $_.Exception.Message
+        $installException = $_.Exception
+        $installFailure = $installException.Message
         $rollbackFailures = [System.Collections.Generic.List[string]]::new()
         try {
             Restore-BlobUiFileSnapshots -Snapshots $snapshots
@@ -1998,9 +2020,10 @@ function Invoke-BlobUiInstall {
             $rollbackFailures.Add($_.Exception.Message)
         }
         if ($rollbackFailures.Count -gt 0) {
+            if ($null -ne $FailureOperation) { $FailureOperation.Value = 'rollback' }
             throw "Installation failed and rollback could not restore all saved files. $installFailure Rollback errors: $([string]::Join('; ', $rollbackFailures))"
         }
-        throw $installFailure
+        throw $installException
     }
 
     return [ordered]@{
