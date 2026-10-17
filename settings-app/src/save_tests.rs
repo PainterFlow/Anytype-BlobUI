@@ -126,10 +126,34 @@ fn native_save_migrates_rebuilds_and_preserves_files_on_failure() {
         read_json_file(&data_path).unwrap()["settings"]["accentColor"],
         "var(--color-system-accent-100)"
     );
-    assert!(fs::read_to_string(css_path)
+    assert!(fs::read_to_string(&css_path)
         .unwrap()
         .contains("fixture-event"));
     assert!(fs::read_dir(blob.join("staging")).unwrap().next().is_none());
+
+    configure_connection_blocking(ConnectionDraft {
+        enabled: false,
+        api_key: String::new(),
+        port: None,
+    })
+    .expect("No API mode must rebuild through stdin without a key");
+    let disabled = read_json_file(&data_path).unwrap();
+    assert_eq!(disabled["apiConnection"]["enabled"], false);
+    assert_eq!(disabled["apiConnection"]["port"], 31009);
+    assert!(!fs::read_to_string(&css_path)
+        .unwrap()
+        .contains("fixture-event"));
+    assert!(load_app_state().unwrap().onboarding_complete);
+    let disabled_save = save_settings_blocking(SettingsDraft::default()).unwrap();
+    assert_eq!(disabled_save.calendar_status, "disabled");
+    let before_invalid_connection = fs::read(&data_path).unwrap();
+    assert!(configure_connection_blocking(ConnectionDraft {
+        enabled: true,
+        api_key: "test-key".into(),
+        port: Some(0),
+    })
+    .is_err());
+    assert_eq!(fs::read(&data_path).unwrap(), before_invalid_connection);
 
     let canonical_fixture = fixture.canonicalize().unwrap();
     assert!(canonical_fixture.starts_with(fixture_parent.canonicalize().unwrap()));

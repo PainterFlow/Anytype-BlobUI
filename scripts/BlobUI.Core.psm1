@@ -1291,7 +1291,9 @@ function Invoke-BlobUiCssCompile {
     }
     $declarationPattern = '/\*\s*@blobui-placeholder\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s+(?<type>font|color|url|number|boolean)\s*\*/'
     $compiled = [System.Text.RegularExpressions.Regex]::Replace($compiled, $declarationPattern, '')
-    $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $Data.calendarObjectColors
+    $apiConnection = Get-BlobUiPropertyField -InputObject $Data -FieldName 'apiConnection'
+    $calendarColors = if ($null -ne $apiConnection -and (Get-BlobUiPropertyField -InputObject $apiConnection -FieldName 'enabled') -eq $false) { @{} } else { $Data.calendarObjectColors }
+    $calendarColorCss = New-BlobUiCalendarColorCss -CalendarObjectColors $calendarColors
     if (-not [string]::IsNullOrWhiteSpace($calendarColorCss)) {
         $compiled = $compiled.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $calendarColorCss + [Environment]::NewLine
     }

@@ -61,6 +61,44 @@
               </span>
             </button>
           </div>
+          <p id="onboarding-choice-error" class="field-error" role="alert"></p>
+          <footer class="onboarding-privacy">BlobUI will not collect your data</footer>
+        </div>
+      </section>
+      <section id="onboarding-connection" class="onboarding-api" aria-labelledby="connection-title" hidden>
+        <div class="onboarding-scroll" id="connection-scroll">
+          <div class="connection-content">
+            <header class="onboarding-api-heading">
+              <h1 id="connection-title" tabindex="-1">Connect to Anytype</h1>
+              <p>Add your read-only API key to enable Calendar Colors and data-powered features.</p>
+            </header>
+            <form id="connection-form" class="connection-form" novalidate>
+              <label class="input-field"><span>API key</span>
+                <input id="connection-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API v2 key" aria-describedby="connection-error" required />
+              </label>
+              <label class="input-field"><span>Port <span class="optional-label">(optional)</span></span>
+                <input id="connection-port" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="31009" aria-describedby="connection-port-hint connection-error" />
+                <span id="connection-port-hint" class="input-hint">Leave blank to use 31009.</span>
+              </label>
+              <section class="connection-guide" aria-labelledby="connection-guide-title">
+                <h2 id="connection-guide-title">Create an API key</h2>
+                <ol>
+                  <li>Open Anytype’s settings and choose <strong>Local API</strong>.</li>
+                  <li>Turn on <strong>Enabled</strong>. Keep the port at <strong>31009</strong>, or enter your custom port above.</li>
+                  <li>Click <strong>Create new</strong> and name the app <strong>BlobUI</strong>.</li>
+                  <li>Choose the spaces BlobUI can read. Select <strong>Allow access to all spaces</strong> for features across your workspace.</li>
+                  <li>Set <strong>Access</strong> to <strong>Read only</strong> and <strong>Expires</strong> to <strong>Never</strong>.</li>
+                  <li>Click <strong>Create key</strong>, copy the API v2 key, and paste it above.</li>
+                </ol>
+                <p>Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.</p>
+              </section>
+              <p id="connection-error" class="field-error" role="alert"></p>
+              <div class="connection-actions">
+                <button id="connection-back" class="connection-back" type="button">Back</button>
+                <button id="connection-confirm" class="connection-confirm" type="submit">Confirm</button>
+              </div>
+            </form>
+          </div>
           <footer class="onboarding-privacy">BlobUI will not collect your data</footer>
         </div>
       </section>

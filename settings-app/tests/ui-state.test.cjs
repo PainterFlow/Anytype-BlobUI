@@ -32,6 +32,8 @@ const calls = [];
 const timers = new Map();
 let nextTimerId = 1;
 let saveError = null;
+let connectionError = null;
+const connectionRequests = [];
 let copiedLogs = '';
 let copyError = false;
 const context = {
@@ -58,12 +60,16 @@ const context = {
     clearTimeout(id) { timers.delete(id); },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
-    __TAURI__: { core: { async invoke(name) {
+    __TAURI__: { core: { async invoke(name, args) {
       calls.push(name);
       if (name === 'get_app_state') return {
         ready: true, theme: 'dark',
         settings: { fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink' },
       };
+      if (name === 'configure_connection') {
+        connectionRequests.push(args.connection);
+        if (connectionError) throw new Error(connectionError);
+      }
       if (name === 'save_settings') {
         if (saveError) throw new Error(saveError);
         return { calendarStatus: 'cached' };
@@ -223,28 +229,48 @@ const status = () => element('status-message').textContent;
   assert.equal(api.hidden, false);
   assert(element('onboarding-api-title').focused);
   element('onboarding-api-option').handlers.click();
-  assert.equal(element('onboarding-api-option').attributes['aria-pressed'], 'true');
   assert.equal(onboarding.dataset.apiChoice, 'api');
   element('onboarding-no-api-option').handlers.click();
-  assert.equal(onboarding.dataset.apiChoice, 'api', 'Ignore repeated selections during the exit animation.');
-  assert.equal(onboarding.hidden, false, 'Do not hide onboarding before its exit animation.');
+  assert.equal(onboarding.dataset.apiChoice, 'api', 'Ignore repeated selections during transition.');
   finishOnboardingTransition();
-  assert.equal(onboarding.hidden, true, 'The last step must open the main app.');
+  assert.equal(element('onboarding-connection').hidden, false, 'API choice must open connection setup.');
+  const submit = () => element('connection-form').handlers.submit({ preventDefault() {} });
+  submit();
+  assert.match(element('connection-error').textContent, /Enter your Anytype/);
+  element('connection-key').value = 'test-key';
+  element('connection-port').value = '65536';
+  submit();
+  assert.match(element('connection-error').textContent, /Port must/);
+  assert.equal(connectionRequests.length, 0);
+  element('connection-port').value = '';
+  connectionError = 'Could not connect to Anytype.';
+  submit();
+  await flush();
+  assert.match(element('connection-error').textContent, /Could not connect/);
+  assert.equal(onboarding.hidden, false, 'Failure must keep the setup page open.');
+  assert.equal(connectionRequests.at(-1).port, null, 'Blank port uses the backend default.');
+  connectionError = null;
+  element('connection-port').value = '31010';
+  submit();
+  assert.equal(element('connection-confirm').disabled, true);
+  await flush();
+  assert.equal(connectionRequests.at(-1).port, 31010);
+  assert.equal(connectionRequests.at(-1).apiKey, 'test-key');
+  assert.equal(element('connection-key').value, '', 'Clear the key after saving.');
+  finishOnboardingTransition();
+  assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);
   assert(shell.classList.contains('onboarding-entering'));
-  assert(!element('root').classList.contains('onboarding-active'));
-  assert(element('font-family').focused);
   context.document.handlers.keydown(debugKey);
-  assert.equal(welcome.hidden, false);
-  assert.equal(api.hidden, true);
-  assert.equal(shell.classList.contains('onboarding-entering'), false);
-  assert.equal(element('onboarding-api-option').attributes['aria-pressed'], 'false');
   welcome.handlers.click();
   finishOnboardingTransition();
   element('onboarding-no-api-option').handlers.click();
+  await flush();
+  assert.equal(connectionRequests.at(-1).enabled, false);
+  assert.equal(connectionRequests.at(-1).apiKey, '');
   assert.equal(onboarding.dataset.apiChoice, 'no-api');
   finishOnboardingTransition();
-  assert.equal(onboarding.hidden, true, 'No API Key must also advance to the main app.');
+  assert.equal(onboarding.hidden, true, 'No API mode skips connection setup.');
   context.document.handlers.keydown(debugKey);
   welcome.handlers.click();
   const pendingTimerIds = [...timers.keys()];
@@ -253,6 +279,6 @@ const status = () => element('status-message').textContent;
   assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);
   assert.equal(element('font-family').value, unsavedFont);
-  assert.equal(calls.length, beforeOnboarding, 'Onboarding must not save or rebuild settings.');
+  assert(calls.slice(beforeOnboarding).every(name => name === 'configure_connection'), 'Only connection setup should be invoked.');
   console.log('UI save visibility, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -3,6 +3,8 @@ param(
     [scriptblock]$ApiTransport,
     [string]$InstallDirectory,
     [string]$SettingsOverridePath,
+    [switch]$ConfigureConnectionFromStdin,
+    [object]$ConnectionOverride,
     [switch]$ForUpdate
 )
 
@@ -135,6 +137,48 @@ if ($null -eq $state.InstallDirectory) {
         throw "The runtime copy's settings point to '$installDirectory', but its blob folder belongs to '$runtimeExpectedInstallDirectory'. Run the source Rebuild.ps1 with -InstallDirectory to use another installation."
     }
 }
+# Credentials arrive over stdin from the desktop app, never in command arguments.
+$connectionCredential = $null
+$connectionApiKey = $null
+if ($ConfigureConnectionFromStdin) {
+    try { $ConnectionOverride = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd()) -ErrorAction Stop }
+    catch { throw 'The connection request is invalid.' }
+}
+$connection = if ($data.PSObject.Properties['apiConnection']) { $data.apiConnection } else { $null }
+if ($null -ne $ConnectionOverride) {
+    if ($ConnectionOverride.enabled -isnot [bool]) { throw 'Choose whether to enable the Anytype API.' }
+    $connectionPort = 31009
+    if ($null -ne $ConnectionOverride.port -and [string]$ConnectionOverride.port -ne '') {
+        if ([string]$ConnectionOverride.port -notmatch '^\d+$' -or [long]$ConnectionOverride.port -lt 1 -or [long]$ConnectionOverride.port -gt 65535) {
+            throw 'Port must be a whole number from 1 to 65535.'
+        }
+        $connectionPort = [int]$ConnectionOverride.port
+    }
+    if ($ConnectionOverride.enabled) {
+        $connectionApiKey = ([string]$ConnectionOverride.apiKey).Trim()
+        if ([string]::IsNullOrWhiteSpace($connectionApiKey) -or $connectionApiKey.Length -gt 4096 -or $connectionApiKey -match '[\x00-\x1f\x7f]') {
+            throw 'Enter a valid Anytype API v2 key.'
+        }
+        $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+    }
+    $connection = [pscustomobject]@{ enabled = [bool]$ConnectionOverride.enabled; port = $connectionPort }
+    $data | Add-Member -MemberType NoteProperty -Name apiConnection -Value $connection -Force
+    # Switching connection modes migrates legacy/default settings to local settings.
+    if (-not $data.PSObject.Properties['settingsV2']) {
+        $data | Add-Member -MemberType NoteProperty -Name settingsV2 -Value ([pscustomobject]@{
+            version = 2
+            settings = [pscustomobject]@{
+                fontFamily = $data.settings.fontFamily; codeFontFamily = $data.settings.codeFontFamily
+                accentColor = $data.settings.accentColor
+                accentMode = if ($data.settings.accentColor -in @('Default', 'var(--color-system-accent-100)')) { 'native' } else { 'custom' }
+                accentPreset = ''
+            }
+        })
+    }
+}
+if ($null -ne $connection -and -not $PSBoundParameters.ContainsKey('ApiBaseUri')) {
+    $ApiBaseUri = 'http://127.0.0.1:' + [int]$connection.port
+}
 $settingsV2Property = $data.PSObject.Properties['settingsV2']
 $settingsOverlay = if ($null -ne $settingsV2Property) { $settingsV2Property.Value } else { $null }
 $useSettingsV2 = $null -ne $settingsOverlay
@@ -197,13 +241,19 @@ try {
             $null = $candidateData | Add-Member -MemberType NoteProperty -Name 'calendarObjectColors' -Value ([ordered]@{})
         }
         $calendarCacheRefreshed = $false
-        if (Test-Path -LiteralPath $credentialPath -PathType Leaf) {
+        $apiDisabled = $null -ne $connection -and -not $connection.enabled
+        if ($apiDisabled) {
+            $candidateData | Add-Member -MemberType NoteProperty -Name calendarObjectColors -Value ([pscustomobject]@{}) -Force
+            Write-Host 'BlobUI_CALENDAR_CACHE=disabled'
+        }
+        elseif ($connectionApiKey -or (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
             try {
-                $apiKey = Read-BlobUiProtectedCredential -Path $credentialPath
+                $apiKey = if ($connectionApiKey) { $connectionApiKey } else { Read-BlobUiProtectedCredential -Path $credentialPath }
                 $candidateData = Update-BlobUiCalendarColorCache -ApiKey $apiKey -Data $candidateData -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
                 $calendarCacheRefreshed = $true
             }
             catch {
+                if ($null -ne $ConnectionOverride -and $ConnectionOverride.enabled) { throw 'Could not connect to Anytype. Check that Local API is enabled, the key has read access, and the port is correct.' }
                 Write-Host "BlobUI_CALENDAR_CACHE=cached"
                 Write-Host "Calendar color data stayed at its last saved values because the Anytype API refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
             }
@@ -279,6 +329,7 @@ try {
         CompiledCssPath = $compiledCssPath
         DataCandidatePath = $candidateDataPath
     }
+    if ($connectionCredential) { $installArguments.CredentialProtectedText = $connectionCredential }
     $result = Invoke-BlobUiInstall @installArguments
 
     if ($ForUpdate) {
@@ -296,6 +347,9 @@ catch {
 }
 finally {
     $apiKey = $null
+    $connectionApiKey = $null
+    $connectionCredential = $null
+    $ConnectionOverride = $null
     if (Test-Path -LiteralPath $runDirectory -PathType Container) {
         Remove-Item -LiteralPath $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }

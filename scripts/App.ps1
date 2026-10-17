@@ -1,4 +1,9 @@
 $ErrorActionPreference = 'Stop'
+$settingsExecutable = Join-Path (Split-Path -Parent $PSScriptRoot) 'settings-app/dist/blobui-settings.exe'
+if (Test-Path -LiteralPath $settingsExecutable -PathType Leaf) {
+    & (Join-Path $PSScriptRoot 'Settings.ps1')
+    return
+}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()

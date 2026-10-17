@@ -6,7 +6,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -46,6 +46,8 @@ struct AppState {
     settings: SettingsDraft,
     message: Option<String>,
     hotkey_error: Option<String>,
+    onboarding_complete: bool,
+    api_port: u16,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,6 +78,103 @@ async fn save_settings(settings: SettingsDraft) -> Result<SaveResult, String> {
     })
     .await
     .map_err(|error| format!("The save task stopped unexpectedly: {error}"))?
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionDraft {
+    enabled: bool,
+    api_key: String,
+    port: Option<u16>,
+}
+
+#[tauri::command]
+async fn configure_connection(connection: ConnectionDraft) -> Result<(), String> {
+    if SAVE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err("Wait for the current save to finish.".into());
+    }
+    let guard = SaveGuard;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        configure_connection_blocking(connection)
+    })
+    .await
+    .map_err(|_| "The connection task stopped unexpectedly.".to_string())?
+}
+
+fn configure_connection_blocking(mut connection: ConnectionDraft) -> Result<(), String> {
+    if connection.port == Some(0) {
+        return Err("Port must be between 1 and 65535.".into());
+    }
+    connection.api_key = connection.api_key.trim().to_string();
+    if connection.enabled
+        && (connection.api_key.is_empty()
+            || connection.api_key.len() > 4096
+            || connection.api_key.chars().any(char::is_control))
+    {
+        return Err("Enter your Anytype API v2 key.".into());
+    }
+    if !connection.enabled {
+        connection.api_key.clear();
+    }
+    let install = resolve_install_directory(&app_data_directory())?;
+    ensure_not_release_path(&install)?;
+    reject_reparse_component(&install)?;
+    let script = resolve_source_directory()?
+        .join("scripts")
+        .join("Rebuild.ps1");
+    let payload = serde_json::to_vec(&connection)
+        .map_err(|_| "Could not encode the connection request.".to_string())?;
+    for shell in ["pwsh.exe", "powershell.exe"] {
+        let mut command = Command::new(shell);
+        command
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&script)
+            .arg("-InstallDirectory")
+            .arg(&install)
+            .arg("-ConfigureConnectionFromStdin")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err("Could not start the connection setup.".into()),
+        };
+        let write_result = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Connection input is unavailable.".to_string())
+            .and_then(|mut input| {
+                input
+                    .write_all(&payload)
+                    .map_err(|_| "Could not send the connection request.".to_string())
+            });
+        let output = child
+            .wait_with_output()
+            .map_err(|_| "Could not finish connection setup.".to_string())?;
+        write_result?;
+        if !output.status.success() {
+            // Never forward process output: it may contain credential material.
+            return Err("Could not apply the connection. Check Anytype's Local API, key permissions and port, then try again.".into());
+        }
+        return Ok(());
+    }
+    Err("PowerShell could not be found.".into())
 }
 
 fn show_settings_window(app: &tauri::AppHandle) {
@@ -115,9 +214,7 @@ fn open_github_link(link: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         let operation: Vec<u16> = "open\0".encode_utf16().collect();
-        let url: Vec<u16> = format!("{link}\0")
-            .encode_utf16()
-            .collect();
+        let url: Vec<u16> = format!("{link}\0").encode_utf16().collect();
         let result = unsafe {
             windows_sys::Win32::UI::Shell::ShellExecuteW(
                 std::ptr::null_mut(),
@@ -154,8 +251,20 @@ fn load_app_state() -> Result<AppState, String> {
     let data_path = install_directory.join("blob").join("data.json");
     let theme = read_anytype_theme(&app_data.join("devconfig.json"));
 
+    let mut onboarding_complete = false;
+    let mut api_port = 31009;
     let (ready, settings, message) = if data_path.is_file() {
         let data = read_json_file(&data_path)?;
+        onboarding_complete = data
+            .pointer("/apiConnection/enabled")
+            .and_then(Value::as_bool)
+            .is_some();
+        api_port = data
+            .pointer("/apiConnection/port")
+            .and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+            .filter(|port| *port > 0)
+            .unwrap_or(31009);
         let settings = settings_from_data(&data);
         (true, settings, None)
     } else {
@@ -177,6 +286,8 @@ fn load_app_state() -> Result<AppState, String> {
         settings,
         message,
         hotkey_error: hotkey::error(),
+        onboarding_complete,
+        api_port,
     })
 }
 
@@ -246,7 +357,9 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
             return Err(format!("{}", summarize_process_error(&combined)));
         }
 
-        let calendar_status = if combined.contains("BlobUI_CALENDAR_CACHE=refreshed") {
+        let calendar_status = if combined.contains("BlobUI_CALENDAR_CACHE=disabled") {
+            "disabled"
+        } else if combined.contains("BlobUI_CALENDAR_CACHE=refreshed") {
             "refreshed"
         } else {
             "cached"
@@ -707,6 +820,7 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            configure_connection,
             get_app_state,
             save_settings,
             minimize_window,

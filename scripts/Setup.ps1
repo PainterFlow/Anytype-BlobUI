@@ -64,6 +64,12 @@ try {
         Copy-Item -LiteralPath (Join-Path $sourceDirectory $name) -Destination $AppDirectory -Recurse
     }
     Copy-Item -LiteralPath (Join-Path $sourceDirectory 'BlobUI.cmd') -Destination $AppDirectory
+    $settingsExecutable = Join-Path $sourceDirectory 'settings-app/dist/blobui-settings.exe'
+    if (Test-Path -LiteralPath $settingsExecutable -PathType Leaf) {
+        $appDistribution = Join-Path $AppDirectory 'settings-app/dist'
+        [IO.Directory]::CreateDirectory($appDistribution) | Out-Null
+        Copy-Item -LiteralPath $settingsExecutable -Destination $appDistribution
+    }
     Write-BlobUiInstallPointer -SourceDirectory $AppDirectory -InstallDirectory $AnytypeDirectory
     $dataPath = Join-Path $AnytypeDirectory 'blob\data.json'
     if (Test-Path -LiteralPath $dataPath -PathType Leaf) {
