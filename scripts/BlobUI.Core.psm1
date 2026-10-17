@@ -8,6 +8,10 @@ $script:BlobUiDefaultSettings = @{
     codeFontFamily = 'Consolas'
     accentColor = '#DE50DE'
     bannerPath = 'spacebanner\banner.png'
+    reducedMotion = $true
+    tabHoverEffect = $false
+    linkHoverEffect = $false
+    objectMentionHoverEffect = $false
 }
 
 function Get-BlobUiHttpStatusCode {
@@ -380,6 +384,28 @@ function Get-BlobUiObjectPropertyValue {
     }
 
     return Get-BlobUiPropertyValue -PropertyValue $matches[0] -DisplayName $DisplayName
+}
+
+function ConvertTo-BlobUiBooleanSetting {
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory = $true)][bool]$Default,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [bool]) { return [bool]$Value }
+    if ($Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or
+        $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]) {
+        if ([int64]$Value -eq 0) { return $false }
+        if ([int64]$Value -eq 1) { return $true }
+    }
+
+    switch -Regex (([string]$Value).Trim().ToLowerInvariant()) {
+        '^(true|1|yes|on)$' { return $true }
+        '^(false|0|no|off)$' { return $false }
+        default { throw "The '$Name' setting must be a checkbox value." }
+    }
 }
 
 function Test-BlobUiCssColorComponent {
@@ -792,6 +818,10 @@ function Get-BlobUiNormalizedSettings {
         font = $null
         code_font = $null
         accent_color = $null
+        reduced_motion = $null
+        tab_hover_effect = $null
+        link_hover_effect = $null
+        object_mention_hover_effect = $null
     }
     foreach ($object in $Objects) {
         if ((Get-BlobUiObjectTypeKey -Object $object) -cne 'setting') {
@@ -800,7 +830,11 @@ function Get-BlobUiNormalizedSettings {
         $propertyMap = @(
             @{ key = 'font'; name = 'Font' },
             @{ key = 'code_font'; name = 'Code Font' },
-            @{ key = 'accent_color'; name = 'Accent Color' }
+            @{ key = 'accent_color'; name = 'Accent Color' },
+            @{ key = 'reduced_motion'; name = 'Reduced Motion' },
+            @{ key = 'tab_hover_effect'; name = 'Tab Hover Effect' },
+            @{ key = 'link_hover_effect'; name = 'Links Hover Effect' },
+            @{ key = 'object_mention_hover_effect'; name = 'Object Mention Hover Effect' }
         )
         foreach ($definition in $propertyMap) {
             $value = Get-BlobUiObjectPropertyValue -Object $object -Key $definition.key -DisplayName $definition.name
@@ -823,12 +857,21 @@ function Get-BlobUiNormalizedSettings {
         $accentValue = $script:BlobUiDefaultSettings.accentColor
     }
 
+    $reducedMotion = ConvertTo-BlobUiBooleanSetting -Value $rawSettings.reduced_motion -Default $script:BlobUiDefaultSettings.reducedMotion -Name 'Reduced Motion'
+    $tabHoverEffect = ConvertTo-BlobUiBooleanSetting -Value $rawSettings.tab_hover_effect -Default $script:BlobUiDefaultSettings.tabHoverEffect -Name 'Tab Hover Effect'
+    $linkHoverEffect = ConvertTo-BlobUiBooleanSetting -Value $rawSettings.link_hover_effect -Default $script:BlobUiDefaultSettings.linkHoverEffect -Name 'Links Hover Effect'
+    $objectMentionHoverEffect = ConvertTo-BlobUiBooleanSetting -Value $rawSettings.object_mention_hover_effect -Default $script:BlobUiDefaultSettings.objectMentionHoverEffect -Name 'Object Mention Hover Effect'
+
     return [ordered]@{
         fontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$fontValue) -Name 'Font'
         codeFontFamily = ConvertTo-BlobUiCssPlaceholderValue -Type font -Value ([string]$codeFontValue) -Name 'Code Font'
         accentColor = ConvertTo-BlobUiAccentColorValue -Value ([string]$accentValue)
         # Kept in the saved schema for compatibility. The banner is no longer an Anytype setting.
         bannerPath = $script:BlobUiDefaultSettings.bannerPath
+        reducedMotion = $reducedMotion
+        tabHoverEffect = $tabHoverEffect
+        linkHoverEffect = $linkHoverEffect
+        objectMentionHoverEffect = $objectMentionHoverEffect
     }
 }
 
@@ -1111,6 +1154,33 @@ function Invoke-BlobUiCssCompile {
         $segments.Add($sourceText)
     }
     $cssText = [string]::Join([Environment]::NewLine, $segments.ToArray())
+    $booleanSettings = @{}
+    foreach ($settingName in @('reducedMotion', 'tabHoverEffect', 'linkHoverEffect', 'objectMentionHoverEffect')) {
+        $settingValue = Get-BlobUiPropertyField -InputObject $Data.settings -FieldName $settingName
+        $booleanSettings[$settingName] = ConvertTo-BlobUiBooleanSetting -Value $settingValue -Default ([bool]$script:BlobUiDefaultSettings[$settingName]) -Name $settingName
+    }
+    $booleanConditionPattern = '(?s)/\*\s*@blobui-if(?<negation>-not)?\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s*\*/(?<content>.*?)/\*\s*@blobui-endif(?<endNegation>-not)?\s+(?<endName>[A-Za-z][A-Za-z0-9]*)\s*\*/'
+    $cssText = [System.Text.RegularExpressions.Regex]::Replace(
+        $cssText,
+        $booleanConditionPattern,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            $name = $match.Groups['name'].Value
+            if ($match.Groups['endName'].Value -cne $name -or $match.Groups['negation'].Value -cne $match.Groups['endNegation'].Value) {
+                throw "The BlobUI CSS condition for '$name' has a mismatched closing marker."
+            }
+            if (-not $booleanSettings.ContainsKey($name)) {
+                throw "The BlobUI CSS condition references an unknown setting: $name"
+            }
+            $enabled = [bool]$booleanSettings[$name]
+            if ($match.Groups['negation'].Success) { $enabled = -not $enabled }
+            if ($enabled) { return $match.Groups['content'].Value }
+            return ''
+        }
+    )
+    if ($cssText -match '/\*\s*@blobui-(?:if(?:-not)?|endif(?:-not)?)\s+[A-Za-z]') {
+        throw 'CSS contains an unmatched accessibility setting condition.'
+    }
     $declarations = Get-BlobUiDeclaredPlaceholders -CssText $cssText
 
     $installDirectory = [string]$Data.installDirectory

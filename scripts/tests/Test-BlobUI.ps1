@@ -347,6 +347,10 @@ $apiTransport = {
                 Font = 'Libron'
                 'Code Font' = 'Consolas'
                 'Accent Color' = '#DE50DE'
+                'Reduced Motion' = @{ format = 'checkbox'; checkbox = $false }
+                'Tab Hover Effect' = @{ format = 'checkbox'; checkbox = $true }
+                'Links Hover Effect' = @{ format = 'checkbox'; checkbox = $false }
+                'Object Mention Hover Effect' = @{ format = 'checkbox'; checkbox = $false }
             }
         }
         $payload = New-TestSettingObject $generalObjectId 'General Settings' $properties
@@ -412,6 +416,10 @@ try {
     Assert-Equal 'Libron' $fetchedData.settings.fontFamily 'The exported Font property was not mapped.'
     Assert-Equal 'Consolas' $fetchedData.settings.codeFontFamily 'The exported Code Font property was not mapped.'
     Assert-Equal '#DE50DE' $fetchedData.settings.accentColor 'The exported Accent Color property was not mapped.'
+    Assert-Equal $false $fetchedData.settings.reducedMotion 'The Reduced Motion checkbox was not mapped.'
+    Assert-Equal $true $fetchedData.settings.tabHoverEffect 'The Tab Hover Effect checkbox was not mapped.'
+    Assert-Equal $false $fetchedData.settings.linkHoverEffect 'The Links Hover Effect checkbox was not mapped.'
+    Assert-Equal $false $fetchedData.settings.objectMentionHoverEffect 'The Object Mention Hover Effect checkbox was not mapped.'
     Assert-Equal 'spacebanner\banner.png' $fetchedData.settings.bannerPath 'The fixed banner asset path changed.'
     Assert-Equal "$generalObjectId|$spaceObjectId" $fetchedData.settingsObjectIds 'Selected object IDs were not stored in selection order.'
     Assert-Equal 'Blue' $fetchedData.calendarObjectColors.$calendarBlueObjectId 'The Calendar Color property was not read from the independent space search.'
@@ -447,6 +455,10 @@ try {
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
     Assert-Equal 'Consolas' $emptyData.settings.codeFontFamily 'The Code Font default is incorrect.'
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
+    Assert-Equal $true $emptyData.settings.reducedMotion 'Reduced Motion did not default to enabled.'
+    Assert-Equal $false $emptyData.settings.tabHoverEffect 'Tab Hover Effect did not default to disabled.'
+    Assert-Equal $false $emptyData.settings.linkHoverEffect 'Links Hover Effect did not default to disabled.'
+    Assert-Equal $false $emptyData.settings.objectMentionHoverEffect 'Object Mention Hover Effect did not default to disabled.'
     Assert-Equal 'spacebanner\banner.png' $emptyData.settings.bannerPath 'The fixed banner asset path is incorrect.'
 
     $defaultAccentDataPath = Join-Path $testRoot 'default-accent-data.json'
@@ -554,7 +566,11 @@ try {
     & (Join-Path $scriptsDirectory 'Compile.ps1') -DataPath $candidateDataPath -OutputPath $scriptCompiledCssPath
     Assert-True (Test-Path -LiteralPath $scriptCompiledCssPath -PathType Leaf) 'Compile.ps1 did not find Dev and assets from another working directory.'
     Assert-Equal $css ([System.IO.File]::ReadAllText($scriptCompiledCssPath)) 'Compile.ps1 changed the compiled CSS when invoked from another working directory.'
-    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-Equal '00-settings.css|10-fonts.css|20-sidebar-banner.css|30-icons.css|31-publish-accent.css|32-membership-switch-accent.css|33-membership-join-accent.css|34-toggle-accent.css|35-shortcuts-accent.css|36-dataview-hover-accent.css|37-properties-accent.css|38-date-picker-accent.css|40-calendar.css|50-text-effects.css|60-accessibility.css' ([string[]]@($compileResult.sourceFiles | ForEach-Object { Split-Path -Leaf $_ })) 'Dev CSS source ordering is incorrect.'
+    Assert-True ($css.Contains('a:not([href^="blob://"])')) 'Links Hover Effect suppression did not compile.'
+    Assert-True ($css.Contains(':is(mention, .mention, .objectMention, .object-mention, [data-type="mention"])')) 'Object mention hover suppression did not compile.'
+    Assert-True (-not $css.Contains(':where([role="tab"], .tab, .tabs .item, .tabs .tab)')) 'The enabled Tab Hover Effect was suppressed.'
+    Assert-True (-not $css.Contains('@blobui-if')) 'Compiled CSS retained an accessibility setting condition.'
     Assert-True ($css.Contains('--color-blob-pink: #DE50DE;')) 'Compiled CSS omitted the default accent color.'
     Assert-True ($css.Contains('#widget-home>div>div>div>div>div.icon.settingsHome.iconColor.iconColor-red.hasSvg')) 'A custom Accent Color no longer tints the home icon.'
     Assert-True ($css.Contains('html .switch.active.blue')) 'A custom Accent Color no longer tints active blue toggles.'
@@ -654,7 +670,12 @@ try {
         '--header-image: url("' + $expectedBannerUri + '");'
     )
     $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace($css, '(?s)/\* BlobUI Calendar Color overrides \*/.*$', '')
-    # Compare the unchanged sources with the legacy baseline, excluding the new accent fixes.
+    $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace(
+        $cssWithoutCalendarOverrides,
+        '(?s)/\* BlobUI source: 60-accessibility\.css \*/.*?(?=/\* BlobUI source: |\z)',
+        ''
+    )
+    # Compare unchanged sources with the legacy baseline, excluding newer accessibility and accent rules.
     $cssWithoutCalendarOverrides = [System.Text.RegularExpressions.Regex]::Replace(
         $cssWithoutCalendarOverrides,
         '(?s)/\* BlobUI source: 3[1-8]-[^*]+\.css \*/.*?(?=/\* BlobUI source: |\z)',

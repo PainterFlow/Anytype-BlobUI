@@ -1,0 +1,80 @@
+/* Keep BlobUI's animated text effects still when Reduced Motion is enabled. */
+/* @blobui-if reducedMotion */
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"],
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
+    animation: none !important;
+    background-position: 50% 50%;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
+    animation: none !important;
+    left: 0;
+    top: 0;
+    opacity: 1;
+    text-shadow: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    font-weight: inherit;
+    -webkit-text-stroke-width: 0;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
+    animation: none !important;
+    display: inline;
+    transform: none;
+}
+/* @blobui-endif reducedMotion */
+
+/* Link, mention, and tab hover styling remains available when its toggle is on. */
+/* @blobui-if-not linkHoverEffect */
+a:not([href^="blob://"]):not(.mention):not(.objectMention):not(.object-mention):not([data-type="mention"]):not(:has(mention, .mention, .objectMention, .object-mention, [data-type="mention"])),
+a:not([href^="blob://"]):not(.mention):not(.objectMention):not(.object-mention):not([data-type="mention"]):not(:has(mention, .mention, .objectMention, .object-mention, [data-type="mention"])):is(:hover, .hover) {
+    color: inherit !important;
+    text-decoration: underline !important;
+    text-decoration-line: underline !important;
+    text-decoration-color: currentColor !important;
+    border-bottom-color: transparent !important;
+    box-shadow: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    filter: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+    transition: none !important;
+}
+/* @blobui-endif-not linkHoverEffect */
+
+/* Anytype can render object mentions as a custom element, a class, or a link
+   containing a mention element. Cover each form without disabling its click. */
+/* @blobui-if-not objectMentionHoverEffect */
+:is(mention, .mention, .objectMention, .object-mention, [data-type="mention"]),
+:is(mention, .mention, .objectMention, .object-mention, [data-type="mention"]):is(:hover, .hover),
+a:not([href^="blob://"]):has(mention, .mention, .objectMention, .object-mention, [data-type="mention"]),
+a:not([href^="blob://"]):has(mention, .mention, .objectMention, .object-mention, [data-type="mention"]):is(:hover, .hover) {
+    color: inherit !important;
+    text-decoration: underline !important;
+    text-decoration-line: underline !important;
+    text-decoration-color: currentColor !important;
+    border-bottom-color: transparent !important;
+    box-shadow: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    filter: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+    transition: none !important;
+}
+/* @blobui-endif-not objectMentionHoverEffect */
+
+/* Keep tab labels visually steady while preserving their selected state. */
+/* @blobui-if-not tabHoverEffect */
+:where([role="tab"], .tab, .tabs .item, .tabs .tab):not(.active):not(.selected):not(.isActive):not([aria-selected="true"]),
+:where([role="tab"], .tab, .tabs .item, .tabs .tab):not(.active):not(.selected):not(.isActive):not([aria-selected="true"]):is(:hover, .hover) {
+    color: inherit !important;
+    box-shadow: none !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    filter: none !important;
+    transition: none !important;
+}
+/* @blobui-endif-not tabHoverEffect */

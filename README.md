@@ -62,6 +62,9 @@ The updater reads the saved API key from its encrypted local file and refreshes 
 
 To apply changes made in your BlobUI settings objects without installing a newer release, run `.\scripts\Rebuild.ps1` from your current BlobUI source folder, then reload Anytype with `Ctrl+R`. You can also pass `-InstallDirectory` to the rebuild script for a custom data directory.
 
+
+The Settings list in the imported space has **General Settings** followed by **Accessibility**. The Accessibility entry contains the **Reduced Motion** checkbox and the **Hover Effects** group. Reduced Motion starts enabled and stops the animated BlobUI text effects. Tab, link, and object mention hover effects start disabled; `blob://` links stay outside the Links Hover Effect toggle. Change the checkboxes, run `.\scripts\Rebuild.ps1`, and reload Anytype to apply them. When installing, select both General Settings and Accessibility. If your settings space was imported before Accessibility was added, import the updated ZIP and run `.\scripts\Install.ps1` again so the Accessibility object is included in your saved selection.
+
 If the updater reports a missing installation or saved settings, check the data directory passed to `-InstallDirectory`. If it reports an invalid API key or missing settings objects, run `.\scripts\Install.ps1` again to save a valid key and select your settings objects.
 
 ## Dev Features
