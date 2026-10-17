@@ -148,8 +148,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .input-field input { width: 54%; }
 .input-field input::placeholder { color: var(--text-muted); }
 .sidebar-actions { order: 1; flex: 0 0 28px; display: grid; grid-template-rows: 28px 28px; gap: 4px; }
-.sidebar-action { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
-.sidebar-action:hover:not(:disabled), .log-button[aria-expanded="true"] { background: var(--hover); }
+.sidebar-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.sidebar-action::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
+.sidebar-action:hover:not(:disabled)::before, .log-button[aria-expanded="true"]::before { opacity: 1; }
 .sidebar-action:disabled { cursor: default; opacity: .6; }
 .action-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .save-button { grid-row: 1; color: var(--accent); }
