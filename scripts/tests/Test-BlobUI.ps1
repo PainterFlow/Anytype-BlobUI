@@ -476,7 +476,7 @@ try {
     Assert-Equal 2 $v1OverlayResult.settingsV2.version 'The first v2 save did not add settingsV2 to a version 1 PSCustomObject.'
     Assert-Equal 'Inter' $v1OverlayResult.settings.fontFamily 'The v2 save did not override the normalized font.'
     Assert-Equal 'rgba(12 34 56 / 50%)' $v1OverlayResult.settings.accentColor 'The v2 save changed a valid custom rgba accent.'
-    Assert-Equal $true $v1OverlayResult.settings.reducedMotion 'The local settings overlay did not default Reduced Motion on.'
+    Assert-Equal $false $v1OverlayResult.settings.reducedMotion 'The local settings overlay did not default Reduced Motion off.'
     Assert-Equal $false $v1OverlayResult.settings.tabHoverEffect 'The local settings overlay did not default Tab Hover Effect off.'
     Assert-Equal $false $v1OverlayResult.settings.linkHoverEffect 'The local settings overlay did not default Links Hover Effect off.'
     Assert-Equal $false $v1OverlayResult.settings.objectMentionHoverEffect 'The local settings overlay did not default Object Mention Hover Effect off.'
@@ -503,7 +503,7 @@ try {
     Assert-Equal 'Libron' $emptyData.settings.fontFamily 'The Font default is incorrect.'
     Assert-Equal 'Consolas' $emptyData.settings.codeFontFamily 'The Code Font default is incorrect.'
     Assert-Equal '#DE50DE' $emptyData.settings.accentColor 'The Accent Color default is incorrect.'
-    Assert-Equal $true $emptyData.settings.reducedMotion 'Reduced Motion did not default to enabled.'
+    Assert-Equal $false $emptyData.settings.reducedMotion 'Reduced Motion did not default to disabled.'
     Assert-Equal $false $emptyData.settings.tabHoverEffect 'Tab Hover Effect did not default to disabled.'
     Assert-Equal $false $emptyData.settings.linkHoverEffect 'Links Hover Effect did not default to disabled.'
     Assert-Equal $false $emptyData.settings.objectMentionHoverEffect 'Object Mention Hover Effect did not default to disabled.'
@@ -517,7 +517,7 @@ try {
     $defaultAccentCssPath = Join-Path $testRoot 'default-accent.css'
     Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $defaultAccentCssPath -Data $defaultAccentData | Out-Null
     $defaultAccentCss = [System.IO.File]::ReadAllText($defaultAccentCssPath)
-    Assert-True ($defaultAccentCss.Contains('background-position: 50% 50%;')) 'Default Reduced Motion did not suppress the animated effects.'
+    Assert-True (-not $defaultAccentCss.Contains('background-position: 50% 50%;')) 'Default Reduced Motion incorrectly suppressed the animated effects.'
     Assert-True ($defaultAccentCss.Contains('#preview.previewWrapper:has(.previewTab)')) 'The default Tab Hover Effect was not suppressed.'
     Assert-True ($defaultAccentCss.Contains('--color-blob-accent: var(--color-system-accent-100);')) 'Compiled CSS did not preserve Anytype system accent blue for Accent Color Default.'
     Assert-True (-not $defaultAccentCss.Contains('html .switch.active.blue')) 'Accent Color Default overrides Anytype''s native toggle color.'

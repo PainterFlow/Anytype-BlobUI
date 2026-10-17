@@ -472,7 +472,7 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         .unwrap_or_else(|| DEFAULT_ACCENT.into());
     let reduced_motion = read_bool(local, "reducedMotion")
         .or_else(|| read_bool(Some(normalized), "reducedMotion"))
-        .unwrap_or(true);
+        .unwrap_or(false);
     let tab_hover_effect = read_bool(local, "tabHoverEffect")
         .or_else(|| read_bool(Some(normalized), "tabHoverEffect"))
         .unwrap_or(false);
@@ -902,7 +902,7 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
-            reduced_motion: true,
+            reduced_motion: false,
             tab_hover_effect: false,
             link_hover_effect: false,
             object_mention_hover_effect: false,
@@ -953,7 +953,7 @@ mod tests {
     #[test]
     fn accessibility_settings_default_and_read_legacy_values() {
         let defaults = SettingsDraft::default();
-        assert!(defaults.reduced_motion);
+        assert!(!defaults.reduced_motion);
         assert!(!defaults.tab_hover_effect);
         assert!(!defaults.link_hover_effect);
         assert!(!defaults.object_mention_hover_effect);

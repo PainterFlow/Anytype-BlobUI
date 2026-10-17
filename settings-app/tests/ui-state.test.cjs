@@ -73,7 +73,7 @@ const context = {
         ready: true, theme: 'dark',
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
-          reducedMotion: true, tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
+          tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
         },
       };
       if (name === 'configure_connection') {
@@ -110,7 +110,7 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
-  assert.equal(element('reduced-motion').checked, true, 'Reduced Motion must load enabled by default.');
+  assert.equal(element('reduced-motion').checked, false, 'Reduced Motion must load disabled by default.');
   assert.equal(element('tab-hover-effect').checked, false, 'Tab hover previews must load disabled by default.');
   assert.equal(element('link-hover-effect').checked, false, 'Link hover previews must load disabled by default.');
   assert.equal(element('object-mention-hover-effect').checked, false, 'Object mention hover previews must load disabled by default.');

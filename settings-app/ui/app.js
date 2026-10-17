@@ -340,7 +340,7 @@
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
-      reducedMotion: settings.reducedMotion !== false,
+      reducedMotion: settings.reducedMotion === true,
       tabHoverEffect: settings.tabHoverEffect === true,
       linkHoverEffect: settings.linkHoverEffect === true,
       objectMentionHoverEffect: settings.objectMentionHoverEffect === true,
