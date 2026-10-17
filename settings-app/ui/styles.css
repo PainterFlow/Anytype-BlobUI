@@ -86,7 +86,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .nav-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 3px 8px; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: default; }
 .nav-icon { width: 20px; height: 20px; flex-shrink: 0; color: var(--text-secondary); }
 .nav-item:hover, .nav-item.active { background: var(--active); color: var(--text); }
-.sidebar-bottom { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 16px 8px 0; }
+.sidebar-bottom { display: flex; align-items: flex-end; gap: 8px; margin-top: auto; padding: 16px 8px 0; }
 .sidebar-foot { order: 0; flex: 1; min-width: 0; display: grid; gap: 8px; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
 .repository-link { display: flex; justify-self: start; align-items: center; gap: 10px; height: 24px; padding: 0 4px 0 0; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; }
 .repository-link:hover { color: var(--text); }
@@ -147,15 +147,15 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .input-field > span { flex-shrink: 0; font-weight: 400; }
 .input-field input { width: 54%; }
 .input-field input::placeholder { color: var(--text-muted); }
-.sidebar-actions { order: 1; flex: 0 0 28px; display: flex; flex-direction: column; gap: 4px; }
-.sidebar-action { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; }
-.sidebar-action:hover:not(:disabled), .log-button[aria-expanded="true"] { background: var(--active); }
+.sidebar-actions { order: 1; flex: 0 0 28px; display: grid; grid-template-rows: 28px 28px; gap: 4px; }
+.sidebar-action { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.sidebar-action:hover:not(:disabled), .log-button[aria-expanded="true"] { background: var(--hover); }
 .sidebar-action:disabled { cursor: default; opacity: .6; }
 .action-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.save-button { color: var(--accent); }
+.save-button { grid-row: 1; color: var(--accent); }
 .log-button[data-severity="error"] { color: var(--color-red); }
 .log-button[data-severity="warning"] { color: var(--color-yellow); }
-.log-control { position: relative; }
+.log-control { position: relative; grid-row: 2; }
 .log-popup { position: absolute; z-index: 10; left: 0; bottom: calc(100% + 8px); width: min(400px, calc(100vw - 32px)); max-height: min(360px, calc(100vh - 80px)); display: flex; flex-direction: column; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--input-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .log-heading { display: flex; align-items: center; justify-content: space-between; padding-left: 8px; }
 .log-heading h2 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
