@@ -43,39 +43,43 @@
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
-  let scrollbarHideTimer = null;
-
-  function updatePageScrollbar() {
-    const canScroll = pageContent.scrollHeight > pageContent.clientHeight;
-    pageContent.classList.toggle("has-overflow", canScroll);
-    if (canScroll) return;
-
-    pageContent.classList.remove("is-scrolling");
-    if (scrollbarHideTimer !== null) {
-      window.clearTimeout(scrollbarHideTimer);
-      scrollbarHideTimer = null;
+  function setupScrollbar(container, contentSelector) {
+    let hideTimer = null;
+    function update() {
+      const canScroll = container.scrollHeight > container.clientHeight;
+      container.classList.toggle("has-overflow", canScroll);
+      if (canScroll) return;
+      container.classList.remove("is-scrolling");
+      if (hideTimer !== null) {
+        window.clearTimeout(hideTimer);
+        hideTimer = null;
+      }
     }
+    container.addEventListener("scroll", () => {
+      update();
+      if (!container.classList.contains("has-overflow")) return;
+      container.classList.add("is-scrolling");
+      if (hideTimer !== null) window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => {
+        container.classList.remove("is-scrolling");
+        hideTimer = null;
+      }, 900);
+    }, { passive: true });
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(update);
+      observer.observe(container);
+      const content = container.querySelector(contentSelector);
+      if (content) observer.observe(content);
+    }
+    update();
+    return update;
   }
-
-  pageContent.addEventListener("scroll", () => {
+  const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
+  const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
+  window.addEventListener("resize", () => {
     updatePageScrollbar();
-    if (!pageContent.classList.contains("has-overflow")) return;
-
-    pageContent.classList.add("is-scrolling");
-    if (scrollbarHideTimer !== null) window.clearTimeout(scrollbarHideTimer);
-    scrollbarHideTimer = window.setTimeout(() => {
-      pageContent.classList.remove("is-scrolling");
-      scrollbarHideTimer = null;
-    }, 900);
-  }, { passive: true });
-  window.addEventListener("resize", updatePageScrollbar);
-  if (typeof ResizeObserver === "function") {
-    const scrollbarObserver = new ResizeObserver(updatePageScrollbar);
-    scrollbarObserver.observe(pageContent);
-    const settingsContent = pageContent.querySelector(".settings-content");
-    if (settingsContent) scrollbarObserver.observe(settingsContent);
-  }
-  updatePageScrollbar();
+    updateOnboardingScrollbar();
+  });
 
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;
@@ -568,6 +572,7 @@
       onboardingWelcome.hidden = true;
       onboardingWelcome.classList.remove("leaving");
       onboardingApi.hidden = false;
+      updateOnboardingScrollbar();
       el("onboarding-api-title").focus();
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   });
