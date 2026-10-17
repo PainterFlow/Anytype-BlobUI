@@ -9,6 +9,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$script:connectionFailureCode = 'setup'
+trap {
+    if ($ConfigureConnectionFromStdin) {
+        # A fixed-code protocol gives the app useful errors without exposing keys,
+        # exception dumps, request headers, or arbitrary server response text.
+        Write-Output ('BLOBUI_CONNECTION_ERROR=' + $script:connectionFailureCode)
+        exit 1
+    }
+    throw
+}
 Import-Module (Join-Path $PSScriptRoot 'BlobUI.Core.psm1') -Force
 $sourceDirectory = Split-Path -Parent $PSScriptRoot
 
@@ -159,7 +169,7 @@ if ($null -ne $ConnectionOverride) {
         if ([string]::IsNullOrWhiteSpace($connectionApiKey) -or $connectionApiKey.Length -gt 4096 -or $connectionApiKey -match '[\x00-\x1f\x7f]') {
             throw 'Enter a valid Anytype API v2 key.'
         }
-        $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+
     }
     $connection = [pscustomobject]@{ enabled = [bool]$ConnectionOverride.enabled; port = $connectionPort }
     $data | Add-Member -MemberType NoteProperty -Name apiConnection -Value $connection -Force
@@ -179,6 +189,21 @@ if ($null -ne $ConnectionOverride) {
 if ($null -ne $connection -and -not $PSBoundParameters.ContainsKey('ApiBaseUri')) {
     $ApiBaseUri = 'http://127.0.0.1:' + [int]$connection.port
 }
+if ($connectionApiKey) {
+    $script:connectionFailureCode = 'connection'
+    try {
+        $null = Test-BlobUiApiConnection -ApiKey $connectionApiKey -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    }
+    catch {
+        if ($_.Exception.Message -match 'HTTP 401') { $script:connectionFailureCode = 'unauthorized' }
+        elseif ($_.Exception.Message -match 'HTTP 403') { $script:connectionFailureCode = 'forbidden' }
+        elseif ($_.Exception.Message -match 'HTTP 404|API v2 spaces response') { $script:connectionFailureCode = 'api-version' }
+        throw
+    }
+    $script:connectionFailureCode = 'credential'
+    $connectionCredential = New-BlobUiProtectedCredential -ApiKey $connectionApiKey
+}
+$script:connectionFailureCode = 'settings'
 $settingsV2Property = $data.PSObject.Properties['settingsV2']
 $settingsOverlay = if ($null -ne $settingsV2Property) { $settingsV2Property.Value } else { $null }
 $useSettingsV2 = $null -ne $settingsOverlay
@@ -253,7 +278,11 @@ try {
                 $calendarCacheRefreshed = $true
             }
             catch {
-                if ($null -ne $ConnectionOverride -and $ConnectionOverride.enabled) { throw 'Could not connect to Anytype. Check that Local API is enabled, the key has read access, and the port is correct.' }
+                if ($null -ne $ConnectionOverride) {
+                    # A new key is already authenticated. Optional calendar data
+                    # must not block saving it, or carry over a previous key's data.
+                    $candidateData | Add-Member -MemberType NoteProperty -Name calendarObjectColors -Value ([pscustomobject]@{}) -Force
+                }
                 Write-Host "BlobUI_CALENDAR_CACHE=cached"
                 Write-Host "Calendar color data stayed at its last saved values because the Anytype API refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
             }
@@ -320,6 +349,7 @@ try {
         DevDirectory = $compileDevDirectory
         AssetSourceDirectory = Join-Path $sourceDirectory 'assets'
     }
+    $script:connectionFailureCode = 'compile'
     & (Join-Path $PSScriptRoot 'Compile.ps1') @compileArguments
 
     $installArguments = @{
@@ -330,6 +360,7 @@ try {
         DataCandidatePath = $candidateDataPath
     }
     if ($connectionCredential) { $installArguments.CredentialProtectedText = $connectionCredential }
+    $script:connectionFailureCode = 'install'
     $result = Invoke-BlobUiInstall @installArguments
 
     if ($ForUpdate) {

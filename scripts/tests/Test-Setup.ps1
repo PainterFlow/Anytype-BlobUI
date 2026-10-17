@@ -79,12 +79,19 @@ try {
         Assert (-not ([IO.File]::ReadAllText($dataPath).Contains('test-only-key'))) 'Plaintext key leaked into data.json.'
         $keyFile = Join-Path $anytype 'blob/credentials/anytype-api-key.dpapi'
         Assert ((Read-BlobUiProtectedCredential -Path $keyFile) -eq 'test-only-key') 'Saved key did not decrypt.'
+        $calendarFailureApi = {
+            param($key, $method, $path, $body, $headers)
+            if ($path -eq '/v2/spaces?limit=1') { return [pscustomobject]@{ data = @(); has_more = $false } }
+            throw 'Simulated optional calendar failure.'
+        }
+        & (Join-Path $secondApp 'scripts/Rebuild.ps1') -InstallDirectory $anytype -ConnectionOverride ([pscustomobject]@{ enabled = $true; port = 31011; apiKey = 'rotated-test-key' }) -ApiTransport $calendarFailureApi
+        Assert ((Read-BlobUiProtectedCredential -Path $keyFile) -eq 'rotated-test-key') 'A valid replacement key was rejected because calendar refresh failed.'
         $beforeFailure = [IO.File]::ReadAllText($dataPath)
         $failedConnection = $false
         try { & (Join-Path $secondApp 'scripts/Rebuild.ps1') -InstallDirectory $anytype -ConnectionOverride ([pscustomobject]@{ enabled = $true; port = 31011; apiKey = 'bad-test-key' }) -ApiTransport { throw 'Simulated API failure.' } } catch { $failedConnection = $true }
         Assert $failedConnection 'Failed API validation was accepted.'
         Assert ([IO.File]::ReadAllText($dataPath) -eq $beforeFailure) 'Failed connection changed saved data.'
-        Assert ((Read-BlobUiProtectedCredential -Path $keyFile) -eq 'test-only-key') 'Failed connection changed the encrypted key.'
+        Assert ((Read-BlobUiProtectedCredential -Path $keyFile) -eq 'rotated-test-key') 'Failed connection changed the encrypted key.'
     }
     # Invalid saved state fails after app staging and removes the incomplete app.
     [IO.File]::WriteAllText($dataPath, 'invalid json')

@@ -169,9 +169,9 @@ function Invoke-BlobUiApiRequest {
         }
         $exceptionMessage = [string]$_.Exception.Message
         if ($exceptionMessage -match '(?i)timeout|timed out') {
-            throw 'The request to Anytype local API at 127.0.0.1:31009 timed out. Confirm Anytype is open and its local API is enabled.'
+            throw "The request to Anytype local API at $($ApiBaseUri.TrimEnd('/')) timed out. Confirm Anytype is open and its local API is enabled."
         }
-        throw 'Could not reach Anytype local API at 127.0.0.1:31009 because the connection failed. Confirm Anytype is open and its local API is enabled.'
+        throw "Could not reach Anytype local API at $($ApiBaseUri.TrimEnd('/')) because the connection failed. Confirm Anytype is open and its local API is enabled."
     }
 }
 
@@ -764,6 +764,21 @@ function Set-BlobUiSettingsV2Overlay {
         $null = $Data | Add-Member -MemberType NoteProperty -Name 'settingsV2' -Value $settingsV2 -Force
     }
     return $Data
+}
+
+function Test-BlobUiApiConnection {
+    param(
+        [Parameter(Mandatory = $true)][string]$ApiKey,
+        [string]$ApiBaseUri = $script:BlobUiApiBaseUri,
+        [scriptblock]$ApiTransport
+    )
+
+    # Authentication must not depend on optional calendar properties or caches.
+    $response = Invoke-BlobUiApiRequest -ApiKey $ApiKey -Path '/v2/spaces?limit=1' -ApiBaseUri $ApiBaseUri -ApiTransport $ApiTransport
+    if ($null -eq $response -or $null -eq $response.PSObject.Properties['data']) {
+        throw 'The selected port did not return an Anytype API v2 spaces response.'
+    }
+    return $true
 }
 
 function Update-BlobUiCalendarColorCache {
@@ -2004,6 +2019,7 @@ Export-ModuleMember -Function @(
     'Get-BlobUiSettingsData',
     'Set-BlobUiSettingsV2Overlay',
     'Update-BlobUiCalendarColorCache',
+    'Test-BlobUiApiConnection',
     'Get-BlobUiInstallPointerPath',
     'Get-BlobUiReleaseVersion',
     'Invoke-BlobUiInstall',

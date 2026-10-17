@@ -629,10 +629,13 @@
     setConnectionBusy(true);
     el("connection-error").textContent = "";
     try {
-      await invoke("configure_connection", { connection: { enabled, apiKey, port } });
+      const result = await invoke("configure_connection", { connection: { enabled, apiKey, port } });
       window.appReady = true;
       updateSaveButton();
-      setStatus(enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", "info");
+      const calendarPending = enabled && result && result.calendarStatus === "cached";
+      setStatus(calendarPending
+        ? "Anytype connected. Calendar data could not refresh yet; try saving again later."
+        : enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", calendarPending ? "warning" : "info");
       el("connection-key").value = "";
       advanceOnboarding();
     } catch (error) {
@@ -656,6 +659,11 @@
     if (enabled) advanceOnboarding();
     else applyConnection(false);
   }));
+
+  el("open-connection").addEventListener("click", () => {
+    showOnboarding();
+    showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
+  });
 
   el("connection-back").addEventListener("click", () => {
     if (connectionBusy || onboardingTransition !== null) return;

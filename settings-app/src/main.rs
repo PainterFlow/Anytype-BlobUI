@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
+mod connection;
 mod hotkey;
 
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -89,7 +90,7 @@ struct ConnectionDraft {
 }
 
 #[tauri::command]
-async fn configure_connection(connection: ConnectionDraft) -> Result<(), String> {
+async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult, String> {
     if SAVE_IN_PROGRESS
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -105,7 +106,7 @@ async fn configure_connection(connection: ConnectionDraft) -> Result<(), String>
     .map_err(|_| "The connection task stopped unexpectedly.".to_string())?
 }
 
-fn configure_connection_blocking(mut connection: ConnectionDraft) -> Result<(), String> {
+fn configure_connection_blocking(mut connection: ConnectionDraft) -> Result<SaveResult, String> {
     if connection.port == Some(0) {
         return Err("Port must be between 1 and 65535.".into());
     }
@@ -169,10 +170,22 @@ fn configure_connection_blocking(mut connection: ConnectionDraft) -> Result<(), 
             .map_err(|_| "Could not finish connection setup.".to_string())?;
         write_result?;
         if !output.status.success() {
-            // Never forward process output: it may contain credential material.
-            return Err("Could not apply the connection. Check Anytype's Local API, key permissions and port, then try again.".into());
+            return Err(connection::connection_error(
+                &output.stdout,
+                connection.port.unwrap_or(31009),
+            ));
         }
-        return Ok(());
+        let text = String::from_utf8_lossy(&output.stdout);
+        let calendar_status = if text.contains("BlobUI_CALENDAR_CACHE=disabled") {
+            "disabled"
+        } else if text.contains("BlobUI_CALENDAR_CACHE=refreshed") {
+            "refreshed"
+        } else {
+            "cached"
+        };
+        return Ok(SaveResult {
+            calendar_status: calendar_status.into(),
+        });
     }
     Err("PowerShell could not be found.".into())
 }
