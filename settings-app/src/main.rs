@@ -103,10 +103,19 @@ fn start_window_drag(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 fn open_project_repository() -> Result<(), String> {
+    open_github_link("https://github.com/PainterFlow/Anytype-BlobUI")
+}
+
+#[tauri::command]
+fn open_author_profile() -> Result<(), String> {
+    open_github_link("https://github.com/PainterFlow")
+}
+
+fn open_github_link(link: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         let operation: Vec<u16> = "open\0".encode_utf16().collect();
-        let url: Vec<u16> = "https://github.com/PainterFlow/Anytype-BlobUI\0"
+        let url: Vec<u16> = format!("{link}\0")
             .encode_utf16()
             .collect();
         let result = unsafe {
@@ -704,6 +713,7 @@ fn main() {
             hide_window,
             start_window_drag,
             open_project_repository,
+            open_author_profile,
             quit_app
         ])
         .on_window_event(|window, event| {

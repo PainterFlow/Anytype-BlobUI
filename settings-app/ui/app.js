@@ -456,6 +456,7 @@
   }
   el("window-minimize").addEventListener("click", () => windowAction("minimize_window"));
   el("window-close").addEventListener("click", () => windowAction("hide_window"));
+  el("open-author").addEventListener("click", () => windowAction("open_author_profile"));
   el("open-repository").addEventListener("click", () => windowAction("open_project_repository"));
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {

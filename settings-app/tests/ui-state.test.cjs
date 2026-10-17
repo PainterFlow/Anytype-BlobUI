@@ -101,6 +101,7 @@ const status = () => element('status-message').textContent;
   for (const [id, command] of [
     ['window-minimize', 'minimize_window'], ['window-close', 'hide_window'],
     ['open-repository', 'open_project_repository'],
+    ['open-author', 'open_author_profile'],
   ]) {
     await element(id).handlers.click();
     assert.equal(calls.at(-1), command);
