@@ -15,12 +15,55 @@
         <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
       </div>
     </header>
-    <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint" hidden>
-      <span class="onboarding-copy">
-        <span id="onboarding-title" class="onboarding-title">Hello</span>
-        <span id="onboarding-hint" class="onboarding-hint">Press anywhere to continue</span>
-      </span>
-    </button>
+    <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden>
+      <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
+        <span class="onboarding-copy">
+          <span id="onboarding-title" class="onboarding-title">Welcome to BlobUI</span>
+          <span id="onboarding-hint" class="onboarding-hint">Press anywhere to continue</span>
+        </span>
+      </button>
+      <section id="onboarding-api" class="onboarding-api" aria-labelledby="onboarding-api-title" hidden>
+        <div class="onboarding-scroll">
+          <header class="onboarding-api-heading">
+            <h1 id="onboarding-api-title" tabindex="-1">Would you like to use an API key?</h1>
+            <p>Choose how you want to use BlobUI.</p>
+          </header>
+          <div class="onboarding-options" role="group" aria-label="API key preference">
+            <button id="onboarding-no-api-option" class="onboarding-option" type="button" aria-pressed="false" data-api="false">
+              <span class="onboarding-option-title">No API Key</span>
+              <span class="onboarding-features" role="list">
+                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Read and use your Data for BlobUI features</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+              </span>
+            </button>
+            <button id="onboarding-api-option" class="onboarding-option recommended-option" type="button" aria-pressed="false" data-api="true">
+              <span class="recommended-label">Recommended</span>
+              <span class="onboarding-option-title">Use API Key</span>
+              <span class="onboarding-features" role="list">
+                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Read and use your Data for BlobUI features</span><span class="feature-mark available" aria-hidden="true">✓</span><span class="sr-only">Included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><span class="feature-mark unavailable" aria-hidden="true">×</span><span class="sr-only">Not included</span></span>
+              </span>
+            </button>
+          </div>
+          <p id="onboarding-selection" class="onboarding-selection" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="onboarding-privacy">BlobUI will not collect your data</footer>
+      </section>
+    </section>
     <div class="app-shell" id="settings-shell">
       <aside class="sidebar" aria-label="Settings navigation">
         <nav class="sidebar-nav" aria-label="Settings">

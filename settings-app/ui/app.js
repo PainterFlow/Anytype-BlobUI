@@ -529,29 +529,65 @@
   el("window-close").addEventListener("click", () => windowAction("hide_window"));
   el("open-author").addEventListener("click", () => windowAction("open_author_profile"));
   el("open-repository").addEventListener("click", () => windowAction("open_project_repository"));
+  const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
+  const onboardingApi = el("onboarding-api");
   const settingsShell = el("settings-shell");
+  const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
   let onboardingPreviousFocus = null;
+  let onboardingTransition = null;
 
   function showOnboarding() {
-    if (!onboardingWelcome.hidden) return;
-    onboardingPreviousFocus = document.activeElement;
+    if (onboarding.hidden) onboardingPreviousFocus = document.activeElement;
+    window.clearTimeout(onboardingTransition);
+    onboardingTransition = null;
     closeLogs();
     settingsShell.inert = true;
+    root.classList.add("onboarding-active");
+    onboarding.hidden = false;
+    onboardingApi.hidden = true;
+    onboardingWelcome.classList.remove("leaving");
     onboardingWelcome.hidden = false;
     onboardingWelcome.focus();
   }
 
-  onboardingWelcome.addEventListener("click", () => {
-    onboardingWelcome.hidden = true;
+  function closeOnboarding() {
+    window.clearTimeout(onboardingTransition);
+    onboardingTransition = null;
+    onboarding.hidden = true;
     settingsShell.inert = false;
+    root.classList.remove("onboarding-active");
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
+  }
+
+  onboardingWelcome.addEventListener("click", () => {
+    if (onboardingTransition !== null) return;
+    onboardingWelcome.classList.add("leaving");
+    onboardingTransition = window.setTimeout(() => {
+      onboardingTransition = null;
+      onboardingWelcome.hidden = true;
+      onboardingWelcome.classList.remove("leaving");
+      onboardingApi.hidden = false;
+      el("onboarding-api-title").focus();
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   });
+
+  apiOptions.forEach((option) => option.addEventListener("click", () => {
+    apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
+    // Selection stays in the preview until the next onboarding steps are built.
+    onboarding.dataset.apiChoice = option === apiOptions[1] ? "api" : "no-api";
+    el("onboarding-selection").textContent = option === apiOptions[1] ? "Use API Key selected" : "No API Key selected";
+  }));
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "F8" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
       event.preventDefault();
       if (!event.repeat) showOnboarding();
+      return;
+    }
+    if (event.key === "Escape" && !onboarding.hidden) {
+      event.preventDefault();
+      closeOnboarding();
       return;
     }
     if (event.key === "Escape" && !logPopup.hidden) {

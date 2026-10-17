@@ -196,38 +196,49 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   .save-spinner { animation: none; }
 }
 
-/* Welcome covers the settings content while keeping native window controls available. */
-.onboarding-welcome {
-  position: fixed;
-  inset: 36px 0 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  padding: 32px;
-  background: var(--bg);
-  color: var(--text);
-  cursor: pointer;
-}
-.onboarding-welcome[hidden] { display: none; }
-.onboarding-copy { display: grid; justify-items: center; gap: 20px; }
-.onboarding-title {
-  font-size: clamp(72px, 12vw, 128px);
-  line-height: 1.1;
-  font-weight: 600;
-  letter-spacing: -.045em;
-  animation: onboarding-fade-in 900ms ease-out both;
-}
-.onboarding-hint {
-  color: var(--text-secondary);
-  font-size: 16px;
-  line-height: 24px;
-  animation: onboarding-fade-in 900ms ease-out 250ms both;
-}
-@keyframes onboarding-fade-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+
+/* The blank title bar remains a drag region without settings chrome. */
+:root.onboarding-active .window-title,
+:root.onboarding-active .window-controls { visibility: hidden; }
+:root.onboarding-active .window-titlebar::before { display: none; }
+.onboarding { position: fixed; inset: 36px 0 0; z-index: 20; background: var(--bg); }
+.onboarding[hidden], .onboarding-welcome[hidden], .onboarding-api[hidden] { display: none; }
+.onboarding-welcome { display: grid; place-items: center; width: 100%; height: 100%; padding: 32px; background: var(--bg); color: var(--text); cursor: pointer; }
+.onboarding-copy { display: grid; justify-items: center; gap: 24px; text-align: center; }
+.onboarding-title { font-size: clamp(48px, 7.5vw, 96px); line-height: 1.15; font-weight: 600; letter-spacing: -.045em; animation: onboarding-fade-in 900ms ease-out both; }
+.onboarding-hint { color: var(--text-secondary); font-size: 16px; line-height: 24px; animation: onboarding-fade-in 900ms ease-out 250ms both; }
+.onboarding-welcome.leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
+.onboarding-api { display: flex; flex-direction: column; height: 100%; min-height: 0; animation: onboarding-fade-in 450ms ease-out both; }
+.onboarding-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 44px 48px 20px; scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+.onboarding-api-heading { text-align: center; margin: 0 auto 44px; }
+.onboarding-api-heading h1 { margin: 0 0 12px; font-size: 32px; line-height: 1.25; font-weight: 600; letter-spacing: -.8px; }
+.onboarding-api-heading h1:focus { outline: none; }
+.onboarding-api-heading p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+.onboarding-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px; max-width: 980px; margin: 0 auto; padding: 8px; }
+.onboarding-option { position: relative; display: flex; flex-direction: column; align-items: stretch; padding: 30px 24px; border: 0; border-radius: 16px; background: var(--bg); text-align: left; cursor: pointer; transition: transform 220ms ease, background 220ms ease, box-shadow 220ms ease; }
+.onboarding-option:hover { transform: scale(1.025); background: var(--input-bg); }
+.onboarding-option[aria-pressed="true"] { background: var(--active); }
+.onboarding-option[aria-pressed="true"] .onboarding-option-title { color: var(--accent); }
+.onboarding-option-title { display: block; margin-bottom: 24px; font-size: 24px; line-height: 30px; font-weight: 600; }
+.onboarding-features { display: grid; gap: 16px; }
+.onboarding-feature { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; font-size: 14px; line-height: 21px; }
+.feature-mark { flex-shrink: 0; font-size: 21px; line-height: 21px; }
+.feature-mark.available { color: var(--accent); }
+.feature-mark.unavailable { color: var(--text-muted); }
+.recommended-option { box-shadow: inset 0 0 0 1px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 18%, transparent); }
+.recommended-option:hover { box-shadow: inset 0 0 0 1px var(--accent), 0 0 36px color-mix(in srgb, var(--accent) 30%, transparent); }
+.recommended-label { position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%); padding: 0 12px; background: var(--bg); color: var(--accent); font-size: 12px; line-height: 22px; font-weight: 500; }
+.onboarding-selection { min-height: 22px; margin: 24px 0 0; text-align: center; color: var(--text-secondary); }
+.onboarding-privacy { flex-shrink: 0; padding: 20px 24px; background: var(--bg); color: var(--text-secondary); text-align: center; font-size: 12px; }
+@keyframes onboarding-fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes onboarding-fade-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-12px); } }
+@media (max-width: 840px) {
+  .onboarding-scroll { padding: 32px 24px 16px; }
+  .onboarding-options { gap: 20px; }
+  .onboarding-option { padding: 28px 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-title, .onboarding-hint { animation: none; }
+  .onboarding-title, .onboarding-hint, .onboarding-welcome.leaving, .onboarding-api { animation: none; }
+  .onboarding-option { transition: none; }
+  .onboarding-option:hover { transform: none; }
 }
