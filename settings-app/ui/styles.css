@@ -94,11 +94,17 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .repository-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
 .main-content { display: flex; flex: 1; flex-direction: column; width: 0; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
-.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; }
+@property --page-scrollbar-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.page-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
 .page-content::-webkit-scrollbar { width: 12px; height: 12px; }
 .page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner { background: transparent; }
-.page-content::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; transition: background-color .15s ease; }
-.page-content.has-overflow.is-scrolling::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+.page-content::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
 .page-content::-webkit-scrollbar-button { display: none; }
 .settings-content { width: calc(100% - 64px); max-width: 640px; margin: 0 auto; padding: 26px 0 36px; }
 .page-heading { margin-bottom: 32px; text-align: left; }
@@ -185,7 +191,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page-content::-webkit-scrollbar-thumb { transition: none; }
+  .page-content { transition: none; }
   .switch-track::after { transition: none; }
   .save-spinner { animation: none; }
 }
