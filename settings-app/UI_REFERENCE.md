@@ -12,4 +12,4 @@ The following upstream files supplied the measurements and control behavior.
 
 Colors and font sizes also match the installed Anytype stylesheet. BlobUI's saved interface and code fonts still apply. The custom color picker and explicit Save action remain BlobUI controls. Decorative shadows, glows, theme cards, and font samples remain absent.
 
-The scrollbar follows the user's Anytype screenshot, with a 12px width, rounded thumb ends, no arrow buttons, and a visible gray thumb on a transparent track. Its dark and light thumb colors match Anytype's `--color-control-active` values.
+The scrollbar follows the user's Anytype screenshot, with a 12px width, rounded thumb ends, no arrow buttons, and a transparent track. Its gray thumb matches the current theme, appears while the page can scroll, and fades after scrolling stops. Pages without overflow show no scrollbar.

@@ -33,6 +33,7 @@
   const logButton = el("log-button");
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
+  const pageContent = document.querySelector(".page-content");
   const logs = [];
   const root = document.documentElement;
 
@@ -42,6 +43,39 @@
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
+  let scrollbarHideTimer = null;
+
+  function updatePageScrollbar() {
+    const canScroll = pageContent.scrollHeight > pageContent.clientHeight;
+    pageContent.classList.toggle("has-overflow", canScroll);
+    if (canScroll) return;
+
+    pageContent.classList.remove("is-scrolling");
+    if (scrollbarHideTimer !== null) {
+      window.clearTimeout(scrollbarHideTimer);
+      scrollbarHideTimer = null;
+    }
+  }
+
+  pageContent.addEventListener("scroll", () => {
+    updatePageScrollbar();
+    if (!pageContent.classList.contains("has-overflow")) return;
+
+    pageContent.classList.add("is-scrolling");
+    if (scrollbarHideTimer !== null) window.clearTimeout(scrollbarHideTimer);
+    scrollbarHideTimer = window.setTimeout(() => {
+      pageContent.classList.remove("is-scrolling");
+      scrollbarHideTimer = null;
+    }, 900);
+  }, { passive: true });
+  window.addEventListener("resize", updatePageScrollbar);
+  if (typeof ResizeObserver === "function") {
+    const scrollbarObserver = new ResizeObserver(updatePageScrollbar);
+    scrollbarObserver.observe(pageContent);
+    const settingsContent = pageContent.querySelector(".settings-content");
+    if (settingsContent) scrollbarObserver.observe(settingsContent);
+  }
+  updatePageScrollbar();
 
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;

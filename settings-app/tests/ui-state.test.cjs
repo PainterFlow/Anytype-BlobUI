@@ -10,6 +10,7 @@ function element(id) {
     const classes = new Set();
     elements.set(id, {
       value: '', textContent: '', hidden: true, children: [], attributes: {}, style: { setProperty() {} }, dataset: {},
+      clientHeight: 500, scrollHeight: 500,
       classList: {
         add: (...names) => names.forEach(name => classes.add(name)),
         remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -28,6 +29,8 @@ function element(id) {
   return elements.get(id);
 }
 const calls = [];
+const timers = new Map();
+let nextTimerId = 1;
 let saveError = null;
 let copiedLogs = '';
 let copyError = false;
@@ -38,13 +41,22 @@ const context = {
     addEventListener(name, handler) { this.handlers[name] = handler; },
     documentElement: element('root'),
     getElementById: element,
+    querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
     querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family'].map(element),
   },
   CSS: { supports: () => true },
   window: {
+    handlers: {},
     CSS: { supports: () => true },
     setInterval() {},
+    setTimeout(callback, delay) {
+      const id = nextTimerId++;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
+    addEventListener(name, handler) { this.handlers[name] = handler; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: { core: { async invoke(name) {
       calls.push(name);
@@ -75,6 +87,32 @@ const status = () => element('status-message').textContent;
   assert.equal(element('log-button').hidden, false);
   assert.equal(element('log-button').dataset.severity, 'info');
   assert.equal(element('log-entries').children.length, 1);
+
+  const pageContent = element('page-content');
+  assert.equal(pageContent.classList.contains('has-overflow'), false, 'A page without overflow starts without a scrollbar.');
+  pageContent.handlers.scroll();
+  assert.equal(pageContent.classList.contains('is-scrolling'), false, 'A page without overflow must not show a scrollbar.');
+  pageContent.scrollHeight = 900;
+  context.window.handlers.resize();
+  assert.equal(pageContent.classList.contains('has-overflow'), true, 'The page must expose its scrollbar when content overflows.');
+  pageContent.handlers.scroll();
+  assert.equal(pageContent.classList.contains('is-scrolling'), true, 'The scrollbar must appear during scrolling.');
+  const firstScrollbarTimerId = [...timers.keys()][0];
+  pageContent.handlers.scroll();
+  assert.equal(timers.has(firstScrollbarTimerId), false, 'A new scroll event must restart the idle delay.');
+  assert.equal(timers.size, 1);
+  const [scrollbarTimerId, scrollbarTimer] = [...timers.entries()][0];
+  assert.equal(scrollbarTimer.delay, 900);
+  timers.delete(scrollbarTimerId);
+  scrollbarTimer.callback();
+  assert.equal(pageContent.classList.contains('is-scrolling'), false, 'The scrollbar must hide after scrolling stops.');
+  pageContent.handlers.scroll();
+  assert.equal(pageContent.classList.contains('is-scrolling'), true);
+  pageContent.scrollHeight = 500;
+  context.window.handlers.resize();
+  assert.equal(pageContent.classList.contains('has-overflow'), false, 'The page must hide its scrollbar when content no longer overflows.');
+  assert.equal(pageContent.classList.contains('is-scrolling'), false, 'The scrollbar must disappear if overflow ends during a scroll.');
+  assert.equal(timers.size, 0, 'An obsolete idle timer must be cleared when overflow ends.');
 
   await input('font-family', 'Arial');
   assert.match(status(), /Unsaved changes/);
