@@ -101,11 +101,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 
 .page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
-.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
-.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
-.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner { background: transparent; }
-.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
-.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button { display: none; }
+.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
+.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar { width: 12px; height: 12px; }
+.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner { background: transparent; }
+.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
+.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button { display: none; }
 .settings-content { width: calc(100% - 64px); max-width: 640px; margin: 0 auto; padding: 26px 0 36px; }
 .page-heading { margin-bottom: 32px; text-align: left; }
 .page-heading h1 { margin: 0; font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -.56px; }
@@ -175,7 +175,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .copy-logs { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-secondary); background: transparent; cursor: pointer; }
 .copy-logs:hover { background: var(--active); color: var(--text); }
 .copy-logs svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.log-entries { overflow-y: auto; min-height: 0; padding: 4px 8px; }
+.log-entries { overflow-y: auto; min-height: 0; padding: 4px 8px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .log-entry { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-code); font-size: 12px; line-height: 18px; }
 .log-entry.error { color: var(--color-red); }
 .log-entry.warning { color: var(--color-yellow); }
@@ -196,7 +196,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page-content, .onboarding-scroll { transition: none; }
+  .page-content, .onboarding-scroll, .log-entries { transition: none; }
   .switch-track::after { transition: none; }
   .save-spinner { animation: none; }
 }

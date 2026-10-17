@@ -86,6 +86,7 @@
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
   const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
+  const updateLogsScrollbar = setupScrollbar(logEntries, ".log-entry");
   window.addEventListener("resize", () => {
     updatePageScrollbar();
     updateOnboardingScrollbar();
@@ -293,6 +294,7 @@
     row.className = "log-entry " + level;
     row.textContent = formatLog(entry);
     logEntries.appendChild(row);
+    updateLogsScrollbar();
     logEntries.scrollTop = logEntries.scrollHeight;
     const severity = logs.some((item) => item.level === "error") ? "error"
       : logs.some((item) => item.level === "warning") ? "warning" : "info";
@@ -555,7 +557,10 @@
   logButton.addEventListener("click", () => {
     logPopup.hidden = !logPopup.hidden;
     logButton.setAttribute("aria-expanded", String(!logPopup.hidden));
-    if (!logPopup.hidden) el("copy-logs").focus();
+    if (!logPopup.hidden) {
+      updateLogsScrollbar();
+      el("copy-logs").focus();
+    }
   });
   document.addEventListener("pointerdown", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
