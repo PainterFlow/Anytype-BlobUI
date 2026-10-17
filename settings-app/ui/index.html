@@ -129,7 +129,7 @@
           </button>
           <button id="advanced-nav" class="nav-item" type="button" data-settings-page="advanced">
             <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/></svg>
-            <span>Advanced</span>
+            <span>Advanced Settings</span>
           </button>
         </nav>
 
@@ -139,6 +139,9 @@
             <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>
             <span class="save-spinner" aria-hidden="true"></span>
             <span class="save-label sr-only">Save changes</span>
+          </button>
+          <button id="discard-button" class="sidebar-action discard-button" type="button" title="Undo changes" aria-label="Undo changes" hidden disabled>
+            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8V3m0 5h5M4.3 7.8A7 7 0 1 1 4 12"/></svg>
           </button>
           <div class="log-control" id="log-control">
             <button id="log-button" class="sidebar-action log-button" type="button" title="Logs" aria-expanded="false" aria-controls="log-popup" hidden>
@@ -173,7 +176,7 @@
         <section class="page-content" aria-labelledby="page-title">
           <div class="settings-content">
           <header class="page-heading">
-            <h1 id="page-title">Preferences</h1>
+            <h1 id="page-title" tabindex="-1">Preferences</h1>
           </header>
 
           <div id="preferences-page" class="settings-page">
@@ -227,13 +230,6 @@
             </div>
 
             <p class="field-error" id="font-error" aria-live="polite"></p>
-          </section>
-          <section class="settings-group" aria-labelledby="api-settings-heading">
-            <div class="section-heading">
-              <h2 id="api-settings-heading">Anytype API</h2>
-              <p>Change your API key or port, or use BlobUI without an API key.</p>
-            </div>
-            <button id="open-connection" class="manage-connection" type="button">Manage connection</button>
           </section>
           </div>
           <div id="accessibility-page" class="settings-page" hidden>
@@ -294,7 +290,7 @@
                 <div class="input-field advanced-row">
                   <label for="advanced-api-ip">API key IP</label>
                   <div id="advanced-api-ip-field" class="visibility-field" data-filled="false">
-                    <input id="advanced-api-ip" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="45" placeholder="127.0.0.1" aria-describedby="advanced-api-ip-hint advanced-api-error" />
+                    <input id="advanced-api-ip" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="45" placeholder="127.0.0.1" aria-describedby="advanced-api-error" />
                     <button id="advanced-api-ip-visibility" class="visibility-toggle" type="button" aria-controls="advanced-api-ip" aria-pressed="true" aria-label="Hide API key IP" title="Hide API key IP">
                       <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
                     </button>
@@ -303,7 +299,7 @@
                 <div class="input-field advanced-row">
                   <label for="advanced-api-port">API key port</label>
                   <div id="advanced-api-port-field" class="visibility-field" data-filled="false">
-                    <input id="advanced-api-port" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="5" placeholder="31009" aria-describedby="advanced-api-port-hint advanced-api-error" />
+                    <input id="advanced-api-port" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="5" placeholder="31009" aria-describedby="advanced-api-error" />
                     <button id="advanced-api-port-visibility" class="visibility-toggle" type="button" aria-controls="advanced-api-port" aria-pressed="true" aria-label="Hide API key port" title="Hide API key port">
                       <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
                     </button>
@@ -311,8 +307,6 @@
                 </div>
               </div>
               <p id="advanced-api-key-hint" class="accessibility-note">Enter a new key to replace the saved key. Clear the masked value to remove it.</p>
-              <p id="advanced-api-ip-hint" class="accessibility-note">Leave the IP blank to use this PC’s local API address (127.0.0.1).</p>
-              <p id="advanced-api-port-hint" class="accessibility-note">Leave the port blank to use the default port (31009).</p>
               <p id="advanced-api-error" class="field-error" role="alert" aria-live="polite"></p>
             </section>
           </div>
@@ -326,17 +320,32 @@
     </div>
     <div id="api-key-removal-backdrop" class="confirm-backdrop" hidden>
       <section id="api-key-removal-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="api-key-removal-title" aria-describedby="api-key-removal-message" tabindex="-1">
-        <button id="api-key-removal-close" class="confirm-close" type="button" aria-label="Close confirmation" title="Close">
+        <button id="api-key-removal-close" class="confirm-close" type="button" aria-label="Undo all unsaved changes" title="Undo all changes">
           <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
         </button>
         <h2 id="api-key-removal-title">Are you sure you want to do this?</h2>
         <p id="api-key-removal-message">Removing the API key will make some features unavailable.</p>
         <div class="confirm-actions">
-          <button id="api-key-removal-cancel" class="confirm-cancel" type="button">Cancel</button>
+          <button id="api-key-removal-undo" class="confirm-undo" type="button">Undo</button>
           <button id="api-key-removal-save" class="confirm-save" type="button">Save</button>
         </div>
       </section>
     </div>
+    <div id="discard-confirmation-backdrop" class="confirm-backdrop" hidden>
+      <section id="discard-confirmation-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-confirmation-title" aria-describedby="discard-confirmation-message" tabindex="-1">
+        <button id="discard-confirmation-close" class="confirm-close" type="button" aria-label="Close without undoing" title="Close">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
+        </button>
+        <h2 id="discard-confirmation-title">Undo all unsaved changes?</h2>
+        <p id="discard-confirmation-message">This will restore the settings from before your edits.</p>
+        <div class="confirm-actions">
+          <button id="discard-confirmation-undo" class="confirm-undo" type="button">Undo</button>
+        </div>
+      </section>
+    </div>
+    <script src="./visibility-field.js"></script>
+    <script src="./modal.js"></script>
+    <script src="./edit-session.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

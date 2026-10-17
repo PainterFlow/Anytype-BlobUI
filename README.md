@@ -33,7 +33,7 @@ Pass `-NoShortcut` to skip the Start menu entry. **Update.ps1 and Uninstall.ps1 
 
 ### Optional: enable calendar color data from the Anytype API
 
-Configure the Anytype API in BlobUI Settings onboarding or **Preferences > Anytype API > Manage connection**. Create a read-only Anytype API v2 key and enter it in the masked field; BlobUI validates it, stores it using Windows DPAPI, and uses it only to retrieve Calendar Color data. No settings-space import or settings-object selection is required.
+Configure the Anytype API in BlobUI Settings onboarding or **Advanced Settings**. Create a read-only Anytype API v2 key and enter it in the masked field; BlobUI validates it, stores it using Windows DPAPI, and uses it only to retrieve Calendar Color data. No settings-space import or settings-object selection is required.
 
 
 > [!NOTE]
@@ -71,7 +71,7 @@ Settings saves write `custom.css` and `blob/data.json`; credential replacement i
 
 The choice, IP, and port are saved locally in `blob/data.json`. No API mode makes no Anytype API calls, removes the encrypted key and API-derived calendar colors, while custom accents, fonts, banners, text effects and UI fixes keep working. Settings saves respect the saved mode and connection address.
 
-Use **Preferences > Anytype API > Manage connection** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\scripts\Settings.ps1 -n` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
+Use **Advanced Settings** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\scripts\Settings.ps1 -n` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
 
 To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not register the app to start automatically with Windows.
 

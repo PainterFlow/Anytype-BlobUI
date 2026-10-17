@@ -42,13 +42,29 @@
   const advancedApiPort = el("advanced-api-port");
   const apiKeyRemovalBackdrop = el("api-key-removal-backdrop");
   const apiKeyRemovalClose = el("api-key-removal-close");
-  const apiKeyRemovalCancel = el("api-key-removal-cancel");
+  const apiKeyRemovalUndo = el("api-key-removal-undo");
   const apiKeyRemovalSave = el("api-key-removal-save");
+  const apiKeyRemovalModal = window.BlobUI.createModalController({
+    backdrop: apiKeyRemovalBackdrop,
+    dialog: el("api-key-removal-dialog"),
+    initialFocus: apiKeyRemovalClose,
+    fallbackFocus: el("page-title"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+  });
+  const discardConfirmationModal = window.BlobUI.createModalController({
+    backdrop: el("discard-confirmation-backdrop"),
+    dialog: el("discard-confirmation-dialog"),
+    initialFocus: el("discard-confirmation-close"),
+    fallbackFocus: el("page-title"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+  });
+  window.BlobUI.openDiscardConfirmation = () => discardConfirmationModal.open();
+  window.BlobUI.closeDiscardConfirmation = (options) => discardConfirmationModal.close(options);
   const settingsShell = el("settings-shell");
-  const titlebar = el("title-drag-region");
   const SAVED_KEY_MASK = "••••••••";
   const pageTitle = el("page-title");
   const saveButton = el("save-button");
+  const discardButton = el("discard-button");
   const saveLabel = saveButton.querySelector(".save-label");
   const statusMessage = el("status-message");
   const logButton = el("log-button");
@@ -59,23 +75,11 @@
   const root = document.documentElement;
 
   const visibilityFields = Object.create(null);
-  function setFieldVisibility(field, visible) {
-    field.input.type = visible ? "text" : "password";
-    field.button.setAttribute("aria-pressed", String(visible));
-    const label = visible ? field.hideLabel : field.showLabel;
-    field.button.setAttribute("aria-label", label);
-    field.button.setAttribute("title", label);
-  }
-
-  function syncVisibilityField(field) {
-    el(field.fieldId).dataset.filled = String(field.input.value.length > 0);
-  }
 
   function resetVisibilityField(inputId) {
     const field = visibilityFields[inputId];
     if (!field) return;
-    setFieldVisibility(field, field.defaultVisible);
-    syncVisibilityField(field);
+    field.reset();
   }
 
   function resetAdvancedVisibility() {
@@ -83,57 +87,30 @@
     ["advanced-api-key", "advanced-api-ip", "advanced-api-port"].forEach(resetVisibilityField);
   }
 
-  function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible) {
-    const field = {
+  function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible, hooks = {}) {
+    visibilityFields[inputId] = window.VisibilityField.bind({
       input: el(inputId),
       button: el(buttonId),
-      fieldId,
+      field: el(fieldId),
       showLabel,
       hideLabel,
       defaultVisible,
-    };
-    visibilityFields[inputId] = field;
-    setFieldVisibility(field, defaultVisible);
-    syncVisibilityField(field);
-    field.input.addEventListener("input", () => syncVisibilityField(field));
-    field.button.addEventListener("mousedown", (event) => {
-      if (document.activeElement === field.input) event.preventDefault();
+      ...hooks,
     });
-    field.button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      if (field.button.disabled) return;
-      const inputWasFocused = document.activeElement === field.input;
-      const selectionStart = inputWasFocused ? field.input.selectionStart : null;
-      const selectionEnd = inputWasFocused ? field.input.selectionEnd : null;
-      if (inputId === "advanced-api-key" && hasSavedApiKey && !advancedKeyEdited) {
-        if (field.input.type === "password") {
-          field.button.disabled = true;
-          const previousValue = field.input.value;
-          try {
-            const key = await invoke("reveal_api_key");
-            if (!hasSavedApiKey || advancedKeyEdited || field.input.value !== previousValue || advancedPage.hidden) return;
-            field.input.value = key;
-          } catch (_) {
-            setStatus("Could not reveal the saved API key. Try entering it again.", "error");
-            return;
-          } finally {
-            field.button.disabled = saveBusy || !draft;
-          }
-        } else {
-          field.input.value = SAVED_KEY_MASK;
-        }
-      }
-      setFieldVisibility(field, field.input.type !== "text");
-      if (inputWasFocused && selectionStart !== null && selectionEnd !== null && typeof field.input.setSelectionRange === "function") {
-        try { field.input.setSelectionRange(selectionStart, selectionEnd); } catch (_) { /* Some input types do not expose a selection. */ }
-      }
-    });
-    return field;
+    return visibilityFields[inputId];
   }
 
   bindVisibilityField("connection-key", "connection-key-visibility", "connection-key-field", "Show API key", "Hide API key", false);
   bindVisibilityField("connection-port", "connection-port-visibility", "connection-port-field", "Show port", "Hide port", true);
-  bindVisibilityField("advanced-api-key", "advanced-api-key-visibility", "advanced-api-key-field", "Show Anytype API key", "Hide Anytype API key", false);
+  bindVisibilityField("advanced-api-key", "advanced-api-key-visibility", "advanced-api-key-field", "Show Anytype API key", "Hide Anytype API key", false, {
+    shouldReveal: () => hasSavedApiKey && !advancedKeyEdited && advancedPage.hidden === false,
+    reveal: () => invoke("reveal_api_key"),
+    onHide: () => {
+      if (hasSavedApiKey && !advancedKeyEdited) advancedApiKey.value = SAVED_KEY_MASK;
+    },
+    onRevealError: () => setStatus("Could not reveal the saved API key. Try entering it again.", "error"),
+    onBusyChange: (busy) => { el("advanced-api-key-visibility").disabled = busy || saveBusy || !draft; },
+  });
   bindVisibilityField("advanced-api-ip", "advanced-api-ip-visibility", "advanced-api-ip-field", "Show API key IP", "Hide API key IP", true);
   bindVisibilityField("advanced-api-port", "advanced-api-port-visibility", "advanced-api-port-field", "Show API key port", "Hide API key port", true);
 
@@ -145,11 +122,20 @@
   let initialApiDraft = { ip: "", port: "" };
   let currentApiIp = "";
   let currentApiPort = 31009;
-  let removalModalFocus = null;
-  let removalModalTimer = null;
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
+  const editSession = window.BlobUI.createEditSession({
+    read: readEditSnapshot,
+    restore: restoreEditSnapshot,
+    equals: editSnapshotsEqual,
+  });
+
+  window.BlobUI.discardChanges = function discardChanges() {
+    if (saveBusy || !draft) return;
+    editSession.discard();
+  };
+
   function setupScrollbar(container, contentSelector) {
     let hideTimer = null;
     function update() {
@@ -418,6 +404,81 @@
       || keyChanged;
   }
 
+  function readEditSnapshot() {
+    return {
+      settings: draft ? { ...draft } : null,
+      connection: {
+        inputIp: advancedApiIp.value.trim(),
+        inputPort: advancedApiPort.value.trim(),
+        apiIp: currentApiIp,
+        apiPort: currentApiPort,
+        hasSavedApiKey,
+        keyChanged: hasSavedApiKey ? advancedKeyEdited : advancedApiKey.value.trim() !== "",
+      },
+    };
+  }
+
+  function readConnectionBaseline() {
+    return {
+      inputIp: initialApiDraft.ip,
+      inputPort: initialApiDraft.port,
+      apiIp: currentApiIp,
+      apiPort: currentApiPort,
+      hasSavedApiKey,
+      keyChanged: false,
+    };
+  }
+
+  function editSnapshotsEqual(left, right) {
+    if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    const a = left.connection;
+    const b = right.connection;
+    return !!a && !!b
+      && a.inputIp === b.inputIp
+      && a.inputPort === b.inputPort
+      && a.apiIp === b.apiIp
+      && a.apiPort === b.apiPort
+      && a.hasSavedApiKey === b.hasSavedApiKey
+      && a.keyChanged === b.keyChanged;
+  }
+
+  function clearValidationErrors() {
+    [fontFamily, codeFontFamily, accentValue, advancedApiKey, advancedApiIp, advancedApiPort]
+      .forEach((input) => input.classList.remove("invalid"));
+    el("font-error").textContent = "";
+    el("accent-error").textContent = "";
+    el("advanced-api-error").textContent = "";
+  }
+
+  function restoreEditSnapshot(snapshot) {
+    if (!snapshot || !snapshot.settings || !snapshot.connection) return;
+
+    assignDraftToForm(snapshot.settings);
+    lastCustomAccent = snapshot.settings.accentMode === "native" ? null : {
+      accentMode: snapshot.settings.accentMode,
+      accentPreset: snapshot.settings.accentPreset,
+      accentColor: snapshot.settings.accentColor,
+    };
+
+    const connection = snapshot.connection;
+    currentApiIp = String(connection.apiIp || "");
+    currentApiPort = Number(connection.apiPort) || 31009;
+    hasSavedApiKey = connection.hasSavedApiKey === true;
+    advancedKeyEdited = false;
+    advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+    advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+    advancedApiIp.value = connection.inputIp;
+    advancedApiPort.value = connection.inputPort;
+    initialApiDraft = { ip: connection.inputIp, port: connection.inputPort };
+    el("advanced-api-key-hint").textContent = hasSavedApiKey
+      ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+      : "Enter a new read-only Anytype API v2 key.";
+    ["advanced-api-key", "advanced-api-ip", "advanced-api-port"].forEach(resetVisibilityField);
+    clearValidationErrors();
+    updateSaveButton();
+    if (window.appReady) setStatus("No unsaved changes.", "info", false);
+  }
+
   function assignAdvancedConnection(state) {
     currentApiIp = String(state.apiIp || "").trim();
     currentApiPort = Number(state.apiPort) || 31009;
@@ -435,44 +496,16 @@
     updateSaveButton();
   }
 
-  function reducedMotionEnabled() {
-    return root.dataset.reducedMotion === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  }
-
-  function finishKeyRemovalConfirmation(restoreFocus) {
-    apiKeyRemovalBackdrop.hidden = true;
-    apiKeyRemovalBackdrop.classList.remove("is-closing");
-    settingsShell.inert = false;
-    titlebar.inert = false;
-    if (restoreFocus && removalModalFocus && typeof removalModalFocus.focus === "function") removalModalFocus.focus();
-    removalModalFocus = null;
-    removalModalTimer = null;
-  }
-
-  function closeKeyRemovalConfirmation(restoreFocus = true) {
-    if (apiKeyRemovalBackdrop.hidden) return;
-    apiKeyRemovalBackdrop.classList.add("is-closing");
-    const delay = reducedMotionEnabled() ? 0 : 140;
-    if (removalModalTimer !== null) window.clearTimeout(removalModalTimer);
-    if (delay === 0) finishKeyRemovalConfirmation(restoreFocus);
-    else removalModalTimer = window.setTimeout(() => finishKeyRemovalConfirmation(restoreFocus), delay);
-  }
-
   function openKeyRemovalConfirmation() {
-    if (apiKeyRemovalBackdrop.hidden) {
-      removalModalFocus = document.activeElement;
-      settingsShell.inert = true;
-      titlebar.inert = true;
-      apiKeyRemovalBackdrop.classList.remove("is-closing");
-      apiKeyRemovalBackdrop.hidden = false;
-    }
-    apiKeyRemovalCancel.focus();
+    apiKeyRemovalModal.open();
   }
 
   function updateSaveButton() {
-    const dirty = !settingsEqual(draft, initialDraft) || connectionHasChanges();
+    const dirty = editSession.isDirty();
     saveButton.hidden = !draft || !dirty;
     saveButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
+    discardButton.hidden = !draft || !dirty;
+    discardButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = saveBusy || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
@@ -482,7 +515,7 @@
     saveButton.classList.toggle("busy", saveBusy);
     saveLabel.textContent = saveBusy ? "Saving…" : "Save changes";
     apiKeyRemovalSave.disabled = saveBusy;
-    apiKeyRemovalCancel.disabled = saveBusy;
+    apiKeyRemovalUndo.disabled = saveBusy;
     apiKeyRemovalClose.disabled = saveBusy;
   }
 
@@ -532,6 +565,8 @@
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
+      editSession.commit();
+      updateSaveButton();
       if (state.ready && state.onboardingComplete === false) showOnboarding();
       if (!state.ready) {
         setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
@@ -566,7 +601,7 @@
     preferencesPage.hidden = isAccessibility || isAdvanced;
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
-    pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced" : "Preferences";
+    pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
@@ -733,10 +768,14 @@
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
         acceptAdvancedConnectionDraft(submittedConnection);
+        editSession.commit({ connection: readConnectionBaseline() });
       }
       if (settingsChanged || options.forceRebuild) {
         result = await invoke("save_settings", { settings: submittedSettings });
-        if (settingsChanged) initialDraft = submittedSettings;
+        if (settingsChanged) {
+          initialDraft = submittedSettings;
+          editSession.commit({ settings: submittedSettings });
+        }
       }
       saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
     } catch (error) {
@@ -856,13 +895,23 @@
     });
   }
   saveButton.addEventListener("click", save);
-  apiKeyRemovalBackdrop.addEventListener("pointerdown", (event) => {
-    if (event.target === apiKeyRemovalBackdrop) closeKeyRemovalConfirmation();
+  discardButton.addEventListener("click", () => window.BlobUI.openDiscardConfirmation());
+  el("discard-confirmation-close").addEventListener("click", () => window.BlobUI.closeDiscardConfirmation());
+  el("discard-confirmation-undo").addEventListener("click", () => {
+    if (saveBusy) return;
+    window.BlobUI.discardChanges();
+    window.BlobUI.closeDiscardConfirmation();
   });
-  apiKeyRemovalClose.addEventListener("click", () => closeKeyRemovalConfirmation());
-  apiKeyRemovalCancel.addEventListener("click", () => closeKeyRemovalConfirmation());
+  function discardAllFromApiRemovalModal() {
+    if (saveBusy) return;
+    window.BlobUI.discardChanges();
+    apiKeyRemovalModal.close();
+  }
+  apiKeyRemovalClose.addEventListener("click", discardAllFromApiRemovalModal);
+  apiKeyRemovalUndo.addEventListener("click", discardAllFromApiRemovalModal);
   apiKeyRemovalSave.addEventListener("click", () => {
-    closeKeyRemovalConfirmation(false);
+    if (saveBusy) return;
+    apiKeyRemovalModal.close({ restoreFocus: false });
     save({ confirmKeyRemoval: true });
   });
   logButton.addEventListener("click", () => {
@@ -1024,6 +1073,7 @@
           : "Enter a new read-only Anytype API v2 key.";
       }
       resetAdvancedVisibility();
+      editSession.commit({ connection: readConnectionBaseline() });
       updateSaveButton();
       const calendarPending = enabled && result && result.calendarStatus === "cached";
       setStatus(calendarPending
@@ -1054,11 +1104,6 @@
     else applyConnection(false, "", currentApiPort);
   }));
 
-  el("open-connection").addEventListener("click", () => {
-    showOnboarding();
-    showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
-  });
-
   el("connection-back").addEventListener("click", () => {
     if (connectionBusy || onboardingTransition !== null) return;
     resetOnboardingTransition();
@@ -1083,25 +1128,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (!apiKeyRemovalBackdrop.hidden) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeKeyRemovalConfirmation();
-        return;
-      }
-      if (event.key === "Tab") {
-        const focusable = [apiKeyRemovalClose, apiKeyRemovalCancel, apiKeyRemovalSave].filter((control) => !control.disabled);
-        if (focusable.length) {
-          const currentIndex = focusable.indexOf(document.activeElement);
-          const nextIndex = event.shiftKey
-            ? currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1
-            : currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
-          event.preventDefault();
-          focusable[nextIndex].focus();
-        }
-      }
-      return;
-    }
+    if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen()) return;
     if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
       && typeof event.key === "string" && event.key.toLowerCase() === "r") {
       event.preventDefault();
@@ -1137,9 +1164,9 @@
     if (!draft) return;
     updateSaveButton();
     if (!saveBusy && window.appReady) {
-      setStatus(settingsEqual(draft, initialDraft)
-        ? "No unsaved changes."
-        : "Unsaved changes are ready to apply.", "info", false);
+      setStatus(editSession.isDirty()
+        ? "Unsaved changes are ready to apply."
+        : "No unsaved changes.", "info", false);
     }
   }
 

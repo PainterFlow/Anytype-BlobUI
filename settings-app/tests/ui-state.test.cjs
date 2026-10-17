@@ -31,10 +31,14 @@ function element(id) {
         } : handler;
       },
       setAttribute(name, value) { this.attributes[name] = value; },
+      getAttribute(name) { return this.attributes[name] || null; },
       appendChild(child) { this.children.push(child); },
       contains(target) { return target === this || this.children.includes(target); },
+      closest() { return null; },
+      getClientRects() { return this.hidden ? [] : [{}]; },
       focus() { this.focused = true; activeElement = this; },
       querySelector: selector => element(id + selector),
+      querySelectorAll() { return this.children; },
     });
   }
   return elements.get(id);
@@ -54,7 +58,14 @@ const context = {
   document: {
     handlers: {},
     get activeElement() { return activeElement; },
-    addEventListener(name, handler) { this.handlers[name] = handler; },
+    addEventListener(name, handler) {
+      const previous = this.handlers[name];
+      this.handlers[name] = previous ? (...args) => {
+        const previousResult = previous(...args);
+        const result = handler(...args);
+        return result === undefined ? previousResult : result;
+      } : handler;
+    },
     documentElement: element('root'),
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
@@ -141,6 +152,11 @@ assert.match(settingsCss, /\.visibility-toggle:focus-visible/);
 assert.match(settingsHtml, /role="alertdialog" aria-modal="true"/, 'Key removal must use an accessible modal dialog.');
 assert.match(settingsHtml, /id="api-key-removal-title">Are you sure you want to do this\?<\/h2>/);
 assert.match(settingsHtml, /id="api-key-removal-message">Removing the API key will make some features unavailable\.<\/p>/);
+assert.match(settingsHtml, /id="discard-button"[^>]*title="Undo changes"/);
+assert(!settingsHtml.includes('id="api-key-removal-dismiss"'), 'The API warning has no labeled Close button.');
+assert.match(settingsHtml, /id="api-key-removal-undo"[^>]*>Undo<\/button>/);
+assert.match(settingsHtml, /id="discard-confirmation-undo"[^>]*>Undo<\/button>/);
+assert(!settingsHtml.includes('id="api-key-removal-cancel"'), 'The key removal warning uses a separate Close action.');
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
@@ -149,8 +165,30 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
 }
 
 (async () => {
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visibility-field.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/modal.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/edit-session.js'), 'utf8'), context);
+  let helperState = { settings: { font: 'Libron' }, connection: { port: 31009 } };
+  const helperSession = context.window.BlobUI.createEditSession({
+    read: () => helperState,
+    restore: snapshot => { helperState = snapshot; },
+    equals: (left, right) => JSON.stringify(left) === JSON.stringify(right),
+  });
+  assert.equal(helperSession.isDirty(), false, 'A new edit session starts at its saved baseline.');
+  helperState.settings.font = 'Arial';
+  helperState.connection.port = 31010;
+  helperSession.commit({ connection: { port: 31010 } });
+  assert.equal(helperSession.isDirty(), true, 'A partial save advances only its saved baseline section.');
+  helperSession.discard();
+  assert.equal(JSON.stringify(helperState), JSON.stringify({ settings: { font: 'Libron' }, connection: { port: 31010 } }), 'Undo restores unsaved sections while retaining successful partial saves.');
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
-  element('api-key-removal-dialog').children.push(element('api-key-removal-close'), element('api-key-removal-cancel'), element('api-key-removal-save'));
+  const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
+  const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
+  [...apiModalButtons, ...discardModalButtons].forEach(id => { element(id).hidden = false; });
+  element('api-key-removal-dialog').hidden = false;
+  element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
+  element('discard-confirmation-dialog').hidden = false;
+  element('discard-confirmation-dialog').children.push(...discardModalButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
@@ -175,7 +213,7 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(element('advanced-page').hidden, false, 'Advanced navigation must open its settings page.');
   assert.equal(element('accessibility-page').hidden, true, 'Opening Advanced must hide Accessibility.');
   assert.equal(element('preferences-page').hidden, true, 'Opening Advanced must hide Preferences.');
-  assert.equal(element('page-title').textContent, 'Advanced');
+  assert.equal(element('page-title').textContent, 'Advanced Settings');
   assert.equal(element('advanced-api-key').value, '••••••••', 'A saved key is represented by a mask instead of plaintext.');
   assert.equal(element('save-button').hidden, true, 'Loaded API settings start clean.');
   assert.equal(element('advanced-api-key').type, 'password', 'The saved key mask starts concealed.');
@@ -262,7 +300,7 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   element('save-button').handlers.click();
   assert.equal(element('api-key-removal-backdrop').hidden, false, 'Saving connection edits with no saved key still requires confirmation.');
   assert.equal(connectionRequests.length, requestsAfterRemoval, 'Unconfirmed empty-key saves must not reach the backend.');
-  element('api-key-removal-cancel').handlers.click();
+  context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
   finishRemovalTransition();
   await input('advanced-api-port', '');
 
@@ -504,18 +542,81 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);
   assert.equal(element('font-family').value, unsavedFont);
-  element('open-connection').handlers.click();
-  assert.equal(api.hidden, false, 'Manage connection must open the API choice directly.');
-  element('onboarding-api-option').handlers.click();
-  finishOnboardingTransition();
-  element('connection-key').value = 'replacement-test-key';
-  element('connection-port').value = '31011';
-  submit();
+  element('advanced-nav').handlers.click();
+  await input('advanced-api-key', 'replacement-test-key');
+  await input('advanced-api-port', '31011');
+  await element('save-button').handlers.click();
   await flush();
   assert.equal(connectionRequests.at(-1).apiKey, 'replacement-test-key');
   assert.equal(connectionRequests.at(-1).port, 31011);
-  finishOnboardingTransition();
-  assert.equal(onboarding.hidden, true);
-  assert(calls.slice(beforeOnboarding).every(name => name === 'configure_connection'), 'Only connection setup should be invoked.');
+
+  // Discard uses the latest saved connection, including Advanced Settings saves.
+  assert.equal(element('discard-button').hidden, true);
+  const savedFont = element('font-family').value;
+  const savedAccent = element('accent-value').value;
+  await input('font-family', 'invalid;font');
+  await input('accent-value', '#ffffff');
+  await input('advanced-api-port', '65536');
+  await element('save-button').handlers.click();
+  assert.equal(element('font-family').classList.contains('invalid'), true);
+  assert.equal(element('discard-button').hidden, false, 'Undo appears with Save even for invalid edits.');
+  element('discard-button').handlers.click();
+  assert.equal(element('discard-confirmation-backdrop').hidden, false);
+  element('discard-confirmation-close').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('font-family').value, 'invalid;font', 'Closing the undo warning preserves edits.');
+  const callsBeforeDiscard = calls.length;
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('font-family').value, savedFont);
+  assert.equal(element('accent-value').value, savedAccent);
+  assert.equal(element('advanced-api-port').value, '31011', 'Undo keeps the connection saved through Advanced Settings.');
+  assert.equal(element('advanced-api-key').value, '••••••••');
+  assert.equal(element('advanced-api-key').type, 'password');
+  assert.equal(element('font-family').classList.contains('invalid'), false);
+  assert.equal(element('font-error').textContent, '');
+  assert.equal(element('accent-error').textContent, '');
+  assert.equal(element('advanced-api-error').textContent, '');
+  assert.equal(element('save-button').hidden, true);
+  assert.equal(element('discard-button').hidden, true);
+  assert.equal(status(), 'No unsaved changes.');
+  assert.equal(calls.length, callsBeforeDiscard, 'Undo never writes to the backend.');
+
+  element('advanced-nav').handlers.click();
+  for (const discardAction of ['api-key-removal-close', 'api-key-removal-undo']) {
+    await input('font-family', 'Arial');
+    await input('advanced-api-key', '');
+    await element('save-button').handlers.click();
+    assert.equal(element('api-key-removal-backdrop').hidden, false);
+    element(discardAction).handlers.click();
+    finishRemovalTransition();
+    assert.equal(element('font-family').value, savedFont, 'API warning discard restores every edited setting.');
+    assert.equal(element('advanced-api-key').value, '••••••••');
+    assert.equal(element('save-button').hidden, true);
+    assert.equal(element('discard-confirmation-backdrop').hidden, true, 'API warning Undo never opens another warning.');
+  }
+
+  await input('font-family', 'Arial');
+  await input('advanced-api-port', '31012');
+  saveError = 'General settings save failed.';
+  await element('save-button').handlers.click();
+  assert.match(status(), /Connection saved\. Other settings could not be saved/);
+  assert.equal(connectionRequests.at(-1).port, 31012);
+  saveError = null;
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('font-family').value, savedFont, 'Undo restores general settings after a failed save.');
+  assert.equal(element('advanced-api-port').value, '31012', 'Undo preserves the part that saved successfully.');
+  assert.equal(element('save-button').hidden, true);
+
+  await input('font-family', 'Arial');
+  await element('save-button').handlers.click();
+  await input('font-family', 'Consolas');
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('font-family').value, 'Arial', 'A successful save advances the undo baseline.');
   console.log('UI save, Alt+R rebuild, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

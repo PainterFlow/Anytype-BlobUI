@@ -174,16 +174,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .visibility-slash { opacity: 0; }
 .visibility-toggle[aria-pressed="false"] .visibility-slash { opacity: 1; }
 .advanced-fields .advanced-row:last-child { border-bottom: 0; }
-.sidebar-actions { order: 1; flex: 0 0 28px; display: grid; grid-template-rows: 28px 28px; gap: 4px; }
+.sidebar-actions { order: 1; flex: 0 0 28px; display: grid; grid-template-rows: repeat(3, 28px); gap: 4px; }
 .sidebar-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .sidebar-action::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
 .sidebar-action:hover:not(:disabled)::before, .log-button[aria-expanded="true"]::before { opacity: 1; }
 .sidebar-action:disabled { cursor: default; opacity: .6; }
 .action-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .save-button { grid-row: 1; color: var(--accent); }
+.discard-button { grid-row: 2; color: var(--text-secondary); }
+.discard-button:hover:not(:disabled) { color: var(--color-red); }
 .log-button[data-severity="error"] { color: var(--color-red); }
 .log-button[data-severity="warning"] { color: var(--color-yellow); }
-.log-control { position: relative; grid-row: 2; }
+.log-control { position: relative; grid-row: 3; }
 .log-popup { position: absolute; z-index: 10; left: 0; bottom: calc(100% + 8px); width: min(400px, calc(100vw - 32px)); max-height: min(360px, calc(100vh - 80px)); display: flex; flex-direction: column; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--input-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .log-heading { display: flex; align-items: center; justify-content: space-between; padding-left: 8px; }
 .log-heading h2 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
@@ -204,17 +206,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .confirm-dialog { position: relative; width: min(100%, 440px); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: 0 18px 48px rgba(0, 0, 0, .36); animation: confirm-dialog-in .2s cubic-bezier(.2, .75, .25, 1) .02s both; }
 .confirm-dialog h2 { max-width: calc(100% - 24px); margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -.2px; }
 .confirm-dialog p { margin: 12px 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 22px; }
-.confirm-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.confirm-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .confirm-close:hover { background: var(--active); color: var(--text); }
 .confirm-close svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .confirm-actions button { min-width: 84px; height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .confirm-cancel { background: var(--active); color: var(--text); }
 .confirm-cancel:hover { background: var(--hover); }
+.confirm-undo { background: var(--color-red); color: #fff; }
+.confirm-undo:hover { filter: brightness(.92); }
 .confirm-save { background: var(--accent); color: #fff; }
 .confirm-save:hover { filter: brightness(.92); }
 .confirm-actions button:disabled, .confirm-close:disabled { opacity: .55; cursor: default; }
-.confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; }
+.confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; pointer-events: none; }
 .confirm-backdrop.is-closing .confirm-dialog { animation: confirm-dialog-out .14s ease-in both; }
 @keyframes confirm-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes confirm-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
