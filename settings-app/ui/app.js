@@ -27,6 +27,10 @@
   const accentValue = el("accent-value");
   const fontFamily = el("font-family");
   const codeFontFamily = el("code-font-family");
+  const bannerImageInput = el("banner-image-input");
+  const chooseBannerImage = el("choose-banner-image");
+  const resetBannerImage = el("reset-banner-image");
+  const spacePreviewImage = el("space-preview-image");
   const reducedMotion = el("reduced-motion");
   const tabHoverEffect = el("tab-hover-effect");
   const linkHoverEffect = el("link-hover-effect");
@@ -125,6 +129,9 @@
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
   let lastTheme = "";
+  let defaultBannerPreview = "";
+  let bannerReadGeneration = 0;
+  let bannerReadPending = false;
   const editSession = window.BlobUI.createEditSession({
     read: readEditSnapshot,
     restore: restoreEditSnapshot,
@@ -365,7 +372,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
   }
 
   function setStatus(message, kind, record = true) {
@@ -453,6 +460,7 @@
   function restoreEditSnapshot(snapshot) {
     if (!snapshot || !snapshot.settings || !snapshot.connection) return;
 
+    invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
     lastCustomAccent = snapshot.settings.accentMode === "native" ? null : {
       accentMode: snapshot.settings.accentMode,
@@ -503,12 +511,15 @@
   function updateSaveButton() {
     const dirty = editSession.isDirty();
     saveButton.hidden = !draft || !dirty;
-    saveButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
+    saveButton.disabled = saveBusy || bannerReadPending || !draft || !window.appReady || !dirty;
     discardButton.hidden = !draft || !dirty;
-    discardButton.disabled = saveBusy || !draft || !window.appReady || !dirty;
+    discardButton.disabled = saveBusy || bannerReadPending || !draft || !window.appReady || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = saveBusy || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    bannerImageInput.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
+    chooseBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
+    resetBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
     Object.keys(visibilityFields).forEach((inputId) => {
       visibilityFields[inputId].button.disabled = saveBusy || !draft;
     });
@@ -537,6 +548,7 @@
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,
       tabHoverEffect: settings.tabHoverEffect === true,
       linkHoverEffect: settings.linkHoverEffect === true,
@@ -552,6 +564,7 @@
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
     renderPicker(true);
     applyFontFamilies();
+    syncBannerPreview();
     initialDraft = { ...draft };
     updateSaveButton();
   }
@@ -561,6 +574,7 @@
       const state = await invoke("get_app_state");
       window.appReady = !!state.ready;
       applyTheme(state.theme);
+      defaultBannerPreview = String(state.defaultBannerPreview || "");
       assignAdvancedConnection(state);
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
@@ -589,6 +603,98 @@
       lastTheme = next;
       if (draft) renderPicker(true);
     }
+  }
+
+  function syncBannerPreview() {
+    const preview = draft && draft.bannerImage ? draft.bannerImage : defaultBannerPreview;
+    if (preview) spacePreviewImage.src = preview;
+    else spacePreviewImage.removeAttribute("src");
+    chooseBannerImage.textContent = draft && draft.bannerImage ? "Choose a different image" : "Choose image";
+    resetBannerImage.hidden = !(draft && draft.bannerImage);
+  }
+
+  function setBannerError(message) {
+    el("banner-error").textContent = message;
+    el("banner-image-status").textContent = "";
+  }
+
+  function invalidateBannerRead() {
+    bannerReadGeneration += 1;
+    bannerReadPending = false;
+    updateSaveButton();
+  }
+
+  function handleBannerFileChange() {
+    bannerReadGeneration += 1;
+    const generation = bannerReadGeneration;
+    bannerReadPending = false;
+    updateSaveButton();
+    const file = bannerImageInput.files && bannerImageInput.files[0];
+    bannerImageInput.value = "";
+    if (!file) return;
+    const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+    if (!allowedTypes.has(String(file.type || "").toLowerCase())) {
+      setBannerError("Choose a PNG, JPEG, or WebP image.");
+      return;
+    }
+    if (!Number.isFinite(file.size) || file.size < 1 || file.size > 2 * 1024 * 1024) {
+      setBannerError("Banner images must be 2 MB or smaller.");
+      return;
+    }
+    bannerReadPending = true;
+    updateSaveButton();
+    const fail = (message) => {
+      if (generation !== bannerReadGeneration) return;
+      bannerReadPending = false;
+      setBannerError(message);
+      updateSaveButton();
+    };
+    const reader = new FileReader();
+    reader.onerror = () => fail("Could not read the selected image. Try another file.");
+    reader.onload = async () => {
+      if (generation !== bannerReadGeneration) return;
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      const prefix = "data:" + String(file.type).toLowerCase() + ";base64,";
+      const payload = dataUrl.startsWith(prefix) ? dataUrl.slice(prefix.length) : "";
+      const maxEncodedLength = 4 * Math.ceil((2 * 1024 * 1024) / 3);
+      if (!payload || payload.length > maxEncodedLength || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)) {
+        fail("Could not read the selected image. Try another file.");
+        return;
+      }
+      const format = { "image/png": "png", "image/jpeg": "jpeg", "image/webp": "webp" }[String(file.type).toLowerCase()];
+      let rawBytes;
+      try { rawBytes = atob(payload); }
+      catch { fail("Could not read the selected image. Try another file."); return; }
+      const matchesFormat = format === "png"
+        ? rawBytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => rawBytes.charCodeAt(index) === byte)
+        : format === "jpeg"
+          ? rawBytes.length >= 3 && rawBytes.charCodeAt(0) === 255 && rawBytes.charCodeAt(1) === 216 && rawBytes.charCodeAt(2) === 255
+          : rawBytes.length >= 12 && rawBytes.slice(0, 4) === "RIFF" && rawBytes.slice(8, 12) === "WEBP";
+      if (!matchesFormat) {
+        fail("The selected file does not match its PNG, JPEG, or WebP image type.");
+        return;
+      }
+      let decoded;
+      try { decoded = await createImageBitmap(file); }
+      catch { fail("The selected file could not be decoded as an image."); return; }
+      const validDimensions = decoded.width > 0 && decoded.height > 0
+        && decoded.width <= 8192 && decoded.height <= 8192
+        && decoded.width * decoded.height <= 20_000_000;
+      if (typeof decoded.close === "function") decoded.close();
+      if (generation !== bannerReadGeneration) return;
+      if (!validDimensions) {
+        fail("Banner images must be no larger than 8192 × 8192 pixels or 20 megapixels.");
+        return;
+      }
+      bannerReadPending = false;
+      draft.bannerImage = dataUrl;
+      el("banner-error").textContent = "";
+      el("banner-image-status").textContent = "Custom banner selected.";
+      syncBannerPreview();
+      updateSaveButton();
+      markDirty();
+    };
+    reader.readAsDataURL(file);
   }
 
   function showSettingsPage(page) {
@@ -684,6 +790,10 @@
 
   async function save(options = {}) {
     if (!draft || saveBusy || !window.appReady) return;
+    if (bannerReadPending) {
+      setStatus("Wait for the selected banner image to finish loading before saving.", "warning");
+      return;
+    }
     draft.fontFamily = fontFamily.value.trim();
     draft.codeFontFamily = codeFontFamily.value.trim();
     draft.accentColor = accentValue.value.trim();
@@ -792,6 +902,21 @@
   hueInput.addEventListener("input", () => {
     hsv.h = Number(hueInput.value);
     chooseCustomColor();
+  });
+  chooseBannerImage.addEventListener("click", () => {
+    if (!chooseBannerImage.disabled) {
+      invalidateBannerRead();
+      bannerImageInput.click();
+    }
+  });
+  bannerImageInput.addEventListener("change", handleBannerFileChange);
+  resetBannerImage.addEventListener("click", () => {
+    if (!draft || saveBusy || !window.appReady) return;
+    draft.bannerImage = "";
+    el("banner-error").textContent = "";
+    el("banner-image-status").textContent = "Default banner selected.";
+    syncBannerPreview();
+    markDirty();
   });
   saturationInput.addEventListener("input", () => {
     hsv.s = Number(saturationInput.value);

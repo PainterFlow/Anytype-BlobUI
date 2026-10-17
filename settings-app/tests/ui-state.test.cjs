@@ -21,7 +21,7 @@ function element(id) {
         contains: name => classes.has(name),
         toggle(name, active) { active ? classes.add(name) : classes.delete(name); },
       },
-      handlers: {},
+      handlers: {}, files: [], clickCount: 0,
       addEventListener(name, handler) {
         const previous = this.handlers[name];
         this.handlers[name] = previous ? (...args) => {
@@ -31,6 +31,8 @@ function element(id) {
         } : handler;
       },
       setAttribute(name, value) { this.attributes[name] = value; },
+      removeAttribute(name) { delete this.attributes[name]; if (name === 'src') this.src = undefined; },
+      click() { this.clickCount += 1; if (this.handlers.click) this.handlers.click({ target: this }); },
       getAttribute(name) { return this.attributes[name] || null; },
       appendChild(child) { this.children.push(child); },
       contains(target) { return target === this || this.children.includes(target); },
@@ -51,6 +53,8 @@ let nextTimerId = 1;
 let saveError = null;
 let connectionError = null;
 const connectionRequests = [];
+const fileReaders = [];
+let delayFileRead = false;
 let copiedLogs = '';
 let copyError = false;
 const context = {
@@ -73,6 +77,15 @@ const context = {
     querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },
+  atob,
+  FileReader: class {
+    readAsDataURL(file) {
+      this.result = file.dataUrl;
+      fileReaders.push(this);
+      if (!delayFileRead) setImmediate(() => this.onload && this.onload());
+    }
+  },
+  createImageBitmap: async file => ({ width: file.width || 1600, height: file.height || 900, close() { file.closed = true; } }),
   window: {
     handlers: {},
     CSS: { supports: () => true },
@@ -96,8 +109,10 @@ const context = {
       if (name === 'get_app_state') return {
         ready: true, theme: 'dark',
         apiPort: 31009, apiIp: '', hasSavedApiKey: true,
+        defaultBannerPreview: 'data:image/png;base64,default-preview',
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
+          bannerImage: '',
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
         },
       };
@@ -144,6 +159,10 @@ assert(!settingsHtml.includes('id="connection-ip"'), 'Onboarding must not add an
 assert.match(settingsHtml, /id="connection-port" type="text" inputmode="numeric"/);
 assert.match(settingsHtml, /id="advanced-api-ip" type="text" inputmode="decimal"/);
 assert.match(settingsHtml, /id="advanced-api-port" type="text" inputmode="numeric"/);
+assert.match(settingsHtml, /id="banner-image-input" class="sr-only" type="file"[^>]*accept="[^"]*image\/png[^"]*image\/jpeg[^"]*image\/webp/);
+assert.match(settingsHtml, /class="space-sidebar-preview" inert role="img"/);
+for (const label of ['Space', 'Homepage', 'Private', 'Work']) assert(settingsHtml.includes('>' + label + '<'), `The inert space preview must show the generic ${label} label.`);
+assert.match(settingsCss, /\.space-preview-row[^}]*font-family:\s*var\(--font-interface\)/);
 assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
 assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field:focus-within \.visibility-toggle/);
@@ -618,5 +637,50 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
   element('discard-confirmation-undo').handlers.click();
   finishRemovalTransition();
   assert.equal(element('font-family').value, 'Arial', 'A successful save advances the undo baseline.');
+
+  element('preferences-nav').handlers.click();
+  const bannerButton = element('choose-banner-image');
+  const bannerInput = element('banner-image-input');
+  const bannerDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+  assert.equal(element('space-preview-image').src, 'data:image/png;base64,default-preview', 'The preview starts with the default banner.');
+  bannerButton.handlers.click();
+  assert.equal(bannerInput.clickCount, 1, 'Choose image opens the native file input.');
+  bannerInput.files = [{ type: 'image/png', size: 8, dataUrl: bannerDataUrl }];
+  await bannerInput.handlers.change();
+  await flush();
+  assert.equal(element('space-preview-image').src, bannerDataUrl, 'Selecting an image updates the rendered sidebar preview.');
+  assert.equal(element('discard-button').hidden, false, 'A selected banner participates in Undo tracking.');
+  assert.equal(element('save-button').disabled, false);
+  await element('save-button').handlers.click();
+  await flush();
+  assert.equal(savedSettings.at(-1).bannerImage, bannerDataUrl, 'Save persists the selected banner data.');
+
+  element('reset-banner-image').handlers.click();
+  assert.equal(element('space-preview-image').src, 'data:image/png;base64,default-preview', 'Use default switches the preview back.');
+  element('discard-button').handlers.click();
+  element('discard-confirmation-undo').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('space-preview-image').src, bannerDataUrl, 'Undo restores the saved banner preview.');
+
+  element('reset-banner-image').handlers.click();
+  await element('save-button').handlers.click();
+  await flush();
+  assert.equal(savedSettings.at(-1).bannerImage, '', 'Save persists the default banner selection.');
+  assert.equal(element('reset-banner-image').hidden, true);
+
+  bannerInput.files = [{ type: 'image/gif', size: 8, dataUrl: 'data:image/gif;base64,R0lGODlh' }];
+  await bannerInput.handlers.change();
+  assert.match(element('banner-error').textContent, /PNG, JPEG, or WebP/);
+  assert.equal(element('save-button').hidden, true, 'An invalid image does not create a settings edit.');
+
+  delayFileRead = true;
+  bannerInput.files = [{ type: 'image/png', size: 8, dataUrl: bannerDataUrl }];
+  await bannerInput.handlers.change();
+  const staleReader = fileReaders.at(-1);
+  assert.equal(element('save-button').disabled, true, 'Save waits while an image is loading.');
+  context.window.BlobUI.discardChanges();
+  await staleReader.onload();
+  assert.equal(element('space-preview-image').src, 'data:image/png;base64,default-preview', 'Undo invalidates a pending image read.');
+  delayFileRead = false;
   console.log('UI save, Alt+R rebuild, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

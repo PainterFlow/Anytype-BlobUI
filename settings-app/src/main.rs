@@ -56,6 +56,8 @@ struct SettingsDraft {
     accent_color: String,
     accent_mode: String,
     accent_preset: String,
+    #[serde(default)]
+    banner_image: String,
     reduced_motion: bool,
     tab_hover_effect: bool,
     link_hover_effect: bool,
@@ -70,6 +72,7 @@ struct AppState {
     app_data_directory: String,
     theme: String,
     settings: SettingsDraft,
+    default_banner_preview: String,
     message: Option<String>,
     hotkey_error: Option<String>,
     onboarding_complete: bool,
@@ -367,6 +370,10 @@ fn load_app_state() -> Result<AppState, String> {
         app_data_directory: app_data.to_string_lossy().into_owned(),
         theme,
         settings,
+        default_banner_preview: resolve_runtime_directory()
+            .ok()
+            .and_then(|runtime| css::default_banner_preview(&runtime).ok())
+            .unwrap_or_default(),
         message,
         hotkey_error: hotkey::error(),
         onboarding_complete: onboarding_complete && !SHOW_ONBOARDING.load(Ordering::Acquire),
@@ -463,6 +470,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "fontFamily": settings.font_family,
         "codeFontFamily": settings.code_font_family,
         "accentColor": accent,
+        "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
         "tabHoverEffect": settings.tab_hover_effect,
         "linkHoverEffect": settings.link_hover_effect,
@@ -484,6 +492,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "accentColor": accent,
             "accentMode": settings.accent_mode,
             "accentPreset": settings.accent_preset,
+            "bannerImage": settings.banner_image,
             "reducedMotion": settings.reduced_motion,
             "tabHoverEffect": settings.tab_hover_effect,
             "linkHoverEffect": settings.link_hover_effect,
@@ -512,6 +521,7 @@ fn validate_settings(mut settings: SettingsDraft) -> Result<SettingsDraft, Strin
     settings.code_font_family = validate_font_family(&settings.code_font_family, "Code font")?;
     settings.accent_color = settings.accent_color.trim().to_string();
     settings.accent_preset = settings.accent_preset.trim().to_string();
+    settings.banner_image = css::validate_banner_image(&settings.banner_image)?;
 
     if settings.accent_color.is_empty() || settings.accent_color.len() > 128 {
         return Err("Accent color must contain 1 to 128 characters.".into());
@@ -595,6 +605,10 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
     let object_mention_hover_effect = read_bool(local, "objectMentionHoverEffect")
         .or_else(|| read_bool(Some(normalized), "objectMentionHoverEffect"))
         .unwrap_or(false);
+    let banner_image = read_string(local, "bannerImage")
+        .or_else(|| read_string(Some(normalized), "bannerImage"))
+        .filter(|value| css::validate_banner_image(value).is_ok())
+        .unwrap_or_default();
 
     let local_mode = read_string(local, "accentMode");
     let local_preset = read_string(local, "accentPreset");
@@ -615,6 +629,7 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         accent_color,
         accent_mode,
         accent_preset,
+        banner_image,
         reduced_motion,
         tab_hover_effect,
         link_hover_effect,
@@ -954,6 +969,7 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
+            banner_image: String::new(),
             reduced_motion: false,
             tab_hover_effect: false,
             link_hover_effect: false,
@@ -1150,6 +1166,7 @@ mod tests {
             app_data_directory: String::new(),
             theme: "dark".into(),
             settings: SettingsDraft::default(),
+            default_banner_preview: String::new(),
             message: None,
             hotkey_error: None,
             onboarding_complete: true,

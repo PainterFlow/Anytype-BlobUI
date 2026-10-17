@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -6,6 +8,52 @@ use std::path::{Path, PathBuf};
 use url::Url;
 
 const DEFAULT_BANNER: &str = "spacebanner/banner.png";
+const MAX_BANNER_BYTES: usize = 2 * 1024 * 1024;
+
+pub fn validate_banner_image(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    let prefix = "data:image/";
+    let remainder = value
+        .strip_prefix(prefix)
+        .ok_or_else(|| "The space banner must be a PNG, JPEG, or WebP image.".to_string())?;
+    let (format, payload) = remainder
+        .split_once(";base64,")
+        .ok_or_else(|| "The space banner image data is invalid.".to_string())?;
+    if !matches!(format, "png" | "jpeg" | "webp")
+        || payload.is_empty()
+        || payload.len() > 4 * MAX_BANNER_BYTES.div_ceil(3)
+        || !payload
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+    {
+        return Err("The space banner must be a PNG, JPEG, or WebP image no larger than 2 MB.".into());
+    }
+    let bytes = STANDARD
+        .decode(payload)
+        .map_err(|_| "The space banner image data is invalid.".to_string())?;
+    if bytes.is_empty() || bytes.len() > MAX_BANNER_BYTES || STANDARD.encode(&bytes) != payload {
+        return Err("The space banner must be a PNG, JPEG, or WebP image no larger than 2 MB.".into());
+    }
+    let has_expected_signature = match format {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
+        "webp" => bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        _ => false,
+    };
+    if !has_expected_signature {
+        return Err("The selected file does not match its PNG, JPEG, or WebP image type.".into());
+    }
+    Ok(format!("data:image/{format};base64,{payload}"))
+}
+
+pub fn default_banner_preview(runtime_root: &Path) -> Result<String, String> {
+    let banner = runtime_root.join("assets").join("spacebanner").join("banner.png");
+    let bytes = fs::read(&banner)
+        .map_err(|error| format!("Could not read the default space banner: {error}"))?;
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
 
 pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> Result<String, String> {
     let dev_directory = runtime_root.join("Dev");
@@ -78,9 +126,17 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
         return Err("The saved settings directory does not match the selected Anytype directory.".into());
     }
     let banner_target = install_directory.join("blob").join("assets").join(DEFAULT_BANNER.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let banner_uri = Url::from_file_path(&banner_target)
-        .map_err(|_| "The banner path could not be converted to a local file URI.".to_string())?
-        .to_string();
+    let banner_image = settings
+        .get("bannerImage")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let banner_uri = if banner_image.is_empty() {
+        Url::from_file_path(&banner_target)
+            .map_err(|_| "The banner path could not be converted to a local file URI.".to_string())?
+            .to_string()
+    } else {
+        validate_banner_image(banner_image)?
+    };
     let values: BTreeMap<&str, (&str, String)> = BTreeMap::from([
         ("fontFamily", ("font", setting_string(settings, "fontFamily")?.to_string())),
         ("codeFontFamily", ("font", setting_string(settings, "codeFontFamily")?.to_string())),
@@ -343,7 +399,7 @@ mod tests {
         fs::create_dir_all(root.join("Dev/nested")).unwrap();
         fs::create_dir_all(root.join("assets/spacebanner")).unwrap();
         fs::write(root.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
-        fs::write(root.join("Dev/10-test.css"), "/* @blobui-placeholder fontFamily font */\nbody { font-family: \"{{fontFamily}}\"; }\n/* @blobui-if tabHoverEffect */\n.tab {}\n/* @blobui-endif tabHoverEffect */").unwrap();
+        fs::write(root.join("Dev/10-test.css"), "/* @blobui-placeholder fontFamily font */\n/* @blobui-placeholder bannerUrl url */\nbody { font-family: \"{{fontFamily}}\"; --header-image: url(\"{{bannerUrl}}\"); }\n/* @blobui-if tabHoverEffect */\n.tab {}\n/* @blobui-endif tabHoverEffect */").unwrap();
         fs::write(root.join("Dev/nested/00-accent.css"), "/* @blobui-placeholder accentColor color */\n:root { color: {{accentColor}}; }").unwrap();
         let install = root.join("anytype");
         let data = json!({"installDirectory": install, "settings": {
@@ -355,6 +411,28 @@ mod tests {
         assert!(css.contains(".tab {}"));
         assert!(css.contains("record-event-1"));
         assert!(!css.contains("@blobui-placeholder"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_and_compiles_custom_banner_data_urls() {
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        let data_url = format!("data:image/png;base64,{}", STANDARD.encode(bytes));
+        assert_eq!(validate_banner_image(&data_url).unwrap(), data_url);
+        assert!(validate_banner_image("data:image/png;base64,Zm9v").is_err());
+        assert!(validate_banner_image("data:image/svg+xml;base64,Zm9v").is_err());
+
+        let root = fixture();
+        fs::create_dir_all(root.join("Dev")).unwrap();
+        fs::create_dir_all(root.join("assets/spacebanner")).unwrap();
+        fs::write(root.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
+        fs::write(root.join("Dev/00-banner.css"), "/* @blobui-placeholder bannerUrl url */\n:root { --header-image: url(\"{{bannerUrl}}\"); }").unwrap();
+        let install = root.join("anytype");
+        let data = json!({"installDirectory": install, "settings": {
+            "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": "#27A879", "bannerImage": data_url
+        }});
+        let css = compile(&root, &install, &data).unwrap();
+        assert!(css.contains(&format!("url(\"{data_url}\")")));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -388,6 +466,11 @@ mod tests {
                 "settings": { "fontFamily": "Arial", "codeFontFamily": "Consolas", "accentColor": "#3656D4", "reducedMotion": false, "tabHoverEffect": true, "linkHoverEffect": true, "objectMentionHoverEffect": false },
                 "apiConnection": { "enabled": false },
                 "calendarObjectColors": { "disabled-case": "Amber" }
+            }),
+            json!({
+                "settings": { "fontFamily": "Arial", "codeFontFamily": "Consolas", "accentColor": "#3656D4", "bannerImage": "data:image/png;base64,iVBORw0KGgo=", "reducedMotion": false, "tabHoverEffect": true, "linkHoverEffect": true, "objectMentionHoverEffect": false },
+                "apiConnection": { "enabled": false },
+                "calendarObjectColors": {}
             }),
         ];
         let powershell = ["pwsh.exe", "powershell.exe"]

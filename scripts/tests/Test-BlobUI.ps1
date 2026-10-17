@@ -493,6 +493,15 @@ try {
     Assert-Equal "$generalObjectId|$spaceObjectId" $v1OverlayResult.settingsObjectIds 'The v2 overlay changed selected legacy object IDs.'
     Assert-Equal $testSpaceId $v1OverlayResult.selectedSpace.id 'The v2 overlay changed the selected settings space.'
     Assert-Equal 'Red' $v1OverlayResult.calendarObjectColors.$staleCalendarObjectId 'The v2 overlay changed cached calendar colors.'
+    $spaceBannerDataUrl = 'data:image/png;base64,' + [System.Convert]::ToBase64String([byte[]]@(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+    $bannerOverlay = ConvertTo-TestApiObject $v2OverlayFixture
+    $bannerOverlay.settings | Add-Member -MemberType NoteProperty -Name bannerImage -Value $spaceBannerDataUrl
+    $bannerOverlayResult = Set-BlobUiSettingsV2Overlay -Data (ConvertTo-TestApiObject $v1OverlayFixture) -Overlay $bannerOverlay
+    Assert-Equal $spaceBannerDataUrl $bannerOverlayResult.settings.bannerImage 'The local settings overlay did not preserve the selected space banner.'
+    Assert-Equal $spaceBannerDataUrl $bannerOverlayResult.settingsV2.settings.bannerImage 'The version 2 settings did not retain the selected space banner.'
+    $invalidBannerOverlay = ConvertTo-TestApiObject $bannerOverlay
+    $invalidBannerOverlay.settings.bannerImage = 'data:image/png;base64,Zm9v'
+    Assert-Throws { Set-BlobUiSettingsV2Overlay -Data (ConvertTo-TestApiObject $v1OverlayFixture) -Overlay $invalidBannerOverlay } 'A mismatched banner image type was accepted.' 'does not match its PNG'
     $invalidPresetFixture = ConvertTo-TestApiObject $v1OverlayFixture
     $invalidPresetBefore = ConvertTo-Json -InputObject $invalidPresetFixture -Depth 20 -Compress
     $invalidPresetOverlay = [pscustomobject]@{
@@ -680,6 +689,16 @@ try {
     Assert-True ($css.Contains('font-family: "Consolas", "Courier New", monospace !important;')) 'Compiled CSS omitted the default code font.'
     Assert-True ($css.Contains('file:///') -and $css.Contains('Anytype%20Data%20%C3%BC%20%231')) 'The banner file URI did not escape spaces, Unicode, and the hash character.'
     Assert-True (-not $css.Contains('{{')) 'Compiled CSS contains an unresolved placeholder.'
+
+    $customBannerData = ConvertTo-TestApiObject $fetchedData
+    $customBannerData.settings | Add-Member -MemberType NoteProperty -Name bannerImage -Value $spaceBannerDataUrl
+    $customBannerCssPath = Join-Path $testRoot 'custom-banner.css'
+    Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath $customBannerCssPath -Data $customBannerData | Out-Null
+    $customBannerCss = [System.IO.File]::ReadAllText($customBannerCssPath)
+    Assert-True ($customBannerCss.Contains('--header-image: url("' + $spaceBannerDataUrl + '");')) 'The selected space banner was not compiled into custom.css.'
+    $invalidBannerData = ConvertTo-TestApiObject $customBannerData
+    $invalidBannerData.settings.bannerImage = 'data:image/png;base64,Zm9v'
+    Assert-Throws { Invoke-BlobUiCssCompile -DevDirectory (Join-Path $repoRoot 'Dev') -AssetSourceDirectory (Join-Path $repoRoot 'assets') -OutputPath (Join-Path $testRoot 'invalid-banner.css') -Data $invalidBannerData | Out-Null } 'A mismatched banner image type was compiled.' 'does not match its PNG'
 
     $paletteObjectColors = [ordered]@{
         'bafy-calendar-palette-grey' = 'Grey'

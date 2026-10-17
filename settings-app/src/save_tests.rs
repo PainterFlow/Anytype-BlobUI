@@ -165,6 +165,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
+        banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,
         tab_hover_effect: true,
         link_hover_effect: true,
@@ -177,11 +178,13 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
     assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
     assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
+    assert_eq!(saved_data["settingsV2"]["settings"]["bannerImage"], draft.banner_image);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");
     assert_eq!(saved_data["calendarObjectColors"]["fixture-event"], "Green");
     let saved_css = fs::read_to_string(&css_path).unwrap();
     assert!(saved_css.contains("#27A879"));
     assert!(saved_css.contains("Cascadia Code"));
+    assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
 
     // White passes settings validation but the native CSS compiler rejects it.

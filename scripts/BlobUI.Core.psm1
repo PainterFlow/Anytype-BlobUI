@@ -704,6 +704,44 @@ function ConvertTo-BlobUiAccentColorValue {
     return ConvertTo-BlobUiCssPlaceholderValue -Type color -Value ([string]$Value) -Name 'Accent Color' -RejectWhite
 }
 
+function ConvertTo-BlobUiBannerImageDataUrl {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    $prefix = 'data:image/'
+    if (-not $Value.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+        throw 'The space banner must be a PNG, JPEG, or WebP image.'
+    }
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $Value,
+        '^data:image/(?<format>png|jpeg|webp);base64,(?<payload>[A-Za-z0-9+/]*={0,2})$'
+    )
+    $maximumBytes = 2MB
+    $maximumBase64Length = 4 * [int][Math]::Ceiling($maximumBytes / 3)
+    if (-not $match.Success -or $match.Groups['payload'].Length -eq 0 -or
+        $match.Groups['payload'].Length -gt $maximumBase64Length) {
+        throw 'The space banner must be a PNG, JPEG, or WebP image no larger than 2 MB.'
+    }
+    $payload = $match.Groups['payload'].Value
+    try { $bytes = [System.Convert]::FromBase64String($payload) }
+    catch { throw 'The space banner image data is invalid.' }
+    if ($bytes.Length -lt 1 -or $bytes.Length -gt $maximumBytes -or
+        [System.Convert]::ToBase64String($bytes) -cne $payload) {
+        throw 'The space banner must be a PNG, JPEG, or WebP image no larger than 2 MB.'
+    }
+    $format = $match.Groups['format'].Value
+    $hasExpectedSignature = switch ($format) {
+        'png' { $bytes.Length -ge 8 -and $bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4e -and $bytes[3] -eq 0x47 -and $bytes[4] -eq 0x0d -and $bytes[5] -eq 0x0a -and $bytes[6] -eq 0x1a -and $bytes[7] -eq 0x0a }
+        'jpeg' { $bytes.Length -ge 3 -and $bytes[0] -eq 0xff -and $bytes[1] -eq 0xd8 -and $bytes[2] -eq 0xff }
+        'webp' { $bytes.Length -ge 12 -and [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ceq 'RIFF' -and [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4) -ceq 'WEBP' }
+        default { $false }
+    }
+    if (-not $hasExpectedSignature) {
+        throw 'The selected file does not match its PNG, JPEG, or WebP image type.'
+    }
+    return 'data:image/{0};base64,{1}' -f $format, $payload
+}
+
 function Set-BlobUiSettingsV2Overlay {
     param(
         [Parameter(Mandatory = $true)]$Data,
@@ -724,6 +762,18 @@ function Set-BlobUiSettingsV2Overlay {
     $accentValue = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentColor')
     $accentMode = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentMode')
     $accentPreset = [string](Get-BlobUiPropertyField -InputObject $values -FieldName 'accentPreset')
+    $bannerImage = Get-BlobUiPropertyField -InputObject $values -FieldName 'bannerImage'
+    if ($null -eq $bannerImage) {
+        $existingSettingsV2 = Get-BlobUiPropertyField -InputObject $Data -FieldName 'settingsV2'
+        $existingV2Settings = if ($null -ne $existingSettingsV2) { Get-BlobUiPropertyField -InputObject $existingSettingsV2 -FieldName 'settings' } else { $null }
+        if ($null -ne $existingV2Settings) {
+            $bannerImage = Get-BlobUiPropertyField -InputObject $existingV2Settings -FieldName 'bannerImage'
+        }
+    }
+    if ($null -eq $bannerImage) {
+        $bannerImage = Get-BlobUiPropertyField -InputObject $Data.settings -FieldName 'bannerImage'
+    }
+    $bannerImage = ConvertTo-BlobUiBannerImageDataUrl -Value ([string]$bannerImage)
     $reducedMotion = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'reducedMotion') -Default $script:BlobUiDefaultSettings.reducedMotion -Name 'Reduced Motion'
     $tabHoverEffect = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'tabHoverEffect') -Default $script:BlobUiDefaultSettings.tabHoverEffect -Name 'Tab Hover Effect'
     $linkHoverEffect = ConvertTo-BlobUiBooleanSetting -Value (Get-BlobUiPropertyField -InputObject $values -FieldName 'linkHoverEffect') -Default $script:BlobUiDefaultSettings.linkHoverEffect -Name 'Links Hover Effect'
@@ -777,6 +827,14 @@ function Set-BlobUiSettingsV2Overlay {
     $Data.settings.fontFamily = $fontValue
     $Data.settings.codeFontFamily = $codeFontValue
     $Data.settings.accentColor = $normalizedAccent
+    if ($Data.settings -is [System.Collections.IDictionary]) {
+        $Data.settings['bannerImage'] = $bannerImage
+    }
+    else {
+        $existingBannerImage = $Data.settings.PSObject.Properties['bannerImage']
+        if ($null -ne $existingBannerImage) { $existingBannerImage.Value = $bannerImage }
+        else { $null = $Data.settings | Add-Member -MemberType NoteProperty -Name 'bannerImage' -Value $bannerImage }
+    }
     foreach ($setting in @(
         @{ name = 'reducedMotion'; value = $reducedMotion },
         @{ name = 'tabHoverEffect'; value = $tabHoverEffect },
@@ -804,6 +862,7 @@ function Set-BlobUiSettingsV2Overlay {
             accentColor = $accentValue
             accentMode = $accentMode
             accentPreset = $accentPreset
+            bannerImage = $bannerImage
             reducedMotion = $reducedMotion
             tabHoverEffect = $tabHoverEffect
             linkHoverEffect = $linkHoverEffect
@@ -1342,16 +1401,30 @@ function Invoke-BlobUiCssCompile {
     if ([string]::IsNullOrWhiteSpace($installDirectory)) {
         throw 'The settings data has no install directory.'
     }
-    $bannerPath = $script:BlobUiDefaultSettings.bannerPath
-    $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetSourceDirectory $bannerPath))
-    $assetRoot = [System.IO.Path]::GetFullPath($AssetSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-        -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
-        throw "The fixed banner image is missing from the packaged assets: $bannerPath"
+    $bannerImage = Get-BlobUiPropertyField -InputObject $Data.settings -FieldName 'bannerImage'
+    if ($null -eq $bannerImage) {
+        $settingsV2 = Get-BlobUiPropertyField -InputObject $Data -FieldName 'settingsV2'
+        $settingsV2Values = if ($null -ne $settingsV2) { Get-BlobUiPropertyField -InputObject $settingsV2 -FieldName 'settings' } else { $null }
+        if ($null -ne $settingsV2Values) {
+            $bannerImage = Get-BlobUiPropertyField -InputObject $settingsV2Values -FieldName 'bannerImage'
+        }
     }
+    $bannerImage = ConvertTo-BlobUiBannerImageDataUrl -Value ([string]$bannerImage)
+    if ($bannerImage) {
+        $bannerUri = $bannerImage
+    }
+    else {
+        $bannerPath = $script:BlobUiDefaultSettings.bannerPath
+        $bannerSource = [System.IO.Path]::GetFullPath((Join-Path $AssetSourceDirectory $bannerPath))
+        $assetRoot = [System.IO.Path]::GetFullPath($AssetSourceDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $bannerSource.StartsWith($assetRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $bannerSource -PathType Leaf)) {
+            throw "The fixed banner image is missing from the packaged assets: $bannerPath"
+        }
 
-    $bannerDestination = Join-Path ([System.IO.Path]::GetFullPath($installDirectory)) (Join-Path 'blob\assets' $bannerPath)
-    $bannerUri = [System.Uri]::new($bannerDestination).AbsoluteUri
+        $bannerDestination = Join-Path ([System.IO.Path]::GetFullPath($installDirectory)) (Join-Path 'blob\assets' $bannerPath)
+        $bannerUri = [System.Uri]::new($bannerDestination).AbsoluteUri
+    }
     $values = @{
         fontFamily = @{ type = 'font'; value = [string]$Data.settings.fontFamily }
         codeFontFamily = @{ type = 'font'; value = [string]$Data.settings.codeFontFamily }
@@ -1382,6 +1455,9 @@ function Invoke-BlobUiCssCompile {
             $entry = $values[$name]
             if ($name -ceq 'accentColor') {
                 return ConvertTo-BlobUiAccentColorValue -Value ([string]$entry.value)
+            }
+            if ($name -ceq 'bannerUrl' -and ([string]$entry.value).StartsWith('data:image/', [System.StringComparison]::Ordinal)) {
+                return [string]$entry.value
             }
             return ConvertTo-BlobUiCssPlaceholderValue -Type $entry.type -Value ([string]$entry.value) -Name $name
         }
