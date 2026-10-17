@@ -97,7 +97,7 @@ BlobUI Settings provides a desktop Appearance window for fonts and accent colors
 .\scripts\Settings.ps1
 ```
 
-The build places the executable in `settings-app/dist/blobui-settings.exe`. Add `-s` to start the app after a successful build, or `-c` to close any running Settings app instances before the build. `Setup.ps1`, `Install.ps1` and `Update.ps1` include that executable when it is present, placing it at `blob/runtime/settings-app.exe`; the installed launcher is `blob/runtime/scripts/Settings.ps1`. A release that ships the app should include the built executable at the same `settings-app/dist` path before packaging.
+The build places the executable in `settings-app/dist/blobui-settings.exe`. Add `-s` to start the app after a successful build, or `-c` to close any running Settings app instances before the build. Add `-n` to build and open onboarding without changing saved settings. It also works with `-s -c`, for example `.\scripts\Build-Settings.ps1 -s -c -n`. `Setup.ps1`, `Install.ps1` and `Update.ps1` include that executable when it is present, placing it at `blob/runtime/settings-app.exe`; the installed launcher is `blob/runtime/scripts/Settings.ps1`. A release that ships the app should include the built executable at the same `settings-app/dist` path before packaging.
 
 Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 
@@ -111,7 +111,7 @@ Settings and key changes preserve the installed runtime, including its executabl
 
 The choice and port are saved locally in `blob/data.json`. No API mode makes no Anytype API calls and removes API-derived calendar colors, while custom accents, fonts, banners, text effects and UI fixes keep working. A previously saved encrypted key may remain on disk but is ignored in this mode. Settings saves and updates respect the saved mode and port.
 
-Use **Preferences > Anytype API > Manage connection** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Press **Escape** to leave without submitting. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
+Use **Preferences > Anytype API > Manage connection** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\scripts\Settings.ps1 -n` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
 
 To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not register the app to start automatically with Windows.
 

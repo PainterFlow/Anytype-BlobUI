@@ -1,6 +1,8 @@
 param(
     [string]$InstallDirectory,
-    [switch]$Background
+    [switch]$Background,
+    [Alias('n')]
+    [switch]$Onboarding
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,8 +33,12 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($InstallDirectory)) {
         [Environment]::SetEnvironmentVariable('BLOBUI_INSTALL_DIRECTORY', [System.IO.Path]::GetFullPath($InstallDirectory), 'Process')
     }
-    if ($Background) {
-        Start-Process -FilePath $settingsExecutable -ArgumentList '--background' -WindowStyle Hidden | Out-Null
+    $arguments = @()
+    if ($Background) { $arguments += '--background' }
+    if ($Onboarding) { $arguments += '--onboarding' }
+    if ($arguments.Count -gt 0) {
+        $windowStyle = if ($Background) { 'Hidden' } else { 'Normal' }
+        Start-Process -FilePath $settingsExecutable -ArgumentList $arguments -WindowStyle $windowStyle | Out-Null
     }
     else {
         Start-Process -FilePath $settingsExecutable -WindowStyle Normal | Out-Null

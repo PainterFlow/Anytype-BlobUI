@@ -1,6 +1,8 @@
 param(
     [switch]$s,
-    [switch]$c
+    [switch]$c,
+    [Alias('n')]
+    [switch]$Onboarding
 )
 
 $ErrorActionPreference = 'Stop'
@@ -94,6 +96,11 @@ catch [System.IO.IOException] {
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run scripts/Install.ps1 or scripts/Update.ps1 to package it with BlobUI, or launch it with scripts/Settings.ps1.'
 
-if ($s) {
-    Start-Process -FilePath $distributionExecutable -WindowStyle Normal | Out-Null
+if ($s -or $Onboarding) {
+    $launchArguments = @{
+        FilePath = $distributionExecutable
+        WindowStyle = 'Normal'
+    }
+    if ($Onboarding) { $launchArguments.ArgumentList = @('--onboarding') }
+    Start-Process @launchArguments | Out-Null
 }

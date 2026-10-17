@@ -351,6 +351,7 @@
     codeFontFamily.value = draft.codeFontFamily;
     accentValue.value = draft.accentColor;
     reducedMotion.checked = draft.reducedMotion;
+    root.dataset.reducedMotion = String(draft.reducedMotion);
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
@@ -550,6 +551,7 @@
     control.addEventListener("change", () => {
       if (!draft || saveBusy) return;
       draft[property] = control.checked;
+      if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
       markDirty();
     });
   }
@@ -644,6 +646,7 @@
     onboarding.hidden = true;
     settingsShell.inert = false;
     root.classList.remove("onboarding-active");
+    settingsShell.classList.add("onboarding-entering");
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
   }
 
@@ -660,7 +663,6 @@
         showOnboardingStep(next);
       } else {
         closeOnboarding();
-        settingsShell.classList.add("onboarding-entering");
       }
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   }
@@ -784,6 +786,9 @@
   const eventApi = window.__TAURI__ && window.__TAURI__.event;
   if (eventApi && typeof eventApi.listen === "function") {
     eventApi.listen("blobui-rebuild-custom-css", () => save()).catch((error) => {
+      setStatus(error.message || String(error), "error");
+    });
+    eventApi.listen("blobui-show-onboarding", () => showOnboarding()).catch((error) => {
       setStatus(error.message || String(error), "error");
     });
   }

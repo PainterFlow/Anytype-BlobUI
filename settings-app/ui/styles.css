@@ -209,8 +209,165 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .onboarding { position: fixed; inset: 36px 0 0; z-index: 20; background: var(--bg); }
 .onboarding[hidden], .onboarding-welcome[hidden], .onboarding-api[hidden] { display: none; }
 .onboarding-welcome { display: grid; place-items: center; width: 100%; height: 100%; padding: 32px; background: var(--bg); color: var(--text); cursor: pointer; }
+.onboarding-welcome:focus-visible { outline: none; }
 .onboarding-copy { display: grid; justify-items: center; gap: 24px; text-align: center; }
 .onboarding-title { font-size: clamp(48px, 7.5vw, 96px); line-height: 1.15; font-weight: 600; letter-spacing: -.045em; animation: onboarding-fade-in 900ms ease-out both; }
+/* Independent cycles let the glitch components drift into and out of overlap. */
+.onboarding-title-glitch {
+    display: inline-block;
+    position: relative;
+    left: 0;
+    top: 0;
+    opacity: 1;
+    --blobui-glitch-split-mask: linear-gradient(to bottom, #000 0 calc(50% - 1px), transparent calc(50% - 1px) calc(50% + 1px), #000 calc(50% + 1px) 100%);
+    animation:
+        blobui-glitch-jitter 6.7s steps(1, end) infinite,
+        blobui-glitch-flicker 4.9s steps(1, end) infinite,
+        blobui-glitch-chroma 9.2s steps(1, end) infinite,
+        blobui-glitch-seam 12.7s steps(1, end) infinite,
+        blobui-glitch-bold 15.1s steps(1, end) infinite;
+    text-shadow: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    font-weight: inherit;
+    -webkit-text-stroke-color: currentColor;
+    -webkit-text-stroke-width: 0;
+}
+
+@keyframes blobui-glitch-jitter {
+    0%, 13%, 14.8%, 42.1%, 43.15%, 66.6%, 68.1%, 88%, 89.1%, 100% {
+        left: 0;
+        top: 0;
+    }
+
+    13.1% {
+        left: -2px;
+        top: 0;
+    }
+
+    13.65% {
+        left: 1px;
+        top: 0;
+    }
+
+    14.1% {
+        left: -1px;
+        top: -1px;
+    }
+
+    42.25% {
+        left: 1px;
+        top: 0;
+    }
+
+    42.75% {
+        left: -2px;
+        top: -1px;
+    }
+
+    66.75% {
+        left: -1px;
+        top: 0;
+    }
+
+    67.55% {
+        left: 2px;
+        top: 0;
+    }
+
+    88.2% {
+        left: 0;
+        top: 1px;
+    }
+
+    88.55% {
+        left: -1px;
+        top: 0;
+    }
+}
+
+@keyframes blobui-glitch-flicker {
+    0%, 21.4%, 24.8%, 51.1%, 52.9%, 79.65%, 81%, 100% {
+        opacity: 1;
+    }
+
+    21.55% {
+        opacity: 0.72;
+    }
+
+    22.8% {
+        opacity: 0.92;
+    }
+
+    23.2% {
+        opacity: 0.64;
+    }
+
+    51.2% {
+        opacity: 0.85;
+    }
+
+    51.45% {
+        opacity: 0.58;
+    }
+
+    79.9% {
+        opacity: 0.78;
+    }
+
+    80.7% {
+        opacity: 0.91;
+    }
+}
+
+@keyframes blobui-glitch-chroma {
+    0%, 19.4%, 23.3%, 37%, 40.1%, 71.5%, 75.6%, 100% {
+        text-shadow: none;
+    }
+
+    19.5%, 37.25%, 71.7% {
+        text-shadow: -4px 0 rgba(255, 35, 70, 0.55), 4px 0 rgba(0, 220, 255, 0.55), -2px 0 rgba(255, 35, 70, 0.98), 2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(0, 220, 255, 0.72);
+    }
+
+    20.1%, 38%, 72.35% {
+        text-shadow: 5px 0 rgba(255, 35, 70, 0.5), -5px 0 rgba(0, 220, 255, 0.5), 2px 0 rgba(255, 35, 70, 0.98), -2px 0 rgba(0, 220, 255, 0.98), 0 0 7px rgba(255, 35, 70, 0.62);
+    }
+
+    20.75%, 38.45%, 73.1% {
+        text-shadow: -6px 0 rgba(255, 35, 70, 0.52), 6px 0 rgba(0, 220, 255, 0.52), -3px 0 rgba(255, 35, 70, 1), 3px 0 rgba(0, 220, 255, 1), 0 0 9px rgba(0, 220, 255, 0.82);
+    }
+}
+
+@keyframes blobui-glitch-seam {
+    0%, 31%, 32.5%, 46.7%, 48.1%, 82.7%, 85%, 100% {
+        -webkit-mask-image: none;
+        mask-image: none;
+    }
+
+    31.1%, 46.8%, 82.8% {
+        -webkit-mask-image: var(--blobui-glitch-split-mask);
+        mask-image: var(--blobui-glitch-split-mask);
+    }
+}
+
+@keyframes blobui-glitch-bold {
+    0%, 25%, 28.5%, 64.6%, 66.8%, 90%, 92%, 100% {
+        font-weight: inherit;
+        -webkit-text-stroke-width: 0;
+    }
+
+    25.1%, 64.7%, 90.05% {
+        font-weight: 900;
+        -webkit-text-stroke-width: 0.3px;
+    }
+}
+
+:root[data-reduced-motion="true"] .onboarding-title-glitch {
+    animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .onboarding-title-glitch { animation: none; }
+}
 .onboarding-hint { color: var(--text-secondary); font-size: 16px; line-height: 24px; animation: onboarding-fade-in 900ms ease-out 250ms both; }
 .onboarding .leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
 .onboarding-api { display: flex; flex-direction: column; height: 100%; min-height: 0; animation: onboarding-fade-in 450ms ease-out both; }

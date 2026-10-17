@@ -9,12 +9,13 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 mod connection;
 mod hotkey;
 
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static SHOW_ONBOARDING: AtomicBool = AtomicBool::new(false);
 
 struct SaveGuard;
 impl Drop for SaveGuard {
@@ -303,7 +304,7 @@ fn load_app_state() -> Result<AppState, String> {
         settings,
         message,
         hotkey_error: hotkey::error(),
-        onboarding_complete,
+        onboarding_complete: onboarding_complete && !SHOW_ONBOARDING.load(Ordering::Acquire),
         api_port,
     })
 }
@@ -856,8 +857,16 @@ fn configure_webview_profile() {
 
 fn main() {
     configure_webview_profile();
+    SHOW_ONBOARDING.store(
+        env::args().any(|argument| argument == "--onboarding" || argument == "-n"),
+        Ordering::Release,
+    );
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
+            if arguments.iter().any(|argument| argument == "--onboarding" || argument == "-n") {
+                SHOW_ONBOARDING.store(true, Ordering::Release);
+                let _ = app.emit("blobui-show-onboarding", ());
+            }
             if !arguments.iter().any(|argument| argument == "--background") {
                 show_settings_window(app);
             }
