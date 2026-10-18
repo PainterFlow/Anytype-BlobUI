@@ -102,6 +102,7 @@
   });
   const releaseNotesContent = el("release-notes-content");
   let releaseNotesVersion = null;
+  let acknowledgeReleaseNotesOnClose = true;
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
   let releaseNotesFailed = false;
@@ -109,12 +110,15 @@
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
     initialFocus: el("release-notes-done"),
-    fallbackFocus: el("page-title"),
+    fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
-      if (!version) return;
+      if (!version || !acknowledgeReleaseNotesOnClose) {
+        acknowledgeReleaseNotesOnClose = true;
+        return;
+      }
       invoke("acknowledge_release_notes", { version }).then((acknowledged) => {
         if (acknowledged) runAutomaticUpdateCheck();
         else {
@@ -125,6 +129,20 @@
         releaseNotesFailed = true;
         setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error");
       });
+    },
+  });
+  const helpErrorModal = window.BlobUI.createModalController({
+    backdrop: el("help-error-backdrop"), dialog: el("help-error-dialog"),
+    initialFocus: el("help-error-done"), fallbackFocus: el("help-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+  });
+  const keybindModal = window.BlobUI.createModalController({
+    backdrop: el("keybinds-backdrop"), dialog: el("keybinds-dialog"),
+    initialFocus: () => el("keybind-list").querySelector("button"), fallbackFocus: el("help-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+    onClose: () => {
+      shortcutCaptureAction = null;
+      invoke("set_shortcut_capture", { active: false }).catch(() => {});
     },
   });
   window.BlobUI.openDiscardConfirmation = () => discardConfirmationModal.open();
@@ -485,6 +503,7 @@
     const simulated = state.status === "simulated";
     const currentVersion = String(state.currentVersion || "");
     const latestVersion = String(state.latestVersion || "");
+    el("blobui-version").textContent = currentVersion ? "BlobUI " + currentVersion : "BlobUI version unavailable";
     el("update-version").textContent = currentVersion
       ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
       : "";
@@ -594,6 +613,29 @@
     }
   }
 
+  async function showLatestReleaseNotes() {
+    try {
+      const notes = await invoke("get_latest_release_notes");
+      if (!notes) return showHelpError("The latest changelog is unavailable.");
+      if (typeof notes.version !== "string" || typeof notes.markdown !== "string" || typeof notes.imageManifest !== "string") {
+        throw new TypeError("The latest changelog is incomplete.");
+      }
+      const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
+      const results = await Promise.allSettled(Object.entries(manifest).map(async ([alias, item]) => [alias, { src: await invoke("get_release_note_image", { source: item.src }), alt: item.alt }]));
+      const images = Object.create(null);
+      for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
+      releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
+      el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
+      el("release-notes-version").textContent = "Version " + notes.version;
+      releaseNotesVersion = notes.version;
+      acknowledgeReleaseNotesOnClose = false;
+      releaseNotesModal.open();
+    } catch (error) {
+      setStatus("Could not display the latest changelog. " + (error.message || String(error)), "error");
+      showHelpError("The latest changelog is unavailable.");
+    }
+  }
+
   async function checkForUpdates(automatic = false) {
     if (automatic && (simulationActive || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed)) return;
     if (!updaterSettingsLoaded || !window.appReady || updaterBusyOperation) return;
@@ -696,6 +738,130 @@
     logButton.setAttribute("aria-expanded", "false");
     if (restoreFocus) logButton.focus();
   }
+
+  const shortcutActions = [
+    ["openSettings", "Open Settings from Anytype"],
+    ["rebuildCss", "Rebuild custom.css"],
+    ["showOnboarding", "Show setup guide"],
+    ["simulateUpdate", "Preview an update"],
+    ["quitSettings", "Quit BlobUI Settings"],
+  ];
+  let shortcutBindings = [];
+  let shortcutCaptureAction = null;
+  function showHelpError(message = "This help content could not be found.") {
+    el("help-error-message").textContent = message;
+    helpErrorModal.open();
+  }
+  function formatShortcut(binding) {
+    const modifiers = [];
+    if (binding.ctrl) modifiers.push("Ctrl");
+    if (binding.alt) modifiers.push("Alt");
+    if (binding.shift) modifiers.push("Shift");
+    if (binding.meta) modifiers.push("Win");
+    const label = binding.code.startsWith("Key") ? binding.code.slice(3)
+      : binding.code.startsWith("Digit") ? binding.code.slice(5)
+      : binding.code.startsWith("Numpad") ? binding.code.replace("Numpad", "Numpad ")
+      : binding.code;
+    modifiers.push(label);
+    return modifiers.join("+");
+  }
+  async function loadShortcutBindings() {
+    try {
+      const loaded = await invoke("get_keyboard_shortcuts");
+      if (!Array.isArray(loaded)) throw new TypeError("Shortcut settings were invalid.");
+      shortcutBindings = loaded;
+      renderShortcutBindings();
+    } catch (error) {
+      el("keybind-status").textContent = error.message || String(error);
+      el("keybind-status").classList.add("error");
+    }
+  }
+  function renderShortcutBindings() {
+    const list = el("keybind-list");
+    list.replaceChildren();
+    shortcutActions.forEach(([action, label]) => {
+      const binding = shortcutBindings.find((item) => item.action === action);
+      const row = document.createElement("div");
+      row.className = "keybind-row";
+      const name = document.createElement("span");
+      name.className = "keybind-label";
+      name.textContent = label;
+      const button = document.createElement("button");
+      button.className = "keybind-button";
+      button.type = "button";
+      button.dataset.shortcutAction = action;
+      button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
+      button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : (binding ? formatShortcut(binding) : "Unavailable");
+      button.addEventListener("click", () => beginShortcutCapture(action));
+      row.append(name, button);
+      list.append(row);
+    });
+  }
+  async function beginShortcutCapture(action) {
+    shortcutCaptureAction = action;
+    el("keybind-status").classList.remove("error");
+    el("keybind-status").textContent = "Press a key combination. Press Escape to cancel.";
+    renderShortcutBindings();
+    el("keybind-list").querySelector(`[data-shortcut-action="${action}"]`).focus();
+    try { await invoke("set_shortcut_capture", { active: true }); }
+    catch (error) {
+      shortcutCaptureAction = null;
+      renderShortcutBindings();
+      el("keybind-status").textContent = error.message || String(error);
+      el("keybind-status").classList.add("error");
+    }
+  }
+  async function finishShortcutCapture(event) {
+    if (!shortcutCaptureAction) return;
+    if (["Control", "Alt", "Shift", "Meta", "OS"].includes(event.key)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.key === "Tab") {
+      el("keybind-status").textContent = "Tab is reserved for moving through the dialog.";
+      el("keybind-status").classList.add("error");
+      el("keybind-list").querySelector(`[data-shortcut-action="${shortcutCaptureAction}"]`).focus();
+      return;
+    }
+    const action = shortcutCaptureAction;
+    shortcutCaptureAction = null;
+    await invoke("set_shortcut_capture", { active: false }).catch(() => {});
+    if (event.key === "Escape") {
+      el("keybind-status").classList.remove("error");
+      el("keybind-status").textContent = "Shortcut capture canceled.";
+      renderShortcutBindings();
+      el("keybind-list").querySelector(`[data-shortcut-action="${action}"]`).focus();
+      return;
+    }
+    const next = {
+      action,
+      code: event.code,
+      ctrl: event.ctrlKey,
+      alt: event.altKey,
+      shift: event.shiftKey,
+      meta: event.metaKey,
+    };
+    const conflict = shortcutBindings.find((item) => item.action !== action && item.code === next.code
+      && item.ctrl === next.ctrl && item.alt === next.alt && item.shift === next.shift && item.meta === next.meta);
+    if (!next.code || conflict) {
+      el("keybind-status").textContent = conflict ? "That shortcut is already assigned to another BlobUI action." : "That key cannot be used as a shortcut.";
+      el("keybind-status").classList.add("error");
+      renderShortcutBindings();
+      el("keybind-list").querySelector(`[data-shortcut-action="${action}"]`).focus();
+      return;
+    }
+    const updated = shortcutBindings.map((item) => item.action === action ? next : item);
+    try {
+      shortcutBindings = await invoke("save_keyboard_shortcuts", { shortcuts: updated });
+      el("keybind-status").textContent = "Shortcut saved.";
+      el("keybind-status").classList.remove("error");
+    } catch (error) {
+      el("keybind-status").textContent = error.message || String(error);
+      el("keybind-status").classList.add("error");
+    }
+    renderShortcutBindings();
+    el("keybind-list").querySelector(`[data-shortcut-action="${action}"]`).focus();
+  }
+  document.addEventListener("keydown", finishShortcutCapture, true);
 
   function connectionHasChanges() {
     const keyChanged = hasSavedApiKey ? advancedKeyEdited : advancedApiKey.value.trim() !== "";
@@ -887,6 +1053,10 @@
       assignAdvancedConnection(state);
       assignDraftToForm(state.settings || {});
       await loadUpdaterState();
+      await loadShortcutBindings();
+      invoke("get_anytype_version").then((version) => {
+        el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
+      }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
       editSession.commit();
@@ -1524,6 +1694,35 @@
       el("copy-logs").focus();
     }
   });
+  const helpButton = el("help-button");
+  const helpPopup = el("help-popup");
+  function closeHelp(restoreFocus = false) {
+    helpPopup.hidden = true;
+    helpButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) helpButton.focus();
+  }
+  helpButton.addEventListener("click", () => {
+    helpPopup.hidden = !helpPopup.hidden;
+    helpButton.setAttribute("aria-expanded", String(!helpPopup.hidden));
+    if (!helpPopup.hidden) el("help-whats-new").focus();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!el("help-control").contains(event.target)) closeHelp();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (!el("help-control").contains(event.target)) closeHelp();
+  });
+  el("help-whats-new").addEventListener("click", () => { closeHelp(); showLatestReleaseNotes(); });
+  el("help-documentation").addEventListener("click", () => { closeHelp(); showHelpError("Documentation could not be found (404 Error)."); });
+  el("help-keybinds").addEventListener("click", async () => {
+    closeHelp();
+    el("keybind-status").textContent = "";
+    el("keybind-status").classList.remove("error");
+    await loadShortcutBindings();
+    keybindModal.open();
+  });
+  ["help-error-close", "help-error-done"].forEach((id) => el(id).addEventListener("click", () => helpErrorModal.close()));
+  ["keybinds-close", "keybinds-done"].forEach((id) => el(id).addEventListener("click", () => keybindModal.close()));
   document.addEventListener("pointerdown", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
   });
@@ -1731,19 +1930,23 @@
   });
 
   document.addEventListener("keydown", (event) => {
-    if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen()) return;
-    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
-      && typeof event.key === "string" && event.key.toLowerCase() === "r") {
+    if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
+    const matches = (action) => {
+      const binding = shortcutBindings.find((item) => item.action === action);
+      return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
+        && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
+    };
+    if (matches("rebuildCss")) {
       event.preventDefault();
-      if (!event.repeat) return save({ forceRebuild: true });
+      if (!event.repeat) save({ forceRebuild: true });
       return;
     }
-    if (event.key === "F8" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+    if (matches("showOnboarding")) {
       event.preventDefault();
       if (!event.repeat) showOnboarding();
       return;
     }
-    if (event.key === "F9" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+    if (matches("simulateUpdate")) {
       event.preventDefault();
       if (!event.repeat) simulateUpdate();
       return;
@@ -1757,7 +1960,7 @@
       event.preventDefault();
       closeLogs(true);
     }
-    if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "q") {
+    if (matches("quitSettings")) {
       event.preventDefault();
       if (!event.repeat) windowAction("quit_app");
     }

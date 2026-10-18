@@ -10,6 +10,7 @@ function element(id) {
   if (!elements.has(id)) {
     const classes = new Set();
     elements.set(id, {
+      id,
       value: '', type: ['connection-key', 'advanced-api-key'].includes(id) ? 'password' : 'text',
       selectionStart: 0, selectionEnd: 0,
       setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
@@ -35,11 +36,19 @@ function element(id) {
       click() { this.clickCount += 1; if (this.handlers.click) this.handlers.click({ target: this }); },
       getAttribute(name) { return this.attributes[name] || null; },
       appendChild(child) { this.children.push(child); },
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = [...children]; },
       contains(target) { return target === this || this.children.includes(target); },
       closest() { return null; },
       getClientRects() { return this.hidden ? [] : [{}]; },
       focus() { this.focused = true; activeElement = this; },
-      querySelector: selector => element(id + selector),
+      querySelector(selector) {
+        const match = selector.match(/^\[data-shortcut-action="([^"]+)"\]$/);
+        if (id === 'keybind-list' && match) {
+          return this.children.flatMap(row => row.children).find(child => child.dataset.shortcutAction === match[1]) || element(id + selector);
+        }
+        return element(id + selector);
+      },
       querySelectorAll() { return this.children; },
     });
   }
@@ -48,6 +57,7 @@ function element(id) {
 const calls = [];
 const savedSettings = [];
 const savedUpdaterSettings = [];
+const savedShortcuts = [];
 const releaseNotesScenarioArg = process.argv.find(argument => argument.startsWith('--release-notes-scenario='));
 const releaseNotesScenario = releaseNotesScenarioArg ? releaseNotesScenarioArg.split('=', 2)[1] : null;
 const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'parse-error'
@@ -127,6 +137,18 @@ const context = {
       } },
       core: { async invoke(name, args) {
       calls.push(name);
+      if (name === 'get_keyboard_shortcuts') return [
+        { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
+        { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
+        { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
+        { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
+        { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
+      ];
+      if (name === 'save_keyboard_shortcuts') {
+        savedShortcuts.push(args.shortcuts);
+        return args.shortcuts;
+      }
+      if (name === 'get_anytype_version') return 'Anytype 0.1.0';
       if (name === 'select_anytype_folder') return selectedFolder;
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
       if (name === 'get_app_state') return {
@@ -192,7 +214,11 @@ const changeToggle = async (id, checked) => {
 const status = () => element('status-message').textContent;
 const settingsHtml = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
 const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
-assert.match(settingsHtml, /<span>Alt\+R to rebuild custom\.css<\/span>\s*<span>Numpad 1 in Anytype<\/span>/, 'The rebuild note must sit immediately above the Numpad 1 note.');
+assert.match(settingsHtml, /id="help-button"[^>]*aria-controls="help-popup"/);
+assert(settingsHtml.indexOf('id="help-whats-new"') < settingsHtml.indexOf('id="help-documentation"'));
+assert(settingsHtml.indexOf('id="help-documentation"') < settingsHtml.indexOf('id="help-keybinds"'));
+assert(settingsHtml.indexOf('class="help-divider"') < settingsHtml.indexOf('id="blobui-version"'));
+for (const shortcut of ['openSettings', 'rebuildCss', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
 assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="accessibility-nav"'), 'Accessibility must be the second Settings navigation page.');
 assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
 assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs inside Advanced Settings.');
@@ -403,13 +429,35 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
   assert.equal(element('start-on-login').checked, true, 'Undo restores the startup preference.');
 
+  element('help-button').handlers.click();
+  assert.equal(element('help-popup').hidden, false, 'The Help button opens its mini-menu.');
+  assert.equal(element('help-button').attributes['aria-expanded'], 'true');
+  assert(element('help-whats-new').focused, 'Opening Help moves focus into the menu.');
+  await element('help-keybinds').handlers.click();
+  assert.equal(element('keybind-list').children.length, 5, 'Keybinds lists all five BlobUI shortcuts.');
+  const shortcutButton = element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]');
+  await shortcutButton.handlers.click();
+  assert.equal(activeElement, element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]'), 'Shortcut capture keeps focus on the active action.');
+  await context.document.handlers.keydown({
+    key: 'z', code: 'KeyZ', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {},
+  });
+  const saveShortcutCall = calls.lastIndexOf('save_keyboard_shortcuts');
+  assert(saveShortcutCall >= 0, 'A valid captured combination is persisted.');
+  assert.equal(savedShortcuts.length, 1);
+  assert.equal(JSON.stringify(savedShortcuts[0].find(binding => binding.action === 'showOnboarding')),
+    JSON.stringify({ action: 'showOnboarding', code: 'KeyZ', ctrl: true, alt: true, shift: false, meta: false }));
+  assert.equal(element('keybind-status').textContent, 'Shortcut saved.');
+  element('keybinds-done').handlers.click();
+  finishRemovalTransition();
+
   const realApplyCallsBeforeSimulation = calls.filter(name => name === 'apply_update').length;
   const realCheckCallsBeforeSimulation = calls.filter(name => name === 'check_for_updates').length;
   let f9Prevented = false;
-  context.document.handlers.keydown({ key: 'F9', repeat: true, preventDefault() {} });
-  context.document.handlers.keydown({ key: 'F9', ctrlKey: true, preventDefault() {} });
+  context.document.handlers.keydown({ key: 'F9', code: 'F9', repeat: true, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} });
+  context.document.handlers.keydown({ key: 'F9', code: 'F9', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} });
   assert.equal(calls.filter(name => name === 'simulate_update').length, 0, 'Repeated or modified F9 does not start a preview.');
-  context.document.handlers.keydown({ key: 'F9', preventDefault() { f9Prevented = true; } });
+  context.document.handlers.keydown({ key: 'F9', code: 'F9', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, preventDefault() { f9Prevented = true; } });
   await flush();
   assert(f9Prevented);
   assert.equal(calls.at(-1), 'simulate_update', 'F9 uses the display-only update simulation command.');
@@ -457,7 +505,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   deferGeneralSave = false;
   pendingGeneralSaveResolve({ calendarStatus: 'cached' });
   await busySave;
-  await flush();
+  for (let turn = 0; turn < 10 && calls.filter(name => name === 'apply_update').length === applyCallsBeforeBusyCheck; turn += 1) await flush();
   assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeBusyCheck + 1, 'A deferred automatic update resumes after Save completes.');
   await input('font-family', 'Libron');
   await element('save-button').handlers.click();
@@ -700,6 +748,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     await element(id).handlers.click();
     assert.equal(calls.at(-1), command);
   }
+
   let prevented = false;
   const quitKey = { key: 'q', ctrlKey: true, preventDefault() { prevented = true; } };
   context.document.handlers.keydown(quitKey);

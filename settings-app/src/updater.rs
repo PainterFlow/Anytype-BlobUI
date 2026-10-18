@@ -299,6 +299,29 @@ pub fn get_release_notes(
     Ok(Some(ReleaseNotes { version, markdown, image_manifest }))
 }
 
+pub fn get_latest_release_notes(
+    install_directory: &Path,
+    runtime_directory: &Path,
+) -> Result<Option<ReleaseNotes>, String> {
+    let runtime_directory = if runtime_directory.join("Changelogs.md").is_file() {
+        runtime_directory
+    } else {
+        return Ok(None);
+    };
+    let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
+    if markdown.trim().is_empty() {
+        return Ok(None);
+    }
+    let manifest_path = runtime_directory.join("Changelogs.yaml");
+    let image_manifest = if manifest_path.is_file() {
+        read_release_text(&manifest_path, MAX_RELEASE_NOTES_BYTES)?
+    } else {
+        "images: []\n".into()
+    };
+    let version = current_version(install_directory, Some(runtime_directory))?;
+    Ok(Some(ReleaseNotes { version, markdown, image_manifest }))
+}
+
 pub fn release_note_image(runtime_directory: &Path, source: &str) -> Result<String, String> {
     let relative = source
         .strip_prefix("assets/changelogs/")
@@ -1336,6 +1359,29 @@ mod tests {
         assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
         assert!(!acknowledge_release_notes(&app_data, &install, &runtime, "1.1.0").unwrap());
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.1.0"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn latest_release_notes_do_not_require_or_consume_a_pending_update() {
+        let root = fixture_root("latest-release-notes");
+        let (install, _, _, _) = install_fixture(&root);
+        let app_data = root.join("APPDATA/anytype");
+        let runtime = install.join("blob/runtime");
+        fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
+        fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        let notes = get_latest_release_notes(&install, &runtime).unwrap().unwrap();
+        assert_eq!(notes.version, "1.0.0");
+        assert_eq!(notes.markdown, "# Latest notes\n");
+        assert_eq!(notes.image_manifest, "images: []\n");
+        assert_eq!(load_preferences(&preferences_path(&app_data)).unwrap().pending_changelog_version, None);
+        fs::remove_file(runtime.join("Changelogs.yaml")).unwrap();
+        assert_eq!(get_latest_release_notes(&install, &runtime).unwrap().unwrap().image_manifest, "images: []\n");
+        fs::write(runtime.join("Changelogs.md"), "  \n").unwrap();
+        assert!(get_latest_release_notes(&install, &runtime).unwrap().is_none());
+        fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
+        fs::remove_file(runtime.join("Changelogs.md")).unwrap();
+        assert!(get_latest_release_notes(&install, &runtime).unwrap().is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

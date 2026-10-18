@@ -148,6 +148,99 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
 }
 
 #[tauri::command]
+fn get_keyboard_shortcuts() -> Vec<hotkey::Shortcut> {
+    hotkey::get_shortcuts()
+}
+
+#[tauri::command]
+fn save_keyboard_shortcuts(shortcuts: Vec<hotkey::Shortcut>) -> Result<Vec<hotkey::Shortcut>, String> {
+    let app_data = app_data_directory();
+    let path = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
+    hotkey::save_shortcuts(&path, shortcuts)
+}
+
+#[tauri::command]
+fn set_shortcut_capture(active: bool) {
+    hotkey::set_capture_active(active);
+}
+
+#[tauri::command]
+fn get_anytype_version() -> String {
+    let mut roots = Vec::new();
+    for variable in ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(root) = env::var_os(variable) {
+            let root = PathBuf::from(root);
+            roots.push(root.join("Programs/Anytype"));
+            roots.push(root.join("Anytype"));
+        }
+    }
+    roots.extend([app_data_directory(), default_install_directory(&app_data_directory())]);
+    #[cfg(windows)]
+    {
+        for root in &roots {
+            if let Some(version) = anytype_executable_version(&root.join("Anytype.exe")) {
+                return format!("Anytype {version}");
+            }
+        }
+        for variable in ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(root) = env::var_os(variable).map(PathBuf::from) {
+                for executable in [
+                    root.join("Programs/Anytype/Anytype.exe"),
+                    root.join("Anytype/Anytype.exe"),
+                ] {
+                    if let Some(version) = anytype_executable_version(&executable) {
+                        return format!("Anytype {version}");
+                    }
+                }
+            }
+        }
+    }
+    for root in roots {
+        for manifest in [
+            root.join("resources/app/package.json"),
+            root.join("resources/app/package-lock.json"),
+            root.join("package.json"),
+        ] {
+            let Ok(contents) = fs::read_to_string(manifest) else { continue };
+            let Ok(value) = serde_json::from_str::<Value>(&contents) else { continue };
+            if let Some(version) = value.get("version").and_then(Value::as_str).filter(|version| !version.trim().is_empty()) {
+                return format!("Anytype {version}");
+            }
+        }
+    }
+    "Anytype unknown".into()
+}
+
+#[cfg(windows)]
+fn anytype_executable_version(path: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    };
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut ignored = 0;
+        let size = GetFileVersionInfoSizeW(path.as_ptr(), &mut ignored);
+        if size == 0 { return None; }
+        let mut data = vec![0u8; size as usize];
+        if GetFileVersionInfoW(path.as_ptr(), 0, size, data.as_mut_ptr().cast()) == 0 { return None; }
+        let root: [u16; 2] = ['\\' as u16, 0];
+        let mut value = std::ptr::null_mut();
+        let mut length = 0;
+        if VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut value, &mut length) == 0
+            || value.is_null() || length < std::mem::size_of::<VS_FIXEDFILEINFO>() as u32 {
+            return None;
+        }
+        let info = &*(value.cast::<VS_FIXEDFILEINFO>());
+        let major = info.dwFileVersionMS >> 16;
+        let minor = info.dwFileVersionMS & 0xffff;
+        let patch = info.dwFileVersionLS >> 16;
+        let build = info.dwFileVersionLS & 0xffff;
+        Some(if build == 0 { format!("{major}.{minor}.{patch}") } else { format!("{major}.{minor}.{patch}.{build}") })
+    }
+}
+
+#[tauri::command]
 async fn save_settings(settings: SettingsDraft) -> Result<SaveResult, String> {
     let guard = acquire_save_guard("Settings are already being saved.")?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -203,6 +296,18 @@ async fn get_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
     })
     .await
     .map_err(|_| "The release notes task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_latest_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::get_latest_release_notes(&install, &runtime)
+    })
+    .await
+    .map_err(|_| "The latest release notes task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -546,7 +651,7 @@ fn open_project_repository() -> Result<(), String> {
 
 #[tauri::command]
 fn open_author_profile() -> Result<(), String> {
-    open_github_link("https://github.com/PainterFlow")
+    open_github_link("https://github.com/PainterFlow/Anytype-BlobUI")
 }
 
 fn open_github_link(link: &str) -> Result<(), String> {
@@ -1307,6 +1412,8 @@ fn main() {
             save_settings,
             get_updater_state,
             get_release_notes,
+            get_latest_release_notes,
+            get_anytype_version,
             get_release_note_image,
             acknowledge_release_notes,
             open_release_note_link,
@@ -1321,6 +1428,9 @@ fn main() {
             start_window_drag,
             open_project_repository,
             open_author_profile,
+            get_keyboard_shortcuts,
+            save_keyboard_shortcuts,
+            set_shortcut_capture,
             quit_app
         ])
         .on_window_event(|window, event| {
@@ -1337,7 +1447,9 @@ fn main() {
             if consume_pending_onboarding_request() {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
-            hotkey::start(app.handle().clone());
+            let app_data = app_data_directory();
+            let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
+            hotkey::start(app.handle().clone(), &shortcuts);
             if !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
             }

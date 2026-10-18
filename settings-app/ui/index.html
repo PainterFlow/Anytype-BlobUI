@@ -160,17 +160,24 @@
               <span id="copy-status" class="sr-only" role="status"></span>
             </section>
           </div>
+          <div class="help-control" id="help-control">
+            <button id="help-button" class="sidebar-action help-button" type="button" title="Help" aria-label="Help" aria-expanded="false" aria-controls="help-popup">
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25"/><circle cx="10" cy="6.4" r=".85" fill="currentColor" stroke="none"/><path d="M10 9v5"/></svg>
+            </button>
+            <section id="help-popup" class="help-popup" aria-label="Help" hidden>
+              <button id="help-whats-new" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 12 7l4.8.5-3.6 3.2 1 4.8-4.2-2.5-4.2 2.5 1-4.8-3.6-3.2L8 7z"/></svg><span>What’s New?</span></button>
+              <button id="help-documentation" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8l4 4v9H4zM12 3.5v4h4M7 11h6M7 14h6"/></svg><span>Documentation</span></button>
+              <button id="help-keybinds" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M5 8h.01M8 8h.01M11 8h.01M14 8h.01M5 11h.01M8 11h4M14 11h.01M6 14h8"/></svg><span>Keybinds</span></button>
+              <div class="help-divider" aria-hidden="true"></div>
+              <div class="help-meta"><span id="blobui-version">BlobUI version</span><span id="anytype-version">Anytype version</span></div>
+              <button id="open-author" class="help-credit" type="button" aria-label="Made by @PainterFlow11" title="https://github.com/PainterFlow/Anytype-BlobUI">Made by @PainterFlow11</button>
+              <button id="open-repository" class="help-credit" type="button" aria-label="Licensed under GPL V3" title="https://github.com/PainterFlow/Anytype-BlobUI">Licensed under GPL V3</button>
+            </section>
+          </div>
         </div>
         <div class="sidebar-foot">
-          <span>Alt+R to rebuild custom.css</span>
-          <span>Numpad 1 in Anytype</span>
-          <button id="open-author" class="repository-link" type="button" aria-label="Open PainterFlow11 on GitHub" title="https://github.com/PainterFlow">
-            <span>Made by PainterFlow11</span>
-          </button>
-          <button id="open-repository" class="repository-link" type="button" aria-label="Open BlobUI on GitHub" title="https://github.com/PainterFlow/Anytype-BlobUI">
-            <span>Github</span>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3h6v6M17 3l-8 8M8 4H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-4"/></svg>
-          </button>
+          <span>BlobUI Settings for Anytype</span>
+
         </div>
         </div>
       </aside>
@@ -457,6 +464,24 @@
         <div class="confirm-actions release-notes-actions">
           <button id="release-notes-done" class="confirm-save" type="button">Done</button>
         </div>
+      </section>
+    </div>
+    <div id="help-error-backdrop" class="confirm-backdrop" hidden>
+      <section id="help-error-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="help-error-title" aria-describedby="help-error-message" tabindex="-1">
+        <button id="help-error-close" class="confirm-close" type="button" aria-label="Close error"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+        <h2 id="help-error-title">404 Error</h2>
+        <p id="help-error-message">This help content could not be found.</p>
+        <div class="confirm-actions"><button id="help-error-done" class="confirm-save" type="button">Close</button></div>
+      </section>
+    </div>
+    <div id="keybinds-backdrop" class="confirm-backdrop" hidden>
+      <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" tabindex="-1">
+        <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keybinds"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+        <h2 id="keybinds-title">Keyboard shortcuts</h2>
+        <p>Choose a shortcut and press a key combination to rebind it. Changes are saved automatically.</p>
+        <div id="keybind-list" class="keybind-list"></div>
+        <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>
+        <div class="confirm-actions"><button id="keybinds-done" class="confirm-save" type="button">Done</button></div>
       </section>
     </div>
     <script src="./vendor/marked.umd.js"></script>

@@ -1,5 +1,104 @@
 //! Foreground-scoped shortcuts for BlobUI Settings and Anytype.
-use std::sync::OnceLock;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+use std::sync::{atomic::{AtomicBool, Ordering}, OnceLock, RwLock};
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Shortcut {
+    pub action: String,
+    pub code: String,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
+
+pub fn default_shortcuts() -> Vec<Shortcut> {
+    [
+        ("openSettings", "Numpad1", false, false, false, false),
+        ("rebuildCss", "KeyR", false, true, false, false),
+        ("showOnboarding", "F8", false, false, false, false),
+        ("simulateUpdate", "F9", false, false, false, false),
+        ("quitSettings", "KeyQ", true, false, false, false),
+    ].into_iter().map(|(action, code, ctrl, alt, shift, meta)| Shortcut {
+        action: action.into(), code: code.into(), ctrl, alt, shift, meta,
+    }).collect()
+}
+
+static SHORTCUTS: OnceLock<RwLock<Vec<Shortcut>>> = OnceLock::new();
+static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+fn shortcut_store() -> &'static RwLock<Vec<Shortcut>> {
+    SHORTCUTS.get_or_init(|| RwLock::new(default_shortcuts()))
+}
+
+pub fn get_shortcuts() -> Vec<Shortcut> {
+    shortcut_store().read().map(|shortcuts| shortcuts.clone()).unwrap_or_else(|_| default_shortcuts())
+}
+
+pub fn set_capture_active(active: bool) {
+    CAPTURE_ACTIVE.store(active, Ordering::Release);
+}
+
+pub fn save_shortcuts(path: &Path, shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
+    validate_shortcuts(&shortcuts)?;
+    if let Some(parent) = path.parent() {
+        crate::storage::reject_reparse_path(parent)?;
+        fs::create_dir_all(parent).map_err(|_| "Could not prepare the keyboard shortcut settings folder.".to_string())?;
+    }
+    let mut bytes = serde_json::to_vec_pretty(&shortcuts)
+        .map_err(|_| "Could not encode the keyboard shortcuts.".to_string())?;
+    bytes.push(b'\n');
+    crate::storage::write_atomic(path, &bytes)?;
+    *shortcut_store().write().map_err(|_| "The keyboard shortcut settings are unavailable.".to_string())? = shortcuts.clone();
+    Ok(shortcuts)
+}
+
+fn load_shortcuts(path: &Path) -> Result<Vec<Shortcut>, String> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let shortcuts: Vec<Shortcut> = serde_json::from_slice(&bytes)
+                .map_err(|_| "The saved keyboard shortcuts are invalid.".to_string())?;
+            validate_shortcuts(&shortcuts)?;
+            Ok(shortcuts)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_shortcuts()),
+        Err(_) => Err("The saved keyboard shortcuts could not be read.".into()),
+    }
+}
+
+fn validate_shortcuts(shortcuts: &[Shortcut]) -> Result<(), String> {
+    let expected = ["openSettings", "rebuildCss", "showOnboarding", "simulateUpdate", "quitSettings"];
+    if shortcuts.len() != expected.len() {
+        return Err("All five BlobUI keyboard shortcuts must be provided.".into());
+    }
+    for (index, shortcut) in shortcuts.iter().enumerate() {
+        if !expected.contains(&shortcut.action.as_str())
+            || shortcuts[..index].iter().any(|prior| prior.action == shortcut.action)
+            || !valid_code(&shortcut.code)
+        {
+            return Err("A keyboard shortcut contains an unsupported action or key.".into());
+        }
+        if shortcuts[..index].iter().any(|prior| same_chord(prior, shortcut)) {
+            return Err("Two BlobUI actions cannot use the same keyboard shortcut.".into());
+        }
+    }
+    Ok(())
+}
+
+fn same_chord(left: &Shortcut, right: &Shortcut) -> bool {
+    left.code == right.code && left.ctrl == right.ctrl && left.alt == right.alt
+        && left.shift == right.shift && left.meta == right.meta
+}
+
+fn valid_code(code: &str) -> bool {
+    matches!(code, "Numpad1" | "Numpad2" | "Numpad3" | "Numpad4" | "Numpad5" | "Numpad6" | "Numpad7" | "Numpad8" | "Numpad9" | "Numpad0" | "NumpadAdd" | "NumpadSubtract" | "NumpadMultiply" | "NumpadDivide" | "NumpadDecimal" | "Space" | "Enter" | "Escape" | "Tab" | "Backspace" | "Delete" | "Insert" | "Home" | "End" | "PageUp" | "PageDown" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Minus" | "Equal" | "BracketLeft" | "BracketRight" | "Backslash" | "Semicolon" | "Quote" | "Backquote" | "Comma" | "Period" | "Slash")
+        || (code.strip_prefix("Key").is_some_and(|rest| rest.len() == 1 && rest.as_bytes()[0].is_ascii_uppercase()))
+        || (code.strip_prefix("Digit").is_some_and(|rest| rest.len() == 1 && rest.as_bytes()[0].is_ascii_digit()))
+        || (code.strip_prefix('F').is_some_and(|rest| rest.parse::<u8>().is_ok_and(|number| (1..=12).contains(&number)) && code == format!("F{}", rest.parse::<u8>().unwrap_or_default())))
+}
 
 #[derive(Default)]
 struct KeyGate {
@@ -22,25 +121,47 @@ impl KeyGate {
     }
 }
 
-fn is_alt_r_key(key: u32) -> bool {
-    key == b'R' as u32
-}
-
-fn alt_r_modifiers_match(alt_down: bool, other_modifier_down: bool) -> bool {
-    alt_down && !other_modifier_down
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{alt_r_modifiers_match, is_alt_r_key, KeyGate};
+    use super::{default_shortcuts, get_shortcuts, load_shortcuts, save_shortcuts, validate_shortcuts, KeyGate};
+    use std::{fs, path::Path};
 
     #[test]
-    fn alt_r_requires_r_and_only_alt() {
-        assert!(is_alt_r_key(b'R' as u32));
-        assert!(!is_alt_r_key(b'1' as u32));
-        assert!(alt_r_modifiers_match(true, false));
-        assert!(!alt_r_modifiers_match(false, false));
-        assert!(!alt_r_modifiers_match(true, true));
+    fn defaults_cover_every_blobui_shortcut_and_are_unique() {
+        let shortcuts = default_shortcuts();
+        assert_eq!(shortcuts.len(), 5);
+        validate_shortcuts(&shortcuts).unwrap();
+        for action in ["openSettings", "rebuildCss", "showOnboarding", "simulateUpdate", "quitSettings"] {
+            assert!(shortcuts.iter().any(|shortcut| shortcut.action == action));
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_chords_and_noncanonical_function_keys() {
+        let mut shortcuts = default_shortcuts();
+        shortcuts[1].code = shortcuts[0].code.clone();
+        shortcuts[1].ctrl = shortcuts[0].ctrl;
+        shortcuts[1].alt = shortcuts[0].alt;
+        shortcuts[1].shift = shortcuts[0].shift;
+        shortcuts[1].meta = shortcuts[0].meta;
+        assert!(validate_shortcuts(&shortcuts).is_err());
+        shortcuts = default_shortcuts();
+        shortcuts[2].code = "F01".into();
+        assert!(validate_shortcuts(&shortcuts).is_err());
+    }
+
+    #[test]
+    fn saves_valid_shortcuts_atomically_and_updates_the_runtime_bindings() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = workspace.join(".test-run").join(format!("shortcuts-{}-{nonce}", std::process::id()));
+        let path = root.join("BlobUI/shortcuts.json");
+        let mut shortcuts = default_shortcuts();
+        shortcuts[2].code = "F10".into();
+        assert_eq!(save_shortcuts(&path, shortcuts.clone()).unwrap(), shortcuts);
+        assert_eq!(get_shortcuts(), shortcuts);
+        assert_eq!(load_shortcuts(&path).unwrap(), shortcuts);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -61,7 +182,13 @@ pub fn error() -> Option<String> {
     STARTUP_ERROR.get().cloned()
 }
 
-pub fn start(app: tauri::AppHandle) {
+pub fn start(app: tauri::AppHandle, preferences_path: &Path) {
+    match load_shortcuts(preferences_path) {
+        Ok(shortcuts) => {
+            if let Ok(mut current) = shortcut_store().write() { *current = shortcuts; }
+        }
+        Err(error) => { let _ = STARTUP_ERROR.set(error); }
+    }
     #[cfg(windows)]
     if let Err(error) = windows::start(app) {
         let _ = STARTUP_ERROR.set(error);
@@ -75,7 +202,7 @@ pub fn start(app: tauri::AppHandle) {
 
 #[cfg(windows)]
 mod windows {
-    use super::{alt_r_modifiers_match, is_alt_r_key, KeyGate};
+    use super::{get_shortcuts, KeyGate, CAPTURE_ACTIVE, Ordering};
     use std::path::Path;
     use std::ptr::{null, null_mut};
     use std::sync::mpsc::{sync_channel, SyncSender};
@@ -87,7 +214,7 @@ mod windows {
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_CONTROL, VK_END, VK_LWIN, VK_MENU, VK_NUMPAD1, VK_RWIN, VK_SHIFT,
+        GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
@@ -107,15 +234,54 @@ mod windows {
         RebuildCustomCss,
     }
 
-    fn is_numpad_one(key: u32, scan: u32, flags: u32) -> bool {
-        flags & LLKHF_EXTENDED == 0
-            && (key == u32::from(VK_NUMPAD1) || (key == u32::from(VK_END) && scan == 0x4f))
-    }
-
     fn is_anytype_executable(path: &str) -> bool {
         Path::new(path)
             .file_name()
             .is_some_and(|name| name.eq_ignore_ascii_case("Anytype.exe"))
+    }
+
+    fn code_matches(code: &str, key: u32, scan: u32, flags: u32) -> bool {
+        if code.starts_with("Numpad") {
+            let (num_lock_vk, num_lock_off_vk, num_lock_off_scan) = match code {
+                "Numpad0" => (0x60, 0x2d, 0x52), "Numpad1" => (0x61, 0x23, 0x4f),
+                "Numpad2" => (0x62, 0x28, 0x50), "Numpad3" => (0x63, 0x22, 0x51),
+                "Numpad4" => (0x64, 0x25, 0x4b), "Numpad5" => (0x65, 0x0c, 0x4c),
+                "Numpad6" => (0x66, 0x27, 0x4d), "Numpad7" => (0x67, 0x24, 0x47),
+                "Numpad8" => (0x68, 0x26, 0x48), "Numpad9" => (0x69, 0x21, 0x49),
+                "NumpadDecimal" => (0x6e, 0x2e, 0x53),
+                "NumpadAdd" => (0x6b, 0, 0), "NumpadSubtract" => (0x6d, 0, 0),
+                "NumpadMultiply" => (0x6a, 0, 0), "NumpadDivide" => (0x6f, 0, 0),
+                _ => return false,
+            };
+            return key == num_lock_vk || (num_lock_off_vk != 0 && flags & LLKHF_EXTENDED == 0
+                && key == num_lock_off_vk && scan == num_lock_off_scan);
+        }
+        let vk = match code {
+            "Space" => 0x20, "Enter" => 0x0d, "Escape" => 0x1b, "Tab" => 0x09,
+            "Backspace" => 0x08, "Delete" => 0x2e, "Insert" => 0x2d,
+            "Home" => 0x24, "End" => 0x23, "PageUp" => 0x21, "PageDown" => 0x22,
+            "ArrowUp" => 0x26, "ArrowDown" => 0x28, "ArrowLeft" => 0x25, "ArrowRight" => 0x27,
+            "Minus" => 0xbd, "Equal" => 0xbb, "BracketLeft" => 0xdb, "BracketRight" => 0xdd,
+            "Backslash" => 0xdc, "Semicolon" => 0xba, "Quote" => 0xde, "Backquote" => 0xc0,
+            "Comma" => 0xbc, "Period" => 0xbe, "Slash" => 0xbf,
+            _ if code.starts_with("Key") => code.as_bytes()[3] as u32,
+            _ if code.starts_with("Digit") => code.as_bytes()[5] as u32,
+            _ if code.starts_with('F') => code[1..].parse::<u32>().ok().map(|number| 0x70 + number - 1).unwrap_or(0),
+            _ => 0,
+        };
+        if matches!(code, "Delete" | "Insert" | "Home" | "End" | "PageUp" | "PageDown" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight") {
+            key == vk && flags & LLKHF_EXTENDED != 0
+        } else {
+            key == vk
+        }
+    }
+
+    unsafe fn modifiers_match(shortcut: &super::Shortcut) -> bool {
+        let down = |key| GetAsyncKeyState(key) < 0;
+        down(i32::from(VK_CONTROL)) == shortcut.ctrl
+            && down(i32::from(VK_MENU)) == shortcut.alt
+            && down(i32::from(VK_SHIFT)) == shortcut.shift
+            && (down(i32::from(VK_LWIN)) || down(i32::from(VK_RWIN))) == shortcut.meta
     }
 
     unsafe fn foreground_process_id() -> u32 {
@@ -155,46 +321,29 @@ mod windows {
         if code >= 0 && data != 0 {
             let key = &*(data as *const KBDLLHOOKSTRUCT);
             let message = message as u32;
-            if key.flags & LLKHF_INJECTED == 0
+            if !CAPTURE_ACTIVE.load(Ordering::Acquire) && key.flags & LLKHF_INJECTED == 0
                 && matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP)
             {
                 let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
-                if is_numpad_one(key.vkCode, key.scanCode, key.flags) {
-                    let modified = [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN]
-                        .iter()
-                        .any(|key| GetAsyncKeyState(i32::from(*key)) < 0);
-                    let (consume, open) = NUMPAD_GATE.with(|gate| {
-                        gate.borrow_mut()
-                            .handle(down, down && anytype_is_foreground(), !modified)
-                    });
-                    if open {
-                        if let Some(sender) = SHORTCUT_ACTIONS.get() {
-                            let _ = sender.try_send(ShortcutAction::OpenSettings);
+                let shortcuts = get_shortcuts();
+                for shortcut in shortcuts.iter().filter(|shortcut| code_matches(&shortcut.code, key.vkCode, key.scanCode, key.flags)) {
+                    let in_scope = match shortcut.action.as_str() {
+                        "openSettings" => down && anytype_is_foreground(),
+                        "rebuildCss" => down && settings_or_anytype_is_foreground(),
+                        _ => false,
+                    };
+                    let matched = modifiers_match(shortcut);
+                    let action = match shortcut.action.as_str() {
+                        "openSettings" => Some((ShortcutAction::OpenSettings, &NUMPAD_GATE)),
+                        "rebuildCss" => Some((ShortcutAction::RebuildCustomCss, &REBUILD_GATE)),
+                        _ => None,
+                    };
+                    if let Some((action, gate)) = action {
+                        let (consume, fire) = gate.with(|gate| gate.borrow_mut().handle(down, in_scope, matched));
+                        if fire {
+                            if let Some(sender) = SHORTCUT_ACTIONS.get() { let _ = sender.try_send(action); }
                         }
-                    }
-                    if consume {
-                        return 1;
-                    }
-                } else if is_alt_r_key(key.vkCode) {
-                    let alt_down = GetAsyncKeyState(i32::from(VK_MENU)) < 0;
-                    let other_modifier_down = [VK_CONTROL, VK_SHIFT, VK_LWIN, VK_RWIN]
-                        .iter()
-                        .any(|key| GetAsyncKeyState(i32::from(*key)) < 0);
-                    let in_scope = down && settings_or_anytype_is_foreground();
-                    let (consume, rebuild) = REBUILD_GATE.with(|gate| {
-                        gate.borrow_mut().handle(
-                            down,
-                            in_scope,
-                            alt_r_modifiers_match(alt_down, other_modifier_down),
-                        )
-                    });
-                    if rebuild {
-                        if let Some(sender) = SHORTCUT_ACTIONS.get() {
-                            let _ = sender.try_send(ShortcutAction::RebuildCustomCss);
-                        }
-                    }
-                    if consume {
-                        return 1;
+                        if consume { return 1; }
                     }
                 }
             }
@@ -244,10 +393,28 @@ mod windows {
 
         #[test]
         fn accepts_numpad_one_with_numlock_on_or_off_but_not_regular_end_or_one() {
-            assert!(is_numpad_one(u32::from(VK_NUMPAD1), 0x4f, 0));
-            assert!(is_numpad_one(u32::from(VK_END), 0x4f, 0));
-            assert!(!is_numpad_one(u32::from(VK_END), 0x4f, LLKHF_EXTENDED));
-            assert!(!is_numpad_one(0x31, 0x02, 0));
+            assert!(code_matches("Numpad1", 0x61, 0x4f, 0));
+            assert!(code_matches("Numpad1", 0x23, 0x4f, 0));
+            assert!(!code_matches("Numpad1", 0x23, 0x4f, LLKHF_EXTENDED));
+            assert!(!code_matches("Numpad1", 0x31, 0x02, 0));
+            for (code, numlock_on, numlock_off, scan) in [
+                ("Numpad0", 0x60, 0x2d, 0x52), ("Numpad1", 0x61, 0x23, 0x4f),
+                ("Numpad2", 0x62, 0x28, 0x50), ("Numpad3", 0x63, 0x22, 0x51),
+                ("Numpad4", 0x64, 0x25, 0x4b), ("Numpad5", 0x65, 0x0c, 0x4c),
+                ("Numpad6", 0x66, 0x27, 0x4d), ("Numpad7", 0x67, 0x24, 0x47),
+                ("Numpad8", 0x68, 0x26, 0x48), ("Numpad9", 0x69, 0x21, 0x49),
+                ("NumpadDecimal", 0x6e, 0x2e, 0x53),
+            ] {
+                assert!(code_matches(code, numlock_on, scan, 0));
+                assert!(code_matches(code, numlock_off, scan, 0));
+                assert!(!code_matches(code, numlock_off, scan, LLKHF_EXTENDED));
+            }
+            for (code, vk, scan) in [("Home", 0x24, 0x47), ("End", 0x23, 0x4f), ("ArrowUp", 0x26, 0x48)] {
+                assert!(!code_matches(code, vk, scan, 0));
+                assert!(code_matches(code, vk, scan, LLKHF_EXTENDED));
+            }
+            assert!(code_matches("Numpad7", 0x67, 0x47, 0));
+            assert!(code_matches("NumpadDecimal", 0x6e, 0x53, 0));
         }
 
         #[test]
