@@ -43,7 +43,7 @@ if ($c) {
 }
 
 $buildEnvironment = @{}
-foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER')) {
+foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER', 'CARGO_TARGET_DIR')) {
     $buildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 Push-Location $workspaceRoot
@@ -80,6 +80,7 @@ try {
         $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = Join-Path $rustRoot 'lib\rustlib\x86_64-pc-windows-msvc\bin\rust-lld.exe'
         Write-Host 'Using the workspace Rust toolchain.'
     }
+    $env:CARGO_TARGET_DIR = Join-Path $projectDirectory 'target'
     & cargo build --locked --release --manifest-path $manifestPath
     if ($LASTEXITCODE -ne 0) {
         throw "The BlobUI Settings build failed with exit code $LASTEXITCODE."
