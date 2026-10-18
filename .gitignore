@@ -8,3 +8,12 @@ data.json
 *.dpapi
 /scripts/tests/.tmp/
 /.test-run/
+/settings-app/target/
+/settings-app/gen/
+/settings-app/dist/blobui-settings.exe
+/settings-app/dist/.blobui-onboarding-next
+/dist/
+/installer/target/
+
+# Keep the release workflow local until 1.2.0 is ready to publish.
+/.github/workflows/windows-release.yml

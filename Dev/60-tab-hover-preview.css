@@ -1,4 +1,6 @@
 /* Hide the tab hover popup while preserving regular object previews. */
+/* @blobui-if-not tabHoverEffect */
 #preview.previewWrapper:has(.previewTab) {
     display: none !important;
 }
+/* @blobui-endif-not tabHoverEffect */

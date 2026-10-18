@@ -8,9 +8,13 @@
     color: var(--color-blob-accent) !important;
 }
 
-/* Recolor checked relation-property icons only when a custom accent is selected. */
+/* Recolor checked property icons only when a custom accent is selected. */
 /* @blobui-if-custom-accent */
-.cellContent.c-checkbox .icon.markerCheckbox2.iconColor-accent100 {
+.icon.markerCheckbox2.iconColor-accent100 {
+    color: var(--color-blob-accent) !important;
+}
+
+.markers .marker.markerCheckbox.active {
     color: var(--color-blob-accent) !important;
 }
 /* @blobui-endif-custom-accent */
