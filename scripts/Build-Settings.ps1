@@ -19,12 +19,26 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 
 if ($c) {
     $oldInstances = @(Get-Process -Name 'blobui-settings', 'settings-app' -ErrorAction SilentlyContinue)
+    $closedInstances = 0
     foreach ($instance in $oldInstances) {
+        $instancePath = $null
+        try { $instancePath = $instance.Path } catch { }
+        if ([string]::IsNullOrWhiteSpace($instancePath)) {
+            Write-Host "Skipped Settings process $($instance.Id) because its executable path could not be verified."
+            continue
+        }
+        $resolvedInstancePath = [System.IO.Path]::GetFullPath($instancePath)
+        $workspacePrefix = $workspaceRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedInstancePath.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "Skipped Settings process $($instance.Id) outside this workspace."
+            continue
+        }
         Stop-Process -Id $instance.Id -Force -ErrorAction Stop
         $instance.WaitForExit()
+        $closedInstances++
     }
-    if ($oldInstances.Count -gt 0) {
-        Write-Host "Closed $($oldInstances.Count) existing BlobUI Settings instance(s)."
+    if ($closedInstances -gt 0) {
+        Write-Host "Closed $closedInstances existing workspace BlobUI Settings instance(s)."
     }
 }
 

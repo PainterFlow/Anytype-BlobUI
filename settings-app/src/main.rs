@@ -255,18 +255,30 @@ async fn check_for_updates() -> Result<updater::UpdaterState, String> {
 }
 
 #[tauri::command]
-async fn apply_update() -> Result<updater::UpdaterState, String> {
+async fn apply_update(
+    app: tauri::AppHandle,
+    automatic: Option<bool>,
+) -> Result<updater::UpdaterState, String> {
     let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let start_on_login = autostart::is_enabled()?;
+    let state = tauri::async_runtime::spawn_blocking(move || {
         let _save_guard = save_guard;
         let _updater_guard = updater_guard;
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
-        with_startup_state(updater::apply_update(&app_data, &install, &runtime)?)
+        updater::apply_update(&app_data, &install, &runtime, automatic.unwrap_or(false))
     })
     .await
-    .map_err(|_| "The update installation task stopped unexpectedly.".to_string())?
+    .map_err(|_| "The update installation task stopped unexpectedly.".to_string())??;
+    let mut state = state;
+    state.start_on_login = start_on_login;
+    if state.status == "restarting" {
+        // The installer has been verified and started. Exit only on this
+        // explicit handoff state so every earlier failure leaves Settings open.
+        app.exit(0);
+    }
+    Ok(state)
 }
 
 #[tauri::command]

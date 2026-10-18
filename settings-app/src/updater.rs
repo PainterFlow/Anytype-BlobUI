@@ -2,10 +2,12 @@ use chrono::{SecondsFormat, Utc};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{css, storage};
@@ -14,6 +16,7 @@ const OWNER: &str = "PainterFlow";
 const REPOSITORY: &str = "Anytype-BlobUI";
 const RELEASE_METADATA: &str = include_str!("../../blobui-release.json");
 const MAX_RELEASE_JSON_BYTES: usize = 2 * 1024 * 1024;
+const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 20_000;
@@ -26,6 +29,7 @@ pub struct UpdaterPreferences {
     pub automatic_checks_enabled: bool,
     pub last_checked_at: Option<String>,
     pub latest_version: Option<String>,
+    pub last_failed_install_version: Option<String>,
     pub last_check_status: Option<String>,
     pub last_message: Option<String>,
 }
@@ -38,6 +42,7 @@ impl Default for UpdaterPreferences {
             automatic_checks_enabled: true,
             last_checked_at: None,
             latest_version: None,
+            last_failed_install_version: None,
             last_check_status: None,
             last_message: None,
         }
@@ -63,6 +68,7 @@ pub struct UpdaterState {
     pub current_version: String,
     pub latest_version: Option<String>,
     pub update_available: bool,
+    pub automatic_update_blocked: bool,
     pub last_checked_at: Option<String>,
     pub status: String,
     pub message: Option<String>,
@@ -72,6 +78,9 @@ pub struct UpdaterState {
 struct ReleaseInfo {
     tag: String,
     version: semver::Version,
+    installer_url: String,
+    installer_size: u64,
+    installer_digest: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +184,10 @@ fn state_for(
             .as_ref()
             .zip(current_parsed.as_ref())
             .is_some_and(|(latest, current)| latest > current);
+    let automatic_update_blocked = update_available
+        && latest.as_ref().is_some_and(|version| {
+            preferences.last_failed_install_version.as_deref() == Some(version.to_string().as_str())
+        });
     let status = if preferences.last_check_status.as_deref() == Some("error") {
         "error"
     } else if update_available {
@@ -182,7 +195,12 @@ fn state_for(
     } else {
         preferences.last_check_status.as_deref().unwrap_or("idle")
     };
-    let message = if update_available {
+    let message = if automatic_update_blocked {
+        Some(format!(
+            "BlobUI version {} is available. Automatic retry is paused after the previous install failed; choose Update now to retry.",
+            latest.as_ref().unwrap()
+        ))
+    } else if update_available {
         Some(format!("BlobUI version {} is available.", latest.unwrap()))
     } else {
         preferences.last_message.clone()
@@ -195,6 +213,7 @@ fn state_for(
         current_version: current,
         latest_version: preferences.latest_version.clone(),
         update_available,
+        automatic_update_blocked,
         last_checked_at: preferences.last_checked_at.clone(),
         status: status.into(),
         message,
@@ -257,6 +276,7 @@ pub fn apply_update(
     app_data_directory: &Path,
     install_directory: &Path,
     fallback_runtime: &Path,
+    automatic: bool,
 ) -> Result<UpdaterState, String> {
     let path = preferences_path(app_data_directory);
     let mut preferences = load_preferences(&path)?;
@@ -281,6 +301,15 @@ pub fn apply_update(
         }
     };
     preferences.latest_version = Some(release.version.to_string());
+    let release_version = release.version.to_string();
+    if automatic && preferences.last_failed_install_version.as_deref() == Some(&release_version) {
+        preferences.last_check_status = Some("available".into());
+        preferences.last_message = Some(format!(
+            "BlobUI version {release_version} is available. Automatic retry is paused after the previous install failed; choose Update now to retry."
+        ));
+        save_preferences(&path, &preferences)?;
+        return state_for(install_directory, &preferences, Some(fallback_runtime));
+    }
     let current_version = parse_version(&current)
         .ok_or_else(|| "The installed BlobUI release version is invalid.".to_string())?;
     if release.version <= current_version {
@@ -289,24 +318,47 @@ pub fn apply_update(
         save_preferences(&path, &preferences)?;
         return state_for(install_directory, &preferences, Some(fallback_runtime));
     }
+    if !automatic {
+        preferences.last_failed_install_version = None;
+    }
 
-    match download_source_archive(&release.tag).and_then(|archive| {
-        apply_archive_to_install(install_directory, &archive, &release.version.to_string())
-    }) {
-        Ok(version) => {
-            preferences.latest_version = Some(version.clone());
-            preferences.last_check_status = Some("updated".into());
-            preferences.last_message = Some(format!(
-                "BlobUI was updated to version {version}. Reload Anytype with Ctrl+R."
-            ));
-        }
+    let result = (|| {
+        let app = resolve_app_directory(
+            install_directory,
+            std::env::current_exe().ok().as_deref(),
+            std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
+        )?;
+        let installer_bytes = download_release_installer(&release)?;
+        let mut staged = stage_installer(install_directory, &installer_bytes)?;
+        preferences.last_check_status = Some("installing".into());
+        preferences.last_message = Some(format!(
+            "BlobUI Settings is restarting to install version {}.",
+            release.version
+        ));
+        save_preferences(&path, &preferences)?;
+        // Construct the complete response before starting the installer. Once
+        // it is running, the app must have no remaining fallible work before
+        // it can exit and release the executable for replacement.
+        let mut state = state_for(install_directory, &preferences, Some(fallback_runtime))?;
+        state.status = "restarting".into();
+        state.message = Some(format!(
+            "BlobUI Settings is restarting to install version {}.",
+            release.version
+        ));
+        launch_update_installer(&staged.executable, &app, install_directory, &release.tag)?;
+        staged.retain = true;
+        Ok(state)
+    })();
+    match result {
+        Ok(state) => Ok(state),
         Err(error) => {
+            preferences.latest_version = Some(release.version.to_string());
             preferences.last_check_status = Some("error".into());
             preferences.last_message = Some(error);
+            save_preferences(&path, &preferences)?;
+            state_for(install_directory, &preferences, Some(fallback_runtime))
         }
     }
-    save_preferences(&path, &preferences)?;
-    state_for(install_directory, &preferences, Some(fallback_runtime))
 }
 
 fn current_version(
@@ -374,6 +426,10 @@ fn fetch_latest_release() -> Result<Option<ReleaseInfo>, String> {
     }
     let release: Value = serde_json::from_slice(&response.body)
         .map_err(|_| "GitHub returned an invalid release record.".to_string())?;
+    release_info_from_record(&release).map(Some)
+}
+
+fn release_info_from_record(release: &Value) -> Result<ReleaseInfo, String> {
     let tag = release
         .get("tag_name")
         .and_then(Value::as_str)
@@ -381,33 +437,292 @@ fn fetch_latest_release() -> Result<Option<ReleaseInfo>, String> {
     let version = parse_version(tag).ok_or_else(|| {
         "The latest GitHub release tag is not a supported semantic version.".to_string()
     })?;
-    Ok(Some(ReleaseInfo {
+    if tag.is_empty()
+        || tag.len() > 64
+        || !tag
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+    {
+        return Err("The latest GitHub release tag is unsafe.".into());
+    }
+    let assets = release
+        .get("assets")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "The BlobUI release has no installer assets.".to_string())?;
+    let mut candidates = assets
+        .iter()
+        .filter(|asset| asset.get("name").and_then(Value::as_str) == Some("blobui-installer.exe"));
+    let asset = candidates
+        .next()
+        .ok_or_else(|| "The BlobUI release does not include blobui-installer.exe.".to_string())?;
+    if candidates.next().is_some() {
+        return Err("The BlobUI release contains duplicate installer assets.".into());
+    }
+    let installer_url = asset
+        .get("browser_download_url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "The BlobUI release installer URL is missing.".to_string())?;
+    validate_installer_url(installer_url, tag)?;
+    let installer_size = asset
+        .get("size")
+        .and_then(Value::as_u64)
+        .filter(|size| *size > 0 && *size <= MAX_INSTALLER_BYTES as u64)
+        .ok_or_else(|| "The BlobUI release installer has an invalid size.".to_string())?;
+    let installer_digest = parse_asset_digest(asset.get("digest"))?;
+    Ok(ReleaseInfo {
         tag: tag.to_string(),
         version,
-    }))
+        installer_url: installer_url.to_string(),
+        installer_size,
+        installer_digest,
+    })
 }
 
-fn download_source_archive(tag: &str) -> Result<Vec<u8>, String> {
-    let version = parse_version(tag)
-        .ok_or_else(|| "The GitHub release tag is not a safe semantic version.".to_string())?;
-    let normalized_tag = if tag.starts_with('v') {
-        tag.to_string()
-    } else {
-        version.to_string()
+fn validate_installer_url(value: &str, tag: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(value)
+        .map_err(|_| "The BlobUI release installer URL is invalid.".to_string())?;
+    let expected_path =
+        format!("/{OWNER}/{REPOSITORY}/releases/download/{tag}/blobui-installer.exe");
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("github.com")
+        || parsed.port().is_some_and(|port| port != 443)
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != expected_path
+    {
+        return Err("The BlobUI release points to an unexpected installer location.".into());
+    }
+    Ok(())
+}
+
+fn parse_asset_digest(value: Option<&Value>) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
     };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let digest = value
+        .as_str()
+        .ok_or_else(|| "The BlobUI release installer digest is invalid.".to_string())?;
+    let hex = digest
+        .strip_prefix("sha256:")
+        .ok_or_else(|| "The BlobUI release installer uses an unsupported digest.".to_string())?;
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("The BlobUI release installer digest is invalid.".into());
+    }
+    Ok(Some(hex.to_ascii_lowercase()))
+}
+
+fn download_release_installer(release: &ReleaseInfo) -> Result<Vec<u8>, String> {
+    validate_installer_url(&release.installer_url, &release.tag)?;
+    let parsed = url::Url::parse(&release.installer_url)
+        .map_err(|_| "The BlobUI release installer URL is invalid.".to_string())?;
     let response = http_get(
-        "github.com",
-        &format!("/{OWNER}/{REPOSITORY}/archive/refs/tags/{normalized_tag}.tar.gz"),
-        "application/vnd.github+json",
-        MAX_ARCHIVE_BYTES,
+        parsed.host_str().expect("validated URL host"),
+        parsed.path(),
+        "application/octet-stream",
+        MAX_INSTALLER_BYTES,
     )?;
     if response.status != 200 {
         return Err(format!(
-            "GitHub's BlobUI source archive returned HTTP {}.",
+            "GitHub returned HTTP {} while downloading the BlobUI installer.",
             response.status
         ));
     }
+    if response.body.len() as u64 != release.installer_size {
+        return Err(
+            "The downloaded BlobUI installer size does not match GitHub's release record.".into(),
+        );
+    }
+    if let Some(expected) = release.installer_digest.as_deref() {
+        let actual = Sha256::digest(&response.body)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        if actual != expected {
+            return Err("The downloaded BlobUI installer failed its SHA-256 check.".into());
+        }
+    }
     Ok(response.body)
+}
+
+fn resolve_app_directory(
+    install_directory: &Path,
+    current_exe: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let install = validate_install_directory(install_directory)?;
+    if let Some(current_exe) = current_exe {
+        reject_reparse_path(current_exe)?;
+        for ancestor in current_exe.parent().into_iter().flat_map(Path::ancestors) {
+            let pointer_path = ancestor.join(".blobui-install.json");
+            match fs::symlink_metadata(&pointer_path) {
+                Ok(_) => {
+                    return validate_app_pointer(ancestor, &pointer_path, &install);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    return Err(
+                        "The running Settings app install pointer could not be inspected safely."
+                            .into(),
+                    )
+                }
+            }
+        }
+    }
+    if let Some(local_app_data) = local_app_data {
+        let app = local_app_data.join("Programs/BlobUI");
+        let pointer = app.join(".blobui-install.json");
+        if fs::symlink_metadata(&pointer).is_ok() {
+            return validate_app_pointer(&app, &pointer, &install);
+        }
+    }
+    Err("The installed BlobUI app folder could not be found. Run the installer once before using self-updates.".into())
+}
+
+fn validate_app_pointer(
+    app: &Path,
+    pointer_path: &Path,
+    install: &Path,
+) -> Result<PathBuf, String> {
+    reject_reparse_path(app)?;
+    reject_reparse_path(pointer_path)?;
+    let app = app
+        .canonicalize()
+        .map_err(|_| "The installed BlobUI app folder could not be resolved.".to_string())?;
+    let pointer: Value = serde_json::from_slice(
+        &fs::read(pointer_path)
+            .map_err(|_| "The installed BlobUI app pointer could not be read.".to_string())?,
+    )
+    .map_err(|_| "The installed BlobUI app pointer is invalid.".to_string())?;
+    let stored = pointer
+        .get("installDirectory")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "The installed BlobUI app pointer is invalid.".to_string())?;
+    let stored = Path::new(stored)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(stored));
+    if !same_path(&stored, install) {
+        return Err("The installed BlobUI app belongs to a different Anytype folder.".into());
+    }
+    for relative in [
+        "blobui-settings.exe",
+        "settings-app/dist/blobui-settings.exe",
+    ] {
+        let executable = app.join(relative);
+        reject_reparse_path(&executable)?;
+        if !fs::symlink_metadata(&executable).is_ok_and(|metadata| metadata.is_file()) {
+            return Err("The selected BlobUI app folder is missing a Settings executable.".into());
+        }
+    }
+    Ok(app)
+}
+
+struct StagedInstaller {
+    directory: PathBuf,
+    executable: PathBuf,
+    retain: bool,
+}
+
+impl Drop for StagedInstaller {
+    fn drop(&mut self) {
+        if !self.retain {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+}
+
+fn stage_installer(install: &Path, bytes: &[u8]) -> Result<StagedInstaller, String> {
+    let install = validate_install_directory(install)?;
+    let staging = install.join("blob/staging");
+    reject_reparse_path(&staging)?;
+    fs::create_dir_all(&staging)
+        .map_err(|_| "Could not prepare the BlobUI installer staging folder.".to_string())?;
+    reject_reparse_path(&staging)?;
+    let directory = staging.join(format!(
+        ".blobui-update-{}-{:x}",
+        std::process::id(),
+        unique_nonce()
+    ));
+    fs::create_dir(&directory)
+        .map_err(|_| "Could not create a private BlobUI installer staging folder.".to_string())?;
+    let executable = directory.join("blobui-installer.exe");
+    let result = (|| {
+        reject_reparse_path(&directory)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&executable)
+            .map_err(|_| "Could not stage the downloaded BlobUI installer.".to_string())?;
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "Could not finish staging the downloaded BlobUI installer.".to_string())?;
+        reject_reparse_path(&executable)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&directory);
+        return Err(error);
+    }
+    Ok(StagedInstaller {
+        directory,
+        executable,
+        retain: false,
+    })
+}
+
+fn launch_update_installer(
+    executable: &Path,
+    app: &Path,
+    install: &Path,
+    tag: &str,
+) -> Result<(), String> {
+    validate_installer_url(
+        &format!(
+            "https://github.com/{OWNER}/{REPOSITORY}/releases/download/{tag}/blobui-installer.exe"
+        ),
+        tag,
+    )?;
+    reject_reparse_path(executable)?;
+    if !fs::symlink_metadata(executable).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("The staged BlobUI installer is missing.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut child = Command::new(executable)
+            .arg("--no-pause")
+            .arg("--update-mode")
+            .arg("--release-tag")
+            .arg(tag)
+            .arg("--app-directory")
+            .arg(app)
+            .arg("--anytype-directory")
+            .arg(install)
+            .arg("--wait-pid")
+            .arg(std::process::id().to_string())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map_err(|_| "Could not start the verified BlobUI installer.".to_string())?;
+        std::thread::sleep(std::time::Duration::from_millis(750));
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|_| "Could not verify that the BlobUI installer started.".to_string())?
+        {
+            return Err(format!(
+                "The BlobUI installer exited before starting the update ({status})."
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (executable, app, install, tag);
+        Err("The BlobUI installer is supported on Windows.".into())
+    }
 }
 
 struct HttpResponse {
@@ -1242,7 +1557,9 @@ fn selected_archive_kind(relative: &Path) -> Option<&'static str> {
     match first {
         Component::Normal(name) if name == "Dev" => Some("Dev"),
         Component::Normal(name) if name == "assets" => Some("assets"),
-        Component::Normal(name) if name == "blobui-release.json" && components.next().is_none() => Some("metadata"),
+        Component::Normal(name) if name == "blobui-release.json" && components.next().is_none() => {
+            Some("metadata")
+        }
         _ => None,
     }
 }
@@ -1391,6 +1708,113 @@ mod tests {
         path
     }
 
+    #[test]
+    fn release_record_accepts_only_the_pinned_official_installer_asset() {
+        let record = json!({
+            "tag_name": "v1.2.0",
+            "assets": [{
+                "name": "blobui-installer.exe",
+                "browser_download_url": "https://github.com/PainterFlow/Anytype-BlobUI/releases/download/v1.2.0/blobui-installer.exe",
+                "size": 125,
+                "digest": null
+            }]
+        });
+        let parsed = release_info_from_record(&record).unwrap();
+        assert_eq!(parsed.tag, "v1.2.0");
+        assert_eq!(parsed.version, semver::Version::parse("1.2.0").unwrap());
+        assert_eq!(parsed.installer_size, 125);
+        assert_eq!(parsed.installer_digest, None);
+
+        let mut forged = record.clone();
+        forged["assets"][0]["browser_download_url"] =
+            json!("https://example.invalid/blobui-installer.exe");
+        assert!(release_info_from_record(&forged)
+            .unwrap_err()
+            .contains("unexpected installer location"));
+        let mut wrong_tag = record.clone();
+        wrong_tag["assets"][0]["browser_download_url"] = json!("https://github.com/PainterFlow/Anytype-BlobUI/releases/download/v1.2.1/blobui-installer.exe");
+        assert!(release_info_from_record(&wrong_tag)
+            .unwrap_err()
+            .contains("unexpected installer location"));
+        let mut bad_size = record.clone();
+        bad_size["assets"][0]["size"] = json!(MAX_INSTALLER_BYTES as u64 + 1);
+        assert!(release_info_from_record(&bad_size)
+            .unwrap_err()
+            .contains("invalid size"));
+        let mut bad_digest = record;
+        bad_digest["assets"][0]["digest"] = json!("sha256:bad");
+        assert!(release_info_from_record(&bad_digest)
+            .unwrap_err()
+            .contains("digest is invalid"));
+    }
+
+    #[test]
+    fn failed_release_blocks_automatic_retry_but_keeps_manual_update_available() {
+        let root = fixture_root("failed-auto-retry");
+        let (install, _, _, _) = install_fixture(&root);
+        let fallback = root.join("runtime");
+        let mut preferences = UpdaterPreferences {
+            latest_version: Some("1.2.0".into()),
+            last_failed_install_version: Some("1.2.0".into()),
+            last_check_status: Some("available".into()),
+            ..UpdaterPreferences::default()
+        };
+
+        let state = state_for(&install, &preferences, Some(&fallback)).unwrap();
+        assert!(state.update_available);
+        assert!(state.automatic_update_blocked);
+        assert!(state.message.unwrap().contains("choose Update now to retry"));
+
+        preferences.latest_version = Some("1.3.0".into());
+        let newer = state_for(&install, &preferences, Some(&fallback)).unwrap();
+        assert!(newer.update_available);
+        assert!(!newer.automatic_update_blocked);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_only_the_app_pointer_for_the_selected_anytype_install() {
+        let root = fixture_root("app-pointer");
+        let install = root.join("Anytype data");
+        let blob = install.join("blob");
+        fs::create_dir_all(&blob).unwrap();
+        fs::write(
+            blob.join("data.json"),
+            serde_json::to_vec(&json!({"installDirectory": install})).unwrap(),
+        )
+        .unwrap();
+        let local_app_data = root.join("LocalAppData");
+        let app = local_app_data.join("Programs/BlobUI");
+        fs::create_dir_all(app.join("settings-app/dist")).unwrap();
+        fs::write(app.join("blobui-settings.exe"), b"root exe").unwrap();
+        fs::write(
+            app.join("settings-app/dist/blobui-settings.exe"),
+            b"nested exe",
+        )
+        .unwrap();
+        fs::write(
+            app.join(".blobui-install.json"),
+            serde_json::to_vec(&json!({"installDirectory": install})).unwrap(),
+        )
+        .unwrap();
+        let workspace_exe = Path::new(env!("CARGO_MANIFEST_DIR")).join("dist/blobui-settings.exe");
+        let resolved =
+            resolve_app_directory(&install, Some(&workspace_exe), Some(&local_app_data)).unwrap();
+        assert_eq!(resolved, app.canonicalize().unwrap());
+
+        fs::write(
+            app.join(".blobui-install.json"),
+            br#"{"installDirectory":"C:\\Elsewhere"}"#,
+        )
+        .unwrap();
+        assert!(
+            resolve_app_directory(&install, Some(&workspace_exe), Some(&local_app_data))
+                .unwrap_err()
+                .contains("different Anytype folder")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn tar_entry(output: &mut Vec<u8>, name: &str, contents: &[u8], kind: u8) {
         let mut header = [0u8; 512];
         header[..name.len()].copy_from_slice(name.as_bytes());
@@ -1521,7 +1945,10 @@ mod tests {
 
     #[test]
     fn release_metadata_validates_schema_and_semantic_version() {
-        assert_eq!(version_from_metadata(RELEASE_METADATA).unwrap().to_string(), "1.2.0");
+        assert_eq!(
+            version_from_metadata(RELEASE_METADATA).unwrap().to_string(),
+            "1.2.0"
+        );
         for invalid in [
             r#"{"formatVersion":2,"version":"1.2.0"}"#,
             r#"{"formatVersion":1,"version":"invalid"}"#,
@@ -1558,7 +1985,12 @@ mod tests {
         assert!(!blob.join("runtime/Dev/old-managed.css").exists());
         assert!(blob.join("runtime/Dev/local.css").is_file());
         assert!(!blob.join("runtime/scripts/old.ps1").exists());
-        assert_eq!(version_from_runtime(&blob.join("runtime")).unwrap().to_string(), "1.2.0");
+        assert_eq!(
+            version_from_runtime(&blob.join("runtime"))
+                .unwrap()
+                .to_string(),
+            "1.2.0"
+        );
         assert!(!blob.join("runtime/scripts/Settings.ps1").exists());
         assert!(!blob.join("assets/obsolete.png").exists());
         assert_eq!(

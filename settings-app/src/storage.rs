@@ -418,20 +418,24 @@ mod tests {
         let managed = blob.join("runtime/Dev/theme.css");
         let obsolete = blob.join("runtime/Dev/obsolete.css");
         let manifest = blob.join(".blobui-managed-files.json");
+        let app_executable = root.join("BlobUI/settings-app/dist/blobui-settings.exe");
         fs::create_dir_all(credential.parent().unwrap()).unwrap();
         fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        fs::create_dir_all(app_executable.parent().unwrap()).unwrap();
         fs::write(&css, b"old generated css").unwrap();
         fs::write(&data, b"unchanged Anytype data").unwrap();
         fs::write(&credential, b"unchanged DPAPI credential").unwrap();
         fs::write(&managed, b"old managed theme").unwrap();
         fs::write(&obsolete, b"old obsolete managed file").unwrap();
         fs::write(&manifest, b"old ownership manifest").unwrap();
+        fs::write(&app_executable, b"old app executable").unwrap();
 
         FAIL_AFTER_REPLACE.with(|fail| *fail.borrow_mut() = Some(manifest.clone()));
         let error = commit_update(vec![
             FileChange { path: css.clone(), contents: Some(b"new generated css".to_vec()) },
             FileChange { path: managed.clone(), contents: Some(b"new managed theme".to_vec()) },
             FileChange { path: obsolete.clone(), contents: None },
+            FileChange { path: app_executable.clone(), contents: Some(b"new app executable".to_vec()) },
             FileChange { path: manifest.clone(), contents: Some(b"new ownership manifest".to_vec()) },
         ]).unwrap_err();
 
@@ -440,6 +444,7 @@ mod tests {
         assert_eq!(fs::read(&manifest).unwrap(), b"old ownership manifest");
         assert_eq!(fs::read(&managed).unwrap(), b"old managed theme");
         assert_eq!(fs::read(&obsolete).unwrap(), b"old obsolete managed file");
+        assert_eq!(fs::read(&app_executable).unwrap(), b"old app executable");
         assert_eq!(fs::read(&data).unwrap(), b"unchanged Anytype data");
         assert_eq!(fs::read(&credential).unwrap(), b"unchanged DPAPI credential");
         fs::remove_dir_all(root).unwrap();

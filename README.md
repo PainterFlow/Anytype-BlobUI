@@ -86,13 +86,11 @@ Enable **File > Apply Custom CSS** in Anytype. The API is optional; theme appear
 
 Open **Advanced Settings** to check for updates, choose the Anytype data folder, or change automatic update preferences. Automatic checks run every five minutes while BlobUI Settings is running, including in the background. Automatic installation starts disabled. An available update also appears in Blob Pink below Undo and Save, above Logs. The manual check button changes to **Update now** or **You're up to date** after a successful check.
 
-Updates run in Rust and use the latest published GitHub release. They preserve saved settings, encrypted credentials, and local CSS files outside BlobUI's managed files. No installer or onboarding reset is required. Press **Ctrl+R** in Anytype after updating to reload CSS. **F9** creates a simulated update so you can test the controls without downloading or installing a release.
+Updates use the latest published GitHub release's verified `blobui-installer.exe` asset. Settings downloads the installer, checks the release URL, size, and GitHub SHA-256 digest when available, then exits only after the installer has started. The installer pins the matching release tag, waits for Settings to close, and replaces managed app and theme files as one rollback-capable update. It preserves saved settings, encrypted credentials, updater preferences, custom banners, and local CSS files outside BlobUI's managed files. If handoff fails, Settings stays open; if installation fails, the installer reopens Settings with an error state and pauses automatic retries of that same release until the user retries or a newer release appears. Press **Ctrl+R** in Anytype after updating to reload CSS. **F9** creates a simulated update so you can test the controls without downloading or installing a release.
 
 The update source is `PainterFlow/Anytype-BlobUI`. The repository and its releases must be publicly accessible. Private or inaccessible release sources show an error; the app does not store GitHub credentials.
 
-When publishing a theme release, use a semantic version tag matching `version` in `blobui-release.json`, such as `v1.2.0`. The updater validates that version against GitHub's generated source archive before installing it.
-
-This updater installs theme sources and assets. It does not replace the running Settings executable. App executable upgrades still require a separately built app.
+When publishing a release, use a semantic version tag matching `version` in `blobui-release.json`, such as `v1.2.0`, and attach both `blobui-windows.zip` and `blobui-installer.exe`. The updater fetches the release for that exact tag after starting the handoff, so a newer release appearing mid-update cannot change the package being installed. Installations running an older Settings build need to run the latest `blobui-installer.exe` once to bootstrap installer-based Settings updates.
 
 ## Settings app
 
@@ -103,7 +101,7 @@ BlobUI Settings provides a desktop Appearance window for fonts and accent colors
 .\settings-app\dist\blobui-settings.exe
 ```
 
-The build places the executable in `settings-app/dist/blobui-settings.exe`; `-s` starts it after build and `-c` closes existing instances first. `-n` records a one-time onboarding request for the next launch without starting the app. Use `-s -n` to start the app in onboarding immediately. Run the executable directly, or use `scripts/Build-Installer.ps1 -PackageRelease` to package it for the native installer.
+The build places the executable in `settings-app/dist/blobui-settings.exe`; `-s` starts it after build and `-c` closes existing instances from this workspace first. `-n` records a one-time onboarding request for the next launch without starting the app. Use `-s -n` to start the app in onboarding immediately. Run the executable directly, or use `scripts/Build-Installer.ps1 -PackageRelease` to package it for the native installer.
 
 Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. In **Advanced > App Settings**, enable **Launch at startup** to open BlobUI Settings when you sign in. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 

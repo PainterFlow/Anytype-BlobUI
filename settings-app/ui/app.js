@@ -462,7 +462,7 @@
       ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
       : "";
     const fallbackMessage = state.status === "checking" ? "Checking for updates…"
-      : state.status === "updating" ? "Installing the update…"
+      : state.status === "updating" ? "Downloading the update. Settings will close and reopen automatically."
       : simulated ? "Preview update available. No files have been changed."
       : updateAvailable ? (latestVersion ? "Version " + latestVersion + " is available." : "An update is available.")
       : state.status === "current" ? "You're up to date."
@@ -494,9 +494,9 @@
       pendingAutomaticUpdate = false;
       return;
     }
-    if (!updaterState || updaterState.updateAvailable !== true || editSession.isDirty()) return;
+    if (!updaterState || updaterState.updateAvailable !== true || updaterState.automaticUpdateBlocked === true || editSession.isDirty()) return;
     pendingAutomaticUpdate = false;
-    applyUpdate();
+    applyUpdate(true);
   }
 
   function mergeUpdaterState(state) {
@@ -527,7 +527,9 @@
       mergeUpdaterState(state || {});
       if (automatic && initialUpdaterSettings && initialUpdaterSettings.automaticUpdatesEnabled
         && state && state.updateAvailable === true && state.status !== "simulated") {
-        if (saveBusy || editSession.isDirty()) {
+        if (state.automaticUpdateBlocked === true) {
+          pendingAutomaticUpdate = false;
+        } else if (saveBusy || editSession.isDirty()) {
           pendingAutomaticUpdate = true;
           mergeUpdaterState({ message: "An update is ready. Save or undo your pending settings to install it automatically." });
         } else {
@@ -563,10 +565,10 @@
       return;
     }
     updaterBusyOperation = "updating";
-    mergeUpdaterState({ status: "updating", message: "Installing the update…" });
+    mergeUpdaterState({ status: "updating", message: "Downloading the update. Settings will close and reopen automatically." });
     renderUpdaterState();
     try {
-      mergeUpdaterState(await invoke("apply_update") || {});
+      mergeUpdaterState(await invoke("apply_update", { automatic: fromAutomaticCheck }) || {});
     } catch (error) {
       mergeUpdaterState({ status: "error", message: error.message || String(error), updateAvailable: true });
       setStatus("Could not install the update. " + (error.message || String(error)), "error");
