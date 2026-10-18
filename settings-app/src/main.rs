@@ -1314,7 +1314,9 @@ fn resolve_runtime_directory_for_install_from(
     let executable_runtime = executable_runtime_directory(executable);
     if executable_runtime
         .as_deref()
-        .is_some_and(|root| !is_installed_runtime_directory(root))
+        .is_some_and(|root| {
+            !is_installed_runtime_directory(root) && !is_installed_app_directory(root)
+        })
     {
         return Ok(executable_runtime.unwrap());
     }
@@ -1361,6 +1363,10 @@ fn is_installed_runtime_directory(path: &Path) -> bool {
                 .file_name()
                 .is_some_and(|name| name.eq_ignore_ascii_case("blob"))
         })
+}
+
+fn is_installed_app_directory(path: &Path) -> bool {
+    path.join(".blobui-install.json").is_file()
 }
 
 fn ensure_not_release_path(path: &Path) -> Result<(), String> {
@@ -1926,3 +1932,4 @@ mod tests {
         assert!(serialized.get("apiKey").is_none());
     }
 }
+

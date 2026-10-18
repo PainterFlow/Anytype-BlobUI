@@ -814,6 +814,13 @@ pub(crate) fn resolve_app_directory(
             }
         }
     }
+    if let Some(app) = app_directory_from_install_manifest(&install)? {
+        let pointer = app.join(".blobui-install.json");
+        if let Some(app) = validate_app_pointer(&app, &pointer, &install)? {
+            return Ok(app);
+        }
+        found_mismatched_pointer = true;
+    }
     if let Some(local_app_data) = local_app_data {
         let app = local_app_data.join("Programs/BlobUI");
         let pointer = app.join(".blobui-install.json");
@@ -839,6 +846,34 @@ pub(crate) fn resolve_app_directory(
             "The installed BlobUI app folder could not be found. Run the installer once before using self-updates."
                 .into(),
         )
+    }
+}
+
+fn app_directory_from_install_manifest(install: &Path) -> Result<Option<PathBuf>, String> {
+    let path = install.join("blob/.blobui-managed-files.json");
+    let bytes = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {
+            reject_reparse_path(&path)?;
+            fs::read(&path).map_err(|_| {
+                "The selected BlobUI runtime manifest could not be read safely.".to_string()
+            })?
+        }
+        Ok(_) => {
+            return Err("The selected BlobUI runtime manifest is not a regular file.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err("The selected BlobUI runtime manifest could not be inspected safely.".into())
+        }
+    };
+    let manifest: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "The selected BlobUI runtime manifest is invalid.".to_string())?;
+    match manifest.get("appDirectory") {
+        None => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Ok(Some(PathBuf::from(value)))
+        }
+        Some(_) => Err("The selected BlobUI app directory pointer is invalid.".into()),
     }
 }
 
@@ -1692,3 +1727,4 @@ mod tests {
     }
 
 }
+

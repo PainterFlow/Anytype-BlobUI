@@ -198,7 +198,15 @@ pub fn install(
             .map_err(|e| format!("Could not write app install pointer: {e}"))?;
 
         let changes =
-            make_install_changes(&package, &anytype, version, &css, &data_bytes, !data_exists)?;
+            make_install_changes(
+                &package,
+                &anytype,
+                &app,
+                version,
+                &css,
+                &data_bytes,
+                !data_exists,
+            )?;
         if shortcut {
             previous_shortcut =
                 create_shortcut(&app_dist.join("blobui-settings.exe"), &app, &anytype)?;
@@ -281,6 +289,7 @@ pub fn install_update(
     changes.extend(make_install_changes(
         &package,
         &anytype,
+        &app,
         version,
         &css,
         &data_bytes,
@@ -990,6 +999,7 @@ fn validate_changelog_image_references(markdown: &str, aliases: &BTreeSet<&str>)
 fn make_install_changes(
     package: &Path,
     anytype: &Path,
+    app: &Path,
     version: &str,
     css: &str,
     data: &[u8],
@@ -1079,8 +1089,12 @@ fn make_install_changes(
     }
     // If an earlier manifest managed the old root-level asset convention, keep
     // its legacy ownership marker; new files use runtime/ and assets/ paths.
-    let manifest =
-        json!({"manifestVersion": 1, "releaseVersion": version, "managedFiles": managed});
+    let manifest = json!({
+        "manifestVersion": 1,
+        "releaseVersion": version,
+        "appDirectory": app.to_string_lossy().into_owned(),
+        "managedFiles": managed
+    });
     changes.push(FileChange {
         path: manifest_path,
         contents: Some(serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?),
@@ -2310,3 +2324,4 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+

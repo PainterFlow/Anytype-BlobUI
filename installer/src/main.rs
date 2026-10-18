@@ -435,10 +435,6 @@ fn startup_entry_targets_app(value: &str, app: &Path) -> bool {
     let Some(executable_parent) = Path::new(executable).parent() else {
         return false;
     };
-    let expected = app.join("settings-app/dist/blobui-settings.exe");
-    let Some(expected_parent) = expected.parent() else {
-        return false;
-    };
     if Path::new(executable).file_name().is_none_or(|name| {
         !name
             .to_string_lossy()
@@ -446,15 +442,19 @@ fn startup_entry_targets_app(value: &str, app: &Path) -> bool {
     }) {
         return false;
     }
-    match (
-        executable_parent.canonicalize(),
-        expected_parent.canonicalize(),
-    ) {
-        (Ok(executable_parent), Ok(expected_parent)) => executable_parent
-            .to_string_lossy()
-            .eq_ignore_ascii_case(&expected_parent.to_string_lossy()),
-        _ => false,
-    }
+    let Ok(executable_parent) = executable_parent.canonicalize() else {
+        return false;
+    };
+    let expected_parents = [app.to_path_buf(), app.join("settings-app/dist")];
+    expected_parents.iter().any(|expected_parent| {
+        expected_parent
+            .canonicalize()
+            .is_ok_and(|expected_parent| {
+                executable_parent
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&expected_parent.to_string_lossy())
+            })
+    })
 }
 
 #[cfg(windows)]
@@ -1105,3 +1105,4 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
