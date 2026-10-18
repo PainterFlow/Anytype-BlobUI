@@ -122,7 +122,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     let install_directory_text = data.get("installDirectory").and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "The settings data has no install directory.".to_string())?;
-    if Path::new(install_directory_text) != install_directory {
+    if !same_install_directory(Path::new(install_directory_text), install_directory) {
         return Err("The saved settings directory does not match the selected Anytype directory.".into());
     }
     let banner_target = install_directory.join("blob").join("assets").join(DEFAULT_BANNER.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -183,6 +183,45 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
         return Err("Compiled CSS still contains an unresolved placeholder.".into());
     }
     Ok(css_text)
+}
+
+fn same_install_directory(saved: &Path, selected: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        comparable_windows_path(saved).eq_ignore_ascii_case(&comparable_windows_path(selected))
+    }
+    #[cfg(not(windows))]
+    {
+        saved == selected
+    }
+}
+
+fn comparable_windows_path(path: &Path) -> String {
+    const VERBATIM_PREFIX: &str = "\\\\?\\";
+    const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
+
+    let path = path.to_string_lossy().replace('/', "\\");
+    if path
+        .get(..VERBATIM_UNC_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_UNC_PREFIX))
+    {
+        return format!(r"\\{}", &path[VERBATIM_UNC_PREFIX.len()..]);
+    }
+    if path
+        .get(..VERBATIM_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_PREFIX))
+    {
+        let without_prefix = &path[VERBATIM_PREFIX.len()..];
+        if without_prefix
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && without_prefix.as_bytes().get(1) == Some(&b':')
+        {
+            return without_prefix.to_owned();
+        }
+    }
+    path
 }
 
 fn collect_css(root: &Path, directory: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
@@ -391,6 +430,34 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run");
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         root.join(format!("css-{}-{unique}", std::process::id()))
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn accepts_equivalent_dos_and_verbatim_install_paths() {
+        let root = fixture();
+        fs::create_dir_all(root.join("Dev")).unwrap();
+        fs::create_dir_all(root.join("assets/spacebanner")).unwrap();
+        fs::write(root.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
+        fs::write(root.join("Dev/00-test.css"), "body {}").unwrap();
+        let install = root.join("anytype");
+        let selected = install.to_string_lossy();
+        let verbatim = if selected.starts_with(r"\\") {
+            format!(r"\\?\UNC\{}", selected.trim_start_matches('\\'))
+        } else {
+            format!(r"\\?\{selected}")
+        };
+        let data = json!({
+            "installDirectory": verbatim,
+            "settings": {
+                "fontFamily": "Inter",
+                "codeFontFamily": "Consolas",
+                "accentColor": "Default"
+            }
+        });
+
+        assert!(compile(&root, &install, &data).is_ok());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -39,8 +39,49 @@ fn startup_entry_matches_executable(value: &str, executable: &std::path::Path) -
     if command_path.contains('"') {
         return false;
     }
-    let executable = executable.to_string_lossy();
-    command_path.eq_ignore_ascii_case(executable.as_ref())
+    startup_executable_aliases(executable)
+        .iter()
+        .any(|alias| command_path.eq_ignore_ascii_case(&alias.to_string_lossy()))
+}
+
+fn startup_executable_aliases(executable: &std::path::Path) -> Vec<std::path::PathBuf> {
+    use std::path::Path;
+
+    let mut aliases = vec![executable.to_path_buf()];
+    if !executable
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("blobui-settings.exe"))
+    {
+        return aliases;
+    }
+
+    let Some(parent) = executable.parent() else {
+        return aliases;
+    };
+    let install_root = if parent
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("dist"))
+        && parent
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name.eq_ignore_ascii_case("settings-app"))
+    {
+        parent.parent().and_then(Path::parent)
+    } else {
+        Some(parent)
+    };
+    let Some(install_root) = install_root else {
+        return aliases;
+    };
+
+    aliases.push(install_root.join("blobui-settings.exe"));
+    aliases.push(
+        install_root
+            .join("settings-app")
+            .join("dist")
+            .join("blobui-settings.exe"),
+    );
+    aliases
 }
 
 #[cfg(windows)]
@@ -269,6 +310,27 @@ mod tests {
         assert!(!startup_entry_matches_executable(
             r#""C:\Program Files\BlobUI\blobui-settings.exe" --background"#,
             executable
+        ));
+    }
+
+    #[test]
+    fn startup_state_matches_both_installed_executable_aliases() {
+        let root_executable = Path::new(r"C:\Program Files\BlobUI\blobui-settings.exe");
+        let dist_executable = Path::new(
+            r"C:\Program Files\BlobUI\settings-app\dist\blobui-settings.exe",
+        );
+
+        assert!(startup_entry_matches_executable(
+            r#""C:\Program Files\BlobUI\blobui-settings.exe""#,
+            dist_executable
+        ));
+        assert!(startup_entry_matches_executable(
+            r#""C:\Program Files\BlobUI\settings-app\dist\blobui-settings.exe""#,
+            root_executable
+        ));
+        assert!(!startup_entry_matches_executable(
+            r#""C:\Old BlobUI\blobui-settings.exe""#,
+            dist_executable
         ));
     }
 }
