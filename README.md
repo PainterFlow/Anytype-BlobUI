@@ -67,7 +67,7 @@ BlobUI Settings provides a desktop Appearance window for fonts and accent colors
 
 The build places the executable in `settings-app/dist/blobui-settings.exe`; `-s` starts it after build and `-c` closes existing instances first. `-n` records a one-time onboarding request for the next launch without starting the app. Use `-s -n` to start the app in onboarding immediately. `Setup.ps1` packages the executable and `scripts/Settings.ps1` remains the supported PowerShell launch wrapper. The installer is responsible for installation; `Update.ps1` and `Uninstall.ps1` are temporarily outdated.
 
-Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
+Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. In **Advanced > App Settings**, enable **Launch at startup** to open BlobUI Settings when you sign in. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 
 The Settings sidebar has **Preferences** followed by **Accessibility**. Reduced Motion starts off, so BlobUI’s animated text effects run by default. Under **Hover Effects**, tab previews, link previews, and @ mention previews start off. `blob://` links always stay outside the hover preview settings. When link or @ mention previews are off, mouse clicks on those editor links or mentions are disabled to prevent Anytype’s delayed preview from appearing after the pointer leaves; existing keyboard behavior is unchanged. Change these switches, press **Save**, then reload Anytype with **Ctrl+R** to apply them.
 
@@ -81,7 +81,7 @@ The choice, IP, and port are saved locally in `blob/data.json`. No API mode make
 
 Use **Advanced Settings** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\scripts\Settings.ps1 -n` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
 
-To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not register the app to start automatically with Windows.
+To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not change the Windows login startup setting.
 
 The first Settings app save migrates the current font and accent values from `data.json` into the local `settingsV2` record. After that, these local choices are authoritative, so saving no longer requires the legacy Anytype Settings objects. Anytype's Calendar Color data refreshes when its local API is available; otherwise the app keeps the saved calendar cache and reports that status. Saving rebuilds `custom.css`; press `Ctrl+R` in Anytype to apply it.
 

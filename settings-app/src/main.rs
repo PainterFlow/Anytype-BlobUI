@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 
 mod api;
+mod autostart;
 mod css;
 mod connection;
 mod folder_dialog;
@@ -186,7 +187,7 @@ async fn get_updater_state() -> Result<updater::UpdaterState, String> {
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
-        updater::get_state(&app_data, &install, &runtime)
+        with_startup_state(updater::get_state(&app_data, &install, &runtime)?)
     })
     .await
     .map_err(|_| "The updater status task stopped unexpectedly.".to_string())?
@@ -200,7 +201,18 @@ async fn save_updater_settings(settings: updater::UpdaterSettingsDraft) -> Resul
         let _updater_guard = updater_guard;
         let app_data = app_data_directory();
         let default_install = resolve_default_install_directory(&app_data)?;
-        updater::save_settings(&app_data, settings, &default_install)
+        let previous_start_on_login = autostart::is_enabled()?;
+        let start_on_login = autostart::set_enabled(settings.start_on_login)?;
+        match updater::save_settings(&app_data, settings, &default_install) {
+            Ok(mut state) => {
+                state.start_on_login = start_on_login;
+                Ok(state)
+            }
+            Err(error) => match autostart::set_enabled(previous_start_on_login) {
+                Ok(_) => Err(error),
+                Err(rollback) => Err(format!("{error} The previous startup setting could not be restored: {rollback}")),
+            },
+        }
     })
     .await
     .map_err(|_| "The updater settings task stopped unexpectedly.".to_string())?
@@ -236,7 +248,7 @@ async fn check_for_updates() -> Result<updater::UpdaterState, String> {
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
-        updater::check_for_updates(&app_data, &install, &runtime)
+        with_startup_state(updater::check_for_updates(&app_data, &install, &runtime)?)
     })
     .await
     .map_err(|_| "The update check task stopped unexpectedly.".to_string())?
@@ -251,7 +263,7 @@ async fn apply_update() -> Result<updater::UpdaterState, String> {
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
-        updater::apply_update(&app_data, &install, &runtime)
+        with_startup_state(updater::apply_update(&app_data, &install, &runtime)?)
     })
     .await
     .map_err(|_| "The update installation task stopped unexpectedly.".to_string())?
@@ -262,7 +274,12 @@ fn simulate_update() -> Result<updater::UpdaterState, String> {
     let app_data = app_data_directory();
     let install = resolve_install_directory(&app_data)?;
     let runtime = resolve_runtime_directory_for_install(&install)?;
-    updater::simulate_update(&app_data, &install, &runtime)
+    with_startup_state(updater::simulate_update(&app_data, &install, &runtime)?)
+}
+
+fn with_startup_state(mut state: updater::UpdaterState) -> Result<updater::UpdaterState, String> {
+    state.start_on_login = autostart::is_enabled()?;
+    Ok(state)
 }
 
 fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResult, String> {

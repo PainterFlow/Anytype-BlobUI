@@ -50,6 +50,7 @@ const savedSettings = [];
 const savedUpdaterSettings = [];
 const updaterPrefs = {
   installDirectory: '%APPDATA%\\anytype',
+  startOnLogin: false,
   automaticUpdatesEnabled: false,
   automaticChecksEnabled: false,
 };
@@ -89,7 +90,7 @@ const context = {
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
-    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
+    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },
   atob,
@@ -179,6 +180,9 @@ assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs in
 assert.match(settingsHtml, /role="tablist"/);
 assert.match(settingsHtml, /id="advanced-app-panel"[^>]*role="tabpanel"[^>]*hidden/);
 assert.match(settingsHtml, /Anytype data folder that contains custom\.css/);
+assert(settingsHtml.indexOf('id="install-directory"') < settingsHtml.indexOf('id="start-on-login"'), 'Launch at startup must follow Anytype Folder.');
+assert(settingsHtml.indexOf('id="start-on-login"') < settingsHtml.indexOf('id="updates-heading"'), 'Launch at startup must precede Updates.');
+assert.match(settingsHtml, /<label class="native-accent-control settings-row accessibility-row" for="start-on-login">\s*<span>Launch at startup<\/span>/, 'The startup toggle uses the concise setting row label.');
 assert.match(settingsHtml, /id="install-directory"[^>]*readonly[^>]*aria-haspopup="dialog"/);
 for (const label of ['Anytype API key', 'API key IP', 'API key port']) {
   assert(settingsHtml.includes('>' + label + '</label>'), `${label} must have a visible label.`);
@@ -216,7 +220,7 @@ assert(!settingsHtml.includes('id="api-key-removal-cancel"'), 'The key removal w
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
-for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'automatic-updates-enabled', 'automatic-checks-enabled']) {
+for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled']) {
   assert.match(settingsHtml, new RegExp(`id="${id}" type="checkbox" role="switch"`), `${id} must be a native switch.`);
 }
 assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
@@ -252,6 +256,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
   assert.equal(element('install-directory').value, '%APPDATA%\\anytype', 'App Settings load the configured Anytype data folder.');
+  assert.equal(element('start-on-login').checked, false, 'Startup is opt-in by default.');
   assert.equal(element('automatic-updates-enabled').checked, false);
   assert.equal(element('automatic-checks-enabled').checked, false);
   assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
@@ -273,13 +278,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('check-updates-button').textContent, "You're up to date");
   const generalSavesBeforeUpdaterSave = savedSettings.length;
   await input('install-directory', 'C:\\BlobUI\\AnytypeData');
+  await changeToggle('start-on-login', true);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
   assert.equal(element('save-button').hidden, false, 'App Settings edits use the shared Save action.');
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startOnLogin: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -296,10 +302,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('font-family').value, 'Libron');
   assert.equal(element('install-directory').value, 'C:\\BlobUI\\AnytypeData');
   await changeToggle('automatic-updates-enabled', false);
+  await changeToggle('start-on-login', false);
   element('discard-button').handlers.click();
   element('discard-confirmation-undo').handlers.click();
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
+  assert.equal(element('start-on-login').checked, true, 'Undo restores the startup preference.');
 
   const realApplyCallsBeforeSimulation = calls.filter(name => name === 'apply_update').length;
   const realCheckCallsBeforeSimulation = calls.filter(name => name === 'check_for_updates').length;

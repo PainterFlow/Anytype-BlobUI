@@ -60,6 +60,7 @@ pub struct UpdaterSettingsDraft {
     pub install_directory: String,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
+    pub start_on_login: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,6 +69,7 @@ pub struct UpdaterState {
     pub install_directory: String,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
+    pub start_on_login: bool,
     pub current_version: String,
     pub latest_version: Option<String>,
     pub update_available: bool,
@@ -199,6 +201,7 @@ fn state_for(
         install_directory: install_directory.to_string_lossy().into_owned(),
         automatic_updates_enabled: preferences.automatic_updates_enabled,
         automatic_checks_enabled: preferences.automatic_checks_enabled,
+        start_on_login: false,
         current_version: current,
         latest_version: preferences.latest_version.clone(),
         update_available,

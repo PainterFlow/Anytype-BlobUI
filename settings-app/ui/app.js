@@ -73,6 +73,7 @@
     });
   });
   const installDirectory = el("install-directory");
+  const startOnLogin = el("start-on-login");
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
   const automaticChecksEnabled = el("automatic-checks-enabled");
   const checkUpdatesButton = el("check-updates-button");
@@ -422,6 +423,7 @@
   function updaterSettingsEqual(left, right) {
     return !!left && !!right
       && left.installDirectory === right.installDirectory
+      && left.startOnLogin === right.startOnLogin
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled;
   }
@@ -433,6 +435,7 @@
       : directory.startsWith("\\\\?\\") ? directory.slice(4) : directory;
     return {
       installDirectory: displayDirectory,
+      startOnLogin: !!(settings && settings.startOnLogin),
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
     };
@@ -442,6 +445,7 @@
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
+    startOnLogin.checked = updaterDraft.startOnLogin;
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     updaterSettingsLoaded = true;
@@ -678,6 +682,7 @@
     if (snapshot.updaterSettings) {
       updaterDraft = { ...snapshot.updaterSettings };
       installDirectory.value = updaterDraft.installDirectory;
+      startOnLogin.checked = updaterDraft.startOnLogin;
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     }
@@ -739,7 +744,7 @@
     bannerImageInput.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, startOnLogin, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = saveBusy || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     Object.keys(visibilityFields).forEach((inputId) => {
@@ -1048,6 +1053,7 @@
     draft.accentPreset = draft.accentMode === "preset" ? draft.accentPreset : "";
     if (updaterDraft) {
       updaterDraft.installDirectory = installDirectory.value;
+      updaterDraft.startOnLogin = startOnLogin.checked;
       updaterDraft.automaticUpdatesEnabled = automaticUpdatesEnabled.checked;
       updaterDraft.automaticChecksEnabled = automaticChecksEnabled.checked;
     }
@@ -1354,6 +1360,7 @@
     markDirty();
   });
   for (const [control, property] of [
+    [startOnLogin, "startOnLogin"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
