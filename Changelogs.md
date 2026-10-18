@@ -22,6 +22,7 @@ I haven’t had the chance to implement MacOS support, as I don’t have a MacBo
 - Fixed A LOT of issues related to the accent color not effecting xyz. ([PainterFlow11](https://github.com/PainterFlow))
 - Fixed custom font not applying in the tab bar. ([PainterFlow11](https://github.com/PainterFlow))
 - Fixed the scrollbar in the channel sidebar. ([PainterFlow11](https://github.com/PainterFlow))
+
 *Developers Note: We basically removed it, so if you are in a lot of channels, you won’t have a scrollbar, but tbh, I’d rather have no scrollbar when I’m in a lot of channels then have a annoying big long grey box in my sidebar.*
 
 ## Developer Changelogs

@@ -55,6 +55,8 @@ test('Markdown rendering preserves formatting and rejects active content', {
         '',
         '**bold _combined_** and ~~deleted~~',
         '',
+        '[**linked _text_**](https://example.com/guide)',
+        '',
         '- parent',
         '  - child',
         '',
@@ -92,6 +94,7 @@ test('Markdown rendering preserves formatting and rejects active content', {
         heading: !!container.querySelector('h1'),
         nestedList: !!container.querySelector('ul ul'),
         bold: container.querySelector('strong')?.textContent,
+        link: container.querySelector('a[href="https://example.com/guide"]')?.innerHTML,
         code: container.querySelector('pre code')?.textContent,
         imageCount: container.querySelectorAll('img').length,
         dataImages: [...container.querySelectorAll('img')].every(image => image.src.startsWith('data:image/png;base64,')),
@@ -106,6 +109,7 @@ test('Markdown rendering preserves formatting and rejects active content', {
     assert(outcome.heading, 'Markdown headings should be preserved.');
     assert(outcome.nestedList, 'Nested lists should be preserved.');
     assert.match(outcome.bold, /bold/);
+    assert.equal(outcome.link, '<strong>linked <em>text</em></strong>', 'Links should preserve formatted Markdown text.');
     assert.match(outcome.code, /@shot/, 'Image mentions in fenced code should remain text.');
     assert.equal(outcome.imageCount, 2, 'Markdown and raw HTML aliases should both resolve to images.');
     assert(outcome.dataImages, 'Rendered images should use the supplied local image bytes.');

@@ -209,10 +209,11 @@
       const safeTitle = token.title ? ` title="${escapeAttribute(token.title)}"` : "";
       return `<img src="${image.src}" alt="${escapeAttribute(token.text || image.alt)}"${safeTitle}>`;
     };
-    renderer.link = (token) => {
+    renderer.link = function (token) {
       const href = safeLink(token.href);
       const title = token.title ? ` title="${escapeAttribute(token.title)}"` : "";
-      return href ? `<a href="${escapeAttribute(href)}"${title}>${token.tokens ? parser.parseInline(token.tokens) : token.text}</a>` : (token.tokens ? parser.parseInline(token.tokens) : token.text);
+      const text = token.tokens ? this.parser.parseInline(token.tokens) : token.text;
+      return href ? `<a href="${escapeAttribute(href)}"${title}>${text}</a>` : text;
     };
     const parser = new root.marked.Marked({
       gfm: true,

@@ -245,13 +245,15 @@ button:focus-visible, input:focus-visible { outline: none; }
 .help-credit { justify-self: start; min-height: 24px; padding: 0 8px; background: transparent; color: #777; font-size: 11px; text-align: left; cursor: pointer; }
 .help-credit:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .repository-link { color: #777; }
-.keybinds-dialog { display: flex; flex-direction: column; width: min(100%, 560px); max-height: min(82vh, 680px); }
-.keybinds-dialog > p { margin-bottom: 16px; }
-.keybind-list { display: grid; gap: 8px; overflow-y: auto; min-height: 0; margin: 0 0 12px; }
-.keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.confirm-dialog.keybinds-dialog { display: flex; flex-direction: column; width: min(100%, 560px); max-height: min(82vh, 680px); border-radius: 16px; }
+.confirm-dialog.keybinds-dialog > p { margin: 10px 0 18px; }
+.keybind-list { display: grid; gap: 7px; overflow-y: auto; min-height: 0; margin: 0 0 12px; padding: 1px; }
+.keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 50px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--input-bg); transition: border-color .14s ease, background .14s ease; }
+.keybind-row:hover, .keybind-row:focus-within { border-color: color-mix(in srgb, var(--line) 65%, var(--text) 35%); background: var(--active); }
 .keybind-label { color: var(--text); font-size: 13px; }
-.keybind-button { min-width: 132px; min-height: 32px; padding: 0 10px; border-radius: 16px; background: var(--active); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
-.keybind-button:hover, .keybind-button[aria-pressed="true"] { background: var(--hover); }
+.keybind-button { min-width: 144px; min-height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font-family: var(--font-code); font-size: 12px; letter-spacing: 0; white-space: nowrap; cursor: pointer; }
+.keybind-button:hover, .keybind-button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); background: var(--active); }
+.keybind-button[aria-pressed="true"] { color: var(--accent); }
 .keybind-status { min-height: 20px; margin: 0 0 12px !important; color: var(--text-secondary); font-size: 12px !important; }
 .keybind-status.error { color: var(--color-red); }
 .log-heading { display: flex; align-items: center; justify-content: space-between; padding-left: 8px; }
@@ -270,6 +272,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .confirm-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .56); animation: confirm-backdrop-in .16s ease-out both; }
+#keybinds-backdrop, #help-error-backdrop, #release-notes-backdrop { backdrop-filter: blur(3px); }
 .confirm-dialog { position: relative; width: min(100%, 440px); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: 0 18px 48px rgba(0, 0, 0, .36); animation: confirm-dialog-in .2s cubic-bezier(.2, .75, .25, 1) .02s both; }
 .confirm-dialog h2 { max-width: calc(100% - 24px); margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -.2px; }
 .confirm-dialog p { margin: 12px 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 22px; }
@@ -287,12 +290,17 @@ button:focus-visible, input:focus-visible { outline: none; }
 #uninstall-confirm { background: var(--color-red); }
 #uninstall-confirm:hover:not(:disabled) { filter: brightness(.92); }
 .confirm-actions button:disabled, .confirm-close:disabled { opacity: .55; cursor: default; }
-.release-notes-dialog { display: flex; flex-direction: column; width: min(100%, 720px); max-height: min(82vh, 760px); padding: 28px 28px 20px; }
-.release-notes-heading { flex: 0 0 auto; padding-right: 28px; }
-.release-notes-version { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
-.release-notes-heading p { margin: 8px 0 18px; }
-.release-notes-image-warning { margin: 0 0 12px; color: var(--text-secondary); font-size: 12px; }
-.release-notes-content { min-height: 0; overflow: auto; padding: 0 10px 8px 0; color: var(--text); scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+.help-error-dialog { width: min(100%, 420px); padding: 32px; border-radius: 16px; }
+.help-error-dialog h2 { display: flex; align-items: center; gap: 9px; }
+.help-error-code { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--color-red) 35%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--color-red) 12%, var(--bg)); color: var(--color-red); font-size: 14px; line-height: 22px; letter-spacing: 0; }
+.help-error-dialog p { margin: 14px 0 0; padding-right: 20px; }
+.keybinds-dialog .confirm-actions { flex: 0 0 auto; padding-top: 14px; border-top: 1px solid var(--line); }
+.release-notes-dialog { display: flex; flex-direction: column; width: min(100%, 720px); max-height: min(82vh, 760px); padding: 28px 28px 0; border-radius: 16px; }
+.release-notes-heading { flex: 0 0 auto; padding: 0 28px 16px 0; border-bottom: 1px solid var(--line); }
+.release-notes-version { display: block; width: max-content; margin-bottom: 8px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--input-bg); color: var(--text-secondary); font-size: 11px; line-height: 18px; }
+.release-notes-heading p { margin: 8px 0 0; }
+.release-notes-image-warning { flex: 0 0 auto; margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; }
+.release-notes-content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px 10px 8px 0; color: var(--text); scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 .release-notes-content:focus { outline: none; }
 .markdown-content { color: var(--text); line-height: 1.55; }
 .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { margin: 22px 0 10px; font-weight: 600; line-height: 1.35; }
@@ -315,7 +323,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 .markdown-content a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .markdown-content input[type="checkbox"] { width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: var(--accent); }
 .markdown-content img { display: block; max-width: 100%; max-height: 440px; margin: 12px 0 18px; border-radius: 10px; object-fit: contain; }
-.release-notes-actions { flex: 0 0 auto; margin-top: 16px; }
+.release-notes-actions { flex: 0 0 auto; margin-top: 8px; padding: 14px 0 20px; border-top: 1px solid var(--line); }
+.help-error-dialog .confirm-close:focus-visible, .keybinds-dialog .confirm-close:focus-visible, .keybind-button:focus-visible, .release-notes-dialog .confirm-close:focus-visible, .release-notes-content:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; pointer-events: none; }
 .confirm-backdrop.is-closing .confirm-dialog { animation: confirm-dialog-out .14s ease-in both; }
 @keyframes confirm-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
@@ -326,6 +335,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 @media (max-height: 700px) {
   .settings-content { padding-top: 26px; padding-bottom: 24px; }
   .color-plane { height: 152px; }
+  .keybinds-dialog, .release-notes-dialog { max-height: 90vh; }
+  .release-notes-dialog { padding-top: 20px; }
 }
 
 @media (max-width: 850px) {
@@ -336,6 +347,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .page-content, .onboarding-scroll, .log-entries { transition: none; }
   .switch-track::after { transition: none; }
+  .keybind-row { transition: none; }
   .save-spinner { animation: none; }
   .confirm-backdrop, .confirm-dialog, .confirm-backdrop.is-closing, .confirm-backdrop.is-closing .confirm-dialog { animation: none; }
 }

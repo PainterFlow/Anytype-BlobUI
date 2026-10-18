@@ -133,7 +133,7 @@
   });
   const helpErrorModal = window.BlobUI.createModalController({
     backdrop: el("help-error-backdrop"), dialog: el("help-error-dialog"),
-    initialFocus: el("help-error-done"), fallbackFocus: el("help-button"),
+    initialFocus: el("help-error-close"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
   const keybindModal = window.BlobUI.createModalController({
@@ -1721,7 +1721,7 @@
     await loadShortcutBindings();
     keybindModal.open();
   });
-  ["help-error-close", "help-error-done"].forEach((id) => el(id).addEventListener("click", () => helpErrorModal.close()));
+  el("help-error-close").addEventListener("click", () => helpErrorModal.close());
   ["keybinds-close", "keybinds-done"].forEach((id) => el(id).addEventListener("click", () => keybindModal.close()));
   document.addEventListener("pointerdown", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
