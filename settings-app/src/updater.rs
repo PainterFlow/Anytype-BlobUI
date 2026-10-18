@@ -142,6 +142,23 @@ pub fn saved_install_directory(path: &Path) -> Result<Option<PathBuf>, String> {
         .map(PathBuf::from))
 }
 
+pub fn recover_install_directory(
+    app_data_directory: &Path,
+    selected_directory: &Path,
+) -> Result<(), String> {
+    let install_directory = validate_install_directory(selected_directory)?;
+    let path = preferences_path(app_data_directory);
+    let mut preferences = match load_preferences(&path) {
+        Ok(preferences) => preferences,
+        Err(error) if error == "The saved BlobUI updater settings are not valid JSON." => {
+            UpdaterPreferences::default()
+        }
+        Err(error) => return Err(error),
+    };
+    preferences.install_directory = Some(install_directory.to_string_lossy().into_owned());
+    save_preferences(&path, &preferences)
+}
+
 pub fn save_settings(
     app_data_directory: &Path,
     draft: UpdaterSettingsDraft,
@@ -1354,6 +1371,48 @@ mod tests {
                 .unwrap_err()
                 .contains("different Anytype folder")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_repairs_invalid_preferences_and_preserves_valid_options() {
+        let root = fixture_root("profile-recovery");
+        let app_data = root.join("APPDATA/anytype");
+        let first_install = root.join("First Anytype");
+        let second_install = root.join("Second Anytype");
+        for install in [&first_install, &second_install] {
+            fs::create_dir_all(install.join("blob")).unwrap();
+            fs::write(
+                install.join("blob/data.json"),
+                serde_json::to_vec(&json!({"installDirectory": install})).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let path = preferences_path(&app_data);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"invalid-json").unwrap();
+        recover_install_directory(&app_data, &first_install).unwrap();
+        let repaired = load_preferences(&path).unwrap();
+        assert_eq!(
+            repaired.install_directory.as_deref(),
+            Some(first_install.to_string_lossy().as_ref())
+        );
+        assert!(!repaired.automatic_updates_enabled);
+        assert!(repaired.automatic_checks_enabled);
+
+        let mut preferences = repaired;
+        preferences.automatic_updates_enabled = true;
+        preferences.automatic_checks_enabled = false;
+        save_preferences(&path, &preferences).unwrap();
+        recover_install_directory(&app_data, &second_install).unwrap();
+        let preserved = load_preferences(&path).unwrap();
+        assert_eq!(
+            preserved.install_directory.as_deref(),
+            Some(second_install.to_string_lossy().as_ref())
+        );
+        assert!(preserved.automatic_updates_enabled);
+        assert!(!preserved.automatic_checks_enabled);
         fs::remove_dir_all(root).unwrap();
     }
 

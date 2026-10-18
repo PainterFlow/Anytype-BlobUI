@@ -293,8 +293,8 @@ fn run(options: Options) -> Result<(), String> {
             return Err(format!("The Anytype data folder does not exist: {}. Open Anytype once or select its custom data folder.", anytype.display()));
         }
         validate_destinations(&anytype, &app, &stage, cfg!(feature = "development"))?;
-        install::install(&stage, &anytype, &app, &version, shortcut)?;
-        retain_installer(&app)?;
+        let installer = env::current_exe().map_err(|e| format!("Could not locate the installer: {e}"))?;
+        install::install(&stage, &anytype, &app, &version, shortcut, &installer)?;
         Ok(version)
     })();
     let _ = fs::remove_dir_all(&stage);
@@ -410,19 +410,11 @@ where
         return Err("The extracted update package must be separate from Anytype data.".into());
     }
     wait_for_settings()?;
-    install::install_update(package, anytype, app, &version)?;
-    retain_installer(app)?;
+    let installer = env::current_exe().map_err(|e| format!("Could not locate the installer: {e}"))?;
+    let installer_target = app.join("blobui-installer.exe");
+    let retained_installer = (installer != installer_target).then_some(installer.as_path());
+    install::install_update(package, anytype, app, &version, retained_installer)?;
     Ok(version)
-}
-
-fn retain_installer(app: &Path) -> Result<(), String> {
-    let target = app.join("blobui-installer.exe");
-    validate_no_links(&target)?;
-    let source = env::current_exe().map_err(|e| e.to_string())?;
-    if source != target {
-        fs::copy(source, target).map_err(|e| format!("Could not retain the installer: {e}"))?;
-    }
-    Ok(())
 }
 
 fn startup_entry_targets_app(value: &str, app: &Path) -> bool {

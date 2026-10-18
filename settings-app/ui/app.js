@@ -565,6 +565,14 @@
       mergeUpdaterState(state || {});
     } catch (error) {
       updaterState = { status: "error", message: error.message || String(error) };
+      if (!updaterSettingsLoaded) {
+        assignUpdaterSettings({
+          installDirectory: installDirectory.value || "",
+          startOnLogin: false,
+          automaticUpdatesEnabled: false,
+          automaticChecksEnabled: false,
+        });
+      }
       renderUpdaterState();
     }
   }
@@ -1102,6 +1110,7 @@
     [installDirectory, startOnLogin, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = saveBusy || !draft || !updaterSettingsLoaded || !window.appReady;
     });
+    installDirectory.disabled = saveBusy || !updaterSettingsLoaded;
     Object.keys(visibilityFields).forEach((inputId) => {
       visibilityFields[inputId].button.disabled = saveBusy || !draft;
     });
@@ -1154,37 +1163,45 @@
   }
 
   async function loadState() {
+    let state = null;
+    let stateError = null;
     try {
-      const state = await invoke("get_app_state");
+      state = await invoke("get_app_state");
       window.appReady = !!state.ready;
       applyTheme(state.theme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       assignAdvancedConnection(state);
       assignDraftToForm(state.settings || {});
-      await loadUpdaterState();
-      await loadShortcutBindings();
-      invoke("get_anytype_version").then((version) => {
-        el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
-      }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
       editSession.commit();
-      updateSaveButton();
-      const needsOnboarding = state.ready && state.onboardingComplete === false;
-      if (needsOnboarding) showOnboarding();
-      if (!state.ready) {
-        setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
-      } else if (state.hotkeyError) {
-        setStatus(state.hotkeyError, "error");
-      } else {
-        setStatus(state.message || "Settings loaded from this device.");
-      }
-      if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
     } catch (error) {
       window.appReady = false;
-      setStatus(error.message || String(error), "error");
-      updateSaveButton();
+      stateError = error;
     }
+
+    await loadUpdaterState();
+    if (stateError) {
+      setStatus(stateError.message || String(stateError), "error");
+      updateSaveButton();
+      return;
+    }
+
+    await loadShortcutBindings();
+    invoke("get_anytype_version").then((version) => {
+      el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
+    }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
+    updateSaveButton();
+    const needsOnboarding = state.ready && state.onboardingComplete === false;
+    if (needsOnboarding) showOnboarding();
+    if (!state.ready) {
+      setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
+    } else if (state.hotkeyError) {
+      setStatus(state.hotkeyError, "error");
+    } else {
+      setStatus(state.message || "Settings loaded from this device.");
+    }
+    if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState() {
@@ -1698,6 +1715,12 @@
       updaterDraft.installDirectory = selected;
       installDirectory.classList.remove("invalid");
       el("updater-settings-error").textContent = "";
+      if (!window.appReady) {
+        await invoke("recover_install_directory", { installDirectory: selected });
+        initialUpdaterSettings = { ...updaterDraft };
+        await loadState();
+        return;
+      }
       markDirty();
     } catch (error) {
       el("updater-settings-error").textContent = error.message || String(error);

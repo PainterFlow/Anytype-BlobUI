@@ -60,6 +60,8 @@ const savedUpdaterSettings = [];
 const savedShortcuts = [];
 const releaseNotesScenarioArg = process.argv.find(argument => argument.startsWith('--release-notes-scenario='));
 const releaseNotesScenario = releaseNotesScenarioArg ? releaseNotesScenarioArg.split('=', 2)[1] : null;
+const loadErrorScenarioArg = process.argv.find(argument => argument.startsWith('--load-error-scenario='));
+const loadErrorScenario = loadErrorScenarioArg ? loadErrorScenarioArg.split('=', 2)[1] : null;
 const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'parse-error'
   ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'images: []' }
   : releaseNotesScenario === 'parse-error' ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'invalid: [' } : null;
@@ -76,6 +78,8 @@ let updaterCheckState = {
 };
 let updaterApplyState = { ...updaterCheckState };
 let selectedFolder = null;
+let recoveryCompleted = false;
+const recoveryRequests = [];
 let deferGeneralSave = false;
 let pendingGeneralSaveResolve = null;
 let rebuildListener = null;
@@ -150,8 +154,16 @@ const context = {
       }
       if (name === 'get_anytype_version') return 'Anytype 0.1.0';
       if (name === 'select_anytype_folder') return selectedFolder;
+      if (name === 'recover_install_directory') {
+        recoveryRequests.push(args.installDirectory);
+        recoveryCompleted = true;
+        Object.assign(updaterPrefs, { installDirectory: args.installDirectory });
+        return;
+      }
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
-      if (name === 'get_app_state') return {
+      if (name === 'get_app_state') {
+        if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
+        return {
         ready: true, theme: 'dark',
         apiPort: 31009, apiIp: '', hasSavedApiKey: true,
         defaultBannerPreview: 'data:image/png;base64,default-preview',
@@ -160,11 +172,15 @@ const context = {
           bannerImage: '',
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
         },
-      };
-      if (name === 'get_updater_state') return {
+        };
+      }
+      if (name === 'get_updater_state') {
+        if (loadErrorScenario === 'preferences' && !recoveryCompleted) throw new Error('The saved BlobUI updater settings are not valid JSON.');
+        return {
         ...updaterPrefs, currentVersion: '1.0.0', latestVersion: null, updateAvailable: false,
         lastCheckedAt: null, status: 'idle', message: null,
-      };
+        };
+      }
       if (name === 'get_release_notes') return releaseNotesPayload;
       if (name === 'get_adjacent_release_notes') {
         if (releaseNotesScenario === 'offline') throw new Error('offline');
@@ -330,6 +346,19 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('release-notes-dialog').children.push(...releaseNotesButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
+  if (loadErrorScenario) {
+    assert.match(status(), /not valid JSON/, 'The original state-load failure remains visible.');
+    assert.equal(element('install-directory').disabled, false, 'The folder picker remains available after a profile load error.');
+    assert.equal(element('start-on-login').disabled, true, 'Other updater controls stay disabled until the profile loads.');
+    selectedFolder = 'C:\\Recovered Anytype';
+    await element('install-directory').handlers.click();
+    assert.deepEqual(recoveryRequests, [selectedFolder], 'Selecting a valid profile invokes the recovery command.');
+    assert.equal(context.window.appReady, true, 'The selected profile is loaded after recovery.');
+    assert.equal(element('install-directory').value, selectedFolder);
+    assert.equal(status(), 'Settings loaded from this device.');
+    console.log(`Profile recovery after ${loadErrorScenario} load errors passed.`);
+    return;
+  }
   if (releaseNotesScenario) {
     assert(calls.includes('get_release_notes'), 'Startup checks for pending release notes.');
     if (releaseNotesScenario === 'parse-error') {

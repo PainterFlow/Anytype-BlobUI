@@ -96,6 +96,7 @@ pub fn install(
     app: &Path,
     version: &str,
     shortcut: bool,
+    retained_installer: &Path,
 ) -> Result<(), String> {
     let package = normalized(package)?;
     let anytype = normalized(anytype)?;
@@ -182,9 +183,11 @@ pub fn install(
             .map_err(|e| format!("Could not prepare app executable folder: {e}"))?;
         copy_file(&executable, &app_dist.join("blobui-settings.exe"))?;
         copy_file(&executable, &app.join("blobui-settings.exe"))?;
+        copy_file(retained_installer, &app.join("blobui-installer.exe"))
+            .map_err(|error| format!("Could not retain the installer: {error}"))?;
         fs::write(
             app.join(".blobui-app-managed-files.json"),
-            app_manifest_bytes(&package, version)?,
+            app_manifest_bytes(&package, version, true)?,
         )
         .map_err(|e| format!("Could not write app ownership manifest: {e}"))?;
         let pointer = serde_json::to_vec_pretty(&json!({"installDirectory": anytype}))
@@ -233,6 +236,7 @@ pub fn install_update(
     anytype: &Path,
     app: &Path,
     version: &str,
+    retained_installer: Option<&Path>,
 ) -> Result<(), String> {
     let package = normalized(package)?;
     let anytype = normalized(anytype)?;
@@ -246,6 +250,7 @@ pub fn install_update(
         return Err("Choose an app folder separate from Anytype and the extracted package.".into());
     }
     validate_update_target(&app, &anytype)?;
+    reject_links(&app.join("blobui-installer.exe"))?;
     reject_links(&package)?;
     validate_package(&package, version)?;
 
@@ -270,7 +275,7 @@ pub fn install_update(
     fill_compile_defaults(&mut data, &anytype);
 
     let css = compile_package_css(&package, &anytype, &data)?;
-    let mut changes = make_update_app_changes(&package, &app, version)?;
+    let mut changes = make_update_app_changes(&package, &app, version, retained_installer)?;
     changes.extend(make_install_changes(
         &package,
         &anytype,
@@ -435,6 +440,7 @@ fn make_update_app_changes(
     package: &Path,
     app: &Path,
     version: &str,
+    retained_installer: Option<&Path>,
 ) -> Result<Vec<FileChange>, String> {
     let manifest_path = app.join(".blobui-app-managed-files.json");
     let previous = read_app_manifest(&manifest_path)?;
@@ -443,7 +449,15 @@ fn make_update_app_changes(
         validate_app_key(key)?;
     }
 
-    let desired = files.keys().cloned().collect::<BTreeSet<_>>();
+    let mut desired = files.keys().cloned().collect::<BTreeSet<_>>();
+    let manage_installer = retained_installer.is_some()
+        || previous
+            .managed_files
+            .iter()
+            .any(|key| key == "blobui-installer.exe");
+    if manage_installer {
+        desired.insert("blobui-installer.exe".into());
+    }
     let mut changes = Vec::new();
     for key in &previous.managed_files {
         if !desired.contains(key) {
@@ -461,9 +475,18 @@ fn make_update_app_changes(
             ),
         });
     }
+    if let Some(source) = retained_installer {
+        changes.push(FileChange {
+            path: app.join("blobui-installer.exe"),
+            contents: Some(
+                fs::read(source)
+                    .map_err(|e| format!("Could not read the installer for retention: {e}"))?,
+            ),
+        });
+    }
     changes.push(FileChange {
         path: manifest_path,
-        contents: Some(app_manifest_bytes(package, version)?),
+        contents: Some(app_manifest_bytes(package, version, manage_installer)?),
     });
     Ok(changes)
 }
@@ -492,12 +515,20 @@ fn packaged_app_files(package: &Path) -> Result<BTreeMap<String, PathBuf>, Strin
     Ok(files)
 }
 
-fn app_manifest_bytes(package: &Path, version: &str) -> Result<Vec<u8>, String> {
+fn app_manifest_bytes(
+    package: &Path,
+    version: &str,
+    manage_installer: bool,
+) -> Result<Vec<u8>, String> {
     let files = packaged_app_files(package)?;
+    let mut managed_files = files.keys().cloned().collect::<BTreeSet<_>>();
+    if manage_installer {
+        managed_files.insert("blobui-installer.exe".into());
+    }
     let manifest = json!({
         "manifestVersion": 1,
         "releaseVersion": version,
-        "managedFiles": files.keys().cloned().collect::<BTreeSet<_>>(),
+        "managedFiles": managed_files,
     });
     let mut bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|_| "Could not prepare the app ownership manifest.".to_string())?;
@@ -551,6 +582,7 @@ fn validate_app_key(key: &str) -> Result<(), String> {
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")
         || !(key == "blobui-settings.exe"
+            || key == "blobui-installer.exe"
             || key == "blobui-release.json"
             || key == "Changelogs.md"
             || key == "Changelogs.yaml"
@@ -1708,11 +1740,43 @@ mod tests {
         fs::write(blob.join("assets/spacebanner/banner.png"), b"custom banner").unwrap();
         fs::write(anytype.join("keep.txt"), b"unrelated Anytype data").unwrap();
         let package = write_package(&root, "1.2.0", b"settings executable");
-        install(&package, &anytype, &app, "1.2.0", false).unwrap();
-        fs::write(app.join("blobui-installer.exe"), b"retained installer").unwrap();
+        let installer = root.join("installer.exe");
+        fs::write(&installer, b"retained installer").unwrap();
+        install(&package, &anytype, &app, "1.2.0", false, &installer).unwrap();
         fs::write(app.join("notes.txt"), b"unrelated app file").unwrap();
         let installed_css = fs::read(anytype.join("custom.css")).unwrap();
         (root, anytype, app, installed_css)
+    }
+
+    #[test]
+    fn failed_installer_retention_rolls_back_a_new_install() {
+        let root = fixture_root("initial-installer-retention-failure");
+        let anytype = root.join("Anytype data");
+        let app = root.join("BlobUI app");
+        let blob = anytype.join("blob");
+        fs::create_dir_all(&blob).unwrap();
+        let data = serde_json::to_vec(&default_data(&anytype)).unwrap();
+        fs::write(blob.join("data.json"), &data).unwrap();
+        fs::write(anytype.join("custom.css"), b"prior stylesheet").unwrap();
+        let package = write_package(&root, "1.2.0", b"settings executable");
+        let missing_installer = root.join("missing-installer.exe");
+
+        let error = install(
+            &package,
+            &anytype,
+            &app,
+            "1.2.0",
+            false,
+            &missing_installer,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Could not retain the installer"));
+        assert!(!app.exists());
+        assert_eq!(fs::read(blob.join("data.json")).unwrap(), data);
+        assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), b"prior stylesheet");
+        assert!(!blob.join("runtime/settings-app.exe").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1780,8 +1844,17 @@ mod tests {
         let preferences = root.join("updater.json");
         fs::write(&preferences, b"{\"automaticUpdatesEnabled\":true}").unwrap();
         let original_data = fs::read(blob.join("data.json")).unwrap();
+        let retained_installer = root.join("new-installer.exe");
+        fs::write(&retained_installer, b"updated retained installer").unwrap();
 
-        install_update(&package, &anytype, &app, "1.2.0").unwrap();
+        install_update(
+            &package,
+            &anytype,
+            &app,
+            "1.2.0",
+            Some(&retained_installer),
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read(app.join("blobui-settings.exe")).unwrap(),
@@ -1792,6 +1865,10 @@ mod tests {
             b"new-settings-executable"
         );
         assert_eq!(fs::read(app.join("notes.txt")).unwrap(), b"user app file");
+        assert_eq!(
+            fs::read(app.join("blobui-installer.exe")).unwrap(),
+            b"updated retained installer"
+        );
         assert_eq!(
             fs::read(blob.join("runtime/settings-app.exe")).unwrap(),
             b"new-settings-executable"
@@ -1821,6 +1898,44 @@ mod tests {
             serde_json::from_slice(&fs::read(app.join(".blobui-app-managed-files.json")).unwrap())
                 .unwrap();
         assert_eq!(app_manifest["releaseVersion"], "1.2.0");
+        assert!(app_manifest["managedFiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == "blobui-installer.exe"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_retained_installer_update_keeps_the_existing_install() {
+        let (root, anytype, app, original_css) =
+            installed_uninstall_fixture("retained-installer-failure");
+        let package = write_package(&root, "1.3.0", b"new-settings-executable");
+        let retained_installer = root.join("new-installer.exe");
+        fs::write(&retained_installer, b"new installer").unwrap();
+        let installer_target = app.join("blobui-installer.exe");
+        fs::remove_file(&installer_target).unwrap();
+        fs::create_dir(&installer_target).unwrap();
+        let original_data = fs::read(anytype.join("blob/data.json")).unwrap();
+        let original_executable = fs::read(app.join("blobui-settings.exe")).unwrap();
+
+        let error = install_update(
+            &package,
+            &anytype,
+            &app,
+            "1.3.0",
+            Some(&retained_installer),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("not a regular file"));
+        assert_eq!(
+            fs::read(app.join("blobui-settings.exe")).unwrap(),
+            original_executable
+        );
+        assert_eq!(fs::read(anytype.join("blob/data.json")).unwrap(), original_data);
+        assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), original_css);
+        assert!(installer_target.is_dir());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1839,7 +1954,7 @@ mod tests {
             b"{\"installDirectory\":\"C:/Elsewhere\"}",
         )
         .unwrap();
-        assert!(install_update(&package, &anytype, &app, "1.2.0").is_err());
+        assert!(install_update(&package, &anytype, &app, "1.2.0", None).is_err());
         assert_eq!(fs::read(app.join("blobui-settings.exe")).unwrap(), b"old");
         fs::remove_dir_all(root).unwrap();
     }

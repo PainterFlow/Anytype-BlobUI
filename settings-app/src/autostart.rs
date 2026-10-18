@@ -31,10 +31,24 @@ fn startup_command(executable: &str) -> String {
     format!("\"{executable}\"")
 }
 
+fn startup_entry_matches_executable(value: &str, executable: &std::path::Path) -> bool {
+    let command_path = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value);
+    if command_path.contains('"') {
+        return false;
+    }
+    let executable = executable.to_string_lossy();
+    command_path.eq_ignore_ascii_case(executable.as_ref())
+}
+
 #[cfg(windows)]
 mod windows {
-    use super::{startup_command, RUN_KEY_PATH, RUN_VALUE_NAME};
-    use std::mem::size_of_val;
+    use super::{
+        startup_command, startup_entry_matches_executable, RUN_KEY_PATH, RUN_VALUE_NAME,
+    };
+    use std::mem::{size_of, size_of_val};
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::{
         ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
@@ -104,7 +118,53 @@ mod windows {
             )
         };
         match status {
-            ERROR_SUCCESS => Ok(value_type == REG_SZ && size >= size_of::<u16>() as u32),
+            ERROR_SUCCESS => {
+                if value_type != REG_SZ
+                    || size < size_of::<u16>() as u32
+                    || size > 64 * 1024 + 8
+                    || size % 2 != 0
+                {
+                    return Ok(false);
+                }
+                let mut value = vec![0u16; size as usize / size_of::<u16>()];
+                let mut read_size = size;
+                let status = unsafe {
+                    RegQueryValueExW(
+                        key.0,
+                        wide(RUN_VALUE_NAME).as_ptr(),
+                        null(),
+                        &mut value_type,
+                        value.as_mut_ptr().cast(),
+                        &mut read_size,
+                    )
+                };
+                match status {
+                    ERROR_SUCCESS => {}
+                    ERROR_FILE_NOT_FOUND => return Ok(false),
+                    error => {
+                        return Err(registry_error(
+                            "read the per-user startup setting",
+                            error,
+                        ))
+                    }
+                }
+                if value_type != REG_SZ
+                    || read_size > size
+                    || read_size % 2 != 0
+                {
+                    return Ok(false);
+                }
+                value.truncate(read_size as usize / size_of::<u16>());
+                if let Some(end) = value.iter().position(|unit| *unit == 0) {
+                    value.truncate(end);
+                }
+                let command = String::from_utf16(&value)
+                    .map_err(|_| "The per-user startup setting is not valid text.".to_string())?;
+                let executable = std::env::current_exe().map_err(|error| {
+                    format!("Could not locate BlobUI Settings for startup: {error}")
+                })?;
+                Ok(startup_entry_matches_executable(&command, &executable))
+            }
             ERROR_FILE_NOT_FOUND => Ok(false),
             error => Err(registry_error("read the per-user startup setting", error)),
         }
@@ -181,12 +241,34 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
-    use super::startup_command;
+    use super::{startup_command, startup_entry_matches_executable};
+    use std::path::Path;
 
     #[test]
     fn startup_command_quotes_executable_paths_with_spaces_and_launches_normally() {
         let command = startup_command(r"C:\Program Files\BlobUI\settings-app.exe");
         assert_eq!(command, r#""C:\Program Files\BlobUI\settings-app.exe""#);
         assert!(!command.contains("--background"));
+    }
+
+    #[test]
+    fn startup_state_matches_only_the_running_settings_executable() {
+        let executable = Path::new(r"C:\Program Files\BlobUI\blobui-settings.exe");
+        assert!(startup_entry_matches_executable(
+            r#""C:\Program Files\BlobUI\blobui-settings.exe""#,
+            executable
+        ));
+        assert!(startup_entry_matches_executable(
+            r#""c:\program files\blobui\BLOBUI-SETTINGS.EXE""#,
+            executable
+        ));
+        assert!(!startup_entry_matches_executable(
+            r#""C:\Old BlobUI\blobui-settings.exe""#,
+            executable
+        ));
+        assert!(!startup_entry_matches_executable(
+            r#""C:\Program Files\BlobUI\blobui-settings.exe" --background"#,
+            executable
+        ));
     }
 }

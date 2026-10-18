@@ -411,6 +411,21 @@ async fn save_updater_settings(settings: updater::UpdaterSettingsDraft) -> Resul
 }
 
 #[tauri::command]
+async fn recover_install_directory(install_directory: String) -> Result<(), String> {
+    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _save_guard = save_guard;
+        let _updater_guard = updater_guard;
+        updater::recover_install_directory(
+            &app_data_directory(),
+            Path::new(&install_directory),
+        )
+    })
+    .await
+    .map_err(|_| "The profile recovery task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
 async fn select_anytype_folder(
     app: tauri::AppHandle,
     current_directory: Option<String>,
@@ -1438,6 +1453,7 @@ fn main() {
             acknowledge_release_notes,
             open_release_note_link,
             save_updater_settings,
+            recover_install_directory,
             select_anytype_folder,
             check_for_updates,
             apply_update,
