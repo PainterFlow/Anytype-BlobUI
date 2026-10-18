@@ -790,13 +790,19 @@ pub(crate) fn resolve_app_directory(
     local_app_data: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let install = validate_install_directory(install_directory)?;
+    let mut found_mismatched_pointer = false;
     if let Some(current_exe) = current_exe {
         reject_reparse_path(current_exe)?;
         for ancestor in current_exe.parent().into_iter().flat_map(Path::ancestors) {
             let pointer_path = ancestor.join(".blobui-install.json");
             match fs::symlink_metadata(&pointer_path) {
                 Ok(_) => {
-                    return validate_app_pointer(ancestor, &pointer_path, &install);
+                    if let Some(app) =
+                        validate_app_pointer(ancestor, &pointer_path, &install)?
+                    {
+                        return Ok(app);
+                    }
+                    found_mismatched_pointer = true;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(_) => {
@@ -811,18 +817,36 @@ pub(crate) fn resolve_app_directory(
     if let Some(local_app_data) = local_app_data {
         let app = local_app_data.join("Programs/BlobUI");
         let pointer = app.join(".blobui-install.json");
-        if fs::symlink_metadata(&pointer).is_ok() {
-            return validate_app_pointer(&app, &pointer, &install);
+        match fs::symlink_metadata(&pointer) {
+            Ok(_) => {
+                if let Some(app) = validate_app_pointer(&app, &pointer, &install)? {
+                    return Ok(app);
+                }
+                found_mismatched_pointer = true;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(
+                    "The installed BlobUI app pointer could not be inspected safely.".into(),
+                )
+            }
         }
     }
-    Err("The installed BlobUI app folder could not be found. Run the installer once before using self-updates.".into())
+    if found_mismatched_pointer {
+        Err("The installed BlobUI app belongs to a different Anytype folder.".into())
+    } else {
+        Err(
+            "The installed BlobUI app folder could not be found. Run the installer once before using self-updates."
+                .into(),
+        )
+    }
 }
 
 fn validate_app_pointer(
     app: &Path,
     pointer_path: &Path,
     install: &Path,
-) -> Result<PathBuf, String> {
+) -> Result<Option<PathBuf>, String> {
     reject_reparse_path(app)?;
     reject_reparse_path(pointer_path)?;
     let app = app
@@ -841,7 +865,7 @@ fn validate_app_pointer(
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(stored));
     if !same_path(&stored, install) {
-        return Err("The installed BlobUI app belongs to a different Anytype folder.".into());
+        return Ok(None);
     }
     for relative in [
         "blobui-settings.exe",
@@ -853,7 +877,50 @@ fn validate_app_pointer(
             return Err("The selected BlobUI app folder is missing a Settings executable.".into());
         }
     }
-    Ok(app)
+    Ok(Some(app))
+}
+
+pub(crate) fn cleanup_staged_installers(install_directory: &Path) {
+    let Ok(install) = validate_install_directory(install_directory) else {
+        return;
+    };
+    let staging = install.join("blob/staging");
+    if reject_reparse_path(&staging).is_err() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&staging) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".blobui-update-")
+        {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            continue;
+        }
+        let directory = entry.path();
+        if reject_reparse_path(&directory).is_err() {
+            continue;
+        }
+
+        // The staged executable may still be mapped by the installer that
+        // reopened Settings. Retry briefly until Windows releases that file.
+        for attempt in 0..20 {
+            match fs::remove_dir_all(&directory) {
+                Ok(()) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(_) if attempt < 19 => {
+                    std::thread::sleep(std::time::Duration::from_millis(250))
+                }
+                Err(_) => break,
+            }
+        }
+    }
 }
 
 struct StagedInstaller {

@@ -501,7 +501,11 @@ fn uninstall_blobui(app: tauri::AppHandle) -> Result<(), String> {
     let (_save, _updater) = acquire_save_and_updater_guards()?;
     let install = resolve_install_directory(&app_data_directory())?;
     let executable = env::current_exe().map_err(|e| e.to_string())?;
-    let directory = updater::resolve_app_directory(&install, Some(&executable), None)?;
+    let directory = updater::resolve_app_directory(
+        &install,
+        Some(&executable),
+        env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
+    )?;
     let installer = directory.join("blobui-installer.exe");
     storage::reject_reparse_path(&installer)?;
     if !installer.is_file() {
@@ -1484,6 +1488,11 @@ fn main() {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
             let app_data = app_data_directory();
+            if let Ok(install_directory) = resolve_install_directory(&app_data) {
+                let _ = std::thread::Builder::new()
+                    .name("blobui-staging-cleanup".into())
+                    .spawn(move || updater::cleanup_staged_installers(&install_directory));
+            }
             let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
             hotkey::start(app.handle().clone(), &shortcuts);
             if !env::args().any(|argument| argument == "--background") {
