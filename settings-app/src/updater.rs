@@ -81,6 +81,7 @@ pub struct UpdaterState {
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseNotes {
     pub version: String,
+    pub tag: String,
     pub markdown: String,
     pub image_manifest: String,
 }
@@ -296,7 +297,7 @@ pub fn get_release_notes(
     }
     let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
     let image_manifest = read_release_text(&runtime_directory.join("Changelogs.yaml"), MAX_RELEASE_NOTES_BYTES)?;
-    Ok(Some(ReleaseNotes { version, markdown, image_manifest }))
+    Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
 }
 
 pub fn get_latest_release_notes(
@@ -319,24 +320,128 @@ pub fn get_latest_release_notes(
         "images: []\n".into()
     };
     let version = current_version(install_directory, Some(runtime_directory))?;
-    Ok(Some(ReleaseNotes { version, markdown, image_manifest }))
+    Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
 }
 
-pub fn release_note_image(runtime_directory: &Path, source: &str) -> Result<String, String> {
-    let relative = source
-        .strip_prefix("assets/changelogs/")
+pub fn get_adjacent_release_notes(version: &str, older: bool) -> Result<Option<ReleaseNotes>, String> {
+    let Some(current) = parse_version(version) else {
+        return Err("The release notes version is invalid.".into());
+    };
+    let mut releases = Vec::new();
+    for page in 1..=10 {
+        let response = http_get(
+            "api.github.com",
+            &format!("/repos/{OWNER}/{REPOSITORY}/releases?per_page=100&page={page}"),
+            "application/vnd.github+json",
+            MAX_RELEASE_JSON_BYTES,
+        )?;
+        if response.status != 200 {
+            return Err(format!("GitHub release history returned HTTP {}.", response.status));
+        }
+        let page_releases: Value = serde_json::from_slice(&response.body)
+            .map_err(|_| "GitHub returned an invalid release history.".to_string())?;
+        let page_releases = page_releases.as_array()
+            .ok_or_else(|| "GitHub returned an invalid release history.".to_string())?;
+        let count = page_releases.len();
+        releases.extend(page_releases.iter().cloned());
+        if count < 100 { break; }
+    }
+    let mut versions = releases.iter().filter_map(|release| {
+        let tag = release.get("tag_name")?.as_str()?;
+        let parsed = parse_version(tag)?;
+        if parsed.pre.is_empty()
+            && tag.len() <= 64
+            && tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'v'))
+        {
+            Some((parsed, tag.to_string()))
+        } else {
+            None
+        }
+    }).collect::<Vec<_>>();
+    versions.sort_by(|left, right| left.0.cmp(&right.0));
+    let selected = if older {
+        versions.iter().filter(|(candidate, _)| candidate < &current).max_by(|left, right| left.0.cmp(&right.0))
+    } else {
+        versions.iter().filter(|(candidate, _)| candidate > &current).min_by(|left, right| left.0.cmp(&right.0))
+    };
+    let Some((_, tag)) = selected else { return Ok(None); };
+    let release = releases.iter().find(|release| release.get("tag_name").and_then(Value::as_str) == Some(tag.as_str()));
+    fetch_release_notes_for_tag(tag, release).map(Some)
+}
+
+pub fn release_note_history_image(tag: &str, source: &str) -> Result<String, String> {
+    if tag.is_empty() || tag.len() > 64 || parse_version(tag).is_none()
+        || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'v'))
+    { return Err("The release notes version is invalid.".into()); }
+    let relative = release_image_relative_path(source)?;
+    let response = http_get(
+        "raw.githubusercontent.com",
+        &format!("/{OWNER}/{REPOSITORY}/{tag}/assets/changelogs/{relative}"),
+        "image/png,image/jpeg,image/gif,image/webp",
+        MAX_RELEASE_IMAGE_BYTES as usize,
+    )?;
+    if response.status != 200 {
+        return Err("The release note image could not be read from GitHub.".into());
+    }
+    encode_release_image(&response.body, &relative)
+}
+
+fn fetch_release_notes_for_tag(tag: &str, release: Option<&Value>) -> Result<ReleaseNotes, String> {
+    if tag.is_empty() || tag.len() > 64
+        || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'v'))
+    {
+        return Err("The GitHub release tag is unsafe.".into());
+    }
+    let markdown = fetch_raw_release_file(tag, "Changelogs.md", MAX_RELEASE_NOTES_BYTES as usize)
+        .or_else(|_| release.and_then(|item| item.get("body").and_then(Value::as_str).map(str::to_string))
+            .ok_or_else(|| "The GitHub release notes could not be read.".to_string()))?;
+    if markdown.trim().is_empty() {
+        return Err("The GitHub release notes are empty.".into());
+    }
+    let image_manifest = fetch_raw_release_file(tag, "Changelogs.yaml", MAX_RELEASE_NOTES_BYTES as usize)
+        .unwrap_or_else(|_| "images: []\n".into());
+    Ok(ReleaseNotes { version: parse_version(tag).unwrap().to_string(), tag: tag.to_string(), markdown, image_manifest })
+}
+
+fn fetch_raw_release_file(tag: &str, filename: &str, max_bytes: usize) -> Result<String, String> {
+    let response = http_get(
+        "raw.githubusercontent.com",
+        &format!("/{OWNER}/{REPOSITORY}/{tag}/{filename}"),
+        "text/plain",
+        max_bytes,
+    )?;
+    if response.status != 200 {
+        return Err(format!("GitHub returned HTTP {} for the release notes.", response.status));
+    }
+    String::from_utf8(response.body).map_err(|_| "The GitHub release notes are not valid UTF-8.".into())
+}
+
+fn release_image_relative_path(source: &str) -> Result<&str, String> {
+    let relative = source.strip_prefix("assets/changelogs/")
         .ok_or_else(|| "The release note image source is outside the changelog image folder.".to_string())?;
     let segments = relative.split('/').collect::<Vec<_>>();
-    if segments.is_empty()
-        || segments.iter().any(|segment| {
-            segment.is_empty()
-                || *segment == "."
-                || *segment == ".."
-                || !segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
+    if segments.is_empty() || segments.iter().any(|segment| segment.is_empty() || *segment == "." || *segment == ".."
+        || !segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')))
     {
         return Err("The release note image source contains an unsafe path.".into());
     }
+    Ok(relative)
+}
+
+fn encode_release_image(bytes: &[u8], filename: &str) -> Result<String, String> {
+    let extension = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
+        "jpg" | "jpeg" if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "image/jpeg",
+        "gif" if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "image/gif",
+        "webp" if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => "image/webp",
+        _ => return Err("The release note image bytes do not match a supported image format.".into()),
+    };
+    Ok(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+}
+
+pub fn release_note_image(runtime_directory: &Path, source: &str) -> Result<String, String> {
+    let relative = release_image_relative_path(source)?;
     let path = runtime_directory.join("assets/changelogs").join(relative);
     storage::reject_reparse_path(&path)?;
     let metadata = fs::metadata(&path)
@@ -350,14 +455,7 @@ pub fn release_note_image(runtime_directory: &Path, source: &str) -> Result<Stri
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "The release note image format is unsupported.".to_string())?;
     let bytes = fs::read(&path).map_err(|_| "The release note image could not be read.".to_string())?;
-    let mime = match extension.as_str() {
-        "png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
-        "jpg" | "jpeg" if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "image/jpeg",
-        "gif" if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "image/gif",
-        "webp" if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => "image/webp",
-        _ => return Err("The release note image bytes do not match a supported image format.".into()),
-    };
-    Ok(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+    encode_release_image(&bytes, &extension)
 }
 
 pub fn acknowledge_release_notes(

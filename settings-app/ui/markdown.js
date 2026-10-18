@@ -217,7 +217,7 @@
     };
     const parser = new root.marked.Marked({
       gfm: true,
-      breaks: false,
+      breaks: true,
       pedantic: false,
       renderer,
       extensions: [{

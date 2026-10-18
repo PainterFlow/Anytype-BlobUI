@@ -311,6 +311,20 @@ async fn get_latest_release_notes() -> Result<Option<updater::ReleaseNotes>, Str
 }
 
 #[tauri::command]
+async fn get_adjacent_release_notes(version: String, older: bool) -> Result<Option<updater::ReleaseNotes>, String> {
+    tauri::async_runtime::spawn_blocking(move || updater::get_adjacent_release_notes(&version, older))
+        .await
+        .map_err(|_| "The release history task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_history_image(tag: String, source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || updater::release_note_history_image(&tag, &source))
+        .await
+        .map_err(|_| "The historical release note image task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
 async fn get_release_note_image(source: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let app_data = app_data_directory();
@@ -1413,6 +1427,8 @@ fn main() {
             get_updater_state,
             get_release_notes,
             get_latest_release_notes,
+            get_adjacent_release_notes,
+            get_release_note_history_image,
             get_anytype_version,
             get_release_note_image,
             acknowledge_release_notes,

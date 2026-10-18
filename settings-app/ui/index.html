@@ -446,19 +446,12 @@
       </section>
     </div>
     <div id="release-notes-backdrop" class="confirm-backdrop" hidden>
-      <section id="release-notes-dialog" class="confirm-dialog release-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="release-notes-title" tabindex="-1">
-        <button id="release-notes-close" class="confirm-close" type="button" aria-label="Close release notes" title="Close">
-          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
-        </button>
-        <header class="release-notes-heading">
-          <span id="release-notes-version" class="release-notes-version"></span>
-          <h2 id="release-notes-title">What’s new in BlobUI?</h2>
-          <p>BlobUI has been updated. Here are the release notes.</p>
-        </header>
+      <section id="release-notes-dialog" class="confirm-dialog release-notes-dialog" role="dialog" aria-modal="true" aria-label="Changelog" tabindex="-1">
         <p id="release-notes-image-warning" class="release-notes-image-warning" role="status" hidden>Some release note images could not be loaded.</p>
         <div id="release-notes-content" class="release-notes-content markdown-content" role="region" aria-label="Release notes" tabindex="0"></div>
-        <div class="confirm-actions release-notes-actions">
-          <button id="release-notes-done" class="confirm-save" type="button">Done</button>
+        <div class="release-notes-navigation" aria-label="Changelog navigation">
+          <button id="release-notes-previous" class="release-notes-nav-button" type="button" disabled>Previous</button>
+          <button id="release-notes-after" class="release-notes-nav-button" type="button" hidden>After</button>
         </div>
       </section>
     </div>
@@ -470,13 +463,14 @@
       </section>
     </div>
     <div id="keybinds-backdrop" class="confirm-backdrop" hidden>
-      <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" tabindex="-1">
-        <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keybinds"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+      <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" aria-describedby="keybinds-description" tabindex="-1">
+        <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keyboard shortcuts" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
         <h2 id="keybinds-title">Keyboard shortcuts</h2>
-        <p>Choose a shortcut and press a key combination to rebind it. Changes are saved automatically.</p>
-        <div id="keybind-list" class="keybind-list"></div>
-        <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>
-        <div class="confirm-actions"><button id="keybinds-done" class="confirm-save" type="button">Done</button></div>
+        <div class="keybinds-content">
+          <p id="keybinds-description">Click a shortcut to change it. Changes are saved automatically.</p>
+          <div id="keybind-list" class="keybind-list"></div>
+          <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>
+        </div>
       </section>
     </div>
     <script src="./vendor/marked.umd.js"></script>

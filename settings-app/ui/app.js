@@ -101,7 +101,14 @@
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
   const releaseNotesContent = el("release-notes-content");
+  const releaseNotesPrevious = el("release-notes-previous");
+  const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
+  let displayedReleaseNotes = null;
+  let previousReleaseNotes = null;
+  let newerReleaseNotes = [];
+  let releaseNotesHistoryRequest = 0;
+  let releaseNotesNavigationBusy = false;
   let acknowledgeReleaseNotesOnClose = true;
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
@@ -109,7 +116,7 @@
   const releaseNotesModal = window.BlobUI.createModalController({
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
-    initialFocus: el("release-notes-done"),
+    initialFocus: el("release-notes-dialog"),
     fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
@@ -265,6 +272,7 @@
     return update;
   }
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
+  const updateReleaseNotesScrollbar = setupScrollbar(el("release-notes-dialog"), "#release-notes-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
   const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
   const updateLogsScrollbar = setupScrollbar(logEntries, ".log-entry");
@@ -567,6 +575,108 @@
     checkForUpdates(true);
   }
 
+  async function renderReleaseNotes(notes, historical = false) {
+    const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
+    const entries = Object.entries(manifest);
+    const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
+      const args = { source: image.src };
+      const src = historical
+        ? await invoke("get_release_note_history_image", { ...args, tag: notes.tag || notes.version })
+        : await invoke("get_release_note_image", args);
+      return [alias, { src, alt: image.alt }];
+    }));
+    const images = Object.create(null);
+    for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
+    releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
+    el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
+    el("release-notes-dialog").scrollTop = 0;
+    updateReleaseNotesScrollbar();
+  }
+
+  function prefetchPreviousReleaseNotes() {
+    const request = ++releaseNotesHistoryRequest;
+    const version = displayedReleaseNotes && displayedReleaseNotes.version;
+    previousReleaseNotes = null;
+    releaseNotesPrevious.disabled = true;
+    releaseNotesPrevious.title = "Checking for earlier release notes…";
+    if (!version || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+      releaseNotesPrevious.title = "Release history is unavailable while offline";
+      updateReleaseNotesNavigation();
+      return;
+    }
+    invoke("get_adjacent_release_notes", { version, older: true }).then((notes) => {
+      if (request !== releaseNotesHistoryRequest) return;
+      previousReleaseNotes = notes || null;
+      releaseNotesPrevious.title = previousReleaseNotes ? "Load earlier release notes" : "No earlier release notes are available";
+      updateReleaseNotesNavigation();
+    }).catch(() => {
+      if (request !== releaseNotesHistoryRequest) return;
+      previousReleaseNotes = null;
+      releaseNotesPrevious.title = "Release history is unavailable while offline";
+      updateReleaseNotesNavigation();
+    });
+  }
+
+  function updateReleaseNotesNavigation() {
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    releaseNotesPrevious.disabled = releaseNotesNavigationBusy || offline || !previousReleaseNotes;
+    releaseNotesAfter.disabled = releaseNotesNavigationBusy || offline || newerReleaseNotes.length === 0;
+    releaseNotesAfter.hidden = newerReleaseNotes.length === 0;
+  }
+
+  async function displayReleaseNotes(notes, historical = false) {
+    await renderReleaseNotes(notes, historical);
+    displayedReleaseNotes = notes;
+    prefetchPreviousReleaseNotes();
+    updateReleaseNotesNavigation();
+  }
+
+  releaseNotesPrevious.addEventListener("click", async () => {
+    if (!previousReleaseNotes || releaseNotesPrevious.disabled || !displayedReleaseNotes || releaseNotesNavigationBusy) return;
+    const older = previousReleaseNotes;
+    const newer = displayedReleaseNotes;
+    releaseNotesNavigationBusy = true;
+    updateReleaseNotesNavigation();
+    newerReleaseNotes.push(newer);
+    try {
+      await displayReleaseNotes(older, true);
+    } catch (error) {
+      newerReleaseNotes.pop();
+      displayedReleaseNotes = newer;
+      setStatus("Could not display the previous changelog. " + (error.message || String(error)), "error");
+    } finally {
+      releaseNotesNavigationBusy = false;
+      updateReleaseNotesNavigation();
+    }
+  });
+
+  releaseNotesAfter.addEventListener("click", async () => {
+    if (!newerReleaseNotes.length || releaseNotesAfter.disabled || releaseNotesNavigationBusy) return;
+    const newer = newerReleaseNotes.pop();
+    const current = displayedReleaseNotes;
+    releaseNotesNavigationBusy = true;
+    updateReleaseNotesNavigation();
+    try {
+      await displayReleaseNotes(newer, newer.version !== releaseNotesVersion);
+    } catch (error) {
+      newerReleaseNotes.push(newer);
+      displayedReleaseNotes = current;
+      setStatus("Could not display the newer changelog. " + (error.message || String(error)), "error");
+    } finally {
+      releaseNotesNavigationBusy = false;
+      updateReleaseNotesNavigation();
+    }
+  });
+
+  window.addEventListener("offline", () => {
+    releaseNotesHistoryRequest += 1;
+    updateReleaseNotesNavigation();
+  });
+  window.addEventListener("online", () => {
+    if (releaseNotesModal.isOpen()) prefetchPreviousReleaseNotes();
+    updateReleaseNotesNavigation();
+  });
+
   async function showReleaseNotesOrContinue() {
     if (!window.appReady || releaseNotesLoading || releaseNotesLoaded) return false;
     releaseNotesLoading = true;
@@ -582,21 +692,9 @@
         || typeof notes.markdown !== "string" || typeof notes.imageManifest !== "string") {
         throw new TypeError("The release notes payload is incomplete.");
       }
-      const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
-      const imageEntries = Object.entries(manifest);
-      const imageResults = await Promise.allSettled(imageEntries.map(async ([alias, image]) => {
-        const src = await invoke("get_release_note_image", { source: image.src });
-        return [alias, { src, alt: image.alt }];
-      }));
-      const images = Object.create(null);
-      for (const result of imageResults) {
-        if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
-      }
-      const rendered = window.BlobUI.Markdown.render(notes.markdown, { images });
-      releaseNotesContent.innerHTML = rendered;
-      el("release-notes-image-warning").hidden = imageResults.every((result) => result.status === "fulfilled");
-      el("release-notes-version").textContent = "Version " + String(notes.version || "");
       releaseNotesVersion = String(notes.version || "");
+      newerReleaseNotes = [];
+      await displayReleaseNotes(notes);
       releaseNotesFailed = false;
       releaseNotesModal.open();
       if (!releaseNotesModal.isOpen()) throw new Error("The release notes dialog could not be opened.");
@@ -620,14 +718,9 @@
       if (typeof notes.version !== "string" || typeof notes.markdown !== "string" || typeof notes.imageManifest !== "string") {
         throw new TypeError("The latest changelog is incomplete.");
       }
-      const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
-      const results = await Promise.allSettled(Object.entries(manifest).map(async ([alias, item]) => [alias, { src: await invoke("get_release_note_image", { source: item.src }), alt: item.alt }]));
-      const images = Object.create(null);
-      for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
-      releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
-      el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
-      el("release-notes-version").textContent = "Version " + notes.version;
       releaseNotesVersion = notes.version;
+      newerReleaseNotes = [];
+      await displayReleaseNotes(notes);
       acknowledgeReleaseNotesOnClose = false;
       releaseNotesModal.open();
     } catch (error) {
@@ -693,7 +786,7 @@
       mergeUpdaterState({ status: "error", message: error.message || String(error), updateAvailable: true });
       setStatus("Could not install the update. " + (error.message || String(error)), "error");
     } finally {
-      updaterBusyOperation = fromAutomaticCheck ? "checking" : "";
+      updaterBusyOperation = "";
       renderUpdaterState();
     }
   }
@@ -785,13 +878,29 @@
       row.className = "keybind-row";
       const name = document.createElement("span");
       name.className = "keybind-label";
+      name.id = `keybind-label-${action}`;
       name.textContent = label;
       const button = document.createElement("button");
       button.className = "keybind-button";
       button.type = "button";
       button.dataset.shortcutAction = action;
+      button.setAttribute("aria-labelledby", `${name.id} keybind-button-${action}`);
+      button.id = `keybind-button-${action}`;
       button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
-      button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : (binding ? formatShortcut(binding) : "Unavailable");
+      if (shortcutCaptureAction === action || !binding) {
+        button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : "Unavailable";
+      } else {
+        const shortcut = formatShortcut(binding);
+        const symbols = { Shift: "⇧", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" };
+        button.setAttribute("aria-label", shortcut);
+        shortcut.split("+").forEach((key) => {
+          const keycap = document.createElement("kbd");
+          keycap.className = "keybind-keycap";
+          keycap.setAttribute("aria-hidden", "true");
+          keycap.textContent = symbols[key] || key;
+          button.append(keycap);
+        });
+      }
       button.addEventListener("click", () => beginShortcutCapture(action));
       row.append(name, button);
       list.append(row);
@@ -1627,9 +1736,6 @@
     else checkForUpdates(false);
   });
   updateNowButton.addEventListener("click", () => applyUpdate());
-  ["release-notes-close", "release-notes-done"].forEach((id) => {
-    el(id).addEventListener("click", () => releaseNotesModal.close());
-  });
   releaseNotesContent.addEventListener("click", (event) => {
     const link = event.target && typeof event.target.closest === "function" ? event.target.closest("a") : null;
     if (!link || !releaseNotesContent.contains(link)) return;
@@ -1722,7 +1828,7 @@
     keybindModal.open();
   });
   el("help-error-close").addEventListener("click", () => helpErrorModal.close());
-  ["keybinds-close", "keybinds-done"].forEach((id) => el(id).addEventListener("click", () => keybindModal.close()));
+  el("keybinds-close").addEventListener("click", () => keybindModal.close());
   document.addEventListener("pointerdown", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
   });

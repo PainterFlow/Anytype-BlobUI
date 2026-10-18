@@ -44,6 +44,7 @@ test('Markdown rendering preserves formatting and rejects active content', {
     });
     const page = await context.newPage();
     await page.setContent('<!doctype html><main id="content" class="markdown-content"></main>');
+    await page.addStyleTag({ path: path.join(workspace, 'settings-app/ui/styles.css') });
     await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/vendor/marked.umd.js') });
     await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/markdown.js') });
 
@@ -71,6 +72,11 @@ test('Markdown rendering preserves formatting and rejects active content', {
         '| --- | --- |',
         '| Alpha | 1 |',
         '',
+        'First changelog line',
+        'Second changelog line',
+        '',
+        '---',
+        '',
         '@shot',
         '',
         '<img src="@shot" alt="Raw image">',
@@ -86,6 +92,16 @@ test('Markdown rendering preserves formatting and rejects active content', {
       container.style.width = '280px';
       container.style.height = '150px';
       container.style.overflow = 'auto';
+      const regularParagraph = document.createElement('div');
+      regularParagraph.className = 'confirm-dialog';
+      regularParagraph.innerHTML = '<div class="markdown-content"><p>Regular notes text</p><hr></div>';
+      document.body.append(regularParagraph);
+      const textProbe = document.createElement('span');
+      textProbe.style.color = 'var(--text)';
+      regularParagraph.append(textProbe);
+      const secondaryProbe = document.createElement('span');
+      secondaryProbe.style.color = 'var(--text-secondary)';
+      regularParagraph.append(secondaryProbe);
       const table = document.createElement('table');
       table.innerHTML = '<tbody><tr><td>' + 'x'.repeat(200) + '</td></tr></tbody>';
       container.append(table);
@@ -103,6 +119,13 @@ test('Markdown rendering preserves formatting and rejects active content', {
         eventAttributes: [...container.querySelectorAll('*')].some(element => [...element.attributes].some(attribute => attribute.name.startsWith('on'))),
         unsafeLinks: [...container.querySelectorAll('a')].some(anchor => /^(?:javascript|file):/i.test(anchor.getAttribute('href') || '')),
         overflow: container.scrollWidth > container.clientWidth,
+        lineBreak: [...container.querySelectorAll('.markdown-content p')].find(paragraph => paragraph.textContent.includes('First changelog line'))?.innerHTML,
+        paragraphColor: getComputedStyle(regularParagraph.querySelector('p')).color,
+        expectedTextColor: getComputedStyle(textProbe).color,
+        ruleStyle: getComputedStyle(regularParagraph.querySelector('hr')).borderTopStyle,
+        ruleWidth: getComputedStyle(regularParagraph.querySelector('hr')).borderTopWidth,
+        ruleColor: getComputedStyle(regularParagraph.querySelector('hr')).borderTopColor,
+        secondaryColor: getComputedStyle(secondaryProbe).color,
       };
     });
 
@@ -118,6 +141,11 @@ test('Markdown rendering preserves formatting and rejects active content', {
     assert.equal(outcome.eventAttributes, false, 'Event-handler attributes must be removed.');
     assert.equal(outcome.unsafeLinks, false, 'Script and file links must be removed.');
     assert.equal(outcome.overflow, true, 'Wide tables should remain horizontally scrollable.');
+    assert.match(outcome.lineBreak, /First changelog line<br>Second changelog line/, 'Single source newlines should remain visible as line breaks.');
+    assert.equal(outcome.paragraphColor, outcome.expectedTextColor, 'Markdown paragraphs should use the normal text color inside confirm dialogs.');
+    assert.equal(outcome.ruleStyle, 'solid');
+    assert.equal(outcome.ruleWidth, '1px', 'Markdown horizontal rules should be one pixel thick.');
+    assert.notEqual(outcome.ruleColor, outcome.secondaryColor, 'Markdown horizontal rules should use a subdued theme-derived gray.');
 
     const invalidManifests = [
       'images:\n  - id: escape\n    src: assets/changelogs/../outside.png\n',

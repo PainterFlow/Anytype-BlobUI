@@ -166,6 +166,13 @@ const context = {
         lastCheckedAt: null, status: 'idle', message: null,
       };
       if (name === 'get_release_notes') return releaseNotesPayload;
+      if (name === 'get_adjacent_release_notes') {
+        if (releaseNotesScenario === 'offline') throw new Error('offline');
+        if (releaseNotesScenario === 'history' && args.older) return {
+          version: '1.1.0', tag: 'v1.1.0', markdown: '# Older fixture notes', imageManifest: 'images: []',
+        };
+        return null;
+      }
       if (name === 'get_release_note_image') return 'data:image/png;base64,fixture';
       if (name === 'acknowledge_release_notes') {
         releaseNotesAcknowledgements.push(args.version);
@@ -310,7 +317,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
-  const releaseNotesButtons = ['release-notes-close', 'release-notes-done'];
+  const releaseNotesButtons = ['release-notes-previous', 'release-notes-after'];
   [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
   element('api-key-removal-dialog').hidden = false;
   element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
@@ -335,16 +342,40 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     }
 
     assert.equal(element('release-notes-backdrop').hidden, false, 'Pending notes open the release notes dialog after startup.');
-    assert.equal(activeElement, element('release-notes-done'), 'The release notes dialog opens with Done focused.');
+    assert.equal(activeElement, element('release-notes-dialog'), 'The release notes dialog opens with its scrollable content focused.');
+    await flush();
+    await flush();
+    if (releaseNotesScenario === 'offline') {
+      assert.equal(element('release-notes-previous').disabled, true, 'History navigation stays disabled when GitHub cannot be reached.');
+    }
+    if (releaseNotesScenario === 'history') {
+      assert.equal(element('release-notes-previous').disabled, false, 'An available older release enables Previous.');
+      element('release-notes-previous').handlers.click();
+      await flush();
+      await flush();
+      assert.equal(element('release-notes-content').innerHTML, '<p># Older fixture notes</p>', 'Previous loads the earlier release notes.');
+      assert.equal(element('release-notes-after').hidden, false, 'Older notes expose the After navigation button.');
+      context.navigator.onLine = false;
+      context.window.handlers.offline();
+      assert.equal(element('release-notes-previous').disabled, true, 'Going offline disables cached Previous navigation.');
+      assert.equal(element('release-notes-after').disabled, true, 'Going offline disables After navigation.');
+      context.navigator.onLine = true;
+      context.window.handlers.online();
+      await flush();
+      assert.equal(element('release-notes-after').disabled, false, 'Reconnecting enables After navigation.');
+      element('release-notes-after').handlers.click();
+      await flush();
+      await flush();
+      assert.equal(element('release-notes-content').innerHTML, '<p># Fixture release notes</p>', 'After returns to the newer notes.');
+    }
     assert.deepEqual(releaseNotesAcknowledgements, [], 'Opening the dialog does not acknowledge the notes.');
     const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
     assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
     await updaterInterval.callback();
     assert.equal(calls.filter(name => name === 'check_for_updates').length, 0, 'Automatic update checks wait until the release notes are dismissed.');
 
-    if (releaseNotesScenario === 'done') element('release-notes-done').handlers.click();
-    else if (releaseNotesScenario === 'escape') context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
-    else if (releaseNotesScenario === 'backdrop') element('release-notes-backdrop').handlers.pointerdown({ target: element('release-notes-backdrop') });
+    if (releaseNotesScenario === 'backdrop') element('release-notes-backdrop').handlers.pointerdown({ target: element('release-notes-backdrop') });
+    else if (['escape', 'history', 'offline'].includes(releaseNotesScenario)) context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
     else throw new Error(`Unknown release notes scenario: ${releaseNotesScenario}`);
     assert.deepEqual(releaseNotesAcknowledgements, [], 'Closing starts the modal transition but does not acknowledge early.');
     finishReleaseNotesTransition();
@@ -448,7 +479,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(JSON.stringify(savedShortcuts[0].find(binding => binding.action === 'showOnboarding')),
     JSON.stringify({ action: 'showOnboarding', code: 'KeyZ', ctrl: true, alt: true, shift: false, meta: false }));
   assert.equal(element('keybind-status').textContent, 'Shortcut saved.');
-  element('keybinds-done').handlers.click();
+  element('keybinds-close').handlers.click();
   finishRemovalTransition();
 
   const realApplyCallsBeforeSimulation = calls.filter(name => name === 'apply_update').length;
@@ -708,7 +739,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   let altRPrevented = false;
   const saveCallsBeforeAltR = calls.filter(name => name === 'save_settings').length;
   await context.document.handlers.keydown({
-    key: 'r', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
+    key: 'r', code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
     preventDefault() { altRPrevented = true; },
   });
   assert(altRPrevented, 'Alt+R must stay out of the focused input.');
@@ -750,7 +781,10 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
 
   let prevented = false;
-  const quitKey = { key: 'q', ctrlKey: true, preventDefault() { prevented = true; } };
+  const quitKey = {
+    key: 'q', code: 'KeyQ', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, repeat: false,
+    preventDefault() { prevented = true; },
+  };
   context.document.handlers.keydown(quitKey);
   assert.equal(calls.at(-1), 'quit_app');
   assert(prevented);
@@ -771,11 +805,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.document.activeElement = element('font-family');
   const beforeOnboarding = calls.length;
   const unsavedFont = element('font-family').value;
-  const debugKey = { key: 'F8', preventDefault() {} };
+  const debugKey = {
+    key: 'z', code: 'KeyZ', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false, repeat: false,
+    preventDefault() {},
+  };
   context.document.handlers.keydown({ ...debugKey, repeat: true });
   assert.equal(onboarding.hidden, true, 'Key repeat must not open onboarding.');
-  context.document.handlers.keydown({ ...debugKey, ctrlKey: true });
-  assert.equal(onboarding.hidden, true, 'Modified F8 must not open onboarding.');
+  context.document.handlers.keydown({ ...debugKey, metaKey: true });
+  assert.equal(onboarding.hidden, true, 'Modified shortcuts must not open onboarding.');
   context.document.handlers.keydown(debugKey);
   assert.equal(onboarding.hidden, false);
   assert.equal(welcome.hidden, false);

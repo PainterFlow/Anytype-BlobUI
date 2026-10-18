@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const harness = path.join(__dirname, 'ui-state.test.cjs');
 
-for (const scenario of ['done', 'escape', 'backdrop', 'parse-error']) {
+for (const scenario of ['escape', 'backdrop', 'history', 'offline', 'parse-error']) {
   test(`release notes ${scenario} lifecycle`, () => {
     const result = spawnSync(process.execPath, [harness, `--release-notes-scenario=${scenario}`], {
       encoding: 'utf8',
