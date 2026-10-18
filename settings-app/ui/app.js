@@ -1174,13 +1174,13 @@
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
-      editSession.commit();
     } catch (error) {
       window.appReady = false;
       stateError = error;
     }
 
     await loadUpdaterState();
+    if (!stateError) editSession.commit();
     if (stateError) {
       setStatus(stateError.message || String(stateError), "error");
       updateSaveButton();
