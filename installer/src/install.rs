@@ -18,6 +18,9 @@ pub fn uninstall(app: &Path, anytype: &Path) -> Result<(), String> {
     let runtime = read_uninstall_manifest(&anytype.join("blob/.blobui-managed-files.json"))?;
     let mut changes = Vec::new();
     for key in app_manifest.managed_files {
+        if key == "blobui-installer.exe" {
+            continue;
+        }
         changes.push(FileChange {
             path: app.join(key),
             contents: None,
