@@ -162,6 +162,7 @@ pub fn install(
     let app_preexisted = app.exists();
     let mut app_created = false;
     let mut shortcut_created = false;
+    let mut previous_shortcut = None;
     let install_result = (|| {
         fs::create_dir_all(&app).map_err(|e| format!("Could not create app folder: {e}"))?;
         app_created = true;
@@ -194,7 +195,8 @@ pub fn install(
         let changes =
             make_install_changes(&package, &anytype, version, &css, &data_bytes, !data_exists)?;
         if shortcut {
-            create_shortcut(&app_dist.join("blobui-settings.exe"), &app)?;
+            previous_shortcut =
+                create_shortcut(&app_dist.join("blobui-settings.exe"), &app, &anytype)?;
             shortcut_created = true;
         }
         commit_update(changes)?;
@@ -202,7 +204,12 @@ pub fn install(
     })();
     if let Err(error) = install_result {
         if shortcut_created {
-            let _ = fs::remove_file(start_menu_shortcut_path());
+            let shortcut_path = start_menu_shortcut_path();
+            if let Some(previous) = previous_shortcut {
+                let _ = fs::write(shortcut_path, previous);
+            } else {
+                let _ = fs::remove_file(shortcut_path);
+            }
         }
         if app_created {
             if reject_links(&app).is_ok() {
@@ -1359,8 +1366,17 @@ fn fill_compile_defaults(data: &mut Value, anytype: &Path) {
 }
 
 #[cfg(windows)]
-fn create_shortcut(target: &Path, working_directory: &Path) -> Result<(), String> {
-    create_shortcut_at(target, working_directory, &start_menu_shortcut_path())
+fn create_shortcut(
+    target: &Path,
+    working_directory: &Path,
+    install_directory: &Path,
+) -> Result<Option<Vec<u8>>, String> {
+    create_shortcut_at(
+        target,
+        working_directory,
+        &start_menu_shortcut_path(),
+        install_directory,
+    )
 }
 
 #[cfg(windows)]
@@ -1368,7 +1384,8 @@ fn create_shortcut_at(
     target: &Path,
     working_directory: &Path,
     link_path: &Path,
-) -> Result<(), String> {
+    install_directory: &Path,
+) -> Result<Option<Vec<u8>>, String> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::{Interface, PCWSTR};
     use windows::Win32::System::Com::{
@@ -1382,12 +1399,34 @@ fn create_shortcut_at(
     reject_links(&programs)?;
     fs::create_dir_all(&programs)
         .map_err(|e| format!("Could not prepare Start menu folder: {e}"))?;
-    if link_path.exists() {
-        return Err(
-            "A BlobUI Start menu shortcut already exists. Remove it or disable shortcut creation."
-                .into(),
-        );
-    }
+    let previous_shortcut = match fs::symlink_metadata(link_path) {
+        Ok(metadata) => {
+            reject_links(link_path)?;
+            if !metadata.is_file() {
+                return Err(
+                    "A BlobUI Start menu shortcut path already exists and is not a file.".into(),
+                );
+            }
+            let Some(existing_target) = read_start_menu_shortcut_target(link_path)? else {
+                return Err(
+                    "A BlobUI Start menu shortcut already exists and cannot be verified.".into(),
+                );
+            };
+            if !shortcut_targets_install(&existing_target, install_directory) {
+                return Err(
+                    "A BlobUI Start menu shortcut already exists and is not owned by this installation."
+                        .into(),
+                );
+            }
+            Some(fs::read(link_path).map_err(|error| {
+                format!("Could not preserve the existing BlobUI Start menu shortcut: {error}")
+            })?)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!("Could not inspect the BlobUI Start menu shortcut: {error}"))
+        }
+    };
     let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     if let Err(e) = init.ok() {
         return Err(format!(
@@ -1395,7 +1434,7 @@ fn create_shortcut_at(
         ));
     }
     let _apartment = ComApartment;
-    (|| unsafe {
+    let save_result = (|| unsafe {
         let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
             .map_err(|e| format!("Could not create Start menu shortcut: {e}"))?;
         let target_w = target
@@ -1421,7 +1460,16 @@ fn create_shortcut_at(
         persist
             .Save(PCWSTR(path_w.as_ptr()), true)
             .map_err(|e| format!("Could not save Start menu shortcut: {e}"))
-    })()
+    })();
+    if let Err(error) = save_result {
+        if let Some(previous) = &previous_shortcut {
+            let _ = fs::write(link_path, previous);
+        } else {
+            let _ = fs::remove_file(link_path);
+        }
+        return Err(error);
+    }
+    Ok(previous_shortcut)
 }
 
 #[cfg(windows)]
@@ -1443,7 +1491,7 @@ fn start_menu_shortcut_path() -> PathBuf {
 }
 
 #[cfg(windows)]
-fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
+fn read_start_menu_shortcut_target(path: &Path) -> Result<Option<PathBuf>, String> {
     use std::ffi::OsString;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows::core::{Interface, PCWSTR};
@@ -1454,11 +1502,7 @@ fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
 
-    let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) else {
-        return Ok(None);
-    };
-    let path = app_data.join("Microsoft/Windows/Start Menu/Programs/BlobUI.lnk");
-    let metadata = match fs::symlink_metadata(&path) {
+    let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -1470,7 +1514,7 @@ fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
     if !metadata.is_file() {
         return Ok(None);
     }
-    reject_links(&path)?;
+    reject_links(path)?;
     let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     init.ok()
         .map_err(|error| format!("Could not inspect the BlobUI Start menu shortcut: {error}"))?;
@@ -1502,8 +1546,35 @@ fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
                 .unwrap_or(target.len())],
         ))
     })()?;
+    Ok(Some(PathBuf::from(target)))
+}
+
+#[cfg(windows)]
+fn shortcut_targets_install(target: &Path, install_directory: &Path) -> bool {
+    let Some(app) = target
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+    else {
+        return false;
+    };
+    if !same_path(target, &app.join("settings-app/dist/blobui-settings.exe")) {
+        return false;
+    }
+    validate_existing_app(app, install_directory).is_ok()
+}
+
+#[cfg(windows)]
+fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
+    let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let path = app_data.join("Microsoft/Windows/Start Menu/Programs/BlobUI.lnk");
+    let Some(target) = read_start_menu_shortcut_target(&path)? else {
+        return Ok(None);
+    };
     let expected = app.join("settings-app/dist/blobui-settings.exe");
-    Ok(same_path(Path::new(&target), &expected).then_some(path))
+    Ok(same_path(&target, &expected).then_some(path))
 }
 
 #[cfg(not(windows))]
@@ -1512,7 +1583,7 @@ fn owned_start_menu_shortcut(_: &Path) -> Result<Option<PathBuf>, String> {
 }
 
 #[cfg(not(windows))]
-fn create_shortcut(_: &Path, _: &Path) -> Result<(), String> {
+fn create_shortcut(_: &Path, _: &Path, _: &Path) -> Result<Option<Vec<u8>>, String> {
     Err("Start menu shortcuts require Windows.".into())
 }
 #[cfg(not(windows))]
@@ -1976,12 +2047,57 @@ mod tests {
         let target = root.join("blobui-settings.exe");
         let link = root.join("BlobUI.lnk");
         fs::write(&target, b"test executable placeholder").unwrap();
-        create_shortcut_at(&target, &root, &link).unwrap();
+        create_shortcut_at(&target, &root, &link, &root).unwrap();
         assert!(link.is_file());
 
         let original = fs::read(&link).unwrap();
-        assert!(create_shortcut_at(&target, &root, &link).is_err());
+        assert!(create_shortcut_at(&target, &root, &link, &root).is_err());
         assert_eq!(fs::read(&link).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_shortcut_replaces_a_link_owned_by_the_same_install() {
+        let root = fixture_root("shortcut-reinstall");
+        let install = root.join("Anytype data");
+        let old_app = root.join("old-app");
+        let new_app = root.join("new-app");
+        let link = root.join("BlobUI.lnk");
+
+        for (app, executable) in [
+            (&old_app, &b"old executable"[..]),
+            (&new_app, &b"new executable"[..]),
+        ] {
+            fs::create_dir_all(app.join("settings-app/dist")).unwrap();
+            fs::write(
+                app.join(".blobui-install.json"),
+                serde_json::to_vec(&json!({"installDirectory": install.clone()})).unwrap(),
+            )
+            .unwrap();
+            fs::write(app.join("blobui-settings.exe"), executable).unwrap();
+            fs::write(
+                app.join("settings-app/dist/blobui-settings.exe"),
+                executable,
+            )
+            .unwrap();
+        }
+
+        let old_target = old_app.join("settings-app/dist/blobui-settings.exe");
+        let new_target = new_app.join("settings-app/dist/blobui-settings.exe");
+        assert_eq!(
+            create_shortcut_at(&old_target, &old_app, &link, &install).unwrap(),
+            None
+        );
+        let original = fs::read(&link).unwrap();
+
+        let replaced = create_shortcut_at(&new_target, &new_app, &link, &install).unwrap();
+
+        assert_eq!(replaced, Some(original));
+        let installed_target = read_start_menu_shortcut_target(&link)
+            .unwrap()
+            .unwrap();
+        assert!(same_path(&installed_target, &new_target));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1995,7 +2111,7 @@ mod tests {
         env::set_var("APPDATA", root.join("roaming"));
         let owned_link = start_menu_shortcut_path();
         let target = app.join("settings-app/dist/blobui-settings.exe");
-        let create_result = create_shortcut_at(&target, &app, &owned_link);
+        let create_result = create_shortcut_at(&target, &app, &owned_link, &anytype);
         if let Err(error) = create_result {
             if let Some(value) = prior_appdata {
                 env::set_var("APPDATA", value);
@@ -2023,7 +2139,7 @@ mod tests {
         let foreign_target = root.join("other-app.exe");
         fs::write(&foreign_target, b"another app").unwrap();
         let foreign_link = start_menu_shortcut_path();
-        let create_result = create_shortcut_at(&foreign_target, &root, &foreign_link);
+        let create_result = create_shortcut_at(&foreign_target, &root, &foreign_link, &anytype);
         if let Err(error) = create_result {
             if let Some(value) = prior_appdata {
                 env::set_var("APPDATA", value);

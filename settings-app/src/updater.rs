@@ -1152,7 +1152,7 @@ pub fn validate_install_directory(path: &Path) -> Result<PathBuf, String> {
     let bytes = fs::read(&data_path).map_err(|_| {
         "BlobUI settings were not found in the selected Anytype folder.".to_string()
     })?;
-    let data: Value = serde_json::from_slice(&bytes)
+    let data: Value = crate::parse_settings_json(&bytes)
         .map_err(|_| "BlobUI data.json in the selected Anytype folder is invalid.".to_string())?;
     if !data_matches_install(&data, &install) {
         return Err("BlobUI settings do not match the selected Anytype folder.".into());
@@ -1316,11 +1316,15 @@ mod tests {
         let install = root.join("Anytype data");
         let blob = install.join("blob");
         fs::create_dir_all(&blob).unwrap();
-        fs::write(
-            blob.join("data.json"),
-            serde_json::to_vec(&json!({"installDirectory": install})).unwrap(),
-        )
-        .unwrap();
+        let mut settings = vec![0xEF, 0xBB, 0xBF];
+        settings.extend_from_slice(
+            &serde_json::to_vec(&json!({"installDirectory": install})).unwrap(),
+        );
+        fs::write(blob.join("data.json"), settings).unwrap();
+        assert_eq!(
+            validate_install_directory(&install).unwrap(),
+            install.canonicalize().unwrap()
+        );
         let local_app_data = root.join("LocalAppData");
         let app = local_app_data.join("Programs/BlobUI");
         fs::create_dir_all(app.join("settings-app/dist")).unwrap();

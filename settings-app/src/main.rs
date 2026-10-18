@@ -1108,13 +1108,17 @@ fn apply_native_theme(app: &tauri::AppHandle, theme: &str) {
 }
 
 fn read_json_file(path: &Path) -> Result<Value, String> {
-    let text = fs::read_to_string(path).map_err(|error| {
+    let bytes = fs::read(path).map_err(|error| {
         format!(
             "Could not read BlobUI settings at {}: {error}",
             path.display()
         )
     })?;
-    serde_json::from_str(&text).map_err(|_| "BlobUI data.json is not valid JSON.".into())
+    parse_settings_json(&bytes).map_err(|_| "BlobUI data.json is not valid JSON.".into())
+}
+
+fn parse_settings_json(bytes: &[u8]) -> Result<Value, serde_json::Error> {
+    serde_json::from_slice(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes))
 }
 
 fn read_string(value: Option<&Value>, name: &str) -> Option<String> {
@@ -1498,6 +1502,31 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_bom_prefixed_legacy_settings_json() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let root = workspace.join(".test-run").join(format!(
+            "settings-json-bom-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("data.json");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(br#"{"settings":{"fontFamily":"Inter"}}"#);
+        fs::write(&path, bytes).unwrap();
+
+        assert_eq!(
+            read_json_file(&path).unwrap()["settings"]["fontFamily"],
+            "Inter"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn loads_v2_values_before_legacy_values() {
