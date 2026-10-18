@@ -56,6 +56,8 @@ $settingsExecutable = Join-Path $sourceDirectory 'settings-app/dist/blobui-setti
 if (-not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) {
     throw 'The Rust Settings app executable is missing. Run scripts/Build-Settings.ps1 before installing BlobUI.'
 }
+$onboardingRequestPath = Join-Path $sourceDirectory 'settings-app/dist/.blobui-onboarding-next'
+$onboardingRequestCopied = $false
 
 $appCreated = $false
 $installed = $false
@@ -71,6 +73,17 @@ try {
     $appDistribution = Join-Path $AppDirectory 'settings-app/dist'
     [IO.Directory]::CreateDirectory($appDistribution) | Out-Null
     Copy-Item -LiteralPath $settingsExecutable -Destination $appDistribution
+    if (Test-Path -LiteralPath $onboardingRequestPath) {
+        $onboardingRequest = Get-Item -LiteralPath $onboardingRequestPath -Force -ErrorAction Stop
+        if (($onboardingRequest.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "The pending onboarding request is a reparse point: $onboardingRequestPath"
+        }
+        if ($onboardingRequest.PSIsContainer) {
+            throw "The pending onboarding request is not a file: $onboardingRequestPath"
+        }
+        Copy-Item -LiteralPath $onboardingRequestPath -Destination $appDistribution
+        $onboardingRequestCopied = $true
+    }
     Write-BlobUiInstallPointer -SourceDirectory $AppDirectory -InstallDirectory $AnytypeDirectory
     $dataPath = Join-Path $AnytypeDirectory 'blob\data.json'
     if (Test-Path -LiteralPath $dataPath -PathType Leaf) {
@@ -117,6 +130,14 @@ try {
     }
     $null = Invoke-BlobUiInstall -InstallDirectory $AnytypeDirectory -RuntimeSourceDirectory $AppDirectory -AssetsSourceDirectory (Join-Path $AppDirectory 'assets') -CompiledCssPath $css -DataCandidatePath $candidate
     $installed = $true
+    if ($onboardingRequestCopied) {
+        try {
+            Remove-Item -LiteralPath $onboardingRequestPath -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "BlobUI was installed, but the pending onboarding request remains in the source folder: $onboardingRequestPath"
+        }
+    }
     Remove-Item -LiteralPath $candidate, $css -Force
     Write-Host "BlobUI installed in $AppDirectory"
     Write-Host "CSS installed in $AnytypeDirectory\custom.css"

@@ -1065,6 +1065,20 @@ fn configure_webview_profile() {
     }
 }
 
+fn consume_pending_onboarding_request() -> bool {
+    let Ok(executable) = env::current_exe() else {
+        return false;
+    };
+    let Some(directory) = executable.parent() else {
+        return false;
+    };
+    match fs::remove_file(directory.join(".blobui-onboarding-next")) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => false,
+    }
+}
+
 fn main() {
     configure_webview_profile();
     SHOW_ONBOARDING.store(
@@ -1073,7 +1087,11 @@ fn main() {
     );
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
-            if arguments.iter().any(|argument| argument == "--onboarding" || argument == "-n") {
+            let onboarding_argument = arguments
+                .iter()
+                .any(|argument| argument == "--onboarding" || argument == "-n");
+            let pending_onboarding = consume_pending_onboarding_request();
+            if onboarding_argument || pending_onboarding {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
                 let _ = app.emit("blobui-show-onboarding", ());
             }
@@ -1109,6 +1127,9 @@ fn main() {
             let theme = read_anytype_theme(&app_data_directory().join("devconfig.json"));
             if let Some(window) = app.get_webview_window("main") {
                 window.set_theme(native_theme(&theme))?;
+            }
+            if consume_pending_onboarding_request() {
+                SHOW_ONBOARDING.store(true, Ordering::Release);
             }
             hotkey::start(app.handle().clone());
             if !env::args().any(|argument| argument == "--background") {

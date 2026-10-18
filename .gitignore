@@ -11,3 +11,4 @@ data.json
 /settings-app/target/
 /settings-app/gen/
 /settings-app/dist/blobui-settings.exe
+/settings-app/dist/.blobui-onboarding-next

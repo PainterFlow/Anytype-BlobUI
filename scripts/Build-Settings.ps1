@@ -96,7 +96,23 @@ catch [System.IO.IOException] {
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run scripts/Setup.ps1 to install BlobUI with the built app, or launch it with scripts/Settings.ps1.'
 
-if ($s -or $Onboarding) {
+if ($Onboarding -and -not $s) {
+    $onboardingRequestPath = Join-Path $distributionDirectory '.blobui-onboarding-next'
+    $onboardingRequest = Get-Item -LiteralPath $onboardingRequestPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $onboardingRequest -and
+        (($onboardingRequest.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The pending onboarding request is a reparse point: $onboardingRequestPath"
+    }
+    if ($null -ne $onboardingRequest -and $onboardingRequest.PSIsContainer) {
+        throw "The pending onboarding request is not a file: $onboardingRequestPath"
+    }
+    if ($null -eq $onboardingRequest) {
+        [System.IO.File]::WriteAllText($onboardingRequestPath, '')
+    }
+    Write-Host 'The next BlobUI Settings launch will open onboarding.'
+}
+
+if ($s) {
     $launchArguments = @{
         FilePath = $distributionExecutable
         WindowStyle = 'Normal'
