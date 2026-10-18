@@ -86,7 +86,6 @@ pub fn uninstall(app: &Path, anytype: &Path) -> Result<(), String> {
 
 #[derive(Default)]
 struct PreviousManifest {
-    release_version: Option<String>,
     managed_files: Vec<String>,
 }
 
@@ -669,10 +668,6 @@ fn read_previous_manifest(path: &Path) -> Result<PreviousManifest, String> {
         }
     }
     Ok(PreviousManifest {
-        release_version: value
-            .get("releaseVersion")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
         managed_files: managed_files.into_iter().collect(),
     })
 }
@@ -716,10 +711,6 @@ fn read_uninstall_manifest(path: &Path) -> Result<PreviousManifest, String> {
         return Err("The BlobUI runtime ownership manifest is empty. Nothing was removed.".into());
     }
     Ok(PreviousManifest {
-        release_version: value
-            .get("releaseVersion")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
         managed_files: managed_files.into_iter().collect(),
     })
 }

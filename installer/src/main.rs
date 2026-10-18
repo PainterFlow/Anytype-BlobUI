@@ -1,9 +1,12 @@
 mod archive;
+// These shared modules also contain code used only by the Settings app.
+#[allow(dead_code)]
 #[path = "../../settings-app/src/css.rs"]
 mod css;
 mod install;
 mod transaction;
 mod network;
+#[allow(dead_code)]
 #[path = "../../settings-app/src/storage.rs"]
 mod storage;
 
