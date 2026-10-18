@@ -1,25 +1,22 @@
 use chrono::{SecondsFormat, Utc};
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{css, storage};
+use crate::storage;
 
 const OWNER: &str = "PainterFlow";
 const REPOSITORY: &str = "Anytype-BlobUI";
 const RELEASE_METADATA: &str = include_str!("../../blobui-release.json");
 const MAX_RELEASE_JSON_BYTES: usize = 2 * 1024 * 1024;
 const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
-const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
-const MAX_EXPANDED_BYTES: usize = 512 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES: usize = 20_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -86,7 +83,6 @@ struct ReleaseInfo {
 #[derive(Clone, Debug)]
 struct PreviousManifest {
     release_version: Option<String>,
-    managed_files: Vec<String>,
 }
 
 pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
@@ -861,371 +857,6 @@ fn http_get(_: &str, _: &str, _: &str, _: usize) -> Result<HttpResponse, String>
     Err("The BlobUI in-app updater is supported on Windows.".into())
 }
 
-pub fn apply_archive_to_install(
-    install_directory: &Path,
-    archive: &[u8],
-    expected_version: &str,
-) -> Result<String, String> {
-    let install = validate_install_directory(install_directory)?;
-    let expected_version = parse_version(expected_version)
-        .ok_or_else(|| "The downloaded BlobUI release version is invalid.".to_string())?;
-    if archive.len() > MAX_ARCHIVE_BYTES {
-        return Err(
-            "The downloaded BlobUI source archive is larger than the supported limit.".into(),
-        );
-    }
-    let blob = install.join("blob");
-    let staging_root = blob.join("staging");
-    reject_reparse_path(&staging_root)?;
-    fs::create_dir_all(&staging_root)
-        .map_err(|_| "Could not prepare the BlobUI update staging folder.".to_string())?;
-    let stage = staging_root.join(format!(
-        "rust-update-{}-{}",
-        std::process::id(),
-        unique_nonce()
-    ));
-    fs::create_dir(&stage)
-        .map_err(|_| "Could not create the BlobUI update staging folder.".to_string())?;
-    let guard = RemoveTree(stage.clone());
-    let source_root = stage.join("source");
-    fs::create_dir(&source_root)
-        .map_err(|_| "Could not prepare the downloaded BlobUI source.".to_string())?;
-    extract_source_archive(archive, &source_root)?;
-
-    let packaged_version = version_from_runtime(&source_root).ok_or_else(|| {
-        "The source archive does not contain a valid BlobUI release version.".to_string()
-    })?;
-    if packaged_version != expected_version {
-        return Err("The source archive version does not match the GitHub release tag.".into());
-    }
-    let previous_manifest_path = blob.join(".blobui-managed-files.json");
-    let previous_manifest = if fs::symlink_metadata(&previous_manifest_path).is_ok() {
-        read_manifest(&previous_manifest_path)?
-    } else {
-        PreviousManifest {
-            release_version: None,
-            managed_files: Vec::new(),
-        }
-    };
-    let current = current_version(&install, Some(&install.join("blob/runtime")))?;
-    let current_version = parse_version(&current)
-        .ok_or_else(|| "The installed BlobUI release version is invalid.".to_string())?;
-    if packaged_version <= current_version {
-        return Err("The installed BlobUI theme is already at this release or newer.".into());
-    }
-
-    let data_path = blob.join("data.json");
-    reject_reparse_path(&data_path)?;
-    let data: Value = serde_json::from_slice(
-        &fs::read(&data_path)
-            .map_err(|_| "BlobUI settings could not be read for the update.".to_string())?,
-    )
-    .map_err(|_| "BlobUI data.json is not valid JSON.".to_string())?;
-    if !data.is_object() || !data_matches_install(&data, &install) {
-        return Err("BlobUI settings do not match the selected Anytype installation.".into());
-    }
-
-    let runtime_destination = blob.join("runtime");
-    let compile_root = stage.join("compile-source");
-    copy_regular_tree(
-        &source_root.join("Dev"),
-        &compile_root.join("Dev"),
-        Some("css"),
-    )?;
-    copy_regular_tree(
-        &source_root.join("assets"),
-        &compile_root.join("assets"),
-        None,
-    )?;
-    let release_dev = source_root.join("Dev");
-    let local_dev = runtime_destination.join("Dev");
-    preserve_unowned_css(
-        &release_dev,
-        &local_dev,
-        &compile_root.join("Dev"),
-        &previous_manifest.managed_files,
-    )?;
-    let normalized_settings = super::validate_settings(super::settings_from_data(&data))?;
-    let mut compile_data = data.clone();
-    super::apply_settings(&mut compile_data, &install, &normalized_settings);
-    let css = css::compile(&compile_root, &install, &compile_data)?;
-    let changes = prepare_file_changes(
-        &install,
-        &blob,
-        &source_root,
-        &css,
-        &previous_manifest,
-        &packaged_version.to_string(),
-    )?;
-    storage::commit_update(changes)?;
-    let version = packaged_version.to_string();
-    drop(guard);
-    Ok(version)
-}
-
-struct RemoveTree(PathBuf);
-impl Drop for RemoveTree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn prepare_file_changes(
-    install: &Path,
-    blob: &Path,
-    source_root: &Path,
-    compiled_css: &str,
-    previous: &PreviousManifest,
-    version: &str,
-) -> Result<Vec<storage::FileChange>, String> {
-    let mut changes = Vec::new();
-    let mut desired = HashMap::<String, Vec<u8>>::new();
-    collect_package_files(
-        &source_root.join("Dev"),
-        &mut desired,
-        "runtime/Dev",
-        Some("css"),
-    )?;
-    collect_package_files(
-        &source_root.join("assets"),
-        &mut desired,
-        "runtime/assets",
-        None,
-    )?;
-    collect_package_files(&source_root.join("assets"), &mut desired, "assets", None)?;
-    let metadata = fs::read(source_root.join("blobui-release.json"))
-        .map_err(|_| "The source archive is missing release metadata.".to_string())?;
-    desired.insert("runtime/blobui-release.json".into(), metadata);
-    if desired.keys().all(|path| !path.starts_with("runtime/Dev/")) {
-        return Err("The source archive contains no BlobUI CSS files.".into());
-    }
-    if !desired.contains_key("runtime/assets/spacebanner/banner.png")
-        || !desired.contains_key("assets/spacebanner/banner.png")
-    {
-        return Err("The source archive is missing BlobUI's default banner asset.".into());
-    }
-
-    let banner_path = blob.join("assets/spacebanner/banner.png");
-    reject_reparse_path(&banner_path)?;
-    let default_banner = desired
-        .remove("assets/spacebanner/banner.png")
-        .ok_or_else(|| {
-            "The source archive is missing BlobUI's default banner asset.".to_string()
-        })?;
-    match fs::symlink_metadata(&banner_path) {
-        Ok(metadata) => {
-            if !metadata.is_file() {
-                return Err("The installed BlobUI banner path is not a regular file.".into());
-            }
-            // This file can contain a user's custom banner, so preserve it.
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            changes.push(storage::FileChange {
-                path: banner_path,
-                contents: Some(default_banner),
-            });
-        }
-        Err(_) => {
-            return Err("The installed BlobUI banner path could not be inspected safely.".into())
-        }
-    }
-
-    let previous_keys = previous
-        .managed_files
-        .iter()
-        .map(|key| key.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    let binary_path = blob.join("runtime/settings-app.exe");
-    if previous_keys.contains("runtime/settings-app.exe") && binary_path.is_file() {
-        // Keep ownership metadata for cleanup, but never replace the running app.
-    }
-    let mut desired_keys = desired
-        .keys()
-        .map(|key| key.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    if previous_keys.contains("runtime/settings-app.exe") && binary_path.is_file() {
-        desired_keys.insert("runtime/settings-app.exe".into());
-    }
-    let mut managed_files = desired.keys().cloned().collect::<Vec<_>>();
-    if previous_keys.contains("runtime/settings-app.exe") && binary_path.is_file() {
-        managed_files.push("runtime/settings-app.exe".into());
-    }
-    for key in &previous.managed_files {
-        if !desired_keys.contains(&key.to_ascii_lowercase()) {
-            changes.push(storage::FileChange {
-                path: managed_destination(blob, key)?,
-                contents: None,
-            });
-        }
-    }
-    for (key, bytes) in desired {
-        changes.push(storage::FileChange {
-            path: managed_destination(blob, &key)?,
-            contents: Some(bytes),
-        });
-    }
-    changes.push(storage::FileChange {
-        path: install.join("custom.css"),
-        contents: Some(compiled_css.as_bytes().to_vec()),
-    });
-
-    // Keep an existing managed app binary in the ownership manifest without replacing it.
-    managed_files.sort_by_key(|key| key.to_ascii_lowercase());
-    managed_files.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    let manifest = json!({
-        "manifestVersion": 1,
-        "releaseVersion": version,
-        "managedFiles": managed_files,
-    });
-    let mut bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|_| "Could not prepare the BlobUI update manifest.".to_string())?;
-    bytes.push(b'\n');
-    changes.push(storage::FileChange {
-        path: blob.join(".blobui-managed-files.json"),
-        contents: Some(bytes),
-    });
-    Ok(changes)
-}
-
-fn collect_package_files(
-    root: &Path,
-    output: &mut HashMap<String, Vec<u8>>,
-    key_prefix: &str,
-    required_extension: Option<&str>,
-) -> Result<(), String> {
-    let mut files = Vec::new();
-    collect_regular_files(root, &mut files)?;
-    for file in files {
-        if required_extension.is_some_and(|extension| {
-            !file
-                .extension()
-                .is_some_and(|found| found.eq_ignore_ascii_case(extension))
-        }) {
-            continue;
-        }
-        let relative = file
-            .strip_prefix(root)
-            .map_err(|_| "A packaged BlobUI file escaped its source folder.".to_string())?;
-        let relative = relative.to_string_lossy().replace('\\', "/");
-        let key = format!("{key_prefix}/{relative}");
-        validate_managed_key(&key)?;
-        output.insert(
-            key,
-            fs::read(&file)
-                .map_err(|_| "A packaged BlobUI source file could not be read.".to_string())?,
-        );
-    }
-    Ok(())
-}
-
-fn preserve_unowned_css(
-    release_dev: &Path,
-    installed_dev: &Path,
-    compile_dev: &Path,
-    previous_managed: &[String],
-) -> Result<(), String> {
-    let managed = previous_managed
-        .iter()
-        .map(|key| key.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    let mut release_files = Vec::new();
-    collect_regular_files(release_dev, &mut release_files)?;
-    let collisions = release_files
-        .iter()
-        .filter_map(|path| path.strip_prefix(release_dev).ok())
-        .map(|path| {
-            path.to_string_lossy()
-                .replace('\\', "/")
-                .to_ascii_lowercase()
-        })
-        .collect::<HashSet<_>>();
-    if !installed_dev.is_dir() {
-        return Ok(());
-    }
-    let mut local_files = Vec::new();
-    collect_regular_files(installed_dev, &mut local_files)?;
-    for file in local_files {
-        if !file
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("css"))
-        {
-            continue;
-        }
-        let relative = file
-            .strip_prefix(installed_dev)
-            .map_err(|_| "An installed local CSS file escaped the Dev folder.".to_string())?;
-        let relative_key = relative.to_string_lossy().replace('\\', "/");
-        let managed_key = format!("runtime/Dev/{relative_key}").to_ascii_lowercase();
-        if managed.contains(&managed_key) || collisions.contains(&relative_key.to_ascii_lowercase())
-        {
-            continue;
-        }
-        let destination = compile_dev.join(relative);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|_| {
-                "Could not preserve a local BlobUI CSS folder for update compilation.".to_string()
-            })?;
-        }
-        fs::copy(&file, &destination).map_err(|_| {
-            "Could not preserve local BlobUI CSS for update compilation.".to_string()
-        })?;
-    }
-    Ok(())
-}
-
-fn copy_regular_tree(
-    source: &Path,
-    destination: &Path,
-    extension: Option<&str>,
-) -> Result<(), String> {
-    let mut files = Vec::new();
-    collect_regular_files(source, &mut files)?;
-    for file in files {
-        if extension.is_some_and(|extension| {
-            !file
-                .extension()
-                .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-        }) {
-            continue;
-        }
-        let relative = file
-            .strip_prefix(source)
-            .map_err(|_| "A BlobUI source file escaped its package folder.".to_string())?;
-        let target = destination.join(relative);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Could not prepare the BlobUI update compiler input.".to_string())?;
-        }
-        fs::copy(&file, target)
-            .map_err(|_| "Could not prepare the BlobUI update compiler input.".to_string())?;
-    }
-    Ok(())
-}
-
-fn collect_regular_files(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
-    if !directory.exists() {
-        return Ok(());
-    }
-    let entries = fs::read_dir(directory)
-        .map_err(|_| "Could not read a BlobUI update source folder.".to_string())?;
-    for entry in entries {
-        let entry =
-            entry.map_err(|_| "Could not inspect a BlobUI update source file.".to_string())?;
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|_| "Could not inspect a BlobUI update source file.".to_string())?;
-        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
-            continue;
-        }
-        if metadata.is_dir() {
-            collect_regular_files(&path, output)?;
-        } else if metadata.is_file() {
-            output.push(path);
-        }
-    }
-    Ok(())
-}
-
 fn read_manifest(path: &Path) -> Result<PreviousManifest, String> {
     reject_reparse_path(path)?;
     let bytes = fs::read(path)
@@ -1241,17 +872,11 @@ fn read_manifest(path: &Path) -> Result<PreviousManifest, String> {
         .ok_or_else(|| {
             "The saved BlobUI install manifest is missing its managed file list.".to_string()
         })?;
-    let mut seen = HashSet::new();
-    let mut managed_files = Vec::new();
     for item in list {
         let raw = item.as_str().ok_or_else(|| {
             "The saved BlobUI install manifest contains an invalid file path.".to_string()
         })?;
-        if let Some(key) = validate_managed_key(raw)? {
-            if seen.insert(key.to_ascii_lowercase()) {
-                managed_files.push(key);
-            }
-        }
+        validate_managed_key(raw)?;
     }
     let release_version = value
         .get("releaseVersion")
@@ -1259,7 +884,6 @@ fn read_manifest(path: &Path) -> Result<PreviousManifest, String> {
         .map(str::to_owned);
     Ok(PreviousManifest {
         release_version,
-        managed_files,
     })
 }
 
@@ -1287,21 +911,6 @@ fn validate_managed_key(raw: &str) -> Result<Option<String>, String> {
         return Err("The BlobUI install manifest contains an unsupported file path.".into());
     }
     Ok(Some(key))
-}
-
-fn managed_destination(blob: &Path, key: &str) -> Result<PathBuf, String> {
-    let key = validate_managed_key(key)?
-        .ok_or_else(|| "The BlobUI update tried to replace a user banner.".to_string())?;
-    let destination = blob.join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let root = blob.canonicalize().unwrap_or_else(|_| blob.to_path_buf());
-    let full = destination
-        .canonicalize()
-        .unwrap_or_else(|_| destination.clone());
-    if !full.starts_with(&root) {
-        return Err("A BlobUI update file escaped the Anytype blob folder.".into());
-    }
-    reject_reparse_path(&destination)?;
-    Ok(destination)
 }
 
 pub fn validate_install_directory(path: &Path) -> Result<PathBuf, String> {
@@ -1386,299 +995,6 @@ fn is_reparse_point(_: &fs::Metadata) -> bool {
     false
 }
 
-fn extract_source_archive(archive: &[u8], destination: &Path) -> Result<(), String> {
-    if archive.len() > MAX_ARCHIVE_BYTES {
-        return Err(
-            "The downloaded BlobUI source archive is larger than the supported limit.".into(),
-        );
-    }
-    let decoder = GzDecoder::new(archive);
-    let mut tar = Vec::new();
-    decoder
-        .take((MAX_EXPANDED_BYTES + 1) as u64)
-        .read_to_end(&mut tar)
-        .map_err(|_| "The downloaded BlobUI source archive is damaged.".to_string())?;
-    if tar.len() > MAX_EXPANDED_BYTES {
-        return Err(
-            "The expanded BlobUI source archive is larger than the supported limit.".into(),
-        );
-    }
-    unpack_selected_tar_entries(&tar, destination)
-}
-
-fn unpack_selected_tar_entries(tar: &[u8], destination: &Path) -> Result<(), String> {
-    let mut offset = 0usize;
-    let mut entry_count = 0usize;
-    let mut expanded_bytes = 0usize;
-    let mut root_prefix: Option<String> = None;
-    let mut pending_pax_path: Option<String> = None;
-    let mut seen_paths = HashSet::new();
-    while offset + 512 <= tar.len() {
-        let header = &tar[offset..offset + 512];
-        if header.iter().all(|byte| *byte == 0) {
-            break;
-        }
-        entry_count += 1;
-        if entry_count > MAX_ARCHIVE_ENTRIES {
-            return Err("The BlobUI source archive contains too many files.".into());
-        }
-        verify_tar_checksum(header)?;
-        let size = parse_tar_octal(&header[124..136])?;
-        let size =
-            usize::try_from(size).map_err(|_| "A BlobUI archive file is too large.".to_string())?;
-        let typeflag = header[156];
-        let data_start = offset + 512;
-        let data_end = data_start
-            .checked_add(size)
-            .ok_or_else(|| "The BlobUI source archive is invalid.".to_string())?;
-        if data_end > tar.len() {
-            return Err("The BlobUI source archive is truncated.".into());
-        }
-        if matches!(typeflag, b'g' | b'x') && size > 1024 * 1024 {
-            return Err("The BlobUI source archive contains oversized PAX metadata.".into());
-        }
-        let padded_size = size
-            .checked_add(511)
-            .ok_or_else(|| "The BlobUI source archive is invalid.".to_string())?
-            / 512
-            * 512;
-        offset = data_start
-            .checked_add(padded_size)
-            .ok_or_else(|| "The BlobUI source archive is invalid.".to_string())?;
-        if offset > tar.len() {
-            return Err("The BlobUI source archive is truncated.".into());
-        }
-        // `git archive` emits global PAX metadata before its files. It contains
-        // no filesystem entries and must not be mistaken for the archive root.
-        if typeflag == b'g' {
-            continue;
-        }
-        if typeflag == b'x' {
-            let pax_data = &tar[data_start..data_end];
-            if let Some(path) = parse_pax_path(pax_data)? {
-                pending_pax_path = Some(path);
-            }
-            continue;
-        }
-        let name = tar_field(&header[0..100])?;
-        let prefix = tar_field(&header[345..500])?;
-        let header_name = if prefix.is_empty() {
-            name
-        } else {
-            format!("{prefix}/{name}")
-        };
-        let full_name = pending_pax_path.take().unwrap_or(header_name);
-        let path = clean_archive_path(&full_name)?;
-        let (root, relative) = split_archive_root(&path)?;
-        if let Some(previous_root) = &root_prefix {
-            if previous_root != &root {
-                return Err("The BlobUI archive contains inconsistent root folders.".into());
-            }
-        } else {
-            root_prefix = Some(root);
-        }
-        let Some(relative) = relative else {
-            continue;
-        };
-        if relative.as_os_str().is_empty() {
-            continue;
-        }
-        let target_kind = selected_archive_kind(&relative);
-        if target_kind.is_none() {
-            continue;
-        }
-        if !matches!(typeflag, 0 | b'0' | b'5') {
-            return Err(
-                "The BlobUI source archive contains an unsupported link or special file.".into(),
-            );
-        }
-        if typeflag == b'5' {
-            continue;
-        }
-        if !relative.extension().is_some_and(|extension| {
-            target_kind != Some("Dev") || extension.eq_ignore_ascii_case("css")
-        }) && target_kind == Some("Dev")
-        {
-            continue;
-        }
-        expanded_bytes = expanded_bytes.saturating_add(size);
-        if expanded_bytes > MAX_EXPANDED_BYTES {
-            return Err("The BlobUI source archive is larger than the supported limit.".into());
-        }
-        let relative_text = relative.to_string_lossy().replace('\\', "/");
-        if !seen_paths.insert(relative_text.to_ascii_lowercase()) {
-            return Err("The BlobUI source archive contains duplicate file paths.".into());
-        }
-        let root = root_prefix.as_ref().expect("root prefix set above");
-        let target = destination.join(root).join(&relative);
-        reject_reparse_path(&target)?;
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Could not stage the downloaded BlobUI source.".to_string())?;
-        }
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-            .map_err(|_| "Could not stage a file from the BlobUI source archive.".to_string())?;
-        file.write_all(&tar[data_start..data_end])
-            .map_err(|_| "Could not stage a file from the BlobUI source archive.".to_string())?;
-    }
-    if entry_count == 0 {
-        return Err("The downloaded BlobUI source archive is empty.".into());
-    }
-    let root =
-        root_prefix.ok_or_else(|| "The downloaded BlobUI source archive is empty.".to_string())?;
-    let top = destination.join(root);
-    let dev = top.join("Dev");
-    let assets = top.join("assets/spacebanner/banner.png");
-    let metadata = top.join("blobui-release.json");
-    if !dev.is_dir() || !assets.is_file() || !metadata.is_file() {
-        return Err(
-            "The downloaded source archive does not contain a complete BlobUI runtime.".into(),
-        );
-    }
-    // Move the selected tree to a stable layout for the compiler and installer.
-    for name in ["Dev", "assets", "blobui-release.json"] {
-        let source = top.join(name);
-        let target = destination.join(name);
-        if source.exists() {
-            fs::rename(&source, &target)
-                .map_err(|_| "Could not prepare the downloaded BlobUI source.".to_string())?;
-        }
-    }
-    let _ = fs::remove_dir_all(&top);
-    Ok(())
-}
-
-fn selected_archive_kind(relative: &Path) -> Option<&'static str> {
-    let mut components = relative.components();
-    let first = components.next()?;
-    match first {
-        Component::Normal(name) if name == "Dev" => Some("Dev"),
-        Component::Normal(name) if name == "assets" => Some("assets"),
-        Component::Normal(name) if name == "blobui-release.json" && components.next().is_none() => {
-            Some("metadata")
-        }
-        _ => None,
-    }
-}
-
-fn split_archive_root(path: &Path) -> Result<(String, Option<PathBuf>), String> {
-    let mut components = path.components();
-    let root = match components.next() {
-        Some(Component::Normal(root)) => root.to_string_lossy().into_owned(),
-        _ => return Err("The BlobUI source archive contains an unsafe path.".into()),
-    };
-    if root.is_empty() || root.contains(':') {
-        return Err("The BlobUI source archive contains an unsafe path.".into());
-    }
-    let relative = components.collect::<PathBuf>();
-    Ok((root, Some(relative)))
-}
-
-fn clean_archive_path(value: &str) -> Result<PathBuf, String> {
-    if value.is_empty()
-        || value.starts_with('/')
-        || value.contains('\\')
-        || value.contains(':')
-        || value.contains('\0')
-    {
-        return Err("The BlobUI source archive contains an unsafe path.".into());
-    }
-    let path = Path::new(value);
-    for component in path.components() {
-        match component {
-            Component::Normal(part) if !part.is_empty() => {}
-            _ => return Err("The BlobUI source archive contains an unsafe path.".into()),
-        }
-    }
-    Ok(path.to_path_buf())
-}
-
-fn parse_pax_path(data: &[u8]) -> Result<Option<String>, String> {
-    let mut offset = 0usize;
-    let mut path = None;
-    while offset < data.len() {
-        let space = data[offset..]
-            .iter()
-            .position(|byte| *byte == b' ')
-            .map(|position| offset + position)
-            .ok_or_else(|| {
-                "The BlobUI source archive contains invalid PAX metadata.".to_string()
-            })?;
-        let length_text = std::str::from_utf8(&data[offset..space])
-            .map_err(|_| "The BlobUI source archive contains invalid PAX metadata.".to_string())?;
-        let record_length = length_text
-            .parse::<usize>()
-            .map_err(|_| "The BlobUI source archive contains invalid PAX metadata.".to_string())?;
-        let end = offset
-            .checked_add(record_length)
-            .filter(|end| *end <= data.len() && *end > space + 1)
-            .ok_or_else(|| {
-                "The BlobUI source archive contains invalid PAX metadata.".to_string()
-            })?;
-        if data[end - 1] != b'\n' {
-            return Err("The BlobUI source archive contains invalid PAX metadata.".into());
-        }
-        let record = std::str::from_utf8(&data[space + 1..end - 1])
-            .map_err(|_| "The BlobUI source archive contains invalid PAX metadata.".to_string())?;
-        if let Some(value) = record.strip_prefix("path=") {
-            path = Some(value.to_string());
-        }
-        offset = end;
-    }
-    Ok(path)
-}
-
-fn verify_tar_checksum(header: &[u8]) -> Result<(), String> {
-    let stored = parse_tar_octal(&header[148..156])?;
-    let checksum = header
-        .iter()
-        .enumerate()
-        .map(|(index, byte)| {
-            if (148..156).contains(&index) {
-                b' ' as u64
-            } else {
-                *byte as u64
-            }
-        })
-        .sum::<u64>();
-    if stored != checksum {
-        return Err("The downloaded BlobUI source archive failed its checksum.".into());
-    }
-    Ok(())
-}
-
-fn parse_tar_octal(bytes: &[u8]) -> Result<u64, String> {
-    let text = bytes
-        .iter()
-        .copied()
-        .take_while(|byte| *byte != 0)
-        .filter(|byte| *byte != b' ')
-        .collect::<Vec<_>>();
-    if text.is_empty() {
-        return Ok(0);
-    }
-    if text.iter().any(|byte| !(b'0'..=b'7').contains(byte)) {
-        return Err("The downloaded BlobUI source archive has an invalid file size.".into());
-    }
-    let text = std::str::from_utf8(&text)
-        .map_err(|_| "The downloaded BlobUI source archive is invalid.".to_string())?;
-    u64::from_str_radix(text, 8)
-        .map_err(|_| "The downloaded BlobUI source archive is invalid.".into())
-}
-
-fn tar_field(bytes: &[u8]) -> Result<String, String> {
-    let bytes = &bytes[..bytes
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(bytes.len())];
-    std::str::from_utf8(bytes)
-        .map(str::to_owned)
-        .map_err(|_| "The downloaded BlobUI source archive contains a non-text path.".to_string())
-}
-
 fn unique_nonce() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1689,8 +1005,6 @@ fn unique_nonce() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
     use std::fs;
     use std::path::Path;
 
@@ -1815,76 +1129,6 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    fn tar_entry(output: &mut Vec<u8>, name: &str, contents: &[u8], kind: u8) {
-        let mut header = [0u8; 512];
-        header[..name.len()].copy_from_slice(name.as_bytes());
-        header[100..108].copy_from_slice(b"0000644\0");
-        header[108..116].copy_from_slice(b"0000000\0");
-        header[116..124].copy_from_slice(b"0000000\0");
-        let size = format!("{:011o}\0", contents.len());
-        header[124..136].copy_from_slice(size.as_bytes());
-        header[136..148].copy_from_slice(b"00000000000\0");
-        header[148..156].fill(b' ');
-        header[156] = kind;
-        header[257..263].copy_from_slice(b"ustar\0");
-        header[263..265].copy_from_slice(b"00");
-        let checksum = header.iter().map(|byte| *byte as u64).sum::<u64>();
-        let checksum_text = format!("{:06o}\0 ", checksum);
-        header[148..156].copy_from_slice(checksum_text.as_bytes());
-        output.extend_from_slice(&header);
-        output.extend_from_slice(contents);
-        let padding = (512 - contents.len() % 512) % 512;
-        output.resize(output.len() + padding, 0);
-    }
-
-    fn archive(entries: &[(&str, &[u8], u8)]) -> Vec<u8> {
-        let mut tar = Vec::new();
-        for (name, contents, kind) in entries {
-            tar_entry(&mut tar, name, contents, *kind);
-        }
-        tar.extend_from_slice(&[0; 1024]);
-        let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
-        gzip.write_all(&tar).unwrap();
-        gzip.finish().unwrap()
-    }
-
-    fn pax_path_record(path: &str) -> Vec<u8> {
-        let payload = format!("path={path}\n");
-        let mut length = payload.len() + 2;
-        loop {
-            let next = payload.len() + length.to_string().len() + 1;
-            if next == length {
-                break;
-            }
-            length = next;
-        }
-        format!("{length} {payload}").into_bytes()
-    }
-
-    fn source_archive(version: &str) -> Vec<u8> {
-        let metadata = json!({"formatVersion": 1, "version": version}).to_string();
-        let css_path = pax_path_record("Anytype-BlobUI-test/Dev/theme.css");
-        archive(&[
-            ("pax_global_header", b"comment=git archive fixture\n", b'g'),
-            ("Anytype-BlobUI-test/pax-header", &css_path, b'x'),
-            (
-                "Anytype-BlobUI-test/Dev/truncated.css",
-                b".release-theme { color: purple; }",
-                b'0',
-            ),
-            (
-                "Anytype-BlobUI-test/assets/spacebanner/banner.png",
-                b"release-default-banner",
-                b'0',
-            ),
-            (
-                "Anytype-BlobUI-test/blobui-release.json",
-                metadata.as_bytes(),
-                b'0',
-            ),
-        ])
-    }
-
     fn install_fixture(root: &Path) -> (PathBuf, Vec<u8>, Vec<u8>, Vec<u8>) {
         let install = root.join("Anytype data");
         let blob = install.join("blob");
@@ -1960,76 +1204,6 @@ mod tests {
     }
 
     #[test]
-    fn source_update_keeps_user_data_credentials_custom_banner_and_local_css() {
-        let root = fixture_root("preserve");
-        let (install, original_data, original_credential, original_banner) = install_fixture(&root);
-        let version =
-            apply_archive_to_install(&install, &source_archive("1.2.0"), "v1.2.0").unwrap();
-        let blob = install.join("blob");
-        assert_eq!(version, "1.2.0");
-        assert_eq!(fs::read(blob.join("data.json")).unwrap(), original_data);
-        assert_eq!(
-            fs::read(blob.join("credentials/anytype-api-key.dpapi")).unwrap(),
-            original_credential
-        );
-        assert_eq!(
-            fs::read(blob.join("assets/spacebanner/banner.png")).unwrap(),
-            original_banner
-        );
-        assert!(fs::read_to_string(install.join("custom.css"))
-            .unwrap()
-            .contains(".release-theme"));
-        assert!(fs::read_to_string(install.join("custom.css"))
-            .unwrap()
-            .contains(".local-theme"));
-        assert!(!blob.join("runtime/Dev/old-managed.css").exists());
-        assert!(blob.join("runtime/Dev/local.css").is_file());
-        assert!(!blob.join("runtime/scripts/old.ps1").exists());
-        assert_eq!(
-            version_from_runtime(&blob.join("runtime"))
-                .unwrap()
-                .to_string(),
-            "1.2.0"
-        );
-        assert!(!blob.join("runtime/scripts/Settings.ps1").exists());
-        assert!(!blob.join("assets/obsolete.png").exists());
-        assert_eq!(
-            fs::read(blob.join("runtime/settings-app.exe")).unwrap(),
-            b"running executable"
-        );
-        let manifest: Value =
-            serde_json::from_slice(&fs::read(blob.join(".blobui-managed-files.json")).unwrap())
-                .unwrap();
-        assert_eq!(manifest["releaseVersion"], "1.2.0");
-        assert!(!manifest["managedFiles"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item == "runtime/Dev/local.css"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_unsafe_archive_paths_before_any_install_file_changes() {
-        let root = fixture_root("traversal");
-        let (install, original_data, original_credential, _) = install_fixture(&root);
-        let malicious = archive(&[("Anytype-BlobUI-test/../escape.css", b"escape", b'0')]);
-        assert!(apply_archive_to_install(&install, &malicious, "1.2.0").is_err());
-        let blob = install.join("blob");
-        assert_eq!(fs::read(blob.join("data.json")).unwrap(), original_data);
-        assert_eq!(
-            fs::read(blob.join("credentials/anytype-api-key.dpapi")).unwrap(),
-            original_credential
-        );
-        assert_eq!(
-            fs::read(install.join("custom.css")).unwrap(),
-            b"old-generated-css"
-        );
-        assert!(!root.join("escape.css").exists());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn updater_defaults_keep_auto_updates_off_and_persist_install_path() {
         let root = fixture_root("settings");
         let path = root.join("updater.json");
@@ -2087,16 +1261,4 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn rejects_link_entries_in_selected_runtime_paths() {
-        let root = fixture_root("links");
-        let (install, _, _, _) = install_fixture(&root);
-        let malicious = archive(&[("Anytype-BlobUI-test/Dev/link.css", b"target", b'2')]);
-        assert!(apply_archive_to_install(&install, &malicious, "1.2.0").is_err());
-        assert_eq!(
-            fs::read(install.join("custom.css")).unwrap(),
-            b"old-generated-css"
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
 }

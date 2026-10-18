@@ -14,15 +14,10 @@ pub enum CredentialChange<'a> {
     Remove,
 }
 
-pub struct FileChange {
-    pub path: PathBuf,
-    pub contents: Option<Vec<u8>>,
-}
-
-struct Snapshot {
+pub(crate) struct Snapshot {
     path: PathBuf,
     bytes: Option<Vec<u8>>,
-    permissions: Option<fs::Permissions>,
+    pub(crate) permissions: Option<fs::Permissions>,
     private: bool,
 }
 
@@ -118,64 +113,7 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn commit_update(changes: Vec<FileChange>) -> Result<(), String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut snapshots = Vec::with_capacity(changes.len());
-    for change in &changes {
-        if !seen.insert(change.path.clone()) {
-            return Err(format!("The update contains a duplicate file target: {}", change.path.display()));
-        }
-        reject_reparse_path(&change.path)?;
-        snapshots.push(snapshot(&change.path, false)?);
-        if change.contents.is_some() {
-            preflight(&change.path)?;
-        }
-    }
-
-    let mut candidates = Vec::with_capacity(changes.len());
-    for (change, before) in changes.iter().zip(snapshots.iter()) {
-        if let Some(contents) = &change.contents {
-            match prepare_temp(&change.path, contents, before.permissions.as_ref(), false) {
-                Ok(path) => candidates.push(Some(path)),
-                Err(error) => {
-                    for candidate in candidates.iter().flatten() { remove_if_exists(candidate); }
-                    return Err(error);
-                }
-            }
-        } else {
-            candidates.push(None);
-        }
-    }
-
-    let result = (|| {
-        for (change, candidate) in changes.iter().zip(candidates.iter()) {
-            match (&change.contents, candidate) {
-                (Some(_), Some(candidate)) => replace_file(candidate, &change.path)
-                    .map_err(|error| format!("Could not install update file {}: {error}", change.path.display()))?,
-                (None, _) => match fs::remove_file(&change.path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(format!("Could not remove obsolete update file {}: {error}", change.path.display())),
-                },
-                _ => return Err("An update file was not prepared safely.".into()),
-            }
-        }
-        Ok(())
-    })();
-
-    for candidate in candidates.iter().flatten() { remove_if_exists(candidate); }
-    if let Err(error) = result {
-        let mut rollback_errors = Vec::new();
-        for before in snapshots.iter().rev() {
-            if let Err(rollback) = restore(before) { rollback_errors.push(rollback); }
-        }
-        if rollback_errors.is_empty() { return Err(error); }
-        return Err(format!("{error} Rollback could not restore every saved file: {}", rollback_errors.join("; ")));
-    }
-    Ok(())
-}
-
-fn snapshot(path: &Path, private: bool) -> Result<Snapshot, String> {
+pub(crate) fn snapshot(path: &Path, private: bool) -> Result<Snapshot, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
@@ -192,7 +130,7 @@ fn snapshot(path: &Path, private: bool) -> Result<Snapshot, String> {
     }
 }
 
-fn preflight(path: &Path) -> Result<(), String> {
+pub(crate) fn preflight(path: &Path) -> Result<(), String> {
     reject_reparse_path(path)?;
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if !metadata.is_file() { return Err(format!("A BlobUI save target is not a regular file: {}", path.display())); }
@@ -210,7 +148,7 @@ fn preflight(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs::Permissions>, private: bool) -> Result<PathBuf, String> {
+pub(crate) fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs::Permissions>, private: bool) -> Result<PathBuf, String> {
     let parent = path.parent().ok_or_else(|| format!("The save target has no parent directory: {}", path.display()))?;
     reject_reparse_path(parent)?;
     fs::create_dir_all(parent).map_err(|error| format!("Could not prepare {}: {error}", parent.display()))?;
@@ -232,7 +170,7 @@ fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs::Permissio
     Ok(temp)
 }
 
-fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     let result = {
         use std::os::windows::ffi::OsStrExt;
@@ -306,7 +244,7 @@ fn restrict_credential_acl(path: &Path) -> Result<(), String> {
 #[cfg(not(windows))]
 fn restrict_credential_acl(_: &Path) -> Result<(), String> { Ok(()) }
 
-fn restore(snapshot: &Snapshot) -> Result<(), String> {
+pub(crate) fn restore(snapshot: &Snapshot) -> Result<(), String> {
     match &snapshot.bytes {
         Some(bytes) => {
             if fs::read(&snapshot.path).ok().as_deref() != Some(bytes.as_slice()) {
@@ -337,7 +275,7 @@ fn restore(snapshot: &Snapshot) -> Result<(), String> {
     }
 }
 
-fn reject_reparse_path(path: &Path) -> Result<(), String> {
+pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
         match fs::symlink_metadata(ancestor) {
             Ok(metadata) if metadata.file_type().is_symlink() || is_reparse_point(&metadata) => {
@@ -357,7 +295,7 @@ fn unique_sibling(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(format!(".{name}.{}-{nonce}.{suffix}", std::process::id()))
 }
 
-fn remove_if_exists(path: &Path) {
+pub(crate) fn remove_if_exists(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
@@ -371,8 +309,13 @@ fn is_reparse_point(metadata: &fs::Metadata) -> bool {
 fn is_reparse_point(_: &fs::Metadata) -> bool { false }
 
 #[cfg(test)]
+#[path = "../../installer/src/transaction.rs"]
+mod transaction;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use super::transaction::{commit_update, FileChange};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

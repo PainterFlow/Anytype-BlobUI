@@ -267,7 +267,6 @@ version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
- "flate2",
  "regex",
  "semver",
  "serde",

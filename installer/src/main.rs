@@ -2,6 +2,7 @@ mod archive;
 #[path = "../../settings-app/src/css.rs"]
 mod css;
 mod install;
+mod transaction;
 mod network;
 #[path = "../../settings-app/src/storage.rs"]
 mod storage;
