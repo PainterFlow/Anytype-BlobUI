@@ -232,7 +232,7 @@
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;
     if (!api || typeof api.invoke !== "function") {
-      return Promise.reject(new Error("The settings app bridge is unavailable. Launch this window from scripts/Settings.ps1."));
+      return Promise.reject(new Error("The settings app bridge is unavailable. Launch BlobUI Settings using blobui-settings.exe."));
     }
     return api.invoke(name, args || {});
   }

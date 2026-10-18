@@ -12,21 +12,11 @@ use crate::{css, storage};
 
 const OWNER: &str = "PainterFlow";
 const REPOSITORY: &str = "Anytype-BlobUI";
-const DEFAULT_RELEASE_VERSION: &str = "1.1.0";
+const RELEASE_METADATA: &str = include_str!("../../blobui-release.json");
 const MAX_RELEASE_JSON_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_EXPANDED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 20_000;
-const PACKAGE_SCRIPTS: &[&str] = &[
-    "BlobUI.Core.psm1",
-    "Get-Data.ps1",
-    "Compile.ps1",
-    "Install.ps1",
-    "Rebuild.ps1",
-    "Update.ps1",
-    "Uninstall.ps1",
-    "Settings.ps1",
-];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -344,16 +334,21 @@ fn current_version(
             return Ok(version.to_string());
         }
     }
-    Ok(DEFAULT_RELEASE_VERSION.into())
+    version_from_metadata(RELEASE_METADATA)
+        .map(|version| version.to_string())
+        .ok_or_else(|| "The built-in BlobUI release metadata is invalid.".into())
 }
 
 fn version_from_runtime(runtime: &Path) -> Option<semver::Version> {
-    let script = runtime.join("scripts").join("BlobUI.Core.psm1");
-    let text = fs::read_to_string(script).ok()?;
-    let captures = regex::Regex::new(r"(?m)^\s*\$script:BlobUiReleaseVersion\s*=\s*'([^']+)'\s*$")
-        .ok()?
-        .captures(&text)?;
-    parse_version(captures.get(1)?.as_str())
+    version_from_metadata(&fs::read_to_string(runtime.join("blobui-release.json")).ok()?)
+}
+
+fn version_from_metadata(text: &str) -> Option<semver::Version> {
+    let metadata: Value = serde_json::from_str(text).ok()?;
+    if metadata.get("formatVersion")?.as_u64()? != 1 {
+        return None;
+    }
+    parse_version(metadata.get("version")?.as_str()?)
 }
 
 fn parse_version(value: &str) -> Option<semver::Version> {
@@ -683,12 +678,9 @@ fn prepare_file_changes(
         None,
     )?;
     collect_package_files(&source_root.join("assets"), &mut desired, "assets", None)?;
-    for name in PACKAGE_SCRIPTS {
-        let source = source_root.join("scripts").join(name);
-        let bytes = fs::read(&source)
-            .map_err(|_| format!("The source archive is missing packaged script {name}."))?;
-        desired.insert(format!("runtime/scripts/{name}"), bytes);
-    }
+    let metadata = fs::read(source_root.join("blobui-release.json"))
+        .map_err(|_| "The source archive is missing release metadata.".to_string())?;
+    desired.insert("runtime/blobui-release.json".into(), metadata);
     if desired.keys().all(|path| !path.starts_with("runtime/Dev/")) {
         return Err("The source archive contains no BlobUI CSS files.".into());
     }
@@ -974,7 +966,8 @@ fn validate_managed_key(raw: &str) -> Result<Option<String>, String> {
         || key.starts_with("runtime/scripts/")
         || key.starts_with("runtime/Dev/")
         || key.starts_with("runtime/assets/")
-        || key == "runtime/settings-app.exe")
+        || key == "runtime/settings-app.exe"
+        || key == "runtime/blobui-release.json")
     {
         return Err("The BlobUI install manifest contains an unsupported file path.".into());
     }
@@ -1224,14 +1217,14 @@ fn unpack_selected_tar_entries(tar: &[u8], destination: &Path) -> Result<(), Str
     let top = destination.join(root);
     let dev = top.join("Dev");
     let assets = top.join("assets/spacebanner/banner.png");
-    let core = top.join("scripts/BlobUI.Core.psm1");
-    if !dev.is_dir() || !assets.is_file() || !core.is_file() {
+    let metadata = top.join("blobui-release.json");
+    if !dev.is_dir() || !assets.is_file() || !metadata.is_file() {
         return Err(
             "The downloaded source archive does not contain a complete BlobUI runtime.".into(),
         );
     }
     // Move the selected tree to a stable layout for the compiler and installer.
-    for name in ["Dev", "assets", "scripts"] {
+    for name in ["Dev", "assets", "blobui-release.json"] {
         let source = top.join(name);
         let target = destination.join(name);
         if source.exists() {
@@ -1249,7 +1242,7 @@ fn selected_archive_kind(relative: &Path) -> Option<&'static str> {
     match first {
         Component::Normal(name) if name == "Dev" => Some("Dev"),
         Component::Normal(name) if name == "assets" => Some("assets"),
-        Component::Normal(name) if name == "scripts" => Some("scripts"),
+        Component::Normal(name) if name == "blobui-release.json" && components.next().is_none() => Some("metadata"),
         _ => None,
     }
 }
@@ -1445,7 +1438,7 @@ mod tests {
     }
 
     fn source_archive(version: &str) -> Vec<u8> {
-        let script = format!("$script:BlobUiReleaseVersion = '{version}'\n");
+        let metadata = json!({"formatVersion": 1, "version": version}).to_string();
         let css_path = pax_path_record("Anytype-BlobUI-test/Dev/theme.css");
         archive(&[
             ("pax_global_header", b"comment=git archive fixture\n", b'g'),
@@ -1461,35 +1454,8 @@ mod tests {
                 b'0',
             ),
             (
-                "Anytype-BlobUI-test/scripts/BlobUI.Core.psm1",
-                script.as_bytes(),
-                b'0',
-            ),
-            (
-                "Anytype-BlobUI-test/scripts/Settings.ps1",
-                b"# launcher",
-                b'0',
-            ),
-            ("Anytype-BlobUI-test/scripts/Get-Data.ps1", b"# get", b'0'),
-            (
-                "Anytype-BlobUI-test/scripts/Compile.ps1",
-                b"# compile",
-                b'0',
-            ),
-            (
-                "Anytype-BlobUI-test/scripts/Install.ps1",
-                b"# install",
-                b'0',
-            ),
-            (
-                "Anytype-BlobUI-test/scripts/Rebuild.ps1",
-                b"# rebuild",
-                b'0',
-            ),
-            ("Anytype-BlobUI-test/scripts/Update.ps1", b"# update", b'0'),
-            (
-                "Anytype-BlobUI-test/scripts/Uninstall.ps1",
-                b"# uninstall",
+                "Anytype-BlobUI-test/blobui-release.json",
+                metadata.as_bytes(),
                 b'0',
             ),
         ])
@@ -1554,6 +1520,19 @@ mod tests {
     }
 
     #[test]
+    fn release_metadata_validates_schema_and_semantic_version() {
+        assert_eq!(version_from_metadata(RELEASE_METADATA).unwrap().to_string(), "1.2.0");
+        for invalid in [
+            r#"{"formatVersion":2,"version":"1.2.0"}"#,
+            r#"{"formatVersion":1,"version":"invalid"}"#,
+            r#"{"version":"1.2.0"}"#,
+            "invalid json",
+        ] {
+            assert!(version_from_metadata(invalid).is_none());
+        }
+    }
+
+    #[test]
     fn source_update_keeps_user_data_credentials_custom_banner_and_local_css() {
         let root = fixture_root("preserve");
         let (install, original_data, original_credential, original_banner) = install_fixture(&root);
@@ -1579,6 +1558,8 @@ mod tests {
         assert!(!blob.join("runtime/Dev/old-managed.css").exists());
         assert!(blob.join("runtime/Dev/local.css").is_file());
         assert!(!blob.join("runtime/scripts/old.ps1").exists());
+        assert_eq!(version_from_runtime(&blob.join("runtime")).unwrap().to_string(), "1.2.0");
+        assert!(!blob.join("runtime/scripts/Settings.ps1").exists());
         assert!(!blob.join("assets/obsolete.png").exists());
         assert_eq!(
             fs::read(blob.join("runtime/settings-app.exe")).unwrap(),

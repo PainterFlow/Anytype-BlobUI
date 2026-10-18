@@ -69,14 +69,13 @@ pub fn install(
     let install_result = (|| {
         fs::create_dir_all(&app).map_err(|e| format!("Could not create app folder: {e}"))?;
         app_created = true;
-        for name in ["scripts", "Dev", "assets", "BlobUI Settings Space"] {
+        for name in ["Dev", "assets"] {
             let source = package.join(name);
             if source.exists() {
                 copy_tree(&source, &app.join(name))?;
             }
         }
-        let launcher = package.join("BlobUI.cmd");
-        if launcher.is_file() { copy_file(&launcher, &app.join("BlobUI.cmd"))?; }
+        copy_file(&package.join("blobui-release.json"), &app.join("blobui-release.json"))?;
         let executable = package.join("settings-app/dist/blobui-settings.exe");
         let app_dist = app.join("settings-app/dist");
         fs::create_dir_all(&app_dist).map_err(|e| format!("Could not prepare app executable folder: {e}"))?;
@@ -154,6 +153,7 @@ fn make_install_changes(
     collect_managed_tree(&package.join("Dev"), "runtime/Dev", &mut files)?;
     collect_managed_tree(&package.join("assets"), "runtime/assets", &mut files)?;
     files.insert("runtime/settings-app.exe".into(), package.join("settings-app/dist/blobui-settings.exe"));
+    files.insert("runtime/blobui-release.json".into(), package.join("blobui-release.json"));
     let managed = files.keys().cloned().collect::<BTreeSet<_>>();
     let mut changes = Vec::new();
     for (key, source) in &files {

@@ -9,7 +9,7 @@ $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $manifestPath = Join-Path $workspaceRoot 'installer\Cargo.toml'
 $distributionDirectory = Join-Path $workspaceRoot 'dist'
 $settingsExecutable = Join-Path $workspaceRoot 'settings-app\dist\blobui-settings.exe'
-$versionSource = Join-Path $workspaceRoot 'scripts\BlobUI.Core.psm1'
+$versionSource = Join-Path $workspaceRoot 'blobui-release.json'
 
 function Assert-WorkspacePath {
     param([Parameter(Mandatory)][string]$Path)
@@ -26,16 +26,15 @@ function Assert-WorkspacePath {
 }
 
 function Copy-PackageTree {
-    param([string]$Source, [string]$Destination, [switch]$ExcludeTests)
+    param([string]$Source, [string]$Destination)
     $item = Get-Item -LiteralPath $Source -Force
     if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refusing to package a reparse point: $Source" }
     if ($item.PSIsContainer) {
         [IO.Directory]::CreateDirectory($Destination) | Out-Null
         foreach ($child in Get-ChildItem -LiteralPath $Source -Force) {
             if ($child.Name.StartsWith('.blobui', [StringComparison]::OrdinalIgnoreCase)) { continue }
-            if ($ExcludeTests -and $child.PSIsContainer -and $child.Name -eq 'tests') { continue }
             if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refusing to package a reparse point: $($child.FullName)" }
-            Copy-PackageTree $child.FullName (Join-Path $Destination $child.Name) -ExcludeTests:$ExcludeTests
+            Copy-PackageTree $child.FullName (Join-Path $Destination $child.Name)
         }
     } else { Copy-Item -LiteralPath $Source -Destination $Destination }
 }
@@ -44,9 +43,9 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Install
 if (-not (Test-Path -LiteralPath $versionSource -PathType Leaf)) { throw "Release version source was not found: $versionSource" }
 if ($PackageRelease -and -not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) { throw "Build BlobUI Settings separately before packaging: scripts/Build-Settings.ps1 -s -c" }
 
-$versionText = [IO.File]::ReadAllText($versionSource)
-if ($versionText -notmatch "(?m)^\s*\`$script:BlobUiReleaseVersion\s*=\s*'([0-9A-Za-z.+-]+)'") { throw 'Could not read BlobUI release version from scripts/BlobUI.Core.psm1.' }
-$releaseVersion = $Matches[1]
+$releaseManifest = Get-Content -LiteralPath $versionSource -Raw | ConvertFrom-Json
+if ($releaseManifest.formatVersion -ne 1 -or $releaseManifest.version -cnotmatch '^[0-9][0-9A-Za-z.+-]{0,63}$') { throw 'Invalid release metadata in blobui-release.json.' }
+$releaseVersion = $releaseManifest.version
 
 $savedEnvironment = @{}
 foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER', 'CARGO_TARGET_DIR', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS')) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -105,12 +104,9 @@ if ($PackageRelease) {
     $null = Assert-WorkspacePath $packageRoot; $null = Assert-WorkspacePath $packagePath; $null = Assert-WorkspacePath $tempArchive
     try {
         [IO.Directory]::CreateDirectory($packageRoot) | Out-Null
-        foreach ($name in @('scripts', 'Dev', 'assets', 'BlobUI Settings Space', 'settings-app\dist')) { [IO.Directory]::CreateDirectory((Join-Path $packageRoot $name)) | Out-Null }
-        Copy-PackageTree (Join-Path $workspaceRoot 'scripts') (Join-Path $packageRoot 'scripts') -ExcludeTests
+        foreach ($name in @('Dev', 'assets', 'settings-app\dist')) { [IO.Directory]::CreateDirectory((Join-Path $packageRoot $name)) | Out-Null }
         Copy-PackageTree (Join-Path $workspaceRoot 'Dev') (Join-Path $packageRoot 'Dev')
         Copy-PackageTree (Join-Path $workspaceRoot 'assets') (Join-Path $packageRoot 'assets')
-        Copy-PackageTree (Join-Path $workspaceRoot 'BlobUI Settings Space') (Join-Path $packageRoot 'BlobUI Settings Space')
-        Copy-Item -LiteralPath (Join-Path $workspaceRoot 'BlobUI.cmd') -Destination $packageRoot
         Copy-Item -LiteralPath $settingsExecutable -Destination (Join-Path $packageRoot 'settings-app\dist\blobui-settings.exe')
         $releaseManifest = @{ formatVersion = 1; version = $releaseVersion } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $packageRoot 'blobui-release.json'), $releaseManifest + "`n", [Text.UTF8Encoding]::new($false))

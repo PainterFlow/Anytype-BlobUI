@@ -27,6 +27,12 @@ try {
     Copy-Item -LiteralPath (Join-Path $repo 'dist/blobui-installer-dev.exe') -Destination $devExe
     Copy-Item -LiteralPath (Join-Path $repo 'dist/blobui-installer.exe') -Destination $prodExe
     $package = Join-Path $repo 'dist/blobui-windows.zip'
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($package)
+    try {
+        Assert (@($archive.Entries | Where-Object { $_.FullName -match '\.(ps1|psm1|cmd)$' }).Count -eq 0) 'The release package contains legacy scripts or launchers.'
+    } finally { $archive.Dispose() }
     # A development install must ignore the normal profile locations completely.
     $env:APPDATA = Join-Path $root 'protected-roaming'
     $env:LOCALAPPDATA = Join-Path $root 'protected-local'
@@ -44,6 +50,18 @@ try {
     Assert ($apps.Count -eq 1) 'First development installation did not create one app folder.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'blobui-settings.exe')) 'Native installation omitted the app executable.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName '.blobui-install.json')) 'Native installation omitted the install pointer.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'scripts'))) 'Native installation included legacy scripts.'
+    $releaseMetadata = Get-Content -LiteralPath (Join-Path $repo 'blobui-release.json') -Raw | ConvertFrom-Json
+    $runtimeMetadata = Get-Content -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/blobui-release.json') -Raw | ConvertFrom-Json
+    Assert ($runtimeMetadata.version -eq $releaseMetadata.version) 'Installed runtime release version does not match the source.'
+    $managedPath = Join-Path $testRoot 'Anytype/blob/.blobui-managed-files.json'
+    $managed = Get-Content -LiteralPath $managedPath -Raw | ConvertFrom-Json
+    $managed.managedFiles += 'runtime/scripts/obsolete.ps1'
+    $managed | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $managedPath -Encoding UTF8
+    $oldScripts = Join-Path $testRoot 'Anytype/blob/runtime/scripts'
+    [IO.Directory]::CreateDirectory($oldScripts) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $oldScripts 'obsolete.ps1'), 'old managed script')
+    [IO.File]::WriteAllText((Join-Path $oldScripts 'user-local.ps1'), 'keep local file')
     $data = Get-Content -LiteralPath $dataPath -Raw | ConvertFrom-Json
     $data.settings.accentColor = '#123456'
     $data | Add-Member NoteProperty installerTestExtra 'keep-unknown-property' -Force
@@ -59,6 +77,8 @@ try {
     [IO.File]::WriteAllText($unrelated, 'keep-anytype-data')
     & $devExe --no-pause --package $package
     Assert ($LASTEXITCODE -eq 0) 'Repeated native development installation failed.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $oldScripts 'obsolete.ps1'))) 'Repeated installation left an obsolete managed script.'
+    Assert ([IO.File]::ReadAllText((Join-Path $oldScripts 'user-local.ps1')) -eq 'keep local file') 'Repeated installation removed an unmanaged local script.'
     Assert ((Get-FileHash -LiteralPath $dataPath).Hash -eq $savedDataHash) 'Repeated installation rewrote or reset saved settings.'
     Assert ([IO.File]::ReadAllText($credentialPath) -eq 'keep-encrypted-credential') 'Repeated installation changed credentials.'
     Assert ([IO.File]::ReadAllText($bannerPath) -eq 'keep-custom-banner') 'Repeated installation changed a custom banner.'

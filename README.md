@@ -5,7 +5,7 @@ It gives Anytype a more modern and elegant touch, coloring buttons, changing fon
 and just improving the overall UI.
 For more documentation, [visit our Anytype page](https://any.coop/A9drcF6fXs9QvXiR114HjF7Lx5ZzrysS1PLZcWFRYYW9Jiob/anytype-blobui)
 
-On Windows, run `blobui-installer.exe` from a published release to install BlobUI. The script-based `Install.cmd` remains available for source downloads. Use **Save** in BlobUI Settings to rebuild and apply the theme; runtime CSS compilation, Anytype API access, and settings saves are handled by the Rust app. Setup details are below.
+On Windows, run `blobui-installer.exe` from a published release to install BlobUI. Use **Save** in BlobUI Settings to rebuild and apply the theme; runtime CSS compilation, Anytype API access, and settings saves are handled by the Rust app. Setup details are below.
 
 
 #### *Made by Adrian Orlik (@PainterFlow11)*
@@ -59,29 +59,15 @@ For an offline test of the current workspace, package the already built Settings
 
 If the Settings executable needs rebuilding, run `scripts/Build-Settings.ps1 -s -c` first. Packaging itself does not rebuild or launch Settings. The production installer accepts downloads from GitHub only.
 
-When publishing a release, run `scripts/Build-Installer.ps1 -PackageRelease` and attach `dist/blobui-windows.zip` and `dist/blobui-installer.exe` to the GitHub release. GitHub's automatic source ZIP does not include the compiled app and cannot replace this asset. Until a release contains `blobui-windows.zip`, the online installer reports the missing package.
+The prepared **Release Windows installer** GitHub Actions workflow is currently ignored by Git until the release is ready. Once committed and pushed, it builds Settings, tests the installer, and publishes `blobui-installer.exe` and `blobui-windows.zip` as GitHub release assets. Merge development changes into `main`, then push a version tag on that commit matching `version` in `blobui-release.json`, prefixed with `v`. For example, version `1.2.0` uses tag `v1.2.0`. The workflow rejects tags whose commits are outside `main` or whose versions do not match.
+
+You can retry an existing tag from **Actions > Release Windows installer > Run workflow** after the workflow reaches the default branch. Enter the existing tag in the `tag` field. The workflow creates a draft release when needed, uploads both tested files, then publishes it. A retry replaces the two assets on an existing mutable release. Immutable published releases cannot have their assets replaced; use a new version tag instead. No additional repository secret is required; uploads use GitHub's built-in token.
+
+For manual packaging, run `scripts/Build-Installer.ps1 -PackageRelease` after building Settings and attach `dist/blobui-windows.zip` and `dist/blobui-installer.exe` to the GitHub release. GitHub's automatic source ZIP does not include the compiled app and cannot replace this asset. Until a release contains `blobui-windows.zip`, the online installer reports the missing package.
 
 Run `scripts/tests/Test-Installer.ps1` to compile both installers and check isolated installation, repeated-install preservation, release selection, and archive validation. Tests use temporary folders inside the workspace and do not launch Settings.
 
-### Script installation
-
-1. Extract the download outside OneDrive and open Anytype at least once.
-2. Double-click **Install.cmd**. Windows PowerShell 5.1 or later is required; administrator access is not needed for the default locations.
-3. Choose the **Anytype data folder**, normally `%APPDATA%\anytype`. This is the folder containing Anytype's profile and `custom.css`, rather than the folder containing `Anytype.exe`.
-4. Choose a separate, empty folder for the **BlobUI app**, normally `%LOCALAPPDATA%\Programs\BlobUI`. Press Enter to accept either default.
-5. Open **BlobUI** from the Start menu, or run `BlobUI.cmd` in the app folder. Enable **File > Apply Custom CSS** in Anytype and press **Ctrl+R**.
-
-Setup installs the default theme, its assets, the Rust Settings executable, and the PowerShell launch wrapper. Build the Settings executable first with `scripts/Build-Settings.ps1 -s -c`; setup refuses to install without it. It does not need an API key or settings-space import. The installed app can run after the extracted download is removed.
-
-Existing theme settings and credentials are preserved. Existing `custom.css` is backed up in the Anytype data folder under `blob/backups`. Setup refuses non-empty app folders. To relocate the app, install into a new empty folder with `-NoShortcut`, then remove the old app folder and shortcut yourself.
-
-You can also run setup from PowerShell with explicit paths:
-
-```powershell
-.\scripts\Setup.ps1 -AnytypeDirectory "C:\path\to\Anytype data" -AppDirectory "C:\path\to\BlobUI"
-```
-
-Pass `-NoShortcut` to skip the Start menu entry. Use the Settings app to update the theme. `Uninstall.ps1` remains temporarily outdated for the Rust runtime. Remove the app folder and BlobUI Start menu shortcut separately if you need to remove the launcher. Theme uninstallation also deletes `blob/backups`; copy out any CSS backup you want to keep first.
+Open **BlobUI** from the Start menu or run `blobui-settings.exe` from the app folder after installation. The app runs directly in Rust. PowerShell is needed only for developer build and test commands. Automated uninstallation is not available yet.
 
 ### Optional: enable calendar color data from the Anytype API
 
@@ -104,9 +90,9 @@ Updates run in Rust and use the latest published GitHub release. They preserve s
 
 The update source is `PainterFlow/Anytype-BlobUI`. The repository and its releases must be publicly accessible. Private or inaccessible release sources show an error; the app does not store GitHub credentials.
 
-When publishing a theme release, use a semantic version tag matching `BlobUiReleaseVersion` in `scripts/BlobUI.Core.psm1`, such as `v1.1.0`. The updater validates that version against GitHub's generated source archive before installing it.
+When publishing a theme release, use a semantic version tag matching `version` in `blobui-release.json`, such as `v1.2.0`. The updater validates that version against GitHub's generated source archive before installing it.
 
-This updater installs theme sources and assets. It does not replace the running Settings executable. App executable upgrades still require a separately built app. `scripts/Update.ps1` opens Settings and directs you to the Rust updater.
+This updater installs theme sources and assets. It does not replace the running Settings executable. App executable upgrades still require a separately built app.
 
 ## Settings app
 
@@ -114,10 +100,10 @@ BlobUI Settings provides a desktop Appearance window for fonts and accent colors
 
 ```powershell
 .\scripts\Build-Settings.ps1 -s -c
-.\scripts\Settings.ps1
+.\settings-app\dist\blobui-settings.exe
 ```
 
-The build places the executable in `settings-app/dist/blobui-settings.exe`; `-s` starts it after build and `-c` closes existing instances first. `-n` records a one-time onboarding request for the next launch without starting the app. Use `-s -n` to start the app in onboarding immediately. `Setup.ps1` packages the executable and `scripts/Settings.ps1` remains the supported PowerShell launch wrapper. The installer is responsible for installation; `Update.ps1` and `Uninstall.ps1` are temporarily outdated.
+The build places the executable in `settings-app/dist/blobui-settings.exe`; `-s` starts it after build and `-c` closes existing instances first. `-n` records a one-time onboarding request for the next launch without starting the app. Use `-s -n` to start the app in onboarding immediately. Run the executable directly, or use `scripts/Build-Installer.ps1 -PackageRelease` to package it for the native installer.
 
 Start Settings once per Windows session to enable **Numpad 1** while Anytype is active. In **Advanced > App Settings**, enable **Launch at startup** to open BlobUI Settings when you sign in. Closing the window keeps the app and shortcut running in the background. Press **Ctrl+Q** in Settings to exit completely, including before replacing the executable with a newer build. Opening the launcher again brings back the existing window. The shortcut supports Num Lock on or off and leaves keys in other apps unchanged.
 
@@ -131,9 +117,9 @@ Settings saves write `custom.css` and `blob/data.json`; credential replacement i
 
 The choice, IP, and port are saved locally in `blob/data.json`. No API mode makes no Anytype API calls, removes the encrypted key and API-derived calendar colors, while custom accents, fonts, banners, text effects and UI fixes keep working. Settings saves respect the saved mode and connection address.
 
-Use **Advanced Settings** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\scripts\Settings.ps1 -n` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
+Use **Advanced Settings** to replace your key, change the port, or disable API features. **F8** restarts the full onboarding flow. Run `.\settings-app\dist\blobui-settings.exe --onboarding` to open onboarding without changing saved settings. Press **Escape** to leave without submitting; the Settings window uses the same entrance animation as when onboarding finishes. Reduced-motion preferences skip animations. Future pages can be added to the `onboardingSteps` list in `settings-app/ui/app.js`; conditional steps use `when`, and all pages share `advanceOnboarding()` and its fallback to Settings.
 
-To start only the background listener, run `.\scripts\Settings.ps1 -Background`. This does not change the Windows login startup setting.
+To start only the background listener, run `.\settings-app\dist\blobui-settings.exe --background`. This does not change the Windows login startup setting.
 
 The first Settings app save migrates the current font and accent values from `data.json` into the local `settingsV2` record. After that, these local choices are authoritative, so saving no longer requires the legacy Anytype Settings objects. Anytype's Calendar Color data refreshes when its local API is available; otherwise the app keeps the saved calendar cache and reports that status. Saving rebuilds `custom.css`; press `Ctrl+R` in Anytype to apply it.
 
@@ -172,8 +158,8 @@ Spoilers appear as rounded blocks slightly brighter than the sidebar widgets, wi
 
 ## Installer validation
 
-On Windows, run `powershell -NoProfile -File scripts/tests/Test-Setup.ps1`. The checks use isolated folders beneath `scripts/tests` and cover installation, backups, launcher packaging, saved-setting preservation, rejected destinations, and failed-install cleanup. The runtime’s Rust tests cover CSS output, API behavior, transactional save rollback, and connection replacement using workspace-only fixtures. `settings-app/tests/native-runtime.test.py` checks runtime ownership and supported launcher/build entry points.
+On Windows, build Settings with `scripts/Build-Settings.ps1 -s -c`, then run `powershell -NoProfile -File scripts/tests/Test-Installer.ps1`. The checks build both native installers and use isolated folders beneath `.test-run` to cover installation, backups, executable packaging, saved-setting preservation, rejected destinations, and failed-install cleanup. The runtime’s Rust tests cover CSS output, API behavior, transactional save rollback, and connection replacement using workspace-only fixtures. `settings-app/tests/native-runtime.test.py` checks runtime ownership and the native executable and developer build entry points.
 
-Windows smoke check: build with `scripts/Build-Settings.ps1 -s -c`, run `Install.cmd`, accept the paths, launch BlobUI from the Start menu, save a setting, and reload Anytype. Verify custom folder paths containing spaces as well. Start menu integration, filesystem ACL preservation, and DPAPI require Windows for full validation.
+Windows smoke check: build with `scripts/Build-Settings.ps1 -s -c`, run the production installer from a published release, choose the paths, launch BlobUI from the Start menu, save a setting, and reload Anytype. Verify custom folder paths containing spaces as well. Start menu integration, filesystem ACL preservation, and DPAPI require Windows for full validation.
 
 Connection regression coverage is part of the native Rust tests: fake keys and a local mock Anytype server exercise replacement keys, optional calendar failures, custom IPs/ports, failed-authentication rollback, CSS failure, and API opt-out. The previous PowerShell process test has been replaced because the Settings runtime no longer starts PowerShell for API or save operations.

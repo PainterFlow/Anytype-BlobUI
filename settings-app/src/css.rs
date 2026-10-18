@@ -444,11 +444,8 @@ mod tests {
         assert!(calendar_color_css(invalid.as_object().map(|_| &invalid)).is_err());
     }
 
-    #[cfg(windows)]
     #[test]
-    fn output_matches_legacy_compiler_for_accent_accessibility_and_calendar_fixtures() {
-        use std::process::Command;
-
+    fn compiles_repository_theme_for_accent_accessibility_and_calendar_settings() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let fixture = fixture().join("parity");
         fs::create_dir_all(&fixture).unwrap();
@@ -473,31 +470,24 @@ mod tests {
                 "calendarObjectColors": {}
             }),
         ];
-        let powershell = ["pwsh.exe", "powershell.exe"]
-            .into_iter()
-            .find(|shell| Command::new(shell).arg("-NoProfile").arg("-Command").arg("exit 0").status().is_ok());
-        let Some(powershell) = powershell else {
-            let _ = fs::remove_dir_all(&fixture);
-            return;
-        };
-
         for (index, settings) in cases.iter().enumerate() {
             let mut data = settings.clone();
             data["installDirectory"] = json!(install);
-            let data_path = fixture.join(format!("case-{index}.json"));
-            let output_path = fixture.join(format!("case-{index}.css"));
-            fs::write(&data_path, serde_json::to_vec_pretty(&data).unwrap()).unwrap();
-            let legacy = Command::new(powershell)
-                .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
-                .arg(root.join("scripts/Compile.ps1"))
-                .arg("-DataPath").arg(&data_path)
-                .arg("-OutputPath").arg(&output_path)
-                .arg("-DevDirectory").arg(root.join("Dev"))
-                .arg("-AssetSourceDirectory").arg(root.join("assets"))
-                .output().unwrap();
-            assert!(legacy.status.success(), "legacy CSS compile failed: {}", String::from_utf8_lossy(&legacy.stderr));
-            let native = compile(root, &install, &data).unwrap();
-            assert_eq!(native.as_bytes(), fs::read(&output_path).unwrap(), "native CSS diverged from the legacy compiler for fixture {index}");
+            let compiled = compile(root, &install, &data).unwrap();
+            assert!(!compiled.contains("{{"), "unresolved setting in case {index}");
+            assert!(!compiled.contains("@blobui-"), "unresolved directive in case {index}");
+            assert!(compiled.contains(settings["settings"]["fontFamily"].as_str().unwrap()));
+            if index == 0 {
+                assert!(compiled.contains("record-default-case"));
+            } else if index == 1 {
+                assert!(compiled.contains("record-custom-case"));
+                assert!(compiled.contains("#27A879"));
+            } else {
+                assert!(!compiled.contains("record-disabled-case"));
+            }
+            if index == 3 {
+                assert!(compiled.contains("data:image/png;base64,iVBORw0KGgo="));
+            }
         }
         fs::remove_dir_all(fixture).unwrap();
     }

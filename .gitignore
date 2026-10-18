@@ -14,3 +14,6 @@ data.json
 /settings-app/dist/.blobui-onboarding-next
 /dist/
 /installer/target/
+
+# Keep the release workflow local until 1.2.0 is ready to publish.
+/.github/workflows/windows-release.yml

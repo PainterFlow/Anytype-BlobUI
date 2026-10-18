@@ -94,7 +94,7 @@ catch [System.IO.IOException] {
     throw "The app compiled, but its distribution executable could not be replaced. Fully quit BlobUI Settings with Ctrl+Q and rerun this script. Built executable: $releaseExecutable. $($_.Exception.Message)"
 }
 Write-Host "BlobUI Settings was built at $distributionExecutable"
-Write-Host 'Run scripts/Setup.ps1 to install BlobUI with the built app, or launch it with scripts/Settings.ps1.'
+Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
 
 if ($Onboarding -and -not $s) {
     $onboardingRequestPath = Join-Path $distributionDirectory '.blobui-onboarding-next'
