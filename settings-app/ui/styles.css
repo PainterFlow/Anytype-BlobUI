@@ -228,8 +228,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .discard-button { grid-row: 2; color: var(--text-secondary); }
 .discard-button:hover:not(:disabled) { color: var(--color-red); }
 .update-now-button { grid-row: 3; color: #de50de; }
-.log-button[data-severity="error"] { color: var(--color-red); }
-.log-button[data-severity="warning"] { color: var(--color-yellow); }
+.log-button[data-severity="error"], .log-button[data-severity="warning"] { color: var(--text-secondary); }
 .log-control { position: relative; grid-row: 3; }
 .help-control { position: relative; grid-row: 4; }
 .sidebar-actions.has-update { grid-template-rows: repeat(5, 28px); }
