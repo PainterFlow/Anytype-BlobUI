@@ -465,7 +465,7 @@ mod tests {
                 "calendarObjectColors": { "disabled-case": "Amber" }
             }),
             json!({
-                "settings": { "fontFamily": "Arial", "codeFontFamily": "Consolas", "accentColor": "#3656D4", "bannerImage": "data:image/png;base64,iVBORw0KGgo=", "reducedMotion": false, "tabHoverEffect": true, "linkHoverEffect": true, "objectMentionHoverEffect": false },
+                "settings": { "fontFamily": "Arial", "codeFontFamily": "Consolas", "accentColor": "#3656D4", "bannerImage": "data:image/png;base64,iVBORw0KGgo=", "reducedMotion": false, "tabHoverEffect": true, "linkHoverEffect": true, "objectMentionHoverEffect": true },
                 "apiConnection": { "enabled": false },
                 "calendarObjectColors": {}
             }),
@@ -477,6 +477,16 @@ mod tests {
             assert!(!compiled.contains("{{"), "unresolved setting in case {index}");
             assert!(!compiled.contains("@blobui-"), "unresolved directive in case {index}");
             assert!(compiled.contains(settings["settings"]["fontFamily"].as_str().unwrap()));
+            assert_eq!(
+                compiled.contains("#preview.previewWrapper:has(.previewLink)"),
+                !settings["settings"]["linkHoverEffect"].as_bool().unwrap(),
+                "link preview toggle was not compiled independently in case {index}"
+            );
+            assert_eq!(
+                compiled.contains("#preview.previewWrapper:has(.previewDefault, .previewObject)"),
+                !settings["settings"]["objectMentionHoverEffect"].as_bool().unwrap(),
+                "object mention preview toggle was not compiled independently in case {index}"
+            );
             if index == 0 {
                 assert!(compiled.contains("record-default-case"));
             } else if index == 1 {

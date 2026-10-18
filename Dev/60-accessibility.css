@@ -25,24 +25,20 @@
 }
 /* @blobui-endif reducedMotion */
 
-/* Prevent Anytype's delayed link preview from opening after the pointer leaves
-   its source. Keep this within editor text so app navigation stays interactive.
-   Anchors inside or containing a mention are controlled by the mention setting. */
+/* Anytype identifies preview content by type. Hide only the matching popup so
+   disabling previews does not disable clicks on the source link. */
 /* @blobui-if-not linkHoverEffect */
-.pageMain .editor .blockText .editable a[href]:not([href^="blob://"]):not(:has(markupmention)):not(markupmention a),
-.pageMain .editor .blockText .editable a[href]:not([href^="blob://"]):not(:has(markupmention)):not(markupmention a) * {
-    pointer-events: none !important;
+#preview.previewWrapper:has(.previewLink):not(:has(.previewTab)) {
+    display: none !important;
 }
 /* @blobui-endif-not linkHoverEffect */
 
-/* Mentions may contain links or sit inside one, so disable the whole target
-   subtree when their independent preview setting is off. */
+/* Object mentions use Anytype's default preview card, while some object
+   previews use previewObject. Tab previews remain controlled by their own
+   setting. */
 /* @blobui-if-not objectMentionHoverEffect */
-.pageMain .editor .blockText .editable markupmention,
-.pageMain .editor .blockText .editable markupmention *,
-.pageMain .editor .blockText .editable a:has(markupmention),
-.pageMain .editor .blockText .editable a:has(markupmention) * {
-    pointer-events: none !important;
+#preview.previewWrapper:has(.previewDefault, .previewObject):not(:has(.previewTab)) {
+    display: none !important;
 }
 /* @blobui-endif-not objectMentionHoverEffect */
 

@@ -1077,32 +1077,75 @@ fn has_runtime_files(root: &Path) -> bool {
     root.join("Dev").is_dir() && root.join("assets").is_dir()
 }
 
-fn resolve_runtime_directory() -> Result<PathBuf, String> {
-    if let Some(root) = non_empty_path(env::var_os("BLOBUI_SOURCE_DIRECTORY")) {
-        if has_runtime_files(&root) {
-            return Ok(root);
-        }
-        return Err("BLOBUI_SOURCE_DIRECTORY does not contain Dev and assets folders.".into());
-    }
-    let executable = env::current_exe()
-        .map_err(|error| format!("Could not locate the settings app executable: {error}"))?;
-    executable
-        .ancestors()
-        .skip(1)
-        .find(|ancestor| has_runtime_files(ancestor))
-        .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            "BlobUI's CSS source and assets could not be found beside the app or in its source folder.".into()
-        })
+fn resolve_runtime_directory_for_install(install: &Path) -> Result<PathBuf, String> {
+    let source_override = non_empty_path(env::var_os("BLOBUI_SOURCE_DIRECTORY"));
+    let executable = env::current_exe().ok();
+    resolve_runtime_directory_for_install_from(
+        install,
+        source_override.as_deref(),
+        executable.as_deref(),
+    )
 }
 
-fn resolve_runtime_directory_for_install(install: &Path) -> Result<PathBuf, String> {
+fn resolve_runtime_directory_for_install_from(
+    install: &Path,
+    source_override: Option<&Path>,
+    executable: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(root) = source_override {
+        return validate_runtime_source_override(root);
+    }
+
+    let executable_runtime = executable_runtime_directory(executable);
+    if executable_runtime
+        .as_deref()
+        .is_some_and(|root| !is_installed_runtime_directory(root))
+    {
+        return Ok(executable_runtime.unwrap());
+    }
+
+    // Installed Settings builds keep using the selected Anytype folder's runtime,
+    // which is also where update checks and updates read their package metadata.
     let installed = install.join("blob/runtime");
     if has_runtime_files(&installed) {
         reject_reparse_component(&installed)?;
         return Ok(installed);
     }
-    resolve_runtime_directory()
+
+    if let Some(root) = executable_runtime {
+        if is_installed_runtime_directory(&root) {
+            reject_reparse_component(&root)?;
+        }
+        return Ok(root);
+    }
+
+    Err("BlobUI's CSS source and assets could not be found beside the app or in its source folder.".into())
+}
+
+fn validate_runtime_source_override(root: &Path) -> Result<PathBuf, String> {
+    if has_runtime_files(root) {
+        Ok(root.to_path_buf())
+    } else {
+        Err("BLOBUI_SOURCE_DIRECTORY does not contain Dev and assets folders.".into())
+    }
+}
+
+fn executable_runtime_directory(executable: Option<&Path>) -> Option<PathBuf> {
+    executable?
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| has_runtime_files(ancestor))
+        .map(Path::to_path_buf)
+}
+
+fn is_installed_runtime_directory(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("runtime"))
+        && path.parent().is_some_and(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("blob"))
+        })
 }
 
 fn ensure_not_release_path(path: &Path) -> Result<(), String> {
@@ -1405,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn updated_installed_runtime_is_preferred_for_future_saves() {
+    fn source_runtime_wins_over_stale_installed_hover_css() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1413,18 +1456,133 @@ mod tests {
             .as_nanos();
         let root = workspace
             .join(".test-run")
-            .join(format!("updated-runtime-resolution-{}-{nonce}", std::process::id()));
+            .join(format!("source-runtime-resolution-{}-{nonce}", std::process::id()));
+        let source_runtime = root.join("workspace-runtime");
         let install = root.join("Anytype data");
         let installed_runtime = install.join("blob/runtime");
-        let source_fallback = root.join("source");
+        fs::create_dir_all(source_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(source_runtime.join("assets/spacebanner")).unwrap();
         fs::create_dir_all(installed_runtime.join("Dev")).unwrap();
-        fs::create_dir_all(installed_runtime.join("assets")).unwrap();
-        fs::create_dir_all(source_fallback.join("Dev")).unwrap();
-        fs::create_dir_all(source_fallback.join("assets")).unwrap();
+        fs::create_dir_all(installed_runtime.join("assets/spacebanner")).unwrap();
+        fs::write(
+            source_runtime.join("Dev/60-tab-hover-preview.css"),
+            "/* @blobui-if-not tabHoverEffect */\n#preview.previewWrapper:has(.previewTab) { display:none!important; }\n/* @blobui-endif-not tabHoverEffect */",
+        )
+        .unwrap();
+        fs::write(
+            source_runtime.join("Dev/60-accessibility.css"),
+            "/* @blobui-if-not linkHoverEffect */\n#preview.previewWrapper:has(.previewLink):not(:has(.previewTab)) { display:none!important; }\n/* @blobui-endif-not linkHoverEffect */\n/* @blobui-if-not objectMentionHoverEffect */\n#preview.previewWrapper:has(.previewDefault, .previewObject):not(:has(.previewTab)) { display:none!important; }\n/* @blobui-endif-not objectMentionHoverEffect */",
+        )
+        .unwrap();
+        fs::write(
+            installed_runtime.join("Dev/60-tab-hover-preview.css"),
+            "/* stale-installed-tab-hover-rule */\n#preview.previewWrapper { display:none!important; }",
+        )
+        .unwrap();
+        fs::write(source_runtime.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
+        fs::write(installed_runtime.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
 
+        let executable = source_runtime.join("settings-app/dist/blobui-settings.exe");
+        let runtime = resolve_runtime_directory_for_install_from(&install, None, Some(&executable))
+            .unwrap();
+        assert_eq!(runtime, source_runtime);
+
+        let mut data = json!({
+            "installDirectory": install,
+            "settings": {
+                "fontFamily": "Arial",
+                "codeFontFamily": "Consolas",
+                "accentColor": "#3656D4",
+                "reducedMotion": true,
+                "tabHoverEffect": true,
+                "linkHoverEffect": true,
+                "objectMentionHoverEffect": true,
+                "bannerImage": ""
+            },
+            "apiConnection": { "enabled": false }
+        });
+        let enabled = css::compile(&runtime, &install, &data).unwrap();
+        assert!(!enabled.contains("stale-installed-tab-hover-rule"));
+        assert!(!enabled.contains("#preview.previewWrapper:has(.previewTab)"));
+        assert!(!enabled.contains("#preview.previewWrapper:has(.previewLink)"));
+        assert!(!enabled.contains("#preview.previewWrapper:has(.previewDefault, .previewObject)"));
+
+        data["settings"]["tabHoverEffect"] = json!(false);
+        data["settings"]["linkHoverEffect"] = json!(false);
+        data["settings"]["objectMentionHoverEffect"] = json!(false);
+        let disabled = css::compile(&runtime, &install, &data).unwrap();
+        assert!(!disabled.contains("stale-installed-tab-hover-rule"));
+        assert!(disabled.contains("#preview.previewWrapper:has(.previewTab)"));
+        assert!(disabled.contains("#preview.previewWrapper:has(.previewLink)"));
+        assert!(disabled.contains("#preview.previewWrapper:has(.previewDefault, .previewObject)"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_runtime_override_precedes_source_and_installed_runtimes() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = workspace
+            .join(".test-run")
+            .join(format!("runtime-override-resolution-{}-{nonce}", std::process::id()));
+        let source_runtime = root.join("workspace-runtime");
+        let override_runtime = root.join("explicit-runtime");
+        let install = root.join("Anytype data");
+        fs::create_dir_all(source_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(source_runtime.join("assets")).unwrap();
+        fs::create_dir_all(override_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(override_runtime.join("assets")).unwrap();
+        fs::create_dir_all(install.join("blob/runtime/Dev")).unwrap();
+        fs::create_dir_all(install.join("blob/runtime/assets")).unwrap();
+
+        let executable = source_runtime.join("settings-app.exe");
         assert_eq!(
-            resolve_runtime_directory_for_install(&install).unwrap(),
-            installed_runtime
+            resolve_runtime_directory_for_install_from(
+                &install,
+                Some(&override_runtime),
+                Some(&executable),
+            )
+            .unwrap(),
+            override_runtime
+        );
+        let missing = root.join("missing-runtime");
+        assert!(resolve_runtime_directory_for_install_from(
+            &install,
+            Some(&missing),
+            Some(&executable),
+        )
+        .unwrap_err()
+        .contains("BLOBUI_SOURCE_DIRECTORY"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_executable_keeps_using_selected_install_runtime() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = workspace
+            .join(".test-run")
+            .join(format!("installed-runtime-resolution-{}-{nonce}", std::process::id()));
+        let install = root.join("Anytype data");
+        let selected_runtime = install.join("blob/runtime");
+        let executable_runtime = root.join("previous-install/blob/runtime");
+        fs::create_dir_all(selected_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(selected_runtime.join("assets")).unwrap();
+        fs::create_dir_all(executable_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(executable_runtime.join("assets")).unwrap();
+
+        let executable = executable_runtime.join("settings-app.exe");
+        assert_eq!(
+            resolve_runtime_directory_for_install_from(&install, None, Some(&executable)).unwrap(),
+            selected_runtime
         );
         fs::remove_dir_all(root).unwrap();
     }
