@@ -267,6 +267,35 @@ button:focus-visible, input:focus-visible { outline: none; }
 #uninstall-confirm { background: var(--color-red); }
 #uninstall-confirm:hover:not(:disabled) { filter: brightness(.92); }
 .confirm-actions button:disabled, .confirm-close:disabled { opacity: .55; cursor: default; }
+.release-notes-dialog { display: flex; flex-direction: column; width: min(100%, 720px); max-height: min(82vh, 760px); padding: 28px 28px 20px; }
+.release-notes-heading { flex: 0 0 auto; padding-right: 28px; }
+.release-notes-version { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.release-notes-heading p { margin: 8px 0 18px; }
+.release-notes-image-warning { margin: 0 0 12px; color: var(--text-secondary); font-size: 12px; }
+.release-notes-content { min-height: 0; overflow: auto; padding: 0 10px 8px 0; color: var(--text); scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+.release-notes-content:focus { outline: none; }
+.markdown-content { color: var(--text); line-height: 1.55; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { margin: 22px 0 10px; font-weight: 600; line-height: 1.35; }
+.markdown-content h1 { font-size: 24px; }
+.markdown-content h2 { font-size: 20px; }
+.markdown-content h3, .markdown-content h4, .markdown-content h5, .markdown-content h6 { font-size: 16px; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content p, .markdown-content ul, .markdown-content ol, .markdown-content blockquote, .markdown-content table, .markdown-content pre { margin: 0 0 14px; }
+.markdown-content ul, .markdown-content ol { padding-left: 24px; }
+.markdown-content li + li { margin-top: 5px; }
+.markdown-content blockquote { padding: 2px 0 2px 14px; border-left: 2px solid var(--line); color: var(--text-secondary); }
+.markdown-content code, .markdown-content pre { font-family: var(--font-code); }
+.markdown-content :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: var(--input-bg); font-size: .92em; }
+.markdown-content pre { overflow-x: auto; padding: 14px; border-radius: 10px; background: var(--input-bg); }
+.markdown-content pre code { padding: 0; background: transparent; white-space: pre; }
+.markdown-content table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+.markdown-content th, .markdown-content td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown-content th { background: var(--input-bg); font-weight: 600; }
+.markdown-content a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-content a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.markdown-content input[type="checkbox"] { width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: var(--accent); }
+.markdown-content img { display: block; max-width: 100%; max-height: 440px; margin: 12px 0 18px; border-radius: 10px; object-fit: contain; }
+.release-notes-actions { flex: 0 0 auto; margin-top: 16px; }
 .confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; pointer-events: none; }
 .confirm-backdrop.is-closing .confirm-dialog { animation: confirm-dialog-out .14s ease-in both; }
 @keyframes confirm-backdrop-in { from { opacity: 0; } to { opacity: 1; } }

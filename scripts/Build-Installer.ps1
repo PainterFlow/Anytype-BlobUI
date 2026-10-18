@@ -10,6 +10,8 @@ $manifestPath = Join-Path $workspaceRoot 'installer\Cargo.toml'
 $distributionDirectory = Join-Path $workspaceRoot 'dist'
 $settingsExecutable = Join-Path $workspaceRoot 'settings-app\dist\blobui-settings.exe'
 $versionSource = Join-Path $workspaceRoot 'blobui-release.json'
+$changelogSource = Join-Path $workspaceRoot 'Changelogs.md'
+$changelogImageManifest = Join-Path $workspaceRoot 'Changelogs.yaml'
 
 function Assert-WorkspacePath {
     param([Parameter(Mandatory)][string]$Path)
@@ -41,6 +43,7 @@ function Copy-PackageTree {
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Installer Cargo manifest was not found: $manifestPath" }
 if (-not (Test-Path -LiteralPath $versionSource -PathType Leaf)) { throw "Release version source was not found: $versionSource" }
+if ($PackageRelease -and (-not (Test-Path -LiteralPath $changelogSource -PathType Leaf) -or -not (Test-Path -LiteralPath $changelogImageManifest -PathType Leaf))) { throw 'Release notes must include Changelogs.md and Changelogs.yaml.' }
 if ($PackageRelease -and -not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) { throw "Build BlobUI Settings separately before packaging: scripts/Build-Settings.ps1 -s -c" }
 
 $releaseManifest = Get-Content -LiteralPath $versionSource -Raw | ConvertFrom-Json
@@ -107,9 +110,13 @@ if ($PackageRelease) {
         foreach ($name in @('Dev', 'assets', 'settings-app\dist')) { [IO.Directory]::CreateDirectory((Join-Path $packageRoot $name)) | Out-Null }
         Copy-PackageTree (Join-Path $workspaceRoot 'Dev') (Join-Path $packageRoot 'Dev')
         Copy-PackageTree (Join-Path $workspaceRoot 'assets') (Join-Path $packageRoot 'assets')
+        Copy-Item -LiteralPath $changelogSource -Destination (Join-Path $packageRoot 'Changelogs.md')
+        Copy-Item -LiteralPath $changelogImageManifest -Destination (Join-Path $packageRoot 'Changelogs.yaml')
         Copy-Item -LiteralPath $settingsExecutable -Destination (Join-Path $packageRoot 'settings-app\dist\blobui-settings.exe')
         $releaseManifest = @{ formatVersion = 1; version = $releaseVersion } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $packageRoot 'blobui-release.json'), $releaseManifest + "`n", [Text.UTF8Encoding]::new($false))
+        & $destinationExecutable --no-pause --validate-package $packageRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Release notes or another packaged payload failed validation; no ZIP was created.' }
         Add-Type -AssemblyName System.IO.Compression
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [IO.Compression.ZipFile]::Open($tempArchive, [IO.Compression.ZipArchiveMode]::Create)

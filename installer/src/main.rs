@@ -25,6 +25,7 @@ struct Options {
     uninstall: bool,
     release_tag: Option<String>,
     wait_pid: Option<u32>,
+    validate_package: Option<PathBuf>,
     #[cfg(feature = "development")]
     package: Option<PathBuf>,
 }
@@ -55,6 +56,8 @@ fn main() {
     };
     if env::args().any(|arg| arg == "--uninstall") {
         println!("BlobUI uninstallation completed.");
+    } else if env::args().any(|arg| arg == "--validate-package") {
+        println!("BlobUI release package validated.");
     } else {
         println!("BlobUI installation completed.");
     }
@@ -71,6 +74,7 @@ fn parse_args() -> Result<Options, String> {
     let mut uninstall = false;
     let mut release_tag = None;
     let mut wait_pid = None;
+    let mut validate_package = None;
     #[cfg(feature = "development")]
     let mut package = None;
     let mut args = env::args().skip(1);
@@ -89,6 +93,11 @@ fn parse_args() -> Result<Options, String> {
                         .parse()
                         .map_err(|_| "The Settings process id is invalid.")?,
                 );
+            }
+            "--validate-package" => {
+                validate_package = Some(PathBuf::from(
+                    args.next().ok_or("Missing value for --validate-package")?,
+                ))
             }
             "--anytype-directory" => {
                 anytype = Some(PathBuf::from(
@@ -118,6 +127,7 @@ fn parse_args() -> Result<Options, String> {
         uninstall,
         release_tag,
         wait_pid,
+        validate_package,
         #[cfg(feature = "development")]
         package,
     })
@@ -126,15 +136,24 @@ fn parse_args() -> Result<Options, String> {
 fn usage() -> &'static str {
     #[cfg(feature = "development")]
     {
-        "Usage: blobui-installer-dev.exe [--no-pause] [--package ZIP] [--anytype-directory DIR] [--app-directory DIR] | --uninstall --anytype-directory DIR --app-directory DIR"
+        "Usage: blobui-installer-dev.exe [--no-pause] [--package ZIP] [--anytype-directory DIR] [--app-directory DIR] | --validate-package DIR | --uninstall --anytype-directory DIR --app-directory DIR"
     }
     #[cfg(not(feature = "development"))]
     {
-        "Usage: blobui-installer.exe [--no-pause] [--anytype-directory DIR] [--app-directory DIR] | --update-mode --release-tag TAG --wait-pid PID | --uninstall --anytype-directory DIR --app-directory DIR [--wait-pid PID]"
+        "Usage: blobui-installer.exe [--no-pause] [--anytype-directory DIR] [--app-directory DIR] | --validate-package DIR | --update-mode --release-tag TAG --wait-pid PID | --uninstall --anytype-directory DIR --app-directory DIR [--wait-pid PID]"
     }
 }
 
 fn run(options: Options) -> Result<(), String> {
+    if let Some(package) = options.validate_package.as_deref() {
+        if options.uninstall || options.update_mode || options.release_tag.is_some()
+            || options.wait_pid.is_some() || options.anytype.is_some() || options.app.is_some()
+        {
+            return Err("Package validation cannot be combined with install or update options.".into());
+        }
+        install::validate_release_package(package)?;
+        return Ok(());
+    }
     if options.uninstall {
         if options.update_mode || options.release_tag.is_some() {
             return Err("Uninstall cannot be combined with update mode or a release tag.".into());
@@ -583,6 +602,14 @@ fn write_update_status(version: Option<&str>, status: &str, message: &str) -> Re
     }
     object.insert("lastCheckStatus".into(), Value::String(status.to_string()));
     object.insert("lastMessage".into(), Value::String(message.to_string()));
+    if status == "updated" {
+        if let Some(version) = version {
+            object.insert(
+                "pendingChangelogVersion".into(),
+                Value::String(version.to_string()),
+            );
+        }
+    }
     if status == "error" {
         if let Some(version) = version {
             object.insert("lastFailedInstallVersion".into(), Value::String(version.to_string()));
@@ -747,7 +774,13 @@ fn read_release_version(root: &Path) -> Result<String, String> {
     {
         return Err("The package release version is invalid.".into());
     }
-    for required in ["Dev", "assets", "settings-app/dist/blobui-settings.exe"] {
+    for required in [
+        "Dev",
+        "assets",
+        "settings-app/dist/blobui-settings.exe",
+        "Changelogs.md",
+        "Changelogs.yaml",
+    ] {
         if !root.join(required).exists() {
             return Err(format!(
                 "The package is missing required content: {required}."
@@ -931,6 +964,8 @@ mod tests {
             br#"{"formatVersion":1,"version":"1.2.0"}"#,
         )
         .unwrap();
+        fs::write(package.join("Changelogs.md"), "# Example release notes\n").unwrap();
+        fs::write(package.join("Changelogs.yaml"), "images: []\n").unwrap();
         package
     }
 

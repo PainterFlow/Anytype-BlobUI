@@ -1,4 +1,6 @@
 use chrono::{SecondsFormat, Utc};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[cfg(test)]
@@ -17,6 +19,8 @@ const REPOSITORY: &str = "Anytype-BlobUI";
 const RELEASE_METADATA: &str = include_str!("../../blobui-release.json");
 const MAX_RELEASE_JSON_BYTES: usize = 2 * 1024 * 1024;
 const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
+const MAX_RELEASE_NOTES_BYTES: u64 = 512 * 1024;
+const MAX_RELEASE_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -29,6 +33,7 @@ pub struct UpdaterPreferences {
     pub last_failed_install_version: Option<String>,
     pub last_check_status: Option<String>,
     pub last_message: Option<String>,
+    pub pending_changelog_version: Option<String>,
 }
 
 impl Default for UpdaterPreferences {
@@ -42,6 +47,7 @@ impl Default for UpdaterPreferences {
             last_failed_install_version: None,
             last_check_status: None,
             last_message: None,
+            pending_changelog_version: None,
         }
     }
 }
@@ -69,6 +75,14 @@ pub struct UpdaterState {
     pub last_checked_at: Option<String>,
     pub status: String,
     pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseNotes {
+    pub version: String,
+    pub markdown: String,
+    pub image_manifest: String,
 }
 
 #[derive(Clone, Debug)]
@@ -266,6 +280,93 @@ pub fn simulate_update(
     state.status = "simulated".into();
     state.message = Some("Simulated update only. No files were downloaded or changed.".into());
     Ok(state)
+}
+
+pub fn get_release_notes(
+    app_data_directory: &Path,
+    install_directory: &Path,
+    runtime_directory: &Path,
+) -> Result<Option<ReleaseNotes>, String> {
+    let preferences = load_preferences(&preferences_path(app_data_directory))?;
+    let Some(version) = preferences.pending_changelog_version else {
+        return Ok(None);
+    };
+    if parse_version(&version).is_none() || current_version(install_directory, Some(runtime_directory))? != version {
+        return Ok(None);
+    }
+    let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
+    let image_manifest = read_release_text(&runtime_directory.join("Changelogs.yaml"), MAX_RELEASE_NOTES_BYTES)?;
+    Ok(Some(ReleaseNotes { version, markdown, image_manifest }))
+}
+
+pub fn release_note_image(runtime_directory: &Path, source: &str) -> Result<String, String> {
+    let relative = source
+        .strip_prefix("assets/changelogs/")
+        .ok_or_else(|| "The release note image source is outside the changelog image folder.".to_string())?;
+    let segments = relative.split('/').collect::<Vec<_>>();
+    if segments.is_empty()
+        || segments.iter().any(|segment| {
+            segment.is_empty()
+                || *segment == "."
+                || *segment == ".."
+                || !segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+    {
+        return Err("The release note image source contains an unsafe path.".into());
+    }
+    let path = runtime_directory.join("assets/changelogs").join(relative);
+    storage::reject_reparse_path(&path)?;
+    let metadata = fs::metadata(&path)
+        .map_err(|_| "The release note image could not be read.".to_string())?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_RELEASE_IMAGE_BYTES {
+        return Err("The release note image has an unsupported size or file type.".into());
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| "The release note image format is unsupported.".to_string())?;
+    let bytes = fs::read(&path).map_err(|_| "The release note image could not be read.".to_string())?;
+    let mime = match extension.as_str() {
+        "png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
+        "jpg" | "jpeg" if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "image/jpeg",
+        "gif" if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "image/gif",
+        "webp" if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => "image/webp",
+        _ => return Err("The release note image bytes do not match a supported image format.".into()),
+    };
+    Ok(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+}
+
+pub fn acknowledge_release_notes(
+    app_data_directory: &Path,
+    install_directory: &Path,
+    runtime_directory: &Path,
+    version: &str,
+) -> Result<bool, String> {
+    let Some(version) = parse_version(version).map(|version| version.to_string()) else {
+        return Err("The release notes version is invalid.".into());
+    };
+    if current_version(install_directory, Some(runtime_directory))? != version {
+        return Ok(false);
+    }
+    let path = preferences_path(app_data_directory);
+    let mut preferences = load_preferences(&path)?;
+    if preferences.pending_changelog_version.as_deref() != Some(version.as_str()) {
+        return Ok(false);
+    }
+    preferences.pending_changelog_version = None;
+    save_preferences(&path, &preferences)?;
+    Ok(true)
+}
+
+fn read_release_text(path: &Path, limit: u64) -> Result<String, String> {
+    storage::reject_reparse_path(path)?;
+    let metadata = fs::metadata(path)
+        .map_err(|_| "The installed release notes are missing or unreadable.".to_string())?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err("The installed release notes exceed the supported size.".into());
+    }
+    fs::read_to_string(path).map_err(|_| "The installed release notes are not valid UTF-8.".into())
 }
 
 pub fn apply_update(
@@ -906,7 +1007,9 @@ fn validate_managed_key(raw: &str) -> Result<Option<String>, String> {
         || key.starts_with("runtime/Dev/")
         || key.starts_with("runtime/assets/")
         || key == "runtime/settings-app.exe"
-        || key == "runtime/blobui-release.json")
+        || key == "runtime/blobui-release.json"
+        || key == "runtime/Changelogs.md"
+        || key == "runtime/Changelogs.yaml")
     {
         return Err("The BlobUI install manifest contains an unsupported file path.".into());
     }
@@ -1201,6 +1304,59 @@ mod tests {
         ] {
             assert!(version_from_metadata(invalid).is_none());
         }
+    }
+
+    #[test]
+    fn release_notes_are_available_only_for_the_installed_pending_version_and_ack_on_close() {
+        let root = fixture_root("release-notes");
+        let app_data = root.join("APPDATA/anytype");
+        let (install, _, _, _) = install_fixture(&root);
+        let runtime = install.join("blob/runtime");
+        fs::write(runtime.join("Changelogs.md"), "# BlobUI 1.0.0\n\nUpdated settings.\n").unwrap();
+        fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        let path = preferences_path(&app_data);
+        let mut preferences = UpdaterPreferences {
+            pending_changelog_version: Some("1.0.0".into()),
+            ..UpdaterPreferences::default()
+        };
+        save_preferences(&path, &preferences).unwrap();
+
+        let notes = get_release_notes(&app_data, &install, &runtime).unwrap().unwrap();
+        assert_eq!(notes.version, "1.0.0");
+        assert!(notes.markdown.contains("Updated settings."));
+        assert_eq!(notes.image_manifest, "images: []\n");
+        assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.0.0"));
+
+        assert!(acknowledge_release_notes(&app_data, &install, &runtime, "1.0.0").unwrap());
+        assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
+        assert_eq!(load_preferences(&path).unwrap().pending_changelog_version, None);
+
+        preferences.pending_changelog_version = Some("1.1.0".into());
+        save_preferences(&path, &preferences).unwrap();
+        assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
+        assert!(!acknowledge_release_notes(&app_data, &install, &runtime, "1.1.0").unwrap());
+        assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.1.0"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn release_note_images_are_confined_size_limited_and_signature_checked() {
+        let root = fixture_root("release-note-images");
+        let runtime = root.join("runtime");
+        let image = runtime.join("assets/changelogs/setup.png");
+        fs::create_dir_all(image.parent().unwrap()).unwrap();
+        let bytes = b"\x89PNG\r\n\x1a\nsmall-png-fixture";
+        fs::write(&image, bytes).unwrap();
+
+        let data_url = release_note_image(&runtime, "assets/changelogs/setup.png").unwrap();
+        assert!(data_url.starts_with("data:image/png;base64,"));
+        assert!(data_url.ends_with(&BASE64.encode(bytes)));
+        assert!(release_note_image(&runtime, "assets/changelogs/../setup.png").is_err());
+        assert!(release_note_image(&runtime, "assets/changelogs/setup.svg").is_err());
+
+        fs::write(runtime.join("assets/changelogs/fake.png"), b"not a png").unwrap();
+        assert!(release_note_image(&runtime, "assets/changelogs/fake.png").unwrap_err().contains("bytes do not match"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

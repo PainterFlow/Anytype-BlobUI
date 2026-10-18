@@ -9,6 +9,7 @@
     initialFocus,
     fallbackFocus,
     inertTargets = [],
+    onClose,
   }) {
     if (!backdrop || !dialog) throw new TypeError("A modal backdrop and dialog are required.");
 
@@ -50,6 +51,7 @@
       if (restoreFocus && !focus(returnFocus)) focus(resolveElement(fallbackFocus));
       returnFocus = null;
       closeTimer = null;
+      if (typeof onClose === "function") onClose();
     }
 
     function open() {

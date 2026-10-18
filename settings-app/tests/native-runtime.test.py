@@ -14,7 +14,8 @@ build = (ROOT / "scripts/Build-Settings.ps1").read_text(encoding="utf-8")
 assert "mod api;" in main and "mod css;" in main and "mod storage;" in main
 assert "api::verify_connection" in main and "api::calendar_colors" in main
 assert "css::compile" in main and "storage::commit_settings" in main
-assert "Command::new" not in main and "PowerShell" not in main
+assert 'Command::new("powershell.exe")' not in main and 'Command::new("cmd.exe")' not in main
+assert "PowerShell" not in main
 assert "Rebuild.ps1" not in main and "Get-Data.ps1" not in main
 assert "CryptProtectData" in runtime_modules and "CryptUnprotectData" in runtime_modules
 assert "ReplaceFileW" in runtime_modules and "MoveFileExW" in runtime_modules

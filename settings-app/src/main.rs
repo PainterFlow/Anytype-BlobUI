@@ -194,6 +194,79 @@ async fn get_updater_state() -> Result<updater::UpdaterState, String> {
 }
 
 #[tauri::command]
+async fn get_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::get_release_notes(&app_data, &install, &runtime)
+    })
+    .await
+    .map_err(|_| "The release notes task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_image(source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::release_note_image(&runtime, &source)
+    })
+    .await
+    .map_err(|_| "The release note image task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
+    let guard = acquire_updater_guard()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::acknowledge_release_notes(&app_data, &install, &runtime, &version)
+    })
+    .await
+    .map_err(|_| "The release notes acknowledgement task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn open_release_note_link(url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let parsed = validate_release_note_link(&url)?;
+        #[cfg(windows)]
+        {
+            std::process::Command::new("explorer.exe")
+                .arg(parsed.as_str())
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| format!("Could not open the release note link: {error}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = parsed;
+            Err("Opening release note links is supported on Windows only.".into())
+        }
+    })
+    .await
+    .map_err(|_| "The release note link task stopped unexpectedly.".to_string())?
+}
+
+fn validate_release_note_link(value: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(value.trim())
+        .map_err(|_| "The release note link is invalid.".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("Only ordinary HTTP and HTTPS release note links can be opened.".into());
+    }
+    Ok(parsed)
+}
+
+#[tauri::command]
 async fn save_updater_settings(settings: updater::UpdaterSettingsDraft) -> Result<updater::UpdaterState, String> {
     let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1233,6 +1306,10 @@ fn main() {
             get_app_state,
             save_settings,
             get_updater_state,
+            get_release_notes,
+            get_release_note_image,
+            acknowledge_release_notes,
+            open_release_note_link,
             save_updater_settings,
             select_anytype_folder,
             check_for_updates,
@@ -1618,6 +1695,15 @@ mod tests {
         assert_eq!(normalize_api_ip(Some("192.168.1.12")).unwrap(), "192.168.1.12");
         assert_eq!(normalize_api_ip(Some("0:0:0:0:0:0:0:1")).unwrap(), "::1");
         assert!(normalize_api_ip(Some("anytype.local")).is_err());
+    }
+
+    #[test]
+    fn release_note_links_are_limited_to_plain_http_and_https_urls() {
+        assert_eq!(validate_release_note_link("https://example.com/a?b=c").unwrap().scheme(), "https");
+        assert!(validate_release_note_link("javascript:alert(1)").is_err());
+        assert!(validate_release_note_link("file:///C:/secret.txt").is_err());
+        assert!(validate_release_note_link("https://user@example.com/").is_err());
+        assert!(validate_release_note_link("https://").is_err());
     }
 
     #[test]

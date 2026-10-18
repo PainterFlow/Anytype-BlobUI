@@ -1,4 +1,5 @@
 use crate::transaction::{commit_update, FileChange};
+use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -476,6 +477,8 @@ fn packaged_app_files(package: &Path) -> Result<BTreeMap<String, PathBuf>, Strin
         "blobui-release.json".into(),
         package.join("blobui-release.json"),
     );
+    files.insert("Changelogs.md".into(), package.join("Changelogs.md"));
+    files.insert("Changelogs.yaml".into(), package.join("Changelogs.yaml"));
     for key in files.keys() {
         validate_app_key(key)?;
     }
@@ -542,6 +545,8 @@ fn validate_app_key(key: &str) -> Result<(), String> {
             .any(|part| part.is_empty() || part == "." || part == "..")
         || !(key == "blobui-settings.exe"
             || key == "blobui-release.json"
+            || key == "Changelogs.md"
+            || key == "Changelogs.yaml"
             || key.starts_with("Dev/")
             || key.starts_with("assets/")
             || key.starts_with("settings-app/dist/"))
@@ -692,13 +697,18 @@ impl Drop for RemoveEmptyDirectory {
 }
 
 fn validate_package(package: &Path, version: &str) -> Result<(), String> {
+    reject_links(package)?;
     for path in [
         "Dev",
         "assets",
         "settings-app/dist/blobui-settings.exe",
         "blobui-release.json",
+        "Changelogs.md",
+        "Changelogs.yaml",
     ] {
-        if !package.join(path).exists() {
+        let payload = package.join(path);
+        reject_links(&payload)?;
+        if !payload.exists() {
             return Err(format!("The package is missing required payload: {path}"));
         }
     }
@@ -710,6 +720,236 @@ fn validate_package(package: &Path, version: &str) -> Result<(), String> {
         || meta.get("version").and_then(Value::as_str) != Some(version)
     {
         return Err("The package release metadata does not match the selected version.".into());
+    }
+    validate_changelog_payload(package)?;
+    Ok(())
+}
+
+pub fn validate_release_package(package: &Path) -> Result<(), String> {
+    let path = package.join("blobui-release.json");
+    reject_links(&path)?;
+    let metadata: Value = serde_json::from_slice(
+        &fs::read(&path).map_err(|_| "The package release metadata is missing.".to_string())?,
+    )
+    .map_err(|_| "The package release metadata is invalid JSON.".to_string())?;
+    if metadata.get("formatVersion").and_then(Value::as_u64) != Some(1) {
+        return Err("The package release metadata has an unsupported format.".into());
+    }
+    let version = metadata.get("version").and_then(Value::as_str)
+        .ok_or("The package release version is missing.")?;
+    if version.len() > 64
+        || !version.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+        || !version.as_bytes().first().is_some_and(u8::is_ascii_digit)
+    {
+        return Err("The package release version is invalid.".into());
+    }
+    validate_package(package, version)
+}
+
+const MAX_CHANGELOG_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_CHANGELOG_TEXT_BYTES: u64 = 512 * 1024;
+
+#[derive(Default)]
+struct ChangelogImage {
+    id: String,
+    src: Option<String>,
+    alt_seen: bool,
+}
+
+fn validate_changelog_payload(package: &Path) -> Result<(), String> {
+    let markdown_path = package.join("Changelogs.md");
+    reject_links(&markdown_path)?;
+    let markdown_metadata = fs::metadata(&markdown_path)
+        .map_err(|_| "The release notes Markdown is missing or unreadable.".to_string())?;
+    if !markdown_metadata.is_file() || markdown_metadata.len() == 0 || markdown_metadata.len() > MAX_CHANGELOG_TEXT_BYTES {
+        return Err("The release notes Markdown is empty or exceeds the supported size.".into());
+    }
+    let markdown = fs::read_to_string(&markdown_path)
+        .map_err(|_| "The release notes Markdown is not valid UTF-8.".to_string())?;
+    if markdown.trim().is_empty() {
+        return Err("The release notes Markdown is empty.".into());
+    }
+
+    let yaml_path = package.join("Changelogs.yaml");
+    reject_links(&yaml_path)?;
+    let yaml_metadata = fs::metadata(&yaml_path)
+        .map_err(|_| "The release notes image manifest is missing or unreadable.".to_string())?;
+    if !yaml_metadata.is_file() || yaml_metadata.len() == 0 || yaml_metadata.len() > MAX_CHANGELOG_TEXT_BYTES {
+        return Err("The release notes image manifest is empty or exceeds the supported size.".into());
+    }
+    let yaml = fs::read_to_string(&yaml_path)
+        .map_err(|_| "The release notes image manifest is not valid UTF-8.".to_string())?;
+    let entries = parse_changelog_image_manifest(&yaml)?;
+    let ids = entries.iter().map(|entry| entry.id.as_str()).collect::<BTreeSet<_>>();
+    validate_changelog_image_references(&markdown, &ids)?;
+    for entry in entries {
+        let source = entry.src.ok_or("A release note image is missing its src field.")?;
+        validate_changelog_image_file(package, &source)?;
+    }
+    Ok(())
+}
+
+fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, String> {
+    let mut entries = Vec::new();
+    let mut current = None;
+    let mut section_seen = false;
+    let mut empty_list = false;
+    let mut ids = BTreeSet::new();
+
+    fn save(
+        current: &mut Option<ChangelogImage>,
+        entries: &mut Vec<ChangelogImage>,
+        ids: &mut BTreeSet<String>,
+    ) -> Result<(), String> {
+        let Some(image) = current.take() else { return Ok(()); };
+        let source = image.src.as_deref().ok_or("Each Changelogs.yaml image needs an id and src.")?;
+        validate_changelog_source(source)?;
+        if !ids.insert(image.id.clone()) {
+            return Err("Changelogs.yaml contains a duplicate image id.".into());
+        }
+        entries.push(image);
+        Ok(())
+    }
+
+    for raw_line in yaml.trim_start_matches('\u{feff}').lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() || line.trim_start().starts_with('#') { continue; }
+        if line.contains('\t') { return Err("Changelogs.yaml must use spaces for indentation.".into()); }
+        let section = line.split_once(" #").map_or(line, |(value, _)| value).trim();
+        if section == "images:" {
+            if section_seen { return Err("Changelogs.yaml contains more than one images section.".into()); }
+            section_seen = true;
+            continue;
+        }
+        if Regex::new(r"^images:\s*\[\s*\]$").unwrap().is_match(section) {
+            if section_seen { return Err("Changelogs.yaml contains more than one images section.".into()); }
+            section_seen = true;
+            empty_list = true;
+            continue;
+        }
+        if !section_seen { return Err("Changelogs.yaml must begin with an images section.".into()); }
+        if empty_list { return Err("Changelogs.yaml cannot add entries after images: [].".into()); }
+        if let Some(item) = line.strip_prefix("  - ").and_then(|item| item.strip_prefix("id:")) {
+            save(&mut current, &mut entries, &mut ids)?;
+            let id = parse_changelog_scalar(item)?;
+            if !valid_changelog_id(&id) {
+                return Err("Changelogs.yaml image ids may use letters, numbers, hyphens, and underscores.".into());
+            }
+            current = Some(ChangelogImage { id, ..ChangelogImage::default() });
+            continue;
+        }
+        if let Some(field) = line.strip_prefix("    ") {
+            let (name, value) = field.split_once(':').ok_or("Changelogs.yaml supports id, src, and optional alt fields.")?;
+            let image = current.as_mut().ok_or("Changelogs.yaml image fields must follow a list item.")?;
+            match name {
+                "src" => {
+                    if image.src.is_some() { return Err("Changelogs.yaml repeats src for an image.".into()); }
+                    image.src = Some(parse_changelog_scalar(value)?);
+                }
+                "alt" => {
+                    if image.alt_seen { return Err("Changelogs.yaml repeats alt for an image.".into()); }
+                    let _ = parse_changelog_scalar(value)?;
+                    image.alt_seen = true;
+                }
+                _ => return Err("Changelogs.yaml supports id, src, and optional alt fields.".into()),
+            }
+            continue;
+        }
+        return Err("Changelogs.yaml supports an images list with id, src, and optional alt fields.".into());
+    }
+    if !section_seen { return Err("Changelogs.yaml must contain an images section.".into()); }
+    save(&mut current, &mut entries, &mut ids)?;
+    Ok(entries)
+}
+
+fn parse_changelog_scalar(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty() { return Err("Changelogs.yaml contains an empty value.".into()); }
+    if value.starts_with('"') {
+        return serde_json::from_str(value).map_err(|_| "Changelogs.yaml contains an invalid quoted value.".into());
+    }
+    if value.starts_with('\'') {
+        if !value.ends_with('\'') || value.len() < 2 {
+            return Err("Changelogs.yaml contains an invalid quoted value.".into());
+        }
+        return Ok(value[1..value.len() - 1].replace("''", "'"));
+    }
+    Ok(value.split_once(" #").map_or(value, |(scalar, _)| scalar).trim().to_string())
+}
+
+fn valid_changelog_id(id: &str) -> bool {
+    let mut chars = id.bytes();
+    let Some(first) = chars.next() else { return false; };
+    id.len() <= 64
+        && first.is_ascii_alphanumeric()
+        && chars.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn validate_changelog_source(source: &str) -> Result<(), String> {
+    let relative = source.strip_prefix("assets/changelogs/")
+        .ok_or("Changelogs.yaml image paths must stay inside assets/changelogs/.")?;
+    let segments = relative.split('/').collect::<Vec<_>>();
+    if segments.is_empty() || segments.iter().any(|segment| {
+        segment.is_empty() || *segment == "." || *segment == ".."
+            || !segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    }) {
+        return Err("Changelogs.yaml contains an unsafe image path.".into());
+    }
+    if !matches!(Path::new(source).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp")) {
+        return Err("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images.".into());
+    }
+    Ok(())
+}
+
+fn validate_changelog_image_file(package: &Path, source: &str) -> Result<(), String> {
+    validate_changelog_source(source)?;
+    let path = package.join(source);
+    reject_links(&path)?;
+    let metadata = fs::metadata(&path).map_err(|_| format!("The release note image is missing: {source}"))?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_CHANGELOG_IMAGE_BYTES {
+        return Err(format!("The release note image has an unsupported size or type: {source}"));
+    }
+    let bytes = fs::read(&path).map_err(|_| format!("The release note image could not be read: {source}"))?;
+    let extension = path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let valid = match extension.as_str() {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "webp" => bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP",
+        _ => false,
+    };
+    if !valid { return Err(format!("The release note image bytes do not match its file type: {source}")); }
+    Ok(())
+}
+
+fn validate_changelog_image_references(markdown: &str, aliases: &BTreeSet<&str>) -> Result<(), String> {
+    let mut text = String::new();
+    let mut fence: Option<(char, usize)> = None;
+    for line in markdown.lines() {
+        let trimmed = line.trim_start();
+        let marker = trimmed.chars().take_while(|character| *character == '`' || *character == '~').collect::<String>();
+        if marker.len() >= 3 {
+            let character = marker.chars().next().unwrap();
+            if let Some((active, length)) = fence {
+                if active == character && marker.len() >= length { fence = None; }
+            } else {
+                fence = Some((character, marker.len()));
+            }
+            text.push('\n');
+        } else if fence.is_none() {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    let inline_code = Regex::new(r"`+[^`\n]*`+").unwrap();
+    let text = inline_code.replace_all(&text, " ");
+    let image_reference = Regex::new(r"!\[[^\]\n]*\]\(\s*@(?<id>[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\s+[^)\n]*)?\s*\)").unwrap();
+    let html_image_reference = Regex::new(r#"(?is)<img\b[^>]*\bsrc\s*=\s*['"]@(?<id>[A-Za-z0-9][A-Za-z0-9_-]{0,63})['"][^>]*>"#).unwrap();
+    for captures in image_reference.captures_iter(&text).chain(html_image_reference.captures_iter(&text)) {
+        let id = captures.name("id").unwrap().as_str();
+        if !aliases.contains(id) {
+            return Err(format!("Release notes reference image id '{id}' which is not declared in Changelogs.yaml."));
+        }
     }
     Ok(())
 }
@@ -754,6 +994,14 @@ fn make_install_changes(
     files.insert(
         "runtime/blobui-release.json".into(),
         package.join("blobui-release.json"),
+    );
+    files.insert(
+        "runtime/Changelogs.md".into(),
+        package.join("Changelogs.md"),
+    );
+    files.insert(
+        "runtime/Changelogs.yaml".into(),
+        package.join("Changelogs.yaml"),
     );
     let managed = files.keys().cloned().collect::<BTreeSet<_>>();
     let mut changes = Vec::new();
@@ -1311,7 +1559,58 @@ mod tests {
             serde_json::to_vec(&json!({"formatVersion": 1, "version": version})).unwrap(),
         )
         .unwrap();
+        fs::write(package.join("Changelogs.md"), "# Example release notes\n").unwrap();
+        fs::write(package.join("Changelogs.yaml"), "images: []\n").unwrap();
         package
+    }
+
+    #[test]
+    fn release_notes_manifest_requires_declared_local_images_and_matching_references() {
+        let root = fixture_root("release-notes");
+        let package = write_package(&root, "1.2.0", b"settings executable");
+        validate_package(&package, "1.2.0").unwrap();
+
+        let image = package.join("assets/changelogs/setup.png");
+        fs::create_dir_all(image.parent().unwrap()).unwrap();
+        fs::write(&image, b"\x89PNG\r\n\x1a\nfixture").unwrap();
+        fs::write(
+            package.join("Changelogs.yaml"),
+            "images:\n  - id: setup\n    src: assets/changelogs/setup.png\n    alt: Setup screen\n",
+        )
+        .unwrap();
+        fs::write(
+            package.join("Changelogs.md"),
+            "![Setup](@setup)\n\n`![code](@not-an-image)`\n",
+        )
+        .unwrap();
+        validate_package(&package, "1.2.0").unwrap();
+
+        fs::write(package.join("Changelogs.md"), "![Missing](@missing)\n").unwrap();
+        assert!(validate_package(&package, "1.2.0").unwrap_err().contains("not declared"));
+
+        fs::write(package.join("Changelogs.md"), "![Setup](@setup)\n").unwrap();
+        fs::write(
+            package.join("Changelogs.yaml"),
+            "images:\n  - id: setup\n    src: assets/changelogs/../setup.png\n",
+        )
+        .unwrap();
+        assert!(validate_package(&package, "1.2.0").is_err());
+
+        fs::write(
+            package.join("Changelogs.yaml"),
+            "images:\n  - id: setup\n    src: assets/changelogs/missing.png\n",
+        )
+        .unwrap();
+        assert!(validate_package(&package, "1.2.0").unwrap_err().contains("missing"));
+
+        fs::write(
+            package.join("Changelogs.yaml"),
+            "images:\n  - id: setup\n    src: assets/changelogs/setup.svg\n",
+        )
+        .unwrap();
+        assert!(validate_package(&package, "1.2.0").unwrap_err().contains("PNG, JPEG, GIF, and WebP"));
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn installed_uninstall_fixture(label: &str) -> (PathBuf, PathBuf, PathBuf, Vec<u8>) {

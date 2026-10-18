@@ -48,11 +48,17 @@ function element(id) {
 const calls = [];
 const savedSettings = [];
 const savedUpdaterSettings = [];
+const releaseNotesScenarioArg = process.argv.find(argument => argument.startsWith('--release-notes-scenario='));
+const releaseNotesScenario = releaseNotesScenarioArg ? releaseNotesScenarioArg.split('=', 2)[1] : null;
+const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'parse-error'
+  ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'images: []' }
+  : releaseNotesScenario === 'parse-error' ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'invalid: [' } : null;
+const releaseNotesAcknowledgements = [];
 const updaterPrefs = {
   installDirectory: '%APPDATA%\\anytype',
   startOnLogin: false,
   automaticUpdatesEnabled: false,
-  automaticChecksEnabled: false,
+  automaticChecksEnabled: !!releaseNotesScenario,
 };
 let updaterCheckState = {
   currentVersion: '1.0.0', latestVersion: null, updateAvailable: false,
@@ -137,6 +143,12 @@ const context = {
         ...updaterPrefs, currentVersion: '1.0.0', latestVersion: null, updateAvailable: false,
         lastCheckedAt: null, status: 'idle', message: null,
       };
+      if (name === 'get_release_notes') return releaseNotesPayload;
+      if (name === 'get_release_note_image') return 'data:image/png;base64,fixture';
+      if (name === 'acknowledge_release_notes') {
+        releaseNotesAcknowledgements.push(args.version);
+        return true;
+      }
       if (name === 'save_updater_settings') {
         Object.assign(updaterPrefs, args.settings);
         savedUpdaterSettings.push({ ...args.settings });
@@ -163,6 +175,12 @@ const context = {
   },
 };
 const flush = () => new Promise(resolve => setImmediate(resolve));
+function finishReleaseNotesTransition() {
+  const pending = [...timers.entries()].find(([, timer]) => timer.delay === 140);
+  assert(pending, 'Closing release notes must schedule the modal exit transition.');
+  timers.delete(pending[0]);
+  pending[1].callback();
+}
 const input = async (id, value) => {
   element(id).value = value;
   await element(id).handlers.input();
@@ -239,6 +257,16 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visibility-field.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/modal.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/edit-session.js'), 'utf8'), context);
+  if (releaseNotesScenario) {
+    context.window.BlobUI.Markdown = {
+      parseImageManifest(value) {
+        if (releaseNotesScenario === 'parse-error') throw new Error('Invalid image manifest.');
+        assert.equal(value, 'images: []');
+        return {};
+      },
+      render(markdown) { return `<p>${markdown}</p>`; },
+    };
+  }
   let helperState = { settings: { font: 'Libron' }, connection: { port: 31009 } };
   const helperSession = context.window.BlobUI.createEditSession({
     read: () => helperState,
@@ -256,7 +284,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
-  [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons].forEach(id => { element(id).hidden = false; });
+  const releaseNotesButtons = ['release-notes-close', 'release-notes-done'];
+  [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
   element('api-key-removal-dialog').hidden = false;
   element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
   element('discard-confirmation-dialog').hidden = false;
@@ -264,8 +293,42 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('uninstall-button').hidden = false;
   element('uninstall-dialog').hidden = false;
   element('uninstall-dialog').children.push(...uninstallModalButtons.map(element));
+  element('release-notes-dialog').hidden = false;
+  element('release-notes-dialog').children.push(...releaseNotesButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
+  if (releaseNotesScenario) {
+    assert(calls.includes('get_release_notes'), 'Startup checks for pending release notes.');
+    if (releaseNotesScenario === 'parse-error') {
+      assert.equal(element('release-notes-backdrop').hidden, true, 'Invalid notes do not open a partially rendered dialog.');
+      assert.deepEqual(releaseNotesAcknowledgements, [], 'A parse failure leaves the release notes pending.');
+      assert.equal(calls.filter(name => name === 'check_for_updates').length, 0, 'Automatic update checks wait while pending notes cannot be rendered.');
+      assert.match(status(), /Could not display the release notes/, 'The render failure remains visible in Settings.');
+      console.log('Release notes parse failures stay pending and block automatic update checks.');
+      return;
+    }
+
+    assert.equal(element('release-notes-backdrop').hidden, false, 'Pending notes open the release notes dialog after startup.');
+    assert.equal(activeElement, element('release-notes-done'), 'The release notes dialog opens with Done focused.');
+    assert.deepEqual(releaseNotesAcknowledgements, [], 'Opening the dialog does not acknowledge the notes.');
+    const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
+    assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
+    await updaterInterval.callback();
+    assert.equal(calls.filter(name => name === 'check_for_updates').length, 0, 'Automatic update checks wait until the release notes are dismissed.');
+
+    if (releaseNotesScenario === 'done') element('release-notes-done').handlers.click();
+    else if (releaseNotesScenario === 'escape') context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
+    else if (releaseNotesScenario === 'backdrop') element('release-notes-backdrop').handlers.pointerdown({ target: element('release-notes-backdrop') });
+    else throw new Error(`Unknown release notes scenario: ${releaseNotesScenario}`);
+    assert.deepEqual(releaseNotesAcknowledgements, [], 'Closing starts the modal transition but does not acknowledge early.');
+    finishReleaseNotesTransition();
+    await flush();
+    await flush();
+    assert.deepEqual(releaseNotesAcknowledgements, ['1.2.0'], 'Dismissal acknowledges only after the modal has closed.');
+    assert(calls.indexOf('acknowledge_release_notes') < calls.indexOf('check_for_updates'), 'The automatic update check resumes only after acknowledgement.');
+    console.log(`Release notes ${releaseNotesScenario} dismissal lifecycle passed.`);
+    return;
+  }
   assert.equal(status(), 'Settings loaded from this device.');
   assert.equal(element('install-directory').value, '%APPDATA%\\anytype', 'App Settings load the configured Anytype data folder.');
   assert.equal(element('start-on-login').checked, false, 'Startup is opt-in by default.');

@@ -100,6 +100,33 @@
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
+  const releaseNotesContent = el("release-notes-content");
+  let releaseNotesVersion = null;
+  let releaseNotesLoading = false;
+  let releaseNotesLoaded = false;
+  let releaseNotesFailed = false;
+  const releaseNotesModal = window.BlobUI.createModalController({
+    backdrop: el("release-notes-backdrop"),
+    dialog: el("release-notes-dialog"),
+    initialFocus: el("release-notes-done"),
+    fallbackFocus: el("page-title"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+    onClose: () => {
+      const version = releaseNotesVersion;
+      releaseNotesVersion = null;
+      if (!version) return;
+      invoke("acknowledge_release_notes", { version }).then((acknowledged) => {
+        if (acknowledged) runAutomaticUpdateCheck();
+        else {
+          releaseNotesFailed = true;
+          setStatus("BlobUI could not confirm that these release notes were dismissed. Restart Settings to try again.", "error");
+        }
+      }).catch((error) => {
+        releaseNotesFailed = true;
+        setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error");
+      });
+    },
+  });
   window.BlobUI.openDiscardConfirmation = () => discardConfirmationModal.open();
   window.BlobUI.closeDiscardConfirmation = (options) => discardConfirmationModal.close(options);
   const settingsShell = el("settings-shell");
@@ -509,15 +536,66 @@
       const state = await invoke("get_updater_state");
       assignUpdaterSettings(state || {});
       mergeUpdaterState(state || {});
-      if (initialUpdaterSettings.automaticChecksEnabled && window.appReady) checkForUpdates(true);
     } catch (error) {
       updaterState = { status: "error", message: error.message || String(error) };
       renderUpdaterState();
     }
   }
 
+  function runAutomaticUpdateCheck() {
+    if (!window.appReady || !initialUpdaterSettings || !initialUpdaterSettings.automaticChecksEnabled
+      || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed) return;
+    checkForUpdates(true);
+  }
+
+  async function showReleaseNotesOrContinue() {
+    if (!window.appReady || releaseNotesLoading || releaseNotesLoaded) return false;
+    releaseNotesLoading = true;
+    let continueWithAutomaticCheck = false;
+    try {
+      const notes = await invoke("get_release_notes");
+      releaseNotesLoaded = true;
+      if (!notes) {
+        continueWithAutomaticCheck = true;
+        return false;
+      }
+      if (typeof notes.version !== "string" || !notes.version.trim()
+        || typeof notes.markdown !== "string" || typeof notes.imageManifest !== "string") {
+        throw new TypeError("The release notes payload is incomplete.");
+      }
+      const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
+      const imageEntries = Object.entries(manifest);
+      const imageResults = await Promise.allSettled(imageEntries.map(async ([alias, image]) => {
+        const src = await invoke("get_release_note_image", { source: image.src });
+        return [alias, { src, alt: image.alt }];
+      }));
+      const images = Object.create(null);
+      for (const result of imageResults) {
+        if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
+      }
+      const rendered = window.BlobUI.Markdown.render(notes.markdown, { images });
+      releaseNotesContent.innerHTML = rendered;
+      el("release-notes-image-warning").hidden = imageResults.every((result) => result.status === "fulfilled");
+      el("release-notes-version").textContent = "Version " + String(notes.version || "");
+      releaseNotesVersion = String(notes.version || "");
+      releaseNotesFailed = false;
+      releaseNotesModal.open();
+      if (!releaseNotesModal.isOpen()) throw new Error("The release notes dialog could not be opened.");
+      return true;
+    } catch (error) {
+      releaseNotesVersion = null;
+      releaseNotesLoaded = false;
+      releaseNotesFailed = true;
+      setStatus("Could not display the release notes. " + (error.message || String(error)), "error");
+      return false;
+    } finally {
+      releaseNotesLoading = false;
+      if (continueWithAutomaticCheck) runAutomaticUpdateCheck();
+    }
+  }
+
   async function checkForUpdates(automatic = false) {
-    if (automatic && simulationActive) return;
+    if (automatic && (simulationActive || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed)) return;
     if (!updaterSettingsLoaded || !window.appReady || updaterBusyOperation) return;
     updaterBusyOperation = "checking";
     mergeUpdaterState({ status: "checking", message: "Checking for updates…" });
@@ -813,7 +891,8 @@
       resetVisibilityField("connection-port");
       editSession.commit();
       updateSaveButton();
-      if (state.ready && state.onboardingComplete === false) showOnboarding();
+      const needsOnboarding = state.ready && state.onboardingComplete === false;
+      if (needsOnboarding) showOnboarding();
       if (!state.ready) {
         setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
       } else if (state.hotkeyError) {
@@ -821,6 +900,7 @@
       } else {
         setStatus(state.message || "Settings loaded from this device.");
       }
+      if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
     } catch (error) {
       window.appReady = false;
       setStatus(error.message || String(error), "error");
@@ -1377,6 +1457,19 @@
     else checkForUpdates(false);
   });
   updateNowButton.addEventListener("click", () => applyUpdate());
+  ["release-notes-close", "release-notes-done"].forEach((id) => {
+    el(id).addEventListener("click", () => releaseNotesModal.close());
+  });
+  releaseNotesContent.addEventListener("click", (event) => {
+    const link = event.target && typeof event.target.closest === "function" ? event.target.closest("a") : null;
+    if (!link || !releaseNotesContent.contains(link)) return;
+    event.preventDefault();
+    const href = link.getAttribute("href") || "";
+    if (!/^https?:\/\//i.test(href)) return;
+    invoke("open_release_note_link", { url: href }).catch((error) => {
+      setStatus("Could not open the release note link. " + (error.message || String(error)), "error");
+    });
+  });
   const uninstallModal = window.BlobUI.createModalController({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
@@ -1518,6 +1611,7 @@
     root.classList.remove("onboarding-active");
     settingsShell.classList.add("onboarding-entering");
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
+    showReleaseNotesOrContinue();
   }
 
   function advanceOnboarding() {

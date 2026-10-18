@@ -32,6 +32,9 @@ try {
     $archive = [IO.Compression.ZipFile]::OpenRead($package)
     try {
         Assert (@($archive.Entries | Where-Object { $_.FullName -match '\.(ps1|psm1|cmd)$' }).Count -eq 0) 'The release package contains legacy scripts or launchers.'
+        foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+            Assert (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -eq 1) "The release package must contain $name at its root."
+        }
     } finally { $archive.Dispose() }
     # A development install must ignore the normal profile locations completely.
     $env:APPDATA = Join-Path $root 'protected-roaming'
@@ -46,6 +49,12 @@ try {
     $dataPath = Join-Path $testRoot 'Anytype/blob/data.json'
     Assert (Test-Path -LiteralPath $dataPath) 'Development EXE did not create isolated settings.'
     Assert (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/settings-app.exe')) 'Native installation omitted the Settings runtime.'
+    foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+        $source = Join-Path $repo $name
+        $installed = Join-Path $testRoot ("Anytype/blob/runtime/" + $name)
+        Assert (Test-Path -LiteralPath $installed -PathType Leaf) "Native installation omitted runtime/$name."
+        Assert ((Get-FileHash -LiteralPath $source).Hash -eq (Get-FileHash -LiteralPath $installed).Hash) "Installed runtime/$name does not match the release source."
+    }
     $apps = Get-TestApps
     Assert ($apps.Count -eq 1) 'First development installation did not create one app folder.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'blobui-settings.exe')) 'Native installation omitted the app executable.'
@@ -56,6 +65,8 @@ try {
     Assert ($runtimeMetadata.version -eq $releaseMetadata.version) 'Installed runtime release version does not match the source.'
     $managedPath = Join-Path $testRoot 'Anytype/blob/.blobui-managed-files.json'
     $managed = Get-Content -LiteralPath $managedPath -Raw | ConvertFrom-Json
+    Assert ($managed.managedFiles -contains 'runtime/Changelogs.md') 'The changelog Markdown is not tracked by the runtime ownership manifest.'
+    Assert ($managed.managedFiles -contains 'runtime/Changelogs.yaml') 'The changelog image manifest is not tracked by the runtime ownership manifest.'
     $managed.managedFiles += 'runtime/scripts/obsolete.ps1'
     $managed | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $managedPath -Encoding UTF8
     $oldScripts = Join-Path $testRoot 'Anytype/blob/runtime/scripts'
