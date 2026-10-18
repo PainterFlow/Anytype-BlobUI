@@ -1344,10 +1344,49 @@ fn same_path(a: &Path, b: &Path) -> bool {
         .ok()
         .zip(normalized(b).ok())
         .is_some_and(|(a, b)| {
-            a.to_string_lossy()
-                .eq_ignore_ascii_case(&b.to_string_lossy())
+            #[cfg(windows)]
+            {
+                comparable_windows_path(&a).eq_ignore_ascii_case(&comparable_windows_path(&b))
+            }
+            #[cfg(not(windows))]
+            {
+                a.to_string_lossy()
+                    .eq_ignore_ascii_case(&b.to_string_lossy())
+            }
         })
 }
+
+#[cfg(windows)]
+fn comparable_windows_path(path: &Path) -> String {
+    // Windows canonicalize can add a verbatim prefix that saved install paths
+    // do not have, even though both strings refer to the same directory.
+    const VERBATIM_PREFIX: &str = "\\\\?\\";
+    const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
+
+    let path = path.to_string_lossy().replace('/', "\\");
+    if path
+        .get(..VERBATIM_UNC_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_UNC_PREFIX))
+    {
+        return format!(r"\\{}", &path[VERBATIM_UNC_PREFIX.len()..]);
+    }
+    if path
+        .get(..VERBATIM_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_PREFIX))
+    {
+        let without_prefix = &path[VERBATIM_PREFIX.len()..];
+        if without_prefix
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && without_prefix.as_bytes().get(1) == Some(&b':')
+        {
+            return without_prefix.to_owned();
+        }
+    }
+    path
+}
+
 fn is_reparse(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
