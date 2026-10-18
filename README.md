@@ -5,13 +5,65 @@ It gives Anytype a more modern and elegant touch, coloring buttons, changing fon
 and just improving the overall UI.
 For more documentation, [visit our Anytype page](https://any.coop/A9drcF6fXs9QvXiR114HjF7Lx5ZzrysS1PLZcWFRYYW9Jiob/anytype-blobui)
 
-On Windows, double-click `Install.cmd` to install BlobUI. Use **Save** in BlobUI Settings to rebuild and apply the theme; runtime CSS compilation, Anytype API access, and settings saves are handled by the Rust app. Setup details are below.
+On Windows, run `blobui-installer.exe` from a published release to install BlobUI. The script-based `Install.cmd` remains available for source downloads. Use **Save** in BlobUI Settings to rebuild and apply the theme; runtime CSS compilation, Anytype API access, and settings saves are handled by the Rust app. Setup details are below.
 
 
-#### *Made by @PainterFlow11 - All rights reserved, no license*
+#### *Made by Adrian Orlik (@PainterFlow11)*
+
+## License
+
+Copyright (C) 2026 Adrian Orlik. Original BlobUI material is licensed under
+GNU GPL v3 only with an additional author attribution term under section 7(b).
+See [LICENSE](LICENSE) for the grant and attribution term and [COPYING](COPYING)
+for the full GPL v3 text. Preserve the credit "BlobUI - original author Adrian Orlik"
+in the covered material or its displayed legal notices when redistributing it.
+Redistribution and commercial use are allowed under these terms; distributed
+derivative works must comply with GPL v3, including its corresponding-source
+requirements. Third-party material retains its own license terms.
+
+Unless explicitly agreed otherwise, contributions submitted for inclusion in
+BlobUI must be licensed under these same terms. Contributors retain copyright
+in their contributions and must have permission to submit them.
 
 
 ## Installing BlobUI
+
+### Windows installer
+
+Download and run `blobui-installer.exe`. It downloads the `blobui-windows.zip` asset from the latest published GitHub release, then asks for the Anytype data folder and an empty BlobUI app folder. Existing theme settings and encrypted credentials are preserved, and existing CSS is backed up. Anytype must already have been opened once. Enable **File > Apply Custom CSS** in Anytype after installation.
+
+The installer is a native Rust executable. It downloads and extracts the release, compiles the theme, and installs files directly without running PowerShell or setup scripts. It does not launch Settings automatically. Open BlobUI from the Start menu after installation. To reinstall while keeping settings, choose a new empty app folder.
+
+Build the installer with Rust and the Windows C++ build tools. The build command also supports the workspace Rust toolchain used by the Settings build.
+
+```powershell
+.\scripts\Build-Installer.ps1
+```
+
+The result is `dist/blobui-installer.exe`. It fetches the newest release each time it runs, so theme releases do not require rebuilding it. PowerShell is used only to run the developer build command. The installer itself has no PowerShell or .NET runtime dependency.
+
+Build an isolated development installer with `-d`.
+
+```powershell
+.\scripts\Build-Installer.ps1 -d
+```
+
+Run `dist/blobui-installer-dev.exe` to test the latest release. It installs only beneath `BlobUI-Installer-Test` beside the executable, uses a separate Anytype data folder, skips Start menu shortcuts, and leaves your normal installation alone. Repeated test installs retain the test settings and use a new app folder. This tests installation without applying the test theme to your running Anytype.
+
+For an offline test of the current workspace, package the already built Settings executable and theme, then run the development installer against that ZIP.
+
+```powershell
+.\scripts\Build-Installer.ps1 -d -PackageRelease
+.\dist\blobui-installer-dev.exe --package .\dist\blobui-windows.zip
+```
+
+If the Settings executable needs rebuilding, run `scripts/Build-Settings.ps1 -s -c` first. Packaging itself does not rebuild or launch Settings. The production installer accepts downloads from GitHub only.
+
+When publishing a release, run `scripts/Build-Installer.ps1 -PackageRelease` and attach `dist/blobui-windows.zip` and `dist/blobui-installer.exe` to the GitHub release. GitHub's automatic source ZIP does not include the compiled app and cannot replace this asset. Until a release contains `blobui-windows.zip`, the online installer reports the missing package.
+
+Run `scripts/tests/Test-Installer.ps1` to compile both installers and check isolated installation, repeated-install preservation, release selection, and archive validation. Tests use temporary folders inside the workspace and do not launch Settings.
+
+### Script installation
 
 1. Extract the download outside OneDrive and open Anytype at least once.
 2. Double-click **Install.cmd**. Windows PowerShell 5.1 or later is required; administrator access is not needed for the default locations.
