@@ -5,6 +5,81 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Remove only manifest-owned files. Settings, backups, and unrelated files stay.
+pub fn uninstall(app: &Path, anytype: &Path) -> Result<(), String> {
+    let app = normalized(app)?;
+    let anytype = normalized(anytype)?;
+    validate_update_target(&app, &anytype)?;
+    let app_manifest = read_app_manifest(&app.join(".blobui-app-managed-files.json"))?;
+    if app_manifest.managed_files.is_empty() {
+        return Err("The current BlobUI ownership manifest was not found. Run the latest installer once before uninstalling. Nothing was removed.".into());
+    }
+    let runtime = read_uninstall_manifest(&anytype.join("blob/.blobui-managed-files.json"))?;
+    let mut changes = Vec::new();
+    for key in app_manifest.managed_files {
+        changes.push(FileChange {
+            path: app.join(key),
+            contents: None,
+        });
+    }
+    for key in runtime.managed_files {
+        // Earlier installers listed the shared default banner as managed even
+        // though Settings treats it as a user-owned fallback after install.
+        if key == "assets/spacebanner/banner.png" {
+            continue;
+        }
+        changes.push(FileChange {
+            path: anytype.join("blob").join(key),
+            contents: None,
+        });
+    }
+    let css_path = anytype.join("custom.css");
+    reject_links(&css_path)?;
+    if css_path.exists() {
+        let current = fs::read(&css_path).map_err(|e| e.to_string())?;
+        let data_bytes = fs::read(anytype.join("blob/data.json")).map_err(|e| e.to_string())?;
+        let mut data: Value = serde_json::from_slice(
+            data_bytes
+                .strip_prefix(&[0xEF, 0xBB, 0xBF])
+                .unwrap_or(&data_bytes),
+        )
+        .map_err(|e| e.to_string())?;
+        fill_compile_defaults(&mut data, &anytype);
+        let installed = compile_package_css(&app, &anytype, &data)?.into_bytes();
+        if current != installed {
+            return Err("custom.css has changed since installation. Nothing was removed. Save a copy and restore the installed stylesheet before uninstalling.".into());
+        }
+        changes.push(FileChange {
+            path: anytype
+                .join("blob/backups")
+                .join(format!("uninstalled-{}.css.bak", unique_suffix())),
+            contents: Some(current),
+        });
+        changes.push(FileChange {
+            path: css_path,
+            contents: None,
+        });
+    }
+    if let Some(shortcut) = owned_start_menu_shortcut(&app)? {
+        changes.push(FileChange {
+            path: shortcut,
+            contents: None,
+        });
+    }
+    for path in [
+        app.join(".blobui-install.json"),
+        app.join(".blobui-app-managed-files.json"),
+        anytype.join("blob/.blobui-managed-files.json"),
+    ] {
+        changes.push(FileChange {
+            path,
+            contents: None,
+        });
+    }
+    // Preflight and rollback cover the whole removal. Never recursively delete a folder.
+    commit_update(changes)
+}
+
 #[derive(Default)]
 struct PreviousManifest {
     release_version: Option<String>,
@@ -269,8 +344,19 @@ fn compile_package_css(package: &Path, anytype: &Path, data: &Value) -> Result<S
     let manifest = read_previous_manifest(&anytype.join("blob/.blobui-managed-files.json"))?;
     let stage_parent = anytype.join("blob/staging");
     reject_links(&stage_parent)?;
+    let remove_stage_parent = match fs::symlink_metadata(&stage_parent) {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect BlobUI compiler staging: {error}"
+            ))
+        }
+    };
     fs::create_dir_all(&stage_parent)
         .map_err(|e| format!("Could not prepare BlobUI update staging: {e}"))?;
+    let _stage_parent_guard =
+        remove_stage_parent.then(|| RemoveEmptyDirectory(stage_parent.clone()));
     let stage = stage_parent.join(format!(".bi-compile-{}", unique_suffix()));
     fs::create_dir(&stage).map_err(|e| format!("Could not create BlobUI compiler staging: {e}"))?;
     let guard = RemoveTree(stage.clone());
@@ -544,10 +630,64 @@ fn read_previous_manifest(path: &Path) -> Result<PreviousManifest, String> {
     })
 }
 
+fn read_uninstall_manifest(path: &Path) -> Result<PreviousManifest, String> {
+    reject_links(path)?;
+    let bytes = fs::read(path).map_err(|_| {
+        "The BlobUI runtime ownership manifest could not be read. Nothing was removed.".to_string()
+    })?;
+    let value: Value = serde_json::from_slice(
+        bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes),
+    )
+    .map_err(|_| {
+        "The BlobUI runtime ownership manifest is invalid. Nothing was removed.".to_string()
+    })?;
+    if value.get("manifestVersion").and_then(Value::as_u64) != Some(1) {
+        return Err(
+            "The BlobUI runtime ownership manifest has an unsupported format. Nothing was removed."
+                .into(),
+        );
+    }
+    let items = value
+        .get("managedFiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "The BlobUI runtime ownership manifest has no managed file list. Nothing was removed."
+                .to_string()
+        })?;
+    let mut managed_files = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    for item in items {
+        let key = item.as_str()
+            .ok_or_else(|| "The BlobUI runtime ownership manifest contains an invalid path. Nothing was removed.".to_string())?;
+        validate_managed_key(key)?;
+        if !seen.insert(key.to_ascii_lowercase()) {
+            return Err("The BlobUI runtime ownership manifest contains duplicate paths. Nothing was removed.".into());
+        }
+        managed_files.insert(key.to_string());
+    }
+    if managed_files.is_empty() {
+        return Err("The BlobUI runtime ownership manifest is empty. Nothing was removed.".into());
+    }
+    Ok(PreviousManifest {
+        release_version: value
+            .get("releaseVersion")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        managed_files: managed_files.into_iter().collect(),
+    })
+}
+
 struct RemoveTree(PathBuf);
 impl Drop for RemoveTree {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+struct RemoveEmptyDirectory(PathBuf);
+impl Drop for RemoveEmptyDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.0);
     }
 }
 
@@ -1054,6 +1194,75 @@ fn start_menu_shortcut_path() -> PathBuf {
         .join("Microsoft/Windows/Start Menu/Programs/BlobUI.lnk")
 }
 
+#[cfg(windows)]
+fn owned_start_menu_shortcut(app: &Path) -> Result<Option<PathBuf>, String> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows::core::{Interface, PCWSTR};
+    use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED, STGM_READ,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+
+    let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let path = app_data.join("Microsoft/Windows/Start Menu/Programs/BlobUI.lnk");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect the BlobUI Start menu shortcut: {error}"
+            ))
+        }
+    };
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    reject_links(&path)?;
+    let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    init.ok()
+        .map_err(|error| format!("Could not inspect the BlobUI Start menu shortcut: {error}"))?;
+    let _apartment = ComApartment;
+    let target = (|| unsafe {
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|error| {
+                format!("Could not inspect the BlobUI Start menu shortcut: {error}")
+            })?;
+        let persist: IPersistFile = link.cast().map_err(|error| error.to_string())?;
+        let path_wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        persist
+            .Load(PCWSTR(path_wide.as_ptr()), STGM_READ)
+            .map_err(|error| format!("Could not read the BlobUI Start menu shortcut: {error}"))?;
+        let mut target = [0u16; 32768];
+        let mut file_data = WIN32_FIND_DATAW::default();
+        link.GetPath(&mut target, &mut file_data, SLGP_RAWPATH.0 as u32)
+            .map_err(|error| {
+                format!("Could not read the BlobUI Start menu shortcut target: {error}")
+            })?;
+        Ok::<_, String>(OsString::from_wide(
+            &target[..target
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(target.len())],
+        ))
+    })()?;
+    let expected = app.join("settings-app/dist/blobui-settings.exe");
+    Ok(same_path(Path::new(&target), &expected).then_some(path))
+}
+
+#[cfg(not(windows))]
+fn owned_start_menu_shortcut(_: &Path) -> Result<Option<PathBuf>, String> {
+    Ok(None)
+}
+
 #[cfg(not(windows))]
 fn create_shortcut(_: &Path, _: &Path) -> Result<(), String> {
     Err("Start menu shortcuts require Windows.".into())
@@ -1103,6 +1312,37 @@ mod tests {
         )
         .unwrap();
         package
+    }
+
+    fn installed_uninstall_fixture(label: &str) -> (PathBuf, PathBuf, PathBuf, Vec<u8>) {
+        let root = fixture_root(label);
+        let anytype = root.join("Anytype data");
+        let app = root.join("BlobUI app");
+        let blob = anytype.join("blob");
+        fs::create_dir_all(&anytype).unwrap();
+        fs::write(anytype.join("custom.css"), b"pre-existing user css").unwrap();
+        let mut data = default_data(&anytype);
+        data["settings"]["fontFamily"] = json!("Inter");
+        data["settings"]["accentColor"] = json!("#123456");
+        data["futureField"] = json!({"preserve": true});
+        fs::create_dir_all(&blob).unwrap();
+        let data_bytes = serde_json::to_vec_pretty(&data).unwrap();
+        fs::write(blob.join("data.json"), &data_bytes).unwrap();
+        fs::create_dir_all(blob.join("credentials")).unwrap();
+        fs::write(
+            blob.join("credentials/anytype-api-key.dpapi"),
+            b"credential",
+        )
+        .unwrap();
+        fs::create_dir_all(blob.join("assets/spacebanner")).unwrap();
+        fs::write(blob.join("assets/spacebanner/banner.png"), b"custom banner").unwrap();
+        fs::write(anytype.join("keep.txt"), b"unrelated Anytype data").unwrap();
+        let package = write_package(&root, "1.2.0", b"settings executable");
+        install(&package, &anytype, &app, "1.2.0", false).unwrap();
+        fs::write(app.join("blobui-installer.exe"), b"retained installer").unwrap();
+        fs::write(app.join("notes.txt"), b"unrelated app file").unwrap();
+        let installed_css = fs::read(anytype.join("custom.css")).unwrap();
+        (root, anytype, app, installed_css)
     }
 
     #[test]
@@ -1268,6 +1508,165 @@ mod tests {
         assert!(validate_managed_key("assets/spacebanner/banner.png").is_ok());
     }
 
+    #[test]
+    fn uninstall_removes_owned_files_and_preserves_user_data_backups_and_installer() {
+        let (root, anytype, app, installed_css) = installed_uninstall_fixture("uninstall-preserve");
+        let blob = anytype.join("blob");
+        let data_before = fs::read(blob.join("data.json")).unwrap();
+        let backup_dir = blob.join("backups");
+        let old_css_backup = fs::read_dir(&backup_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("custom-")
+            })
+            .expect("the original user CSS backup should exist");
+        assert_eq!(fs::read(&old_css_backup).unwrap(), b"pre-existing user css");
+
+        uninstall(&app, &anytype).unwrap();
+
+        assert!(!anytype.join("custom.css").exists());
+        assert!(!app.join(".blobui-install.json").exists());
+        assert!(!app.join(".blobui-app-managed-files.json").exists());
+        assert!(!app.join("blobui-settings.exe").exists());
+        assert!(!app.join("settings-app/dist/blobui-settings.exe").exists());
+        assert!(!app.join("Dev/theme.css").exists());
+        assert!(!blob.join("runtime/settings-app.exe").exists());
+        assert!(!blob.join("runtime/Dev/theme.css").exists());
+        assert!(!blob.join(".blobui-managed-files.json").exists());
+        assert_eq!(
+            fs::read(app.join("blobui-installer.exe")).unwrap(),
+            b"retained installer"
+        );
+        assert_eq!(
+            fs::read(app.join("notes.txt")).unwrap(),
+            b"unrelated app file"
+        );
+        assert_eq!(fs::read(blob.join("data.json")).unwrap(), data_before);
+        assert_eq!(
+            fs::read(blob.join("credentials/anytype-api-key.dpapi")).unwrap(),
+            b"credential"
+        );
+        assert_eq!(
+            fs::read(blob.join("assets/spacebanner/banner.png")).unwrap(),
+            b"custom banner"
+        );
+        assert_eq!(
+            fs::read(anytype.join("keep.txt")).unwrap(),
+            b"unrelated Anytype data"
+        );
+        assert_eq!(fs::read(old_css_backup).unwrap(), b"pre-existing user css");
+        let uninstall_backup = fs::read_dir(backup_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("uninstalled-")
+            })
+            .expect("the removed generated CSS should have a backup");
+        assert_eq!(fs::read(uninstall_backup).unwrap(), installed_css);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstall_refuses_changed_css_without_removing_anything() {
+        let (root, anytype, app, _) = installed_uninstall_fixture("uninstall-changed-css");
+        let blob = anytype.join("blob");
+        let changed_css = [
+            fs::read(anytype.join("custom.css")).unwrap(),
+            b"\n/* user edit */".to_vec(),
+        ]
+        .concat();
+        fs::write(anytype.join("custom.css"), &changed_css).unwrap();
+        let app_exe = fs::read(app.join("blobui-settings.exe")).unwrap();
+        let data = fs::read(blob.join("data.json")).unwrap();
+
+        let error = uninstall(&app, &anytype).unwrap_err();
+
+        assert!(error.contains("custom.css has changed"));
+        assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), changed_css);
+        assert_eq!(fs::read(app.join("blobui-settings.exe")).unwrap(), app_exe);
+        assert_eq!(fs::read(blob.join("data.json")).unwrap(), data);
+        assert!(app.join(".blobui-install.json").exists());
+        assert!(blob.join(".blobui-managed-files.json").exists());
+        assert!(
+            !blob.join("staging").exists(),
+            "CSS comparison must not leave compiler staging behind"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstall_rejects_traversal_in_either_manifest_before_deleting_files() {
+        for (label, manifest_path, manifest_contents) in [
+            (
+                "uninstall-runtime-traversal",
+                "runtime",
+                br#"{"manifestVersion":1,"managedFiles":["runtime/../data.json"]}"#.as_slice(),
+            ),
+            (
+                "uninstall-app-traversal",
+                "app",
+                br#"{"manifestVersion":1,"managedFiles":["Dev/../outside.txt"]}"#.as_slice(),
+            ),
+        ] {
+            let (root, anytype, app, _) = installed_uninstall_fixture(label);
+            let blob = anytype.join("blob");
+            let manifest = if manifest_path == "runtime" {
+                blob.join(".blobui-managed-files.json")
+            } else {
+                app.join(".blobui-app-managed-files.json")
+            };
+            fs::write(&manifest, manifest_contents).unwrap();
+            let css = fs::read(anytype.join("custom.css")).unwrap();
+            let app_exe = fs::read(app.join("blobui-settings.exe")).unwrap();
+            let data = fs::read(blob.join("data.json")).unwrap();
+
+            assert!(uninstall(&app, &anytype).is_err(), "{label} was accepted");
+
+            assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), css);
+            assert_eq!(fs::read(app.join("blobui-settings.exe")).unwrap(), app_exe);
+            assert_eq!(fs::read(blob.join("data.json")).unwrap(), data);
+            assert!(app.join(".blobui-install.json").exists());
+            assert_eq!(fs::read(&manifest).unwrap(), manifest_contents);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_rejects_reparse_managed_path_before_deleting_other_files() {
+        use std::os::windows::fs::symlink_file;
+        let (root, anytype, app, _) = installed_uninstall_fixture("uninstall-reparse");
+        let link = app.join("Dev/theme.css");
+        fs::remove_file(&link).unwrap();
+        if let Err(error) = symlink_file(app.join("notes.txt"), &link) {
+            assert_eq!(
+                error.raw_os_error(),
+                Some(1314),
+                "unexpected failure creating a reparse fixture: {error}"
+            );
+            eprintln!("Skipping reparse-point integration assertion: this Windows account cannot create symbolic links (privilege 1314).");
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        let css = fs::read(anytype.join("custom.css")).unwrap();
+        let app_exe = fs::read(app.join("blobui-settings.exe")).unwrap();
+
+        assert!(uninstall(&app, &anytype).is_err());
+
+        assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), css);
+        assert_eq!(fs::read(app.join("blobui-settings.exe")).unwrap(), app_exe);
+        assert!(app.join(".blobui-install.json").exists());
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(windows)]
     #[test]
     fn native_shortcut_is_created_at_requested_path_and_existing_link_is_preserved() {
@@ -1284,6 +1683,67 @@ mod tests {
         let original = fs::read(&link).unwrap();
         assert!(create_shortcut_at(&target, &root, &link).is_err());
         assert_eq!(fs::read(&link).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_removes_only_a_start_menu_shortcut_that_targets_this_install() {
+        use std::env;
+
+        let (root, anytype, app, _) = installed_uninstall_fixture("uninstall-shortcut-owned");
+        let prior_appdata = env::var_os("APPDATA");
+        env::set_var("APPDATA", root.join("roaming"));
+        let owned_link = start_menu_shortcut_path();
+        let target = app.join("settings-app/dist/blobui-settings.exe");
+        let create_result = create_shortcut_at(&target, &app, &owned_link);
+        if let Err(error) = create_result {
+            if let Some(value) = prior_appdata {
+                env::set_var("APPDATA", value);
+            } else {
+                env::remove_var("APPDATA");
+            }
+            panic!("could not create owned shortcut fixture: {error}");
+        }
+        let uninstall_result = uninstall(&app, &anytype);
+        if let Some(value) = prior_appdata {
+            env::set_var("APPDATA", value);
+        } else {
+            env::remove_var("APPDATA");
+        }
+        uninstall_result.unwrap();
+        assert!(
+            !owned_link.exists(),
+            "the install-owned shortcut should be removed"
+        );
+        fs::remove_dir_all(root).unwrap();
+
+        let (root, anytype, app, _) = installed_uninstall_fixture("uninstall-shortcut-foreign");
+        let prior_appdata = env::var_os("APPDATA");
+        env::set_var("APPDATA", root.join("roaming"));
+        let foreign_target = root.join("other-app.exe");
+        fs::write(&foreign_target, b"another app").unwrap();
+        let foreign_link = start_menu_shortcut_path();
+        let create_result = create_shortcut_at(&foreign_target, &root, &foreign_link);
+        if let Err(error) = create_result {
+            if let Some(value) = prior_appdata {
+                env::set_var("APPDATA", value);
+            } else {
+                env::remove_var("APPDATA");
+            }
+            panic!("could not create foreign shortcut fixture: {error}");
+        }
+        let uninstall_result = uninstall(&app, &anytype);
+        if let Some(value) = prior_appdata {
+            env::set_var("APPDATA", value);
+        } else {
+            env::remove_var("APPDATA");
+        }
+        uninstall_result.unwrap();
+        assert!(
+            foreign_link.is_file(),
+            "a shortcut to another app must be preserved"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

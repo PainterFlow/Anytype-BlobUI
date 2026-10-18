@@ -545,7 +545,7 @@ fn download_release_installer(release: &ReleaseInfo) -> Result<Vec<u8>, String> 
     Ok(response.body)
 }
 
-fn resolve_app_directory(
+pub(crate) fn resolve_app_directory(
     install_directory: &Path,
     current_exe: Option<&Path>,
     local_app_data: Option<&Path>,

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 thread_local! {
-    static FAIL_AFTER_REPLACE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static FAIL_AFTER_REPLACE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
 pub enum CredentialChange<'a> {

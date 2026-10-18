@@ -22,6 +22,7 @@ struct Options {
     anytype: Option<PathBuf>,
     app: Option<PathBuf>,
     update_mode: bool,
+    uninstall: bool,
     release_tag: Option<String>,
     wait_pid: Option<u32>,
     #[cfg(feature = "development")]
@@ -32,8 +33,14 @@ fn main() {
     let no_pause = match parse_args() {
         Ok(options) => {
             let no_pause = options.no_pause;
+            let uninstall = options.uninstall;
             if let Err(error) = run(options) {
-                eprintln!("BlobUI installation failed: {error}");
+                let action = if uninstall {
+                    "uninstallation"
+                } else {
+                    "installation"
+                };
+                eprintln!("BlobUI {action} failed: {error}");
                 if !no_pause {
                     pause();
                 }
@@ -46,7 +53,11 @@ fn main() {
             std::process::exit(2);
         }
     };
-    println!("BlobUI installation completed.");
+    if env::args().any(|arg| arg == "--uninstall") {
+        println!("BlobUI uninstallation completed.");
+    } else {
+        println!("BlobUI installation completed.");
+    }
     if !no_pause {
         pause();
     }
@@ -57,6 +68,7 @@ fn parse_args() -> Result<Options, String> {
     let mut anytype = None;
     let mut app = None;
     let mut update_mode = false;
+    let mut uninstall = false;
     let mut release_tag = None;
     let mut wait_pid = None;
     #[cfg(feature = "development")]
@@ -66,6 +78,7 @@ fn parse_args() -> Result<Options, String> {
         match arg.as_str() {
             "--no-pause" => no_pause = true,
             "--update-mode" => update_mode = true,
+            "--uninstall" => uninstall = true,
             "--release-tag" => {
                 release_tag = Some(args.next().ok_or("Missing value for --release-tag")?)
             }
@@ -102,6 +115,7 @@ fn parse_args() -> Result<Options, String> {
         anytype,
         app,
         update_mode,
+        uninstall,
         release_tag,
         wait_pid,
         #[cfg(feature = "development")]
@@ -112,15 +126,57 @@ fn parse_args() -> Result<Options, String> {
 fn usage() -> &'static str {
     #[cfg(feature = "development")]
     {
-        "Usage: blobui-installer-dev.exe [--no-pause] [--package ZIP] [--anytype-directory DIR] [--app-directory DIR]"
+        "Usage: blobui-installer-dev.exe [--no-pause] [--package ZIP] [--anytype-directory DIR] [--app-directory DIR] | --uninstall --anytype-directory DIR --app-directory DIR"
     }
     #[cfg(not(feature = "development"))]
     {
-        "Usage: blobui-installer.exe [--no-pause] [--anytype-directory DIR] [--app-directory DIR] [--update-mode --release-tag TAG --wait-pid PID]"
+        "Usage: blobui-installer.exe [--no-pause] [--anytype-directory DIR] [--app-directory DIR] | --update-mode --release-tag TAG --wait-pid PID | --uninstall --anytype-directory DIR --app-directory DIR [--wait-pid PID]"
     }
 }
 
 fn run(options: Options) -> Result<(), String> {
+    if options.uninstall {
+        if options.update_mode || options.release_tag.is_some() {
+            return Err("Uninstall cannot be combined with update mode or a release tag.".into());
+        }
+        let app = absolute(&options.app.ok_or("Uninstall requires --app-directory.")?)?;
+        let anytype = absolute(
+            &options
+                .anytype
+                .ok_or("Uninstall requires --anytype-directory.")?,
+        )?;
+        install::validate_update_target(&app, &anytype)?;
+        let app = fs::canonicalize(&app)
+            .map_err(|_| "The existing BlobUI app folder could not be resolved safely.")?;
+        let anytype = fs::canonicalize(&anytype)
+            .map_err(|_| "The existing Anytype data folder could not be resolved safely.")?;
+        if let Some(pid) = options.wait_pid {
+            if pid == 0 || pid == std::process::id() {
+                return Err("Invalid Settings process id.".into());
+            }
+            ProcessWaiter::open(pid)?.wait()?;
+        } else {
+            print!(
+                "Remove BlobUI from {}? Type UNINSTALL to confirm: ",
+                anytype.display()
+            );
+            io::stdout().flush().map_err(|e| e.to_string())?;
+            let mut answer = String::new();
+            io::stdin()
+                .read_line(&mut answer)
+                .map_err(|e| e.to_string())?;
+            if answer.trim() != "UNINSTALL" {
+                return Err("Uninstall cancelled.".into());
+            }
+        }
+        install::uninstall(&app, &anytype)?;
+        if let Err(error) = remove_startup_registration(&app) {
+            eprintln!(
+                "BlobUI was removed, but its per-user startup entry could not be cleared: {error}"
+            );
+        }
+        return Ok(());
+    }
     if options.update_mode {
         if cfg!(feature = "development") {
             return Err(
@@ -219,6 +275,7 @@ fn run(options: Options) -> Result<(), String> {
         }
         validate_destinations(&anytype, &app, &stage, cfg!(feature = "development"))?;
         install::install(&stage, &anytype, &app, &version, shortcut)?;
+        retain_installer(&app)?;
         Ok(version)
     })();
     let _ = fs::remove_dir_all(&stage);
@@ -335,7 +392,167 @@ where
     }
     wait_for_settings()?;
     install::install_update(package, anytype, app, &version)?;
+    retain_installer(app)?;
     Ok(version)
+}
+
+fn retain_installer(app: &Path) -> Result<(), String> {
+    let target = app.join("blobui-installer.exe");
+    validate_no_links(&target)?;
+    let source = env::current_exe().map_err(|e| e.to_string())?;
+    if source != target {
+        fs::copy(source, target).map_err(|e| format!("Could not retain the installer: {e}"))?;
+    }
+    Ok(())
+}
+
+fn startup_entry_targets_app(value: &str, app: &Path) -> bool {
+    let executable = if let Some(quoted) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        quoted
+    } else {
+        value
+    };
+    if executable.contains('"') {
+        return false;
+    }
+    let Some(executable_parent) = Path::new(executable).parent() else {
+        return false;
+    };
+    let expected = app.join("settings-app/dist/blobui-settings.exe");
+    let Some(expected_parent) = expected.parent() else {
+        return false;
+    };
+    if Path::new(executable).file_name().is_none_or(|name| {
+        !name
+            .to_string_lossy()
+            .eq_ignore_ascii_case("blobui-settings.exe")
+    }) {
+        return false;
+    }
+    match (
+        executable_parent.canonicalize(),
+        expected_parent.canonicalize(),
+    ) {
+        (Ok(executable_parent), Ok(expected_parent)) => executable_parent
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected_parent.to_string_lossy()),
+        _ => false,
+    }
+}
+
+#[cfg(windows)]
+fn remove_startup_registration(app: &Path) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{
+        ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
+    };
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
+        KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
+    };
+
+    let key_path = "Software\\Microsoft\\Windows\\CurrentVersion\\Run\0"
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    let value_name = "BlobUI Settings\0".encode_utf16().collect::<Vec<_>>();
+    let mut key: HKEY = std::ptr::null_mut();
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            key_path.as_ptr(),
+            0,
+            KEY_QUERY_VALUE | KEY_SET_VALUE,
+            &mut key,
+        )
+    };
+    if opened == ERROR_FILE_NOT_FOUND || opened == ERROR_PATH_NOT_FOUND {
+        return Ok(());
+    }
+    if opened != ERROR_SUCCESS {
+        return Err(format!(
+            "Windows could not inspect the per-user startup settings: {}",
+            io::Error::from_raw_os_error(opened as i32)
+        ));
+    }
+    let mut value_type = 0;
+    let mut value_bytes = 0;
+    let queried = unsafe {
+        RegQueryValueExW(
+            key,
+            value_name.as_ptr(),
+            std::ptr::null(),
+            &mut value_type,
+            std::ptr::null_mut(),
+            &mut value_bytes,
+        )
+    };
+    if queried == ERROR_FILE_NOT_FOUND {
+        unsafe { RegCloseKey(key) };
+        return Ok(());
+    }
+    if queried != ERROR_SUCCESS {
+        unsafe { RegCloseKey(key) };
+        return Err(format!(
+            "Windows could not inspect the per-user startup setting: {}",
+            io::Error::from_raw_os_error(queried as i32)
+        ));
+    }
+    if value_type != REG_SZ || value_bytes % std::mem::size_of::<u16>() as u32 != 0 {
+        unsafe { RegCloseKey(key) };
+        return Ok(());
+    }
+    let mut value = vec![0u16; value_bytes as usize / std::mem::size_of::<u16>()];
+    let queried = unsafe {
+        RegQueryValueExW(
+            key,
+            value_name.as_ptr(),
+            std::ptr::null(),
+            &mut value_type,
+            value.as_mut_ptr().cast(),
+            &mut value_bytes,
+        )
+    };
+    if queried != ERROR_SUCCESS || value_type != REG_SZ {
+        unsafe { RegCloseKey(key) };
+        return Err(format!(
+            "Windows could not inspect the per-user startup setting: {}",
+            io::Error::from_raw_os_error(queried as i32)
+        ));
+    }
+    let decoded = String::from_utf16(
+        &value[..value
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(value.len())],
+    );
+    let value = match decoded {
+        Ok(value) => value,
+        Err(_) => {
+            unsafe { RegCloseKey(key) };
+            return Err("The per-user startup setting is not valid text.".into());
+        }
+    };
+    if !startup_entry_targets_app(&value, app) {
+        unsafe { RegCloseKey(key) };
+        return Ok(());
+    }
+    let deleted = unsafe { RegDeleteValueW(key, value_name.as_ptr()) };
+    unsafe { RegCloseKey(key) };
+    if deleted == ERROR_SUCCESS || deleted == ERROR_FILE_NOT_FOUND {
+        Ok(())
+    } else {
+        Err(format!(
+            "Windows could not remove the per-user startup setting: {}",
+            io::Error::from_raw_os_error(deleted as i32)
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+fn remove_startup_registration(_: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn write_update_status(version: Option<&str>, status: &str, message: &str) -> Result<(), String> {
@@ -648,6 +865,32 @@ fn pause() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_cleanup_matches_only_this_app_executable() {
+        let root = fixture("startup-ownership");
+        let app = root.join("BlobUI app");
+        let expected_dir = app.join("settings-app/dist");
+        let other_dir = root.join("Another app/settings-app/dist");
+        fs::create_dir_all(&expected_dir).unwrap();
+        fs::create_dir_all(&other_dir).unwrap();
+        let expected = expected_dir.join("blobui-settings.exe");
+        let other = other_dir.join("blobui-settings.exe");
+
+        assert!(startup_entry_targets_app(
+            &format!("\"{}\"", expected.display()),
+            &app
+        ));
+        assert!(!startup_entry_targets_app(
+            &format!("\"{}\"", other.display()),
+            &app
+        ));
+        assert!(!startup_entry_targets_app(
+            &format!("\"{}\" --background", expected.display()),
+            &app
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn fixture(label: &str) -> PathBuf {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))

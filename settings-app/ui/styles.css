@@ -264,6 +264,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 .confirm-undo:hover { filter: brightness(.92); }
 .confirm-save { background: var(--accent); color: #fff; }
 .confirm-save:hover { filter: brightness(.92); }
+#uninstall-confirm { background: var(--color-red); }
+#uninstall-confirm:hover:not(:disabled) { filter: brightness(.92); }
 .confirm-actions button:disabled, .confirm-close:disabled { opacity: .55; cursor: default; }
 .confirm-backdrop.is-closing { animation: confirm-backdrop-out .14s ease-in both; pointer-events: none; }
 .confirm-backdrop.is-closing .confirm-dialog { animation: confirm-dialog-out .14s ease-in both; }
@@ -517,3 +519,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .connection-form .input-hint { margin: -12px 16px 0; }
 .manage-connection { padding: 10px 16px; border-radius: 10px; background: var(--input-bg); cursor: pointer; }
 .manage-connection:hover { background: var(--active); }
+.danger-button { color: #fff !important; background: #b8323c !important; border-color: #b8323c !important; }
+.danger-button:hover:not(:disabled) { color: #fff !important; background: #942630 !important; }
+#uninstall-error { color: #dc4854; }

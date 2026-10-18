@@ -289,6 +289,62 @@ fn simulate_update() -> Result<updater::UpdaterState, String> {
     with_startup_state(updater::simulate_update(&app_data, &install, &runtime)?)
 }
 
+#[tauri::command]
+fn uninstall_blobui(app: tauri::AppHandle) -> Result<(), String> {
+    let (_save, _updater) = acquire_save_and_updater_guards()?;
+    let install = resolve_install_directory(&app_data_directory())?;
+    let executable = env::current_exe().map_err(|e| e.to_string())?;
+    let directory = updater::resolve_app_directory(&install, Some(&executable), None)?;
+    let installer = directory.join("blobui-installer.exe");
+    storage::reject_reparse_path(&installer)?;
+    if !installer.is_file() {
+        return Err("The uninstaller is missing. Run the latest BlobUI installer first.".into());
+    }
+    let mut child = std::process::Command::new(&installer)
+        .arg("--uninstall")
+        .arg("--app-directory")
+        .arg(&directory)
+        .arg("--anytype-directory")
+        .arg(&install)
+        .arg("--wait-pid")
+        .arg(std::process::id().to_string())
+        .spawn()
+        .map_err(|e| format!("Could not start the uninstaller: {e}"))?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            return Err(format!(
+                "The uninstaller exited before starting ({status})."
+            ))
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Could not verify that the uninstaller started: {error}"
+            ));
+        }
+    }
+    match autostart::is_enabled() {
+        Ok(true) => {
+            if let Err(error) = autostart::set_enabled(false) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        Ok(false) => {}
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    }
+    app.exit(0);
+    Ok(())
+}
+
 fn with_startup_state(mut state: updater::UpdaterState) -> Result<updater::UpdaterState, String> {
     state.start_on_login = autostart::is_enabled()?;
     Ok(state)
@@ -1139,6 +1195,7 @@ fn main() {
             check_for_updates,
             apply_update,
             simulate_update,
+            uninstall_blobui,
             minimize_window,
             hide_window,
             start_window_drag,

@@ -1377,6 +1377,32 @@
     else checkForUpdates(false);
   });
   updateNowButton.addEventListener("click", () => applyUpdate());
+  const uninstallModal = window.BlobUI.createModalController({
+    backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
+    initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+  });
+  let uninstallBusy = false;
+  el("uninstall-button").addEventListener("click", () => {
+    if (saveBusy || updaterBusyOperation || uninstallBusy || !window.appReady) return;
+    el("uninstall-error").textContent = "";
+    uninstallModal.open();
+  });
+  ["uninstall-close", "uninstall-cancel"].forEach((id) => el(id).addEventListener("click", () => uninstallModal.close()));
+  el("uninstall-confirm").addEventListener("click", async () => {
+    if (saveBusy || updaterBusyOperation || uninstallBusy) return;
+    uninstallBusy = true;
+    const button = el("uninstall-confirm");
+    button.disabled = true;
+    ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = true; });
+    try { await invoke("uninstall_blobui"); }
+    catch (error) { el("uninstall-error").textContent = String(error); }
+    finally {
+      uninstallBusy = false;
+      button.disabled = false;
+      ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = false; });
+    }
+  });
   saveButton.addEventListener("click", save);
   discardButton.addEventListener("click", () => window.BlobUI.openDiscardConfirmation());
   el("discard-confirmation-close").addEventListener("click", () => window.BlobUI.closeDiscardConfirmation());

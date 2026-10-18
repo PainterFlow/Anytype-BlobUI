@@ -144,6 +144,7 @@ const context = {
       }
       if (name === 'check_for_updates') return { ...updaterPrefs, ...updaterCheckState };
       if (name === 'apply_update') return { ...updaterPrefs, ...updaterApplyState };
+      if (name === 'uninstall_blobui') throw new Error('Uninstall fixture failed.');
       if (name === 'simulate_update') return {
         ...updaterPrefs, currentVersion: '1.0.0', latestVersion: '1.1.0', updateAvailable: true,
         lastCheckedAt: null, status: 'simulated', message: 'Preview update available.',
@@ -225,6 +226,13 @@ for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'ob
 }
 assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
 assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
+assert(settingsHtml.indexOf('id="updates-heading"') < settingsHtml.indexOf('id="uninstall-button"'), 'Uninstall appears below Updates in Advanced Settings.');
+assert.match(settingsHtml, /<button id="uninstall-button" class="banner-image-button danger-button"[^>]*>Uninstall BlobUI<\/button>/);
+assert.match(settingsHtml, /id="uninstall-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true"/);
+assert.match(settingsHtml, /Your Anytype data, BlobUI settings, CSS backups, and installer will be kept/);
+assert.match(settingsCss, /\.danger-button\s*\{[^}]*background:\s*#b8323c/);
+assert.match(settingsCss, /\.danger-button:hover:not\(:disabled\)\s*\{[^}]*background:\s*#942630/);
+assert(!settingsCss.includes('`n'), 'The stylesheet must contain real line breaks rather than literal PowerShell escapes.');
 assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \* 60 \* 1000/);
 
 (async () => {
@@ -247,11 +255,15 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
-  [...apiModalButtons, ...discardModalButtons].forEach(id => { element(id).hidden = false; });
+  const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
+  [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons].forEach(id => { element(id).hidden = false; });
   element('api-key-removal-dialog').hidden = false;
   element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
   element('discard-confirmation-dialog').hidden = false;
   element('discard-confirmation-dialog').children.push(...discardModalButtons.map(element));
+  element('uninstall-button').hidden = false;
+  element('uninstall-dialog').hidden = false;
+  element('uninstall-dialog').children.push(...uninstallModalButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
   assert.equal(status(), 'Settings loaded from this device.');
@@ -265,6 +277,25 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('advanced-nav').handlers.click();
   assert.equal(element('advanced-page').hidden, false, 'Advanced Settings shows all controls on one page.');
   assert.equal(element('page-title').textContent, 'Advanced Settings');
+  const uninstallCallsBeforeCancel = calls.filter(name => name === 'uninstall_blobui').length;
+  element('uninstall-button').focus();
+  element('uninstall-button').handlers.click();
+  assert.equal(element('uninstall-backdrop').hidden, false, 'Uninstall opens its confirmation dialog.');
+  assert.equal(activeElement, element('uninstall-cancel'), 'The confirmation opens with Cancel focused.');
+  element('uninstall-cancel').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel closes the uninstall dialog.');
+  assert.equal(calls.filter(name => name === 'uninstall_blobui').length, uninstallCallsBeforeCancel, 'Cancel never invokes the native uninstaller.');
+  element('uninstall-error').textContent = 'stale error';
+  element('uninstall-button').handlers.click();
+  assert.equal(element('uninstall-error').textContent, '', 'Opening the dialog clears an earlier failure.');
+  await element('uninstall-confirm').handlers.click();
+  assert.equal(calls.at(-1), 'uninstall_blobui', 'Confirm invokes the native uninstaller.');
+  assert.match(element('uninstall-error').textContent, /Uninstall fixture failed/, 'A native uninstall error stays visible in the dialog.');
+  assert.equal(element('uninstall-confirm').disabled, false, 'The confirmation button is restored after a failed or returned invocation.');
+  element('uninstall-cancel').handlers.click();
+  finishRemovalTransition();
+  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel remains available after a native failure.');
   const initialFolder = element('install-directory').value;
   await element('install-directory').handlers.click();
   assert.equal(element('install-directory').value, initialFolder, 'Canceling the folder picker preserves the selected folder.');

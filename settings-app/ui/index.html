@@ -394,6 +394,7 @@
                   <button id="check-updates-button" class="banner-image-button update-check-button" type="button" disabled>Check for updates</button>
                 </div>
               </section>
+              <section class="settings-section"><button id="uninstall-button" class="banner-image-button danger-button" type="button">Uninstall BlobUI</button></section>
             </section>
           </div>
           </div>
@@ -403,6 +404,18 @@
           <span id="status-message">Loading your current settings…</span>
         </div>
       </main>
+    </div>
+    <div id="uninstall-backdrop" class="confirm-backdrop" hidden>
+      <section id="uninstall-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="uninstall-title" aria-describedby="uninstall-message" tabindex="-1">
+        <button id="uninstall-close" class="confirm-close" type="button" aria-label="Cancel uninstall"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+        <h2 id="uninstall-title">Uninstall BlobUI?</h2>
+        <p id="uninstall-message">This will close Settings and remove BlobUI and its stylesheet. Your Anytype data, BlobUI settings, CSS backups, and installer will be kept. Unsaved changes will be lost.</p>
+        <p id="uninstall-error" role="alert"></p>
+        <div class="confirm-actions">
+          <button id="uninstall-cancel" class="confirm-cancel" type="button">Cancel</button>
+          <button id="uninstall-confirm" class="confirm-save danger-button" type="button">Uninstall</button>
+        </div>
+      </section>
     </div>
     <div id="api-key-removal-backdrop" class="confirm-backdrop" hidden>
       <section id="api-key-removal-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="api-key-removal-title" aria-describedby="api-key-removal-message" tabindex="-1">
