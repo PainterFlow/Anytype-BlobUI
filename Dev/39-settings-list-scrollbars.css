@@ -1,0 +1,12 @@
+/* Hide native scrollbars in Anytype's virtualized properties and object-type
+   lists. Keep overflow enabled so wheel and keyboard scrolling still work. */
+#body.body > .list > .filterWrapper .ReactVirtualized__Grid {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+#body.body > .list > .filterWrapper .ReactVirtualized__Grid::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
