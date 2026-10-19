@@ -4,6 +4,12 @@
     background-color: color-mix(in srgb, var(--color-blob-accent) 22%, transparent) !important;
 }
 
+/* Match the configured accent on the editable shortcut's "Add" prompt. */
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing):not(.hasError):hover .flex > .label.text.grey,
+.popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing):not(.hasError).hover .flex > .label.text.grey {
+    color: var(--color-blob-accent) !important;
+}
+
 /* Keep editable shortcut errors red when the hover state is active. */
 .popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing).hasError:hover .symbols .label,
 .popups .popup.popupShortcut .body .section .item.canEdit:not(.isEditing).hasError.hover .symbols .label {
