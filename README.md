@@ -98,6 +98,8 @@ When publishing a release, use a semantic version tag matching `version` in `blo
 
 BlobUI Settings provides a desktop Appearance window for fonts and accent colors. Build it from the source folder with Rust and the Windows C++ build tools installed.
 
+The custom font applies to Anytype page content. It cannot change the desktop tab bar because Anytype renders that bar outside the page where it loads `custom.css`; see [Issue #27](https://github.com/PainterFlow/Anytype-BlobUI/issues/27).
+
 ```powershell
 .\scripts\Build-Settings.ps1 -s -c
 .\settings-app\dist\blobui-settings.exe
