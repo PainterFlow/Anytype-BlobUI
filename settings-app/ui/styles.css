@@ -366,8 +366,38 @@ button:focus-visible, input:focus-visible { outline: none; }
 .onboarding[hidden], .onboarding-welcome[hidden], .onboarding-api[hidden] { display: none; }
 .documentation { position: fixed; inset: 36px 0 0; z-index: 20; background: var(--bg); animation: onboarding-fade-in 450ms ease-out both; }
 .documentation[hidden] { display: none; }
-.documentation-layout { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); width: 100%; height: 100%; }
-.documentation-categories { border-right: 1px solid var(--line); }
+.documentation-layout { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; }
+.documentation-navigation { min-width: 0; min-height: 0; padding: 20px 8px 12px; overflow-y: auto; border-right: 1px solid var(--line); background: var(--sidebar); }
+.documentation-category + .documentation-category { margin-top: 18px; }
+.documentation-category-label { display: flex; align-items: center; gap: 8px; padding: 0 8px 7px; color: var(--text-secondary); font-size: 12px; line-height: 18px; font-weight: 500; }
+.documentation-category-icon { display: grid; flex: 0 0 16px; place-items: center; width: 16px; height: 16px; color: var(--text-secondary); }
+.documentation-category-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.documentation-category-icon img { display: block; width: 15px; height: 15px; object-fit: contain; }
+.documentation-article-list { display: grid; gap: 1px; }
+.documentation-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 3px 8px; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.documentation-item:hover, .documentation-item[aria-current="page"] { background: var(--active); color: var(--text); }
+.documentation-item:focus-visible, #documentation-retry:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: -2px; }
+.documentation-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.documentation-item-icon { display: grid; flex: 0 0 16px; place-items: center; width: 16px; height: 16px; color: var(--text-secondary); }
+.documentation-item-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.documentation-item-icon img { display: block; width: 15px; height: 15px; object-fit: contain; }
+.documentation-chevron { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 18px; margin-left: auto; border: 1px solid var(--line); border-radius: 50%; color: var(--text-secondary); }
+.documentation-chevron svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform 120ms ease; }
+.documentation-item[aria-expanded="true"] .documentation-chevron svg { transform: rotate(90deg); }
+.documentation-children { position: relative; display: grid; gap: 1px; margin-left: 16px; padding: 2px 0 2px 8px; }
+.documentation-children[hidden] { display: none; }
+.documentation-children::before { position: absolute; top: 2px; bottom: 2px; left: 0; width: 1px; background: var(--line); content: ""; }
+.documentation-child { padding-left: 8px; }
+.documentation-content { min-width: 0; min-height: 0; overflow: auto; padding: 36px clamp(24px, 6vw, 88px) 56px; scroll-behavior: smooth; }
+.documentation-article { width: min(100%, 760px); margin: 0 auto; }
+.documentation-article:empty { display: none; }
+.documentation-load-error { display: grid; justify-items: start; gap: 12px; width: min(100%, 760px); margin: 20px auto; color: var(--text-secondary); }
+.documentation-load-error[hidden] { display: none; }
+.documentation-load-error p { margin: 0; }
+.documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar { width: 12px; height: 12px; }
+.documentation-navigation::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-track { background: transparent; }
+.documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+.documentation-navigation:hover::-webkit-scrollbar-thumb, .documentation-content:hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
 .documentation.leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
 .onboarding-welcome { display: grid; place-items: center; width: 100%; height: 100%; padding: 32px; background: var(--bg); color: var(--text); cursor: pointer; }
 .onboarding-welcome:focus-visible { outline: none; }

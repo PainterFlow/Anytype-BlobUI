@@ -1926,6 +1926,7 @@
     documentation.hidden = false;
     documentationBack.hidden = false;
     documentationBack.focus();
+    window.BlobUI.DocsUI.load();
   }
 
   function closeDocumentation() {
