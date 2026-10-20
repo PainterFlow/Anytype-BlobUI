@@ -221,6 +221,26 @@
       pedantic: false,
       renderer,
       extensions: [{
+        name: "blobuiCheckboxLine",
+        level: "block",
+        start(source) {
+          const match = /\n {0,3}\[[ xX]\](?:[\t ]+|(?=\n|$))/.exec(source);
+          return match ? match.index + 1 : undefined;
+        },
+        tokenizer(source) {
+          const match = /^ {0,3}\[([ xX])\](?:[\t ]+([^\n]*)|(?=\n|$))(?:\n|$)/.exec(source);
+          if (!match) return undefined;
+          return {
+            type: "blobuiCheckboxLine",
+            raw: match[0],
+            checked: match[1].toLowerCase() === "x",
+            tokens: this.lexer.inlineTokens(match[2] || ""),
+          };
+        },
+        renderer(token) {
+          return `<p><input type="checkbox" disabled${token.checked ? " checked" : ""}> ${this.parser.parseInline(token.tokens)}</p>\n`;
+        },
+      }, {
         name: "blobuiImageMention",
         level: "inline",
         start(source) {

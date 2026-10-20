@@ -12,3 +12,6 @@ This separate-category test page checks a table and a task list in the Markdown 
 
 - [x] Render checked item
 - [ ] Render unchecked item
+
+[x] test
+[ ] test2
