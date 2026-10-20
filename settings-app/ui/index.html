@@ -11,10 +11,17 @@
     <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
       <span class="window-title">BlobUI Settings</span>
       <div class="window-controls">
+        <button id="documentation-back" class="window-control" type="button" aria-label="Back to settings" title="Back to settings" hidden><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M10 6H2m0 0 4 4m-4-4 4-4"/></svg></button>
         <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"/></svg></button>
         <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
       </div>
     </header>
+    <section id="documentation" class="documentation" aria-label="Documentation" hidden>
+      <div class="documentation-layout" aria-hidden="true">
+        <div class="documentation-categories"></div>
+        <div class="documentation-content"></div>
+      </div>
+    </section>
     <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden>
       <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
         <span class="onboarding-copy">
