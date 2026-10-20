@@ -1939,7 +1939,6 @@
       documentation.hidden = true;
       documentationBack.hidden = true;
       settingsShell.inert = false;
-      settingsShell.classList.add("onboarding-entering");
       if (documentationPreviousFocus) documentationPreviousFocus.focus();
       documentationPreviousFocus = null;
     }, reducedMotion ? 0 : 320);
