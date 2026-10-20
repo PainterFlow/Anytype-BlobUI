@@ -37,6 +37,7 @@ test('documentation navigation selects articles, expands one child level, and sa
     </body></html>`);
     await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/vendor/marked.umd.js') });
     await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/markdown.js') });
+    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/disclosure.js') });
     await page.evaluate(() => {
       window.BlobUI.DocsData = {
         async load() {
@@ -82,6 +83,87 @@ test('documentation navigation selects articles, expands one child level, and sa
   }
 });
 
+test('disclosure controller supports reusable panels, rapid reversal, focus safety, and reduced motion', {
+  skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
+}, async () => {
+  const browser = await chromium.launch({ executablePath: chromePath, headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<!doctype html><html><body>
+      <section id="settings-group">
+        <button id="settings-toggle" type="button" data-disclosure-toggle aria-controls="settings-panel" aria-expanded="false">Advanced settings</button>
+        <div id="settings-panel" data-disclosure-panel data-disclosure-state="closed" hidden inert>
+          <div class="documentation-children-inner" data-disclosure-content>
+            <div style="height: 100px"><button id="settings-control" type="button">Setting</button></div>
+          </div>
+        </div>
+      </section>
+    </body></html>`);
+    await page.addStyleTag({ path: path.join(workspace, 'settings-app/ui/styles.css') });
+    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/disclosure.js') });
+    await page.evaluate(() => {
+      window.disclosureController = window.BlobUI.Disclosure.attach(document.getElementById('settings-group'));
+      window.originalSettingsPanel = document.getElementById('settings-panel');
+    });
+
+    const openingHeights = await page.evaluate(async () => {
+      const panel = document.getElementById('settings-panel');
+      window.disclosureController.setExpanded(document.getElementById('settings-toggle'), true);
+      let transition = null;
+      const startedAt = performance.now();
+      while (!transition && performance.now() - startedAt < 500) {
+        await new Promise(requestAnimationFrame);
+        transition = panel.getAnimations().find(animation => animation.transitionProperty === 'grid-template-rows' && animation.playState === 'running');
+      }
+      if (!transition) return { mid: -1, full: -1 };
+      while (Number(transition.currentTime) < 70) await new Promise(requestAnimationFrame);
+      const mid = panel.getBoundingClientRect().height;
+      await transition.finished;
+      return { mid, full: panel.getBoundingClientRect().height };
+    });
+    const midOpenHeight = openingHeights.mid;
+    assert.ok(midOpenHeight > 0 && midOpenHeight < 100, `The real panel transition should be partway open at 70ms, got ${midOpenHeight}px.`);
+    const fullOpenHeight = openingHeights.full;
+    assert.ok(Math.abs(fullOpenHeight - 100) < 1, `The panel should reach its 100px content height, got ${fullOpenHeight}px.`);
+
+    const closeStarted = await page.evaluate(async () => {
+      const panel = document.getElementById('settings-panel');
+      window.disclosureController.setExpanded(document.getElementById('settings-toggle'), false);
+      let transition = null;
+      const startedAt = performance.now();
+      while (!transition && performance.now() - startedAt < 500) {
+        await new Promise(requestAnimationFrame);
+        transition = panel.getAnimations().find(animation => animation.transitionProperty === 'grid-template-rows' && animation.playState === 'running');
+      }
+      if (!transition) return false;
+      while (Number(transition.currentTime) < 70) await new Promise(requestAnimationFrame);
+      return true;
+    });
+    assert.equal(closeStarted, true, 'The panel should be in a real closing transition before reversal.');
+    await page.evaluate(() => window.disclosureController.setExpanded(document.getElementById('settings-toggle'), true));
+    await page.waitForTimeout(300);
+
+    assert.equal(await page.locator('#settings-toggle').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#settings-panel').evaluate(panel => panel.hidden), false, 'Reversing an in-progress close must not hide a panel after its transition fallback fires.');
+    assert.equal(await page.locator('#settings-panel').getAttribute('data-disclosure-state'), 'open');
+    assert.equal(await page.locator('#settings-panel').evaluate(panel => panel.inert), false);
+    assert.equal(await page.locator('#settings-panel').evaluate(panel => panel === window.originalSettingsPanel), true, 'The controller must preserve the panel node through toggles.');
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.locator('#settings-control').focus();
+    await page.evaluate(() => window.disclosureController.setExpanded(document.getElementById('settings-toggle'), false));
+    assert.equal(await page.locator('#settings-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('#settings-panel').evaluate(panel => panel.hidden), true, 'Reduced motion should collapse immediately.');
+    assert.equal(await page.locator('#settings-panel').evaluate(panel => panel.inert), true);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'settings-toggle', 'Focus should move out of a panel before it is hidden.');
+
+    await page.evaluate(() => window.disclosureController.setExpanded(document.getElementById('settings-toggle'), true));
+    assert.equal(await page.locator('#settings-panel').getAttribute('data-disclosure-state'), 'open', 'Reduced motion should also open without a deferred animation frame.');
+  } finally {
+    await browser.close();
+  }
+});
+
 test('bundled documentation loads over HTTP with real Markdown, icons, and image aliases', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
 }, async () => {
@@ -118,7 +200,7 @@ test('bundled documentation loads over HTTP with real Markdown, icons, and image
       </div>
     </section>
     <script src="/vendor/marked.umd.js"></script><script src="/markdown.js"></script>
-    <script src="/docs-data.js"></script><script src="/docs.js"></script>
+    <script src="/docs-data.js"></script><script src="/disclosure.js"></script><script src="/docs.js"></script>
     <script>window.docsReady = window.BlobUI.DocsUI.load();</script>
   </body></html>`;
 

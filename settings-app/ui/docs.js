@@ -13,13 +13,14 @@
     reference: '<path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h4"/>',
   };
   const documentIcon = '<path d="M5 2.5h7l4 4v11H5zM12 2.5v4h4M8 10h5M8 13h5"/>';
-  const chevronIcon = '<path d="m4 2 5 5-5 5"/>';
+  const chevronIcon = '<path d="m7 4 6 6-6 6"/>';
 
   if (!nav || !article || !errorPanel || !retryButton) return;
 
   let catalog = null;
   let loadPromise = null;
   let selectedId = null;
+  let disclosureController = null;
   const expanded = new Set();
   const buttonsById = new Map();
   const imageCache = new Map();
@@ -84,24 +85,29 @@
     label.textContent = articleData.name;
     button.append(label);
     if (hasChildren) {
+      button.dataset.disclosureToggle = "";
       button.setAttribute("aria-expanded", "false");
       button.append(svgIcon(chevronIcon, "documentation-chevron"));
     }
-    button.addEventListener("click", () => {
+    if (!hasChildren) button.addEventListener("click", () => {
       selectedId = articleData.id;
-      if (hasChildren) {
-        if (expanded.has(articleData.id)) expanded.delete(articleData.id);
-        else expanded.add(articleData.id);
-      }
-      renderNavigation();
+      updateActiveNavigation();
       renderArticle(articleData);
-      buttonsById.get(articleData.id)?.focus();
     });
     buttonsById.set(articleData.id, button);
     return button;
   }
 
+  function updateActiveNavigation() {
+    for (const [id, button] of buttonsById) {
+      if (id === selectedId) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+  }
+
   function renderNavigation() {
+    disclosureController?.destroy();
+    disclosureController = null;
     nav.replaceChildren();
     buttonsById.clear();
     for (const categoryData of catalog.categories) {
@@ -134,11 +140,16 @@
           const childList = root.document.createElement("div");
           childList.id = `documentation-children-${item.id}`;
           childList.className = "documentation-children";
+          childList.dataset.disclosurePanel = "";
           childList.hidden = !expanded.has(item.id);
           const parentButton = buttonsById.get(item.id);
           parentButton.setAttribute("aria-controls", childList.id);
           parentButton.setAttribute("aria-expanded", String(expanded.has(item.id)));
-          for (const child of children) childList.append(makeArticleButton(child, false, true));
+          const content = root.document.createElement("div");
+          content.className = "documentation-children-inner";
+          content.dataset.disclosureContent = "";
+          for (const child of children) content.append(makeArticleButton(child, false, true));
+          childList.append(content);
           list.append(childList);
         }
       }
@@ -146,11 +157,18 @@
       nav.append(group);
     }
 
-    for (const [id, button] of buttonsById) {
-      const active = id === selectedId;
-      if (active) button.setAttribute("aria-current", "page");
-      else button.removeAttribute("aria-current");
-    }
+    updateActiveNavigation();
+    disclosureController = BlobUI.Disclosure.attach(nav, {
+      onToggle({ toggle, expanded: isExpanded }) {
+        const id = toggle.dataset.articleId;
+        if (isExpanded) expanded.add(id);
+        else expanded.delete(id);
+        selectedId = id;
+        updateActiveNavigation();
+        const articleData = catalog.articles.find((item) => item.id === id);
+        if (articleData) renderArticle(articleData);
+      },
+    });
   }
 
   async function imagesForMarkdown(markdown) {
