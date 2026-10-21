@@ -28,7 +28,17 @@ pub fn set_enabled(enabled: bool) -> Result<bool, String> {
 }
 
 fn startup_command(executable: &str) -> String {
-    format!("\"{executable}\"")
+    format!("\"{}\"", shell_path(executable))
+}
+
+// Explorer's Run commands use shell paths, while an installer launch can leave
+// current_exe() with the verbatim prefix used by Windows canonicalize().
+fn shell_path(path: &str) -> String {
+    if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{path}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+    }
 }
 
 fn startup_entry_matches_executable(value: &str, executable: &std::path::Path) -> bool {
@@ -41,7 +51,7 @@ fn startup_entry_matches_executable(value: &str, executable: &std::path::Path) -
     }
     startup_executable_aliases(executable)
         .iter()
-        .any(|alias| command_path.eq_ignore_ascii_case(&alias.to_string_lossy()))
+        .any(|alias| shell_path(command_path).eq_ignore_ascii_case(&shell_path(&alias.to_string_lossy())))
 }
 
 fn startup_executable_aliases(executable: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -331,6 +341,37 @@ mod tests {
         assert!(!startup_entry_matches_executable(
             r#""C:\Old BlobUI\blobui-settings.exe""#,
             dist_executable
+        ));
+    }
+
+    #[test]
+    fn startup_commands_use_shell_paths_for_verbatim_install_locations() {
+        assert_eq!(
+            startup_command(r"\\?\C:\Program Files\BlobUI\blobui-settings.exe"),
+            r#""C:\Program Files\BlobUI\blobui-settings.exe""#
+        );
+        assert_eq!(
+            startup_command(r"\\?\UNC\server\apps\BlobUI\blobui-settings.exe"),
+            r#""\\server\apps\BlobUI\blobui-settings.exe""#
+        );
+    }
+
+    #[test]
+    fn startup_detection_accepts_verbatim_paths_in_either_direction() {
+        for (ordinary, verbatim) in [
+            (r"C:\Program Files\BlobUI\blobui-settings.exe", r"\\?\C:\Program Files\BlobUI\blobui-settings.exe"),
+            (r"\\server\apps\BlobUI\blobui-settings.exe", r"\\?\UNC\server\apps\BlobUI\blobui-settings.exe"),
+        ] {
+            assert!(startup_entry_matches_executable(&startup_command(ordinary), Path::new(verbatim)));
+            assert!(startup_entry_matches_executable(&format!("\"{verbatim}\""), Path::new(ordinary)));
+        }
+        assert!(startup_entry_matches_executable(
+            r#""C:\Program Files\BlobUI\blobui-settings.exe""#,
+            Path::new(r"\\?\C:\Program Files\BlobUI\settings-app\dist\blobui-settings.exe")
+        ));
+        assert!(!startup_entry_matches_executable(
+            r#""\\?\C:\Other BlobUI\blobui-settings.exe""#,
+            Path::new(r"C:\Program Files\BlobUI\blobui-settings.exe")
         ));
     }
 }
