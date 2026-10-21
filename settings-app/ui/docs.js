@@ -3,6 +3,7 @@
 
   const BlobUI = root.BlobUI = root.BlobUI || {};
   const nav = root.document.getElementById("documentation-navigation");
+  const content = root.document.getElementById("documentation-content");
   const article = root.document.getElementById("documentation-article");
   const errorPanel = root.document.getElementById("documentation-load-error");
   const retryButton = root.document.getElementById("documentation-retry");
@@ -25,7 +26,58 @@
   };
   const chevronIcon = '<path d="m7 4 6 6-6 6"/>';
 
-  if (!nav || !article || !errorPanel || !retryButton) return;
+  if (!nav || !content || !article || !errorPanel || !retryButton) return;
+
+  function setupScrollbar(container, contentSelector) {
+    let hideTimer = null;
+    let resizeObserver = null;
+    function update() {
+      const canScroll = container.scrollHeight > container.clientHeight;
+      container.classList.toggle("has-overflow", canScroll);
+      if (canScroll) return;
+      container.classList.remove("is-scrolling");
+      if (hideTimer !== null) {
+        root.clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    }
+    function observeContent() {
+      if (!resizeObserver || !contentSelector) return;
+      for (const element of container.querySelectorAll(contentSelector)) resizeObserver.observe(element);
+    }
+    container.addEventListener("scroll", () => {
+      update();
+      if (!container.classList.contains("has-overflow")) return;
+      container.classList.add("is-scrolling");
+      if (hideTimer !== null) root.clearTimeout(hideTimer);
+      hideTimer = root.setTimeout(() => {
+        container.classList.remove("is-scrolling");
+        hideTimer = null;
+      }, 900);
+    }, { passive: true });
+    if (typeof root.ResizeObserver === "function") {
+      resizeObserver = new root.ResizeObserver(update);
+      resizeObserver.observe(container);
+      observeContent();
+    }
+    if (typeof root.MutationObserver === "function") {
+      const mutationObserver = new root.MutationObserver(() => {
+        observeContent();
+        update();
+      });
+      mutationObserver.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-disclosure-state", "hidden"],
+      });
+    }
+    root.addEventListener("resize", update);
+    update();
+  }
+
+  setupScrollbar(nav, ".documentation-category");
+  setupScrollbar(content, "#documentation-article");
 
   let catalog = null;
   let loadPromise = null;
