@@ -3,15 +3,15 @@
 
   const BlobUI = root.BlobUI = root.BlobUI || {};
   const categories = Object.freeze([
-    Object.freeze({ id: "getting-started", name: "Getting Started", icon: "blobui-mark" }),
-    Object.freeze({ id: "reference", name: "Reference", icon: "theme-swatches" }),
+    Object.freeze({ id: "getting-started", name: "User guide", icon: "book" }),
+    Object.freeze({ id: "development", name: "Development", icon: "code" }),
   ]);
   const imagePaths = Object.freeze(Object.assign(Object.create(null), {
     "blobui-mark": "./cdn/blobui-mark.svg",
     "theme-swatches": "./cdn/theme-swatches.png",
   }));
   const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-  const articleFields = new Set(["category", "parent", "icon", "name"]);
+  const articleFields = new Set(["category", "parent", "icon", "name", "index"]);
   const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
   function fail(id, message) {
@@ -66,6 +66,9 @@
     for (const key of ["category", "icon", "name"]) {
       if (!fields[key]) fail(articleId, `frontmatter needs a "${key}" field.`);
     }
+    if (fields.index && (!/^[1-9]\d*$/.test(fields.index) || !Number.isSafeInteger(Number(fields.index)))) {
+      fail(articleId, 'frontmatter field "index" must be a positive integer starting at 1.');
+    }
     if (fields.parent) {
       const parent = fields.parent.replace(/\.md$/i, "");
       if (!slugPattern.test(parent) && !parent.trim()) fail(articleId, "parent must be an article slug or name.");
@@ -76,6 +79,7 @@
     return Object.freeze({
       id: articleId,
       category: fields.category,
+      index: fields.index ? Number(fields.index) : null,
       parent: fields.parent || null,
       icon: fields.icon,
       name: fields.name,
@@ -135,7 +139,8 @@
       return Object.freeze({ ...article, parent: parent.id });
     });
 
-    const articles = resolved.sort((a, b) => collator.compare(a.name, b.name) || collator.compare(a.id, b.id));
+    const articles = resolved.sort((a, b) => (a.index ?? Number.MAX_SAFE_INTEGER) - (b.index ?? Number.MAX_SAFE_INTEGER)
+      || collator.compare(a.name, b.name) || collator.compare(a.id, b.id));
     return Object.freeze({
       categories,
       articles: Object.freeze(articles),
@@ -143,7 +148,7 @@
   }
 
   async function load() {
-    const ids = ["customize-appearance", "accent-colors", "typography", "api-key"];
+    const ids = ["introduction", "features", "installation-and-removal", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
     const entries = await Promise.all(ids.map(async (id) => {
       const response = await root.fetch(`./docs/${id}.md`);
       if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);

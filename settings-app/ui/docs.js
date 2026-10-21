@@ -13,6 +13,16 @@
     reference: '<path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h4"/>',
   };
   const documentIcon = '<path d="M5 2.5h7l4 4v11H5zM12 2.5v4h4M8 10h5M8 13h5"/>';
+  const iconPaths = {
+    book: '<path d="M10 5C8 3 5 3 2 3.5v12c3-.5 6-.5 8 1.5 2-2 5-2 8-1.5v-12C15 3 12 3 10 5Zm0 0v12"/>',
+    introduction: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6" r=".9" fill="currentColor" stroke="none"/>',
+    features: '<path d="m8 3 1.8 4.7L14.5 9.5l-4.7 1.8L8 16l-1.8-4.7L1.5 9.5l4.7-1.8ZM15.5 2v4M13.5 4h4M16 13.5v4M14 15.5h4"/>',
+    installation: '<path d="M10 2.5v10m-4-4 4 4 4-4M3 13.5v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/>',
+    updating: '<path d="M16.5 7A7 7 0 1 0 17 12M16.5 2.5V7H12"/>',
+    setup: '<rect x="2" y="3" width="16" height="14" rx="2"/><path d="m5 7 3 3-3 3M11 13h4"/>',
+    code: '<path d="m6 5-4 5 4 5m8-10 4 5-4 5M11.5 3l-3 14"/>',
+    testing: '<path d="M7 2.5h6M8 2.5v5l-4.7 8a1.3 1.3 0 0 0 1.1 2h11.2a1.3 1.3 0 0 0 1.1-2l-4.7-8v-5M6 12h8"/>',
+  };
   const chevronIcon = '<path d="m7 4 6 6-6 6"/>';
 
   if (!nav || !article || !errorPanel || !retryButton) return;
@@ -43,7 +53,7 @@
 
   function makeArticleIcon(articleData) {
     const source = safeArticleIcon(articleData);
-    if (!source) return svgIcon(documentIcon, "documentation-item-icon");
+    if (!source) return svgIcon(iconPaths[articleData.icon] || documentIcon, "documentation-item-icon");
     const wrapper = root.document.createElement("span");
     wrapper.className = "documentation-item-icon";
     const image = root.document.createElement("img");
@@ -57,7 +67,7 @@
 
   function makeCategoryIcon(categoryData) {
     const source = safeArticleIcon(categoryData);
-    if (!source) return svgIcon(categoryIconPaths[categoryData.id] || documentIcon, "documentation-category-icon");
+    if (!source) return svgIcon(iconPaths[categoryData.icon] || categoryIconPaths[categoryData.id] || documentIcon, "documentation-category-icon");
     const wrapper = root.document.createElement("span");
     wrapper.className = "documentation-category-icon";
     const image = root.document.createElement("img");
@@ -70,7 +80,9 @@
   }
 
   function compareArticles(left, right) {
-    return String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base", numeric: true });
+    return (left.index ?? Number.MAX_SAFE_INTEGER) - (right.index ?? Number.MAX_SAFE_INTEGER)
+      || String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base", numeric: true })
+      || String(left.id || "").localeCompare(String(right.id || ""));
   }
 
   function makeArticleButton(articleData, hasChildren, child) {

@@ -164,7 +164,7 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('bundled documentation loads over HTTP with real Markdown, icons, and image aliases', {
+test('all seven bundled articles render offline in light and dark themes', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
 }, async () => {
   const uiRoot = path.join(workspace, 'settings-app/ui');
@@ -239,28 +239,50 @@ test('bundled documentation loads over HTTP with real Markdown, icons, and image
     await page.goto('http://docs.test/__docs-host');
     await page.evaluate(() => window.docsReady);
 
-    const selectedParent = page.locator('[data-article-id="customize-appearance"]');
-    assert.equal(await selectedParent.getAttribute('aria-current'), 'page', 'The first root article in the first category should open by default.');
-    assert.equal(await selectedParent.getAttribute('aria-expanded'), 'true', 'The selected parent should start expanded.');
-    const initialChildren = await page.locator('#documentation-children-customize-appearance [data-article-id]')
-      .evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(initialChildren, ['accent-colors', 'typography'], 'Bundled child articles should be alphabetized and visible.');
-
-    const svgIcon = page.locator('#documentation-navigation [data-article-id="customize-appearance"] img');
-    await page.waitForFunction(() => {
-      const image = document.querySelector('#documentation-navigation [data-article-id="customize-appearance"] img');
-      return image && image.complete && image.naturalWidth > 0;
+    assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('#documentation-article h1').textContent(), 'Introduction');
+    assert.equal(await page.locator('.documentation-child').count(), 0);
+    assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
+    const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.equal(await page.locator('.documentation-item-icon svg').count(), 7);
+    assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
+    const externalRequests = [];
+    page.on('request', request => {
+      if (!request.url().startsWith('http://docs.test/')) externalRequests.push(request.url());
     });
-    assert.match(await svgIcon.getAttribute('src'), /blobui-mark\.svg$/);
-
-    await page.locator('[data-article-id="accent-colors"]').click();
-    const swatches = page.locator('#documentation-article img[alt="Theme color swatches"]');
-    await page.waitForFunction(() => {
-      const image = document.querySelector('#documentation-article img[alt="Theme color swatches"]');
-      return image && image.complete && image.naturalWidth > 0;
-    });
-    assert.match(await swatches.getAttribute('src'), /^data:image\/png;base64,/);
-    assert.match(await page.locator('#documentation-article').textContent(), /tests image aliases and fenced code rendering/);
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
+      for (const id of ids) {
+        await page.locator('[data-article-id="' + id + '"]').click();
+        await page.waitForFunction(expected => document.getElementById('documentation-article').getAttribute('aria-label') === expected,
+          await page.locator('[data-article-id="' + id + '"]').getAttribute('aria-label'));
+        assert.equal(await page.locator('#documentation-article h1').count(), 1);
+        assert.ok((await page.locator('#documentation-article').textContent()).length > 700);
+        assert.equal(await page.locator('#documentation-load-error').evaluate(node => node.hidden), true);
+        assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true, id + ' should not overflow horizontally');
+        await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: node.scrollHeight, behavior: 'instant' }));
+        assert.ok(await page.locator('#documentation-content').evaluate(node => node.scrollTop > 0), id + ' should scroll');
+        if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 2);
+        if (id === 'testing-and-releases') {
+          assert.ok(await page.locator('#documentation-article pre code').count() >= 3);
+          const code = page.locator('#documentation-article pre').first();
+          const scroll = await code.evaluate(node => {
+            node.scrollLeft = node.scrollWidth;
+            return { overflow: node.scrollWidth > node.clientWidth, left: node.scrollLeft,
+              width: getComputedStyle(node).scrollbarWidth, color: getComputedStyle(node).scrollbarColor };
+          });
+          assert.equal(scroll.overflow, true, 'Long commands should stay within a scrollable code block');
+          assert.ok(scroll.left > 0);
+          assert.equal(scroll.width, 'thin');
+          assert.notEqual(scroll.color, 'auto');
+          await code.evaluate(node => node.scrollLeft = 0);
+        }
+        await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.screenshot({ path: path.join(testRoot, id + '-' + theme + '.png') });
+      }
+    }
+    assert.deepEqual(externalRequests, [], 'Bundled articles should not request external resources.');
     await page.screenshot({ path: screenshot });
   } finally {
     if (context) await context.close();
