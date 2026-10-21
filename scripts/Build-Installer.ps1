@@ -12,6 +12,9 @@ $settingsExecutable = Join-Path $workspaceRoot 'settings-app\dist\blobui-setting
 $versionSource = Join-Path $workspaceRoot 'blobui-release.json'
 $changelogSource = Join-Path $workspaceRoot 'Changelogs.md'
 $changelogImageManifest = Join-Path $workspaceRoot 'Changelogs.yaml'
+$buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the local Git commit.' }
+Write-Host "Building installer for blobui-app Dev+$buildCommit"
 
 function Assert-WorkspacePath {
     param([Parameter(Mandatory)][string]$Path)
@@ -80,7 +83,7 @@ try {
     $env:CARGO_TARGET_DIR = Assert-WorkspacePath (Join-Path $workspaceRoot 'installer\target')
     $env:RUSTFLAGS = '-C target-feature=+crt-static'
     [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', $null, 'Process')
-    $cargoArgs = @('build', '--locked', '--release', '--target', 'x86_64-pc-windows-msvc', '--manifest-path', $manifestPath)
+    $cargoArgs = @('build', '--locked', '--release', '--quiet', '--target', 'x86_64-pc-windows-msvc', '--manifest-path', $manifestPath)
     if ($d) { $cargoArgs += @('--features', 'development') }
     & cargo @cargoArgs
     if ($LASTEXITCODE -ne 0) { throw "Native installer build failed with exit code $LASTEXITCODE." }

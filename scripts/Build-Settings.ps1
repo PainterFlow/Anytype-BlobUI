@@ -12,6 +12,9 @@ $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
 $releaseExecutable = Join-Path $projectDirectory 'target\release\blobui-settings.exe'
 $distributionDirectory = Join-Path $projectDirectory 'dist'
 $distributionExecutable = Join-Path $distributionDirectory 'blobui-settings.exe'
+$buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the local Git commit.' }
+Write-Host "Building blobui-app Dev+$buildCommit"
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "The BlobUI Settings Rust project was not found: $manifestPath"
@@ -81,7 +84,7 @@ try {
         Write-Host 'Using the workspace Rust toolchain.'
     }
     $env:CARGO_TARGET_DIR = Join-Path $projectDirectory 'target'
-    & cargo build --locked --release --manifest-path $manifestPath
+    & cargo build --locked --release --quiet --manifest-path $manifestPath
     if ($LASTEXITCODE -ne 0) {
         throw "The BlobUI Settings build failed with exit code $LASTEXITCODE."
     }

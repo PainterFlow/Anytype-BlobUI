@@ -584,6 +584,7 @@
   }
 
   async function renderReleaseNotes(notes, historical = false) {
+    historical = historical || !notes.version.startsWith("Dev+");
     const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
     const entries = Object.entries(manifest);
     const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
