@@ -1,0 +1,48 @@
+/* Stop BlobUI text animations when Reduced Motion is enabled. */
+/* @blobui-if reducedMotion */
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"],
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
+    animation: none !important;
+    background-position: 50% 50%;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
+    animation: none !important;
+    left: 0;
+    top: 0;
+    opacity: 1;
+    text-shadow: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    font-weight: inherit;
+    -webkit-text-stroke-width: 0;
+}
+
+.pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
+    animation: none !important;
+    display: inline;
+    transform: none;
+}
+/* @blobui-endif reducedMotion */
+
+/* Anytype identifies preview content by type. Hide only the matching popup so
+   disabling previews does not disable clicks on the source link. */
+/* @blobui-if-not linkHoverEffect */
+#preview.previewWrapper:has(.previewLink):not(:has(.previewTab)) {
+    display: none !important;
+}
+/* @blobui-endif-not linkHoverEffect */
+
+/* Object mentions use Anytype's default preview card, while some object
+   previews use previewObject. Tab previews remain controlled by their own
+   setting. */
+/* @blobui-if-not objectMentionHoverEffect */
+#preview.previewWrapper:has(.previewDefault, .previewObject):not(:has(.previewTab)) {
+    display: none !important;
+}
+/* @blobui-endif-not objectMentionHoverEffect */
+
+/* blob:// markers never open hover previews, independently of the toggles. */
+body:has(a[href^="blob://"]:hover) #preview.previewWrapper:not(:has(.previewTab)) {
+    display: none !important;
+}

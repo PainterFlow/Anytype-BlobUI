@@ -1,0 +1,29 @@
+BlobUI
+Copyright (C) 2026 Adrian Orlik
+
+Except where otherwise noted, original BlobUI material in this repository
+is licensed under the GNU General Public License, version 3 only
+(GPL-3.0-only), with the additional attribution term below. The full,
+unmodified GNU GPL version 3 text is provided in COPYING.
+
+BlobUI is free software: you can redistribute it and/or modify it under
+these terms. It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See COPYING for details.
+
+Additional attribution term under GNU GPL version 3, section 7(b)
+
+For material covered by Adrian Orlik's copyright, you must preserve the
+following reasonable author attribution in that material, or in the
+Appropriate Legal Notices displayed by works containing it:
+
+    BlobUI - original author Adrian Orlik
+
+This term requires preservation of author attribution, not advertising,
+endorsement, or a credit on every screen. It does not require an interactive
+interface to be created for material that has none. When conveying covered
+material, preserve this additional term as required by GNU GPL version 3.
+
+Third-party material remains subject to its own license notices. This
+license does not claim ownership of or relicense Anytype, third-party
+dependencies, fonts, or other third-party assets.

@@ -1,0 +1,11 @@
+/* Hide the outer scrollbar around Anytype's Properties and object types menus. */
+#body.body:has(> .list > .filterWrapper) {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+#body.body:has(> .list > .filterWrapper)::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}

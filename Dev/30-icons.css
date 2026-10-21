@@ -3,14 +3,27 @@
     color: var(--color-orange) !important;
 }
 
+#button-header-favorite.menuActionUnfav.withBackground {
+    background-color: color-mix(in srgb, var(--color-orange) 15%, transparent) !important;
+}
+
+#button-header-favorite.menuActionUnfav.withBackground:hover,
+#button-header-favorite.menuActionUnfav.withBackground.hover {
+    background-color: color-mix(in srgb, var(--color-orange) 22%, transparent) !important;
+}
+
 /* Use the configured accent for the selected properties button. */
 #button-header-relation.active {
     color: var(--color-blob-accent) !important;
 }
 
-/* Recolor checked relation-property icons only when a custom accent is selected. */
+/* Recolor checked property icons only when a custom accent is selected. */
 /* @blobui-if-custom-accent */
-.cellContent.c-checkbox .icon.markerCheckbox2.iconColor-accent100 {
+.icon.markerCheckbox2.iconColor-accent100 {
+    color: var(--color-blob-accent) !important;
+}
+
+.markers .marker.markerCheckbox.active {
     color: var(--color-blob-accent) !important;
 }
 /* @blobui-endif-custom-accent */

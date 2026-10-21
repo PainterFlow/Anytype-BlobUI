@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-main",
+  "description": "Allows the settings window to listen for its rebuild shortcut event.",
+  "windows": ["main"],
+  "permissions": ["core:event:allow-listen"]
+}

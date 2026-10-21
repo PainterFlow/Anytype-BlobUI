@@ -1,0 +1,134 @@
+name: Release Windows installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag on main, matching blobui-release.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release version and main ancestry
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadata = Get-Content blobui-release.json -Raw | ConvertFrom-Json
+          if ($metadata.formatVersion -ne 1 -or $env:RELEASE_TAG -cne "v$($metadata.version)") {
+            throw 'The release tag must match the version in blobui-release.json, prefixed with v.'
+          }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Release tags must point to a commit on main. Merge dev into main before releasing.'
+          }
+
+      - name: Select the Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed.' }
+
+      - name: Build Settings and close the launched app
+        env:
+          APPDATA: ${{ github.workspace }}\.test-run\ci-roaming
+          LOCALAPPDATA: ${{ github.workspace }}\.test-run\ci-local
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+          try {
+            ./scripts/Build-Settings.ps1 -s -c
+          } finally {
+            Get-Process -Name blobui-settings -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+
+      - name: Build and validate the production installer and release package
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/Build-Installer.ps1 -PackageRelease
+          foreach ($path in @('dist/blobui-installer.exe', 'dist/blobui-windows.zip')) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Release build did not create $path."
+            }
+          }
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead('dist/blobui-windows.zip')
+          try {
+            foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+              if (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -ne 1) {
+                throw "The release package must contain $name at its root."
+              }
+            }
+            if (@($archive.Entries | Where-Object { $_.FullName -ceq 'settings-app/dist/blobui-settings.exe' }).Count -ne 1) {
+              throw 'The release package must contain the built Settings app.'
+            }
+          } finally { $archive.Dispose() }
+          Copy-Item -LiteralPath Changelogs.md -Destination dist/Changelogs.md -Force
+
+      - name: Save validated release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            dist/Changelogs.md
+            dist/blobui-installer.exe
+            dist/blobui-windows.zip
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated release files
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: dist
+
+      - name: Upload files and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file dist/Changelogs.md
+          else
+            gh release edit "$RELEASE_TAG" --notes-file dist/Changelogs.md
+          fi
+          gh release upload "$RELEASE_TAG" dist/blobui-installer.exe dist/blobui-windows.zip --clobber
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi
