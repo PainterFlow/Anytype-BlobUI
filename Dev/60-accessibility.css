@@ -1,5 +1,9 @@
 /* Stop BlobUI text animations when Reduced Motion is enabled. */
 /* @blobui-if reducedMotion */
+.viewContent.viewBoard #columns.columns > .column {
+    --blobui-kanban-motion: 0ms;
+}
+
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"],
 .pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
     animation: none !important;

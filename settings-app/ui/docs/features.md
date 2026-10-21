@@ -24,9 +24,9 @@ Set the interface and code fonts separately using fonts available on your comput
 
 ## Kanban views
 
-In Preferences, Kanban Views Style applies to inline and full-page boards. Default keeps Anytype's layout. Balanced reduces card and column spacing. Compact also places properties on shared rows that wrap inside the card, while keeping each title on its own row.
+In Preferences, Board layout applies to inline and full-page boards. Default keeps Anytype's layout. Balanced reduces card and column spacing. Compact also narrows columns to 220px and places properties on shared rows that wrap inside the card, while keeping each title on its own row.
 
-Collapsed Categories works with every style. It shows category headers until you hover over a column or move keyboard focus into it. Devices without hover keep the cards visible. The initial settings are Default with Collapsed Categories off. Save and reload Anytype to apply changes, or use Undo changes to discard a draft.
+Collapsed Categories works with every style. It shows rounded category headers until you hover over a column or move keyboard focus into it. Cards expand and collapse with a short animation, disabled by system or BlobUI Reduced Motion settings. Devices without hover keep the cards visible. The initial settings are Default with Collapsed Categories off. Save and reload Anytype to apply changes, or use Undo changes to discard a draft.
 
 ## Space banner
 

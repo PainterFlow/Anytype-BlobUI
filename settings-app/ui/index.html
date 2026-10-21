@@ -234,25 +234,34 @@
           <section class="settings-group" aria-labelledby="kanban-heading">
             <div class="section-heading">
               <h2 id="kanban-heading">Kanban views</h2>
-              <p>Adjust inline and full-page boards. Changes apply after Save.</p>
+              <p>Choose how boards are displayed.</p>
             </div>
-            <div class="settings-list">
-              <label class="input-field" for="kanban-view-style">
-                <span>Kanban Views Style</span>
-                <select id="kanban-view-style" aria-describedby="kanban-style-help">
-                  <option value="default">Default</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="compact">Compact</option>
-                </select>
-              </label>
-              <label class="native-accent-control settings-row" for="collapsed-categories">
+            <div class="settings-list kanban-settings-list">
+              <div class="kanban-setting-row kanban-style-row">
+                <div class="kanban-setting-copy">
+                  <span class="kanban-setting-title">Board layout</span>
+                  <span id="kanban-style-help" class="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span>
+                </div>
+                <div class="kanban-select" id="kanban-select">
+                  <button id="kanban-view-style" class="kanban-select-trigger" type="button" value="default" aria-haspopup="listbox" aria-expanded="false" aria-controls="kanban-style-options" aria-labelledby="kanban-style-label kanban-style-value" aria-describedby="kanban-style-help">
+                    <span id="kanban-style-label" class="sr-only">Board layout</span>
+                    <span id="kanban-style-value">Default</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+                  </button>
+                  <div id="kanban-style-options" class="kanban-select-menu" role="listbox" aria-label="Board layout" hidden>
+                    <button class="kanban-select-option" type="button" role="option" data-value="default" aria-selected="true" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Default</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <button class="kanban-select-option" type="button" role="option" data-value="balanced" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Balanced</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <button class="kanban-select-option" type="button" role="option" data-value="compact" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Compact</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                  </div>
+                </div>
+              </div>
+              <label class="native-accent-control settings-row kanban-setting-row" for="collapsed-categories">
                 <span>Collapsed Categories</span>
                 <input id="collapsed-categories" type="checkbox" role="switch" aria-describedby="kanban-collapse-help" />
                 <span class="switch-track" aria-hidden="true"></span>
               </label>
             </div>
-            <p id="kanban-style-help">Balanced tightens spacing. Compact also wraps properties onto shared rows. Default keeps Anytype's layout.</p>
-            <p id="kanban-collapse-help">Show category headers only, then reveal cards on hover or keyboard focus. Touch devices keep cards visible.</p>
+            <p id="kanban-collapse-help" class="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
           </section>
 
           <section class="settings-group typography-group" aria-labelledby="typography-heading">
