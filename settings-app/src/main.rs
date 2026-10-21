@@ -61,7 +61,7 @@ fn acquire_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String
     }
 }
 
-const DEFAULT_FONT: &str = "Libron";
+const DEFAULT_FONT: &str = "Inter";
 const DEFAULT_CODE_FONT: &str = "Consolas";
 const DEFAULT_ACCENT: &str = "#DE50DE";
 const DEFAULT_API_IP: &str = "127.0.0.1";

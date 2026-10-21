@@ -1269,7 +1269,7 @@
     const font = fontFamily.value.trim();
     const codeFont = codeFontFamily.value.trim();
     const validFamily = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
-    const interfaceFamily = validFamily.test(font) ? font : "Libron";
+    const interfaceFamily = validFamily.test(font) ? font : "Inter";
     const codeFamily = validFamily.test(codeFont) ? codeFont : "Consolas";
     root.style.setProperty("--font-interface", '"' + interfaceFamily + '", "Segoe UI", sans-serif');
     root.style.setProperty("--font-code", '"' + codeFamily + '", "Cascadia Code", monospace');
@@ -1278,7 +1278,7 @@
   function assignDraftToForm(settings) {
     const accent = normalizeForUi(settings);
     draft = {
-      fontFamily: String(settings.fontFamily || "Libron"),
+      fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
