@@ -1842,7 +1842,7 @@
     if (!el("help-control").contains(event.target)) closeHelp();
   });
   el("help-whats-new").addEventListener("click", () => { closeHelp(); showLatestReleaseNotes(); });
-  el("help-documentation").addEventListener("click", () => { closeHelp(); showHelpError("Documentation could not be found (404 Error)."); });
+  el("help-documentation").addEventListener("click", () => { closeHelp(); showDocumentation(); });
   el("help-keybinds").addEventListener("click", async () => {
     closeHelp();
     el("keybind-status").textContent = "";
@@ -1883,6 +1883,8 @@
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
   const onboardingApi = el("onboarding-api");
+  const documentation = el("documentation");
+  const documentationBack = el("documentation-back");
   const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
   // Add future pages here. Every page advances through the same transition;
   // reaching the end always reveals the main app.
@@ -1895,6 +1897,55 @@
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
+  let documentationPreviousFocus = null;
+  let documentationTransition = null;
+
+  function resetDocumentationTransition() {
+    window.clearTimeout(documentationTransition);
+    documentationTransition = null;
+    documentation.classList.remove("leaving");
+    settingsShell.classList.remove("onboarding-entering");
+  }
+
+  function hideDocumentationImmediately() {
+    const previousFocus = documentationPreviousFocus;
+    resetDocumentationTransition();
+    documentation.hidden = true;
+    documentationBack.hidden = true;
+    settingsShell.inert = false;
+    documentationPreviousFocus = null;
+    return previousFocus;
+  }
+
+  function showDocumentation() {
+    if (connectionBusy || !onboarding.hidden || !documentation.hidden) return;
+    resetDocumentationTransition();
+    closeLogs();
+    documentationPreviousFocus = document.activeElement;
+    settingsShell.inert = true;
+    documentation.hidden = false;
+    documentationBack.hidden = false;
+    documentationBack.focus();
+    window.BlobUI.DocsUI.load();
+  }
+
+  function closeDocumentation() {
+    if (documentation.hidden || documentationTransition !== null) return;
+    documentation.classList.add("leaving");
+    const reducedMotion = root.dataset.reducedMotion === "true"
+      || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    documentationTransition = window.setTimeout(() => {
+      documentationTransition = null;
+      documentation.classList.remove("leaving");
+      documentation.hidden = true;
+      documentationBack.hidden = true;
+      settingsShell.inert = false;
+      if (documentationPreviousFocus) documentationPreviousFocus.focus();
+      documentationPreviousFocus = null;
+    }, reducedMotion ? 0 : 320);
+  }
+
+  documentationBack.addEventListener("click", closeDocumentation);
 
   function resetOnboardingTransition() {
     window.clearTimeout(onboardingTransition);
@@ -1913,7 +1964,8 @@
 
   function showOnboarding() {
     if (connectionBusy) return;
-    if (onboarding.hidden) onboardingPreviousFocus = document.activeElement;
+    const documentationFocus = documentation.hidden ? null : hideDocumentationImmediately();
+    if (onboarding.hidden) onboardingPreviousFocus = documentationFocus || document.activeElement;
     resetOnboardingTransition();
     closeLogs();
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));

@@ -11,10 +11,23 @@
     <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
       <span class="window-title">BlobUI Settings</span>
       <div class="window-controls">
-        <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"/></svg></button>
+        <button id="documentation-back" class="window-control" type="button" aria-label="Back to settings" title="Back to settings" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h11a7 7 0 0 1 7 7v3"/></svg></button>
+        <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10"/></svg></button>
         <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
       </div>
     </header>
+    <section id="documentation" class="documentation" aria-label="Documentation" hidden>
+      <div class="documentation-layout">
+        <nav id="documentation-navigation" class="documentation-navigation" aria-label="Documentation articles"></nav>
+        <main id="documentation-content" class="documentation-content" aria-label="Article" tabindex="-1">
+          <div id="documentation-article" class="documentation-article markdown-content"></div>
+          <div id="documentation-load-error" class="documentation-load-error" role="alert" hidden>
+            <p>Documentation could not be loaded.</p>
+            <button id="documentation-retry" class="banner-image-button" type="button">Try again</button>
+          </div>
+        </main>
+      </div>
+    </section>
     <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden>
       <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
         <span class="onboarding-copy">
@@ -478,6 +491,9 @@
     <script src="./modal.js"></script>
     <script src="./edit-session.js"></script>
     <script src="./markdown.js"></script>
+    <script src="./docs-data.js"></script>
+    <script src="./disclosure.js"></script>
+    <script src="./docs.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

@@ -20,6 +20,10 @@ Advanced Settings uses API key and App settings tabs. App settings contains the 
 
 Load `visibility-field.js`, `modal.js`, and `edit-session.js` before `app.js`.
 
+`disclosure.js` exposes `BlobUI.Disclosure.attach(container, { onToggle })` for expandable panels. Use a native button with `data-disclosure-toggle`, `aria-controls`, and an initial `aria-expanded` value. Give its panel the matching `id` and `data-disclosure-panel`. Add `data-disclosure-content` to an inner wrapper when CSS animates panel height.
+
+The controller updates `aria-expanded`, `data-disclosure-state`, `inert`, and `hidden`. If a panel closes while focus is inside it, the controller moves focus to its button. It skips transition delays when the system or app requests reduced motion. The returned controller exposes `setExpanded(button, value)` and `destroy()`. Call `destroy()` before replacing the container's contents. Load `disclosure.js` before the module that calls it. The `onToggle` callback receives `{ toggle, panel, expanded, previousExpanded }`.
+
 `VisibilityField.bind({ input, button, field, showLabel, hideLabel, defaultVisible })` adds an eye toggle to a text field. Its returned controller exposes `reset()`, `sync()`, and `invalidate()`. Call `reset()` after replacing a field value or leaving a screen to restore its default visibility and cancel a pending reveal. Optional `shouldReveal`, `reveal`, `onHide`, `onRevealError`, and `onBusyChange` hooks keep saved-secret retrieval in the application. Resetting or editing the field invalidates a delayed reveal result.
 
 `BlobUI.createModalController({ backdrop, dialog, initialFocus, fallbackFocus, inertTargets })` provides `open()`, `close()`, and `isOpen()`. It handles the shared animation, reduced motion, background interaction, focus restoration, Tab navigation, Escape, and backdrop dismissal. Bind action buttons separately so each dialog can choose whether an action dismisses, saves, or discards edits.
