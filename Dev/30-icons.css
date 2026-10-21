@@ -3,6 +3,15 @@
     color: var(--color-orange) !important;
 }
 
+#button-header-favorite.menuActionUnfav.withBackground {
+    background-color: color-mix(in srgb, var(--color-orange) 15%, transparent) !important;
+}
+
+#button-header-favorite.menuActionUnfav.withBackground:hover,
+#button-header-favorite.menuActionUnfav.withBackground.hover {
+    background-color: color-mix(in srgb, var(--color-orange) 22%, transparent) !important;
+}
+
 /* Use the configured accent for the selected properties button. */
 #button-header-relation.active {
     color: var(--color-blob-accent) !important;

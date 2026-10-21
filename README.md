@@ -1,10 +1,8 @@
 # Anytype BlobUI
 
-![Anytype BlobUI banner](banner.png)
-
 BlobUI is a custom CSS theme for Anytype with a Windows Settings app. Customize accents, fonts, space banners, calendar colors, text effects, and hover previews without editing CSS by hand.
 
-Made by Adrian Orlik (@PainterFlow11).
+Made by @PainterFlow11.
 
 ## Install on Windows
 
