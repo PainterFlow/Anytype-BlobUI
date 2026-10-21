@@ -82,6 +82,8 @@ let recoveryCompleted = false;
 const recoveryRequests = [];
 let deferGeneralSave = false;
 let pendingGeneralSaveResolve = null;
+let deferUpdateApply = false;
+let pendingUpdateApplyReject = null;
 let rebuildListener = null;
 const timers = new Map();
 const intervals = [];
@@ -200,7 +202,10 @@ const context = {
         return { ...updaterPrefs, ...updaterCheckState };
       }
       if (name === 'check_for_updates') return { ...updaterPrefs, ...updaterCheckState };
-      if (name === 'apply_update') return { ...updaterPrefs, ...updaterApplyState };
+      if (name === 'apply_update') {
+        if (deferUpdateApply) return new Promise((resolve, reject) => { pendingUpdateApplyReject = reject; });
+        return { ...updaterPrefs, ...updaterApplyState };
+      }
       if (name === 'uninstall_blobui') throw new Error('Uninstall fixture failed.');
       if (name === 'simulate_update') return {
         ...updaterPrefs, currentVersion: '1.0.0', latestVersion: '1.1.0', updateAvailable: true,
@@ -1050,5 +1055,50 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await staleReader.onload();
   assert.equal(element('space-preview-image').src, 'data:image/png;base64,default-preview', 'Undo invalidates a pending image read.');
   delayFileRead = false;
+
+  updaterCheckState = {
+    currentVersion: '1.2.0', latestVersion: '1.3.0', updateAvailable: true,
+    lastCheckedAt: null, status: 'available', message: 'Version 1.3.0 is available.',
+  };
+  assert.equal(element('update-now-button').hidden, true, 'The prior completed update clears its action before the deferred check.');
+  element('check-updates-button').handlers.click();
+  for (let turn = 0; turn < 10 && element('update-now-button').hidden; turn += 1) await flush();
+  assert.equal(element('update-now-button').hidden, false, 'The manual check reveals the available update before the apply attempt.');
+  deferUpdateApply = true;
+  const applyCallsBeforeDeferredInstall = calls.filter(name => name === 'apply_update').length;
+  const inFlightUpdate = element('update-now-button').handlers.click();
+  assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeDeferredInstall + 1, 'The deferred test reaches the native installer.');
+  assert.equal(typeof pendingUpdateApplyReject, 'function', 'The test holds the native installer promise open.');
+  assert.equal(element('font-family').disabled, true, 'Installing an update locks settings inputs while the native updater runs.');
+  assert.equal(element('install-directory').disabled, true, 'Installing an update locks updater preferences.');
+  assert.equal(element('save-button').disabled, true, 'Installing an update blocks Save.');
+  assert.equal(element('discard-button').disabled, true, 'Installing an update blocks Undo.');
+  const savesDuringUpdate = calls.filter(name => name === 'save_settings').length;
+  await element('save-button').handlers.click();
+  assert.equal(calls.filter(name => name === 'save_settings').length, savesDuringUpdate, 'A direct Save action is ignored during installation.');
+  let forceRebuildPrevented = false;
+  await context.document.handlers.keydown({
+    key: 'r', code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
+    preventDefault() { forceRebuildPrevented = true; },
+  });
+  assert(forceRebuildPrevented, 'Alt+R remains handled during installation.');
+  assert.equal(calls.filter(name => name === 'save_settings').length, savesDuringUpdate, 'Force rebuild is ignored during installation.');
+  element('discard-button').handlers.click();
+  assert.equal(element('discard-confirmation-backdrop').hidden, true, 'Undo confirmation cannot open during installation.');
+  await context.document.handlers.keydown({
+    key: 'z', code: 'KeyZ', altKey: true, ctrlKey: true, metaKey: false, shiftKey: false, repeat: false,
+    preventDefault() {},
+  });
+  assert.equal(element('onboarding').hidden, true, 'The setup guide cannot open during installation.');
+  pendingUpdateApplyReject(new Error('Fixture update failed.'));
+  await inFlightUpdate;
+  deferUpdateApply = false;
+  assert.equal(element('font-family').disabled, false, 'Settings inputs are restored after the updater fails.');
+  await input('font-family', 'Consolas');
+  assert.equal(element('save-button').disabled, false, 'Save is restored after the updater fails.');
+  assert.equal(element('discard-button').disabled, false, 'Undo is restored after the updater fails.');
+  context.window.BlobUI.discardChanges();
+  assert.equal(element('save-button').hidden, true, 'The failure fixture leaves no pending settings edits.');
+
   console.log('UI save, Alt+R rebuild, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

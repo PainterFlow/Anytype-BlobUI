@@ -311,10 +311,13 @@ pub fn get_release_notes(
     let Some(version) = preferences.pending_changelog_version else {
         return Ok(None);
     };
-    if parse_version(&version).is_none() || current_version(install_directory, Some(runtime_directory))? != version {
+    let Some(tag) = release_tag_for_version(&version) else {
+        return Ok(None);
+    };
+    if current_version(install_directory, Some(runtime_directory))? != version {
         return Ok(None);
     }
-    fetch_release_notes_for_tag(&version, None).map(Some)
+    fetch_release_notes_for_tag(&tag, None).map(Some)
 }
 
 fn is_development_runtime(runtime: &Path) -> bool {
@@ -668,6 +671,10 @@ fn version_from_metadata(text: &str) -> Option<semver::Version> {
 fn parse_version(value: &str) -> Option<semver::Version> {
     let value = value.trim().strip_prefix('v').unwrap_or(value.trim());
     semver::Version::parse(value).ok()
+}
+
+fn release_tag_for_version(version: &str) -> Option<String> {
+    parse_version(version).map(|version| format!("v{version}"))
 }
 
 fn fetch_latest_release() -> Result<Option<ReleaseInfo>, String> {
@@ -1617,6 +1624,12 @@ mod tests {
         ] {
             assert!(version_from_metadata(invalid).is_none());
         }
+    }
+
+    #[test]
+    fn pending_release_note_version_restores_release_tag_prefix() {
+        assert_eq!(release_tag_for_version("1.2.0").as_deref(), Some("v1.2.0"));
+        assert!(release_tag_for_version("invalid").is_none());
     }
 
     #[test]

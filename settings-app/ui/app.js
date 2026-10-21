@@ -152,7 +152,9 @@
       invoke("set_shortcut_capture", { active: false }).catch(() => {});
     },
   });
-  window.BlobUI.openDiscardConfirmation = () => discardConfirmationModal.open();
+  window.BlobUI.openDiscardConfirmation = () => {
+    if (!saveBusy && !isInstallingUpdate()) discardConfirmationModal.open();
+  };
   window.BlobUI.closeDiscardConfirmation = (options) => discardConfirmationModal.close(options);
   const settingsShell = el("settings-shell");
   const SAVED_KEY_MASK = "••••••••";
@@ -203,7 +205,7 @@
       if (hasSavedApiKey && !advancedKeyEdited) advancedApiKey.value = SAVED_KEY_MASK;
     },
     onRevealError: () => setStatus("Could not reveal the saved API key. Try entering it again.", "error"),
-    onBusyChange: (busy) => { el("advanced-api-key-visibility").disabled = busy || saveBusy || !draft; },
+    onBusyChange: (busy) => { el("advanced-api-key-visibility").disabled = busy || saveBusy || isInstallingUpdate() || !draft; },
   });
   bindVisibilityField("advanced-api-ip", "advanced-api-ip-visibility", "advanced-api-ip-field", "Show API key IP", "Hide API key IP", true);
   bindVisibilityField("advanced-api-port", "advanced-api-port-visibility", "advanced-api-port-field", "Show API key port", "Hide API key port", true);
@@ -222,6 +224,7 @@
   let updaterSettingsLoaded = false;
   let updaterBusyOperation = "";
   let pendingAutomaticUpdate = false;
+  let connectionBusy = false;
   let simulationActive = false;
   let hsv = { h: 300, s: 64, v: 87 };
   let lastCustomAccent = null;
@@ -236,7 +239,7 @@
   });
 
   window.BlobUI.discardChanges = function discardChanges() {
-    if (saveBusy || !draft) return;
+    if (saveBusy || isInstallingUpdate() || !draft) return;
     editSession.discard();
   };
 
@@ -373,7 +376,7 @@
   }
 
   function chooseCustomColor() {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     const value = hsvToHex(hsv.h, hsv.s, hsv.v);
     draft.accentMode = "custom";
     draft.accentPreset = "";
@@ -536,6 +539,10 @@
     updateNowButton.disabled = !!updaterBusyOperation || saveBusy || editSession.isDirty();
     updateNowButton.title = simulated ? "Preview update only" : "Update now";
     updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
+  }
+
+  function isInstallingUpdate() {
+    return updaterBusyOperation === "updating";
   }
 
   function maybeApplyPendingAutomaticUpdate() {
@@ -751,7 +758,7 @@
         && state && state.updateAvailable === true && state.status !== "simulated") {
         if (state.automaticUpdateBlocked === true) {
           pendingAutomaticUpdate = false;
-        } else if (saveBusy || editSession.isDirty()) {
+        } else if (saveBusy || bannerReadPending || editSession.isDirty()) {
           pendingAutomaticUpdate = true;
           mergeUpdaterState({ message: "An update is ready. Save or undo your pending settings to install it automatically." });
         } else {
@@ -781,7 +788,7 @@
       return;
     }
     if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
-    if (saveBusy || editSession.isDirty()) {
+    if (saveBusy || bannerReadPending || editSession.isDirty()) {
       if (fromAutomaticCheck) pendingAutomaticUpdate = true;
       else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
       return;
@@ -789,6 +796,7 @@
     updaterBusyOperation = "updating";
     mergeUpdaterState({ status: "updating", message: "Downloading the update. Settings will close and reopen automatically." });
     renderUpdaterState();
+    updateSaveButton();
     try {
       mergeUpdaterState(await invoke("apply_update", { automatic: fromAutomaticCheck }) || {});
     } catch (error) {
@@ -797,6 +805,7 @@
     } finally {
       updaterBusyOperation = "";
       renderUpdaterState();
+      updateSaveButton();
     }
   }
 
@@ -1098,28 +1107,33 @@
 
   function updateSaveButton() {
     const dirty = editSession.isDirty();
+    const settingsLocked = saveBusy || isInstallingUpdate();
     saveButton.hidden = !draft || !dirty;
-    saveButton.disabled = saveBusy || bannerReadPending || !draft || !window.appReady || !dirty;
+    saveButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
     discardButton.hidden = !draft || !dirty;
-    discardButton.disabled = saveBusy || bannerReadPending || !draft || !window.appReady || !dirty;
+    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
     document.querySelectorAll("input").forEach((control) => {
-      control.disabled = saveBusy || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
+      control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
-    bannerImageInput.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
-    chooseBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
-    resetBannerImage.disabled = saveBusy || bannerReadPending || !draft || !window.appReady;
+    bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
+    chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
+    resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     [installDirectory, startOnLogin, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
-      control.disabled = saveBusy || !draft || !updaterSettingsLoaded || !window.appReady;
+      control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
-    installDirectory.disabled = saveBusy || !updaterSettingsLoaded;
+    installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
     Object.keys(visibilityFields).forEach((inputId) => {
-      visibilityFields[inputId].button.disabled = saveBusy || !draft;
+      visibilityFields[inputId].button.disabled = settingsLocked || !draft;
     });
+    ["discard-confirmation-close", "discard-confirmation-undo", "api-key-removal-close", "api-key-removal-undo", "api-key-removal-save"]
+      .forEach((id) => { el(id).disabled = settingsLocked; });
+    ["onboarding-welcome", "onboarding-no-api-option", "onboarding-api-option", "connection-key-visibility", "connection-port-visibility", "connection-back", "connection-confirm"]
+      .forEach((id) => { el(id).disabled = isInstallingUpdate() || connectionBusy; });
     saveButton.classList.toggle("busy", saveBusy);
     saveLabel.textContent = saveBusy ? "Saving…" : "Save changes";
-    apiKeyRemovalSave.disabled = saveBusy;
-    apiKeyRemovalUndo.disabled = saveBusy;
-    apiKeyRemovalClose.disabled = saveBusy;
+    apiKeyRemovalSave.disabled = settingsLocked;
+    apiKeyRemovalUndo.disabled = settingsLocked;
+    apiKeyRemovalClose.disabled = settingsLocked;
     renderUpdaterState();
     maybeApplyPendingAutomaticUpdate();
   }
@@ -1256,6 +1270,7 @@
   }
 
   function handleBannerFileChange() {
+    if (isInstallingUpdate()) return;
     bannerReadGeneration += 1;
     const generation = bannerReadGeneration;
     bannerReadPending = false;
@@ -1421,7 +1436,7 @@
   }
 
   async function save(options = {}) {
-    if (!draft || saveBusy || !window.appReady) return;
+    if (!draft || saveBusy || isInstallingUpdate() || !window.appReady) return;
     if (bannerReadPending) {
       setStatus("Wait for the selected banner image to finish loading before saving.", "warning");
       return;
@@ -1585,18 +1600,19 @@
   }
 
   hueInput.addEventListener("input", () => {
+    if (isInstallingUpdate()) return;
     hsv.h = Number(hueInput.value);
     chooseCustomColor();
   });
   chooseBannerImage.addEventListener("click", () => {
-    if (!chooseBannerImage.disabled) {
+    if (!chooseBannerImage.disabled && !isInstallingUpdate()) {
       invalidateBannerRead();
       bannerImageInput.click();
     }
   });
   bannerImageInput.addEventListener("change", handleBannerFileChange);
   resetBannerImage.addEventListener("click", () => {
-    if (!draft || saveBusy || !window.appReady) return;
+    if (!draft || saveBusy || isInstallingUpdate() || !window.appReady) return;
     draft.bannerImage = "";
     el("banner-error").textContent = "";
     el("banner-image-status").textContent = "Default banner selected.";
@@ -1604,10 +1620,12 @@
     markDirty();
   });
   saturationInput.addEventListener("input", () => {
+    if (isInstallingUpdate()) return;
     hsv.s = Number(saturationInput.value);
     chooseCustomColor();
   });
   brightnessInput.addEventListener("input", () => {
+    if (isInstallingUpdate()) return;
     hsv.v = Number(brightnessInput.value);
     chooseCustomColor();
   });
@@ -1618,20 +1636,20 @@
     chooseCustomColor();
   }
   plane.addEventListener("pointerdown", (event) => {
-    if (!draft || saveBusy || nativeAccent.checked || event.button !== 0) return;
+    if (!draft || saveBusy || isInstallingUpdate() || nativeAccent.checked || event.button !== 0) return;
     event.preventDefault();
     plane.setPointerCapture(event.pointerId);
     saturationInput.focus({ preventScroll: true });
     pickAtPointer(event);
   });
   plane.addEventListener("pointermove", (event) => {
-    if (plane.hasPointerCapture(event.pointerId) && !saveBusy && !nativeAccent.checked) pickAtPointer(event);
+    if (plane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate() && !nativeAccent.checked) pickAtPointer(event);
   });
   plane.addEventListener("pointerup", (event) => {
     if (plane.hasPointerCapture(event.pointerId)) plane.releasePointerCapture(event.pointerId);
   });
   nativeAccent.addEventListener("change", () => {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     if (nativeAccent.checked) {
       lastCustomAccent = { accentMode: draft.accentMode, accentPreset: draft.accentPreset, accentColor: draft.accentColor };
       Object.assign(draft, { accentMode: "native", accentPreset: "", accentColor: "Default" });
@@ -1645,7 +1663,7 @@
     markDirty();
   });
   accentValue.addEventListener("input", () => {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     const raw = accentValue.value.trim();
     Object.assign(draft, normalizeForUi({ accentColor: raw }));
     // Empty input stays invalid until the user supplies a color.
@@ -1657,7 +1675,7 @@
     markDirty();
   });
   fontFamily.addEventListener("input", () => {
-    if (!draft) return;
+    if (!draft || isInstallingUpdate()) return;
     draft.fontFamily = fontFamily.value.trim();
     applyFontFamilies();
     el("font-error").textContent = "";
@@ -1665,7 +1683,7 @@
     markDirty();
   });
   codeFontFamily.addEventListener("input", () => {
-    if (!draft) return;
+    if (!draft || isInstallingUpdate()) return;
     draft.codeFontFamily = codeFontFamily.value.trim();
     applyFontFamilies();
     el("font-error").textContent = "";
@@ -1673,20 +1691,20 @@
     markDirty();
   });
   advancedApiKey.addEventListener("input", () => {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     advancedKeyEdited = true;
     advancedApiKey.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
   });
   advancedApiIp.addEventListener("input", () => {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     advancedApiIp.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
   });
   advancedApiPort.addEventListener("input", () => {
-    if (!draft || saveBusy) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
     advancedApiPort.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
@@ -1698,7 +1716,7 @@
     [objectMentionHoverEffect, "objectMentionHoverEffect"],
   ]) {
     control.addEventListener("change", () => {
-      if (!draft || saveBusy) return;
+      if (!draft || saveBusy || isInstallingUpdate()) return;
       draft[property] = control.checked;
       if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
       markDirty();
@@ -1706,12 +1724,12 @@
   }
   let folderPickerBusy = false;
   async function selectAnytypeFolder() {
-    if (folderPickerBusy || saveBusy || !updaterDraft) return;
+    if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
     installDirectory.setAttribute("aria-busy", "true");
     try {
       const selected = await invoke("select_anytype_folder", { currentDirectory: installDirectory.value });
-      if (!selected || saveBusy) return;
+      if (!selected || saveBusy || isInstallingUpdate()) return;
       installDirectory.value = selected;
       updaterDraft.installDirectory = selected;
       installDirectory.classList.remove("invalid");
@@ -1738,7 +1756,7 @@
     }
   });
   installDirectory.addEventListener("input", () => {
-    if (!updaterDraft || saveBusy) return;
+    if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
     updaterDraft.installDirectory = installDirectory.value;
     installDirectory.classList.remove("invalid");
     el("updater-settings-error").textContent = "";
@@ -1750,7 +1768,7 @@
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
     control.addEventListener("change", () => {
-      if (!updaterDraft || saveBusy) return;
+      if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
       updaterDraft[property] = control.checked;
       markDirty();
     });
@@ -1800,19 +1818,19 @@
   discardButton.addEventListener("click", () => window.BlobUI.openDiscardConfirmation());
   el("discard-confirmation-close").addEventListener("click", () => window.BlobUI.closeDiscardConfirmation());
   el("discard-confirmation-undo").addEventListener("click", () => {
-    if (saveBusy) return;
+    if (saveBusy || isInstallingUpdate()) return;
     window.BlobUI.discardChanges();
     window.BlobUI.closeDiscardConfirmation();
   });
   function discardAllFromApiRemovalModal() {
-    if (saveBusy) return;
+    if (saveBusy || isInstallingUpdate()) return;
     window.BlobUI.discardChanges();
     apiKeyRemovalModal.close();
   }
   apiKeyRemovalClose.addEventListener("click", discardAllFromApiRemovalModal);
   apiKeyRemovalUndo.addEventListener("click", discardAllFromApiRemovalModal);
   apiKeyRemovalSave.addEventListener("click", () => {
-    if (saveBusy) return;
+    if (saveBusy || isInstallingUpdate()) return;
     apiKeyRemovalModal.close({ restoreFocus: false });
     save({ confirmKeyRemoval: true });
   });
@@ -1894,7 +1912,6 @@
     { page: onboardingApi, focus: el("onboarding-api-title") },
     { page: el("onboarding-connection"), focus: el("connection-title"), when: () => onboarding.dataset.apiChoice === "api" },
   ];
-  let connectionBusy = false;
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
@@ -1964,7 +1981,7 @@
   }
 
   function showOnboarding() {
-    if (connectionBusy) return;
+    if (connectionBusy || isInstallingUpdate()) return;
     const documentationFocus = documentation.hidden ? null : hideDocumentationImmediately();
     if (onboarding.hidden) onboardingPreviousFocus = documentationFocus || document.activeElement;
     resetOnboardingTransition();
@@ -1983,7 +2000,7 @@
   }
 
   function closeOnboarding() {
-    if (connectionBusy) return;
+    if (connectionBusy || isInstallingUpdate()) return;
     el("connection-key").value = "";
     resetVisibilityField("connection-key");
     resetOnboardingTransition();
@@ -1996,7 +2013,7 @@
   }
 
   function advanceOnboarding() {
-    if (onboarding.hidden || onboardingTransition !== null) return;
+    if (isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
     const current = onboardingSteps[onboardingStep].page;
     current.classList.add("leaving");
     onboardingTransition = window.setTimeout(() => {
@@ -2026,6 +2043,7 @@
   }
 
   async function applyConnection(enabled, apiKey = "", port = null) {
+    if (isInstallingUpdate()) return;
     const advancedWasDirty = connectionHasChanges();
     const appliedPort = port || 31009;
     setConnectionBusy(true);
@@ -2079,7 +2097,7 @@
   }
 
   apiOptions.forEach((option) => option.addEventListener("click", () => {
-    if (connectionBusy || onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
+    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
     el("onboarding-choice-error").textContent = "";
     const enabled = option === apiOptions[1];
@@ -2089,13 +2107,13 @@
   }));
 
   el("connection-back").addEventListener("click", () => {
-    if (connectionBusy || onboardingTransition !== null) return;
+    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null) return;
     resetOnboardingTransition();
     showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
   });
   el("connection-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (connectionBusy || onboardingTransition !== null || onboarding.hidden) return;
+    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null || onboarding.hidden) return;
     const key = el("connection-key").value.trim();
     const portText = el("connection-port").value.trim();
     if (!key || key.length > 4096 || /[\x00-\x1f\x7f]/.test(key)) {
@@ -2154,7 +2172,7 @@
   });
 
   function markDirty() {
-    if (!draft) return;
+    if (!draft || isInstallingUpdate()) return;
     updateSaveButton();
     if (!saveBusy && window.appReady) {
       setStatus(editSession.isDirty()

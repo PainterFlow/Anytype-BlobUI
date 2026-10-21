@@ -64,8 +64,8 @@ Packaging validates changelog sources and referenced images before writing `dist
 
 ## Publish assets
 
-Release `main` from `dev`. Tag the release commit on `main` with a semantic version matching `blobui-release.json` and prefixed with `v`, such as `v1.2.0`. The prepared Release Windows installer workflow rejects tags outside `main` and mismatched versions. Its file is currently ignored by Git until release preparation is complete. Confirm it is committed and present on the default branch before relying on Actions.
+Release `main` from `dev`. Tag the release commit on `main` with a semantic version matching `blobui-release.json` and prefixed with `v`, such as `v1.2.0`. Commit `.github/workflows/windows-release.yml` to `main` before tagging. The workflow rejects tags outside `main` and mismatched versions.
 
-The workflow builds Settings, tests the installer, uploads `blobui-installer.exe` and `blobui-windows.zip`, and publishes the release. For manual publishing, attach both files from `dist`. Automatic source archives do not contain the compiled app. The repository and releases must be public for unauthenticated updates.
+The workflow builds Settings once, then builds the production installer and release package once. The installer validates the package before it is zipped, and the workflow checks that the ZIP contains both changelog files and the compiled Settings app. It uploads `blobui-installer.exe` and `blobui-windows.zip`, then publishes the release. The broader isolated installer checks remain available separately under `scripts/tests/Test-Installer.ps1`. For manual publishing, attach both files from `dist`. Automatic source archives do not contain the compiled app. The repository and releases must be public for unauthenticated updates.
 
 Retry a tag with Actions > Release Windows installer > Run workflow and supply its tag. It uses GitHub's built-in token and creates a draft when needed. Retries can replace assets on mutable releases; immutable published releases require a new version tag. The updater pins the selected tag during handoff.

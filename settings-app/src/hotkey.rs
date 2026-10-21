@@ -240,6 +240,46 @@ mod windows {
             .is_some_and(|name| name.eq_ignore_ascii_case("Anytype.exe"))
     }
 
+    fn physical_scan_code(code: &str) -> Option<u32> {
+        const LETTER_ROWS: [(&str, u32); 3] = [
+            ("QWERTYUIOP", 0x10),
+            ("ASDFGHJKL", 0x1e),
+            ("ZXCVBNM", 0x2c),
+        ];
+
+        if let Some(letter) = code.strip_prefix("Key") {
+            if letter.len() != 1 || !letter.as_bytes()[0].is_ascii_uppercase() {
+                return None;
+            }
+            return LETTER_ROWS.iter().find_map(|(row, first_scan)| {
+                row.bytes().position(|key| key == letter.as_bytes()[0])
+                    .map(|offset| *first_scan + offset as u32)
+            });
+        }
+        if let Some(digit) = code.strip_prefix("Digit") {
+            if digit.len() != 1 || !digit.as_bytes()[0].is_ascii_digit() {
+                return None;
+            }
+            return "1234567890".bytes().position(|key| key == digit.as_bytes()[0])
+                .map(|offset| 0x02 + offset as u32);
+        }
+
+        Some(match code {
+            "Minus" => 0x0c,
+            "Equal" => 0x0d,
+            "BracketLeft" => 0x1a,
+            "BracketRight" => 0x1b,
+            "Backslash" => 0x2b,
+            "Semicolon" => 0x27,
+            "Quote" => 0x28,
+            "Backquote" => 0x29,
+            "Comma" => 0x33,
+            "Period" => 0x34,
+            "Slash" => 0x35,
+            _ => return None,
+        })
+    }
+
     fn code_matches(code: &str, key: u32, scan: u32, flags: u32) -> bool {
         if code.starts_with("Numpad") {
             let (num_lock_vk, num_lock_off_vk, num_lock_off_scan) = match code {
@@ -256,16 +296,14 @@ mod windows {
             return key == num_lock_vk || (num_lock_off_vk != 0 && flags & LLKHF_EXTENDED == 0
                 && key == num_lock_off_vk && scan == num_lock_off_scan);
         }
+        if let Some(expected_scan) = physical_scan_code(code) {
+            return scan == expected_scan && flags & LLKHF_EXTENDED == 0;
+        }
         let vk = match code {
             "Space" => 0x20, "Enter" => 0x0d, "Escape" => 0x1b, "Tab" => 0x09,
             "Backspace" => 0x08, "Delete" => 0x2e, "Insert" => 0x2d,
             "Home" => 0x24, "End" => 0x23, "PageUp" => 0x21, "PageDown" => 0x22,
             "ArrowUp" => 0x26, "ArrowDown" => 0x28, "ArrowLeft" => 0x25, "ArrowRight" => 0x27,
-            "Minus" => 0xbd, "Equal" => 0xbb, "BracketLeft" => 0xdb, "BracketRight" => 0xdd,
-            "Backslash" => 0xdc, "Semicolon" => 0xba, "Quote" => 0xde, "Backquote" => 0xc0,
-            "Comma" => 0xbc, "Period" => 0xbe, "Slash" => 0xbf,
-            _ if code.starts_with("Key") => code.as_bytes()[3] as u32,
-            _ if code.starts_with("Digit") => code.as_bytes()[5] as u32,
             _ if code.starts_with('F') => code[1..].parse::<u32>().ok().map(|number| 0x70 + number - 1).unwrap_or(0),
             _ => 0,
         };
@@ -390,6 +428,22 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn matches_physical_letter_digit_and_punctuation_codes_across_layouts() {
+            // On QWERTZ, the physical Y position produces VK_Z but remains KeyY.
+            assert!(code_matches("KeyY", 0x5a, 0x15, 0));
+            assert!(!code_matches("KeyY", 0x59, 0x2c, 0));
+
+            // On AZERTY, the physical Q and A positions produce VK_A and VK_Q.
+            assert!(code_matches("KeyQ", 0x41, 0x10, 0));
+            assert!(code_matches("KeyA", 0x51, 0x1e, 0));
+
+            // Number-row and OEM keys use their physical positions too.
+            assert!(code_matches("Digit1", 0, 0x02, 0));
+            assert!(code_matches("Minus", 0, 0x0c, 0));
+            assert!(!code_matches("Minus", 0, 0x0d, 0));
+        }
 
         #[test]
         fn accepts_numpad_one_with_numlock_on_or_off_but_not_regular_end_or_one() {
