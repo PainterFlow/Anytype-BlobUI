@@ -13,6 +13,7 @@ I haven’t had the chance to implement MacOS support, as I don’t have a MacBo
 - BlobUI now supports toggling the hover effects. ([PainterFlow11](https://github.com/PainterFlow))
 - You can now toggle reduced motion(*it’s on by default*). ([PainterFlow11](https://github.com/PainterFlow))
 - And a lot of other cool stuff, before it was just some weird Anytype properties reading thing, now it’s a built-out app which obviously has way better UI and a lot more possibilities. ([PainterFlow11](https://github.com/PainterFlow))
+- Added docs.
 
 ## Smaller Improvements & QoL Changes
 - You can now toggle whether you want to have hover effects for @ mentions and links. ([PainterFlow11](https://github.com/PainterFlow))
@@ -21,9 +22,10 @@ I haven’t had the chance to implement MacOS support, as I don’t have a MacBo
 ## Bugfixes
 - Fixed A LOT of issues related to the accent color not effecting xyz. ([PainterFlow11](https://github.com/PainterFlow))
 - Fixed custom font not applying in the tab bar. ([PainterFlow11](https://github.com/PainterFlow))
+- Fixed the scrollbar in the properties and object types menu. ([PainterFlow11](https://github.com/PainterFlow))
 - Fixed the scrollbar in the channel sidebar. ([PainterFlow11](https://github.com/PainterFlow))
 
-*Developers Note: We basically removed it, so if you are in a lot of channels, you won’t have a scrollbar, but tbh, I’d rather have no scrollbar when I’m in a lot of channels then have a annoying big long grey box in my sidebar.*
+*Developers Note: We basically removed it, so if you are in a lot of channels, you might not see a scrollbar, but tbh, I’d rather have no scrollbar when I’m in a lot of channels then having an annoying big long grey box in my sidebar.*
 
 ## Developer Changelogs
 - removed most non-testing related powershell scripts
