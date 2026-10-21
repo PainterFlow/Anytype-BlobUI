@@ -22,6 +22,12 @@ In Preferences, use the accent picker, hue control, or Hex or CSS color field. T
 
 Set the interface and code fonts separately using fonts available on your computer. Saved fonts also apply to Settings. The app follows the root theme setting in Anytype's `devconfig.json` for light, dark, and system appearance.
 
+## Kanban views
+
+In Preferences, Kanban Views Style applies to inline and full-page boards. Default keeps Anytype's layout. Balanced reduces card and column spacing. Compact also places properties on shared rows that wrap inside the card, while keeping each title on its own row.
+
+Collapsed Categories works with every style. It shows category headers until you hover over a column or move keyboard focus into it. Devices without hover keep the cards visible. The initial settings are Default with Collapsed Categories off. Save and reload Anytype to apply changes, or use Undo changes to discard a draft.
+
 ## Space banner
 
 1. Under Space banner, select Choose image.

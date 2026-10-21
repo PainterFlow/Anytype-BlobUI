@@ -170,6 +170,8 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         tab_hover_effect: true,
         link_hover_effect: true,
         object_mention_hover_effect: true,
+        kanban_view_style: "compact".into(),
+        collapsed_categories: true,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
@@ -177,6 +179,11 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert_eq!(saved_data["settingsV2"]["version"], 2);
     assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
     assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
+    assert_eq!(saved_data["settingsV2"]["settings"]["kanbanViewStyle"], "compact");
+    assert_eq!(saved_data["settingsV2"]["settings"]["collapsedCategories"], true);
+    let restored = settings_from_data(&saved_data);
+    assert_eq!(restored.kanban_view_style, "compact");
+    assert!(restored.collapsed_categories);
     assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
     assert_eq!(saved_data["settingsV2"]["settings"]["bannerImage"], draft.banner_image);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");

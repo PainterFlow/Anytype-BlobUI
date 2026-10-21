@@ -35,6 +35,8 @@
   const tabHoverEffect = el("tab-hover-effect");
   const linkHoverEffect = el("link-hover-effect");
   const objectMentionHoverEffect = el("object-mention-hover-effect");
+  const kanbanViewStyle = el("kanban-view-style");
+  const collapsedCategories = el("collapsed-categories");
   const preferencesNav = el("preferences-nav");
   const accessibilityNav = el("accessibility-nav");
   const advancedNav = el("advanced-nav");
@@ -473,7 +475,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1115,6 +1117,7 @@
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    kanbanViewStyle.disabled = settingsLocked || !draft;
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
@@ -1161,6 +1164,8 @@
       tabHoverEffect: settings.tabHoverEffect === true,
       linkHoverEffect: settings.linkHoverEffect === true,
       objectMentionHoverEffect: settings.objectMentionHoverEffect === true,
+      kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
+      collapsedCategories: settings.collapsedCategories === true,
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1170,6 +1175,8 @@
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
+    kanbanViewStyle.value = draft.kanbanViewStyle;
+    collapsedCategories.checked = draft.collapsedCategories;
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
@@ -1714,6 +1721,7 @@
     [tabHoverEffect, "tabHoverEffect"],
     [linkHoverEffect, "linkHoverEffect"],
     [objectMentionHoverEffect, "objectMentionHoverEffect"],
+    [collapsedCategories, "collapsedCategories"],
   ]) {
     control.addEventListener("change", () => {
       if (!draft || saveBusy || isInstallingUpdate()) return;
@@ -1723,6 +1731,12 @@
     });
   }
   let folderPickerBusy = false;
+  kanbanViewStyle.addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!["default", "balanced", "compact"].includes(kanbanViewStyle.value)) return;
+    draft.kanbanViewStyle = kanbanViewStyle.value;
+    markDirty();
+  });
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;

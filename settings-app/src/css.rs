@@ -87,10 +87,14 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
 
     let settings = data.get("settings").and_then(Value::as_object)
         .ok_or_else(|| "The settings data has no normalized settings object.".to_string())?;
-    let bool_settings = ["reducedMotion", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect"]
+    let mut bool_settings = ["reducedMotion", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect", "collapsedCategories"]
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
+    let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
+    bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
+    bool_settings.insert("kanbanCompact", kanban_style == "compact");
+    bool_settings.insert("kanbanStyled", matches!(kanban_style, "balanced" | "compact"));
 
     let condition = Regex::new(r"(?s)/\*\s*@blobui-if(?<negation>-not)?\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s*\*/(?<content>.*?)/\*\s*@blobui-endif(?<endNegation>-not)?\s+(?<endName>[A-Za-z][A-Za-z0-9]*)\s*\*/").unwrap();
     let mut condition_error = None;
@@ -457,6 +461,33 @@ mod tests {
         });
 
         assert!(compile(&root, &install, &data).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiles_all_kanban_combinations_and_defaults_without_overrides() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let root = fixture();
+        fs::create_dir_all(root.join("Dev")).unwrap();
+        fs::create_dir_all(root.join("assets/spacebanner")).unwrap();
+        fs::write(root.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
+        fs::copy(workspace.join("Dev/41-kanban.css"), root.join("Dev/41-kanban.css")).unwrap();
+        for style in ["default", "balanced", "compact", "invalid"] {
+            for collapsed in [false, true] {
+                let data = json!({"installDirectory": root.join("anytype"), "settings": {
+                    "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": "Default",
+                    "kanbanViewStyle": style, "collapsedCategories": collapsed
+                }});
+                let compiled = compile(&root, &root.join("anytype"), &data).unwrap();
+                assert!(!compiled.contains("@blobui-if"));
+                assert_eq!(compiled.contains("column-gap: 8px"), matches!(style, "balanced" | "compact"));
+                assert_eq!(compiled.contains("flex-wrap: wrap"), style == "compact");
+                assert_eq!(compiled.contains(":focus-within"), collapsed);
+                if matches!(style, "default" | "invalid") && !collapsed {
+                    assert!(!compiled.contains("#columns"));
+                }
+            }
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

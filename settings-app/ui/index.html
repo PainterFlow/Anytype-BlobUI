@@ -231,6 +231,30 @@
             <p class="field-error" id="accent-error" aria-live="polite"></p>
           </section>
 
+          <section class="settings-group" aria-labelledby="kanban-heading">
+            <div class="section-heading">
+              <h2 id="kanban-heading">Kanban views</h2>
+              <p>Adjust inline and full-page boards. Changes apply after Save.</p>
+            </div>
+            <div class="settings-list">
+              <label class="input-field" for="kanban-view-style">
+                <span>Kanban Views Style</span>
+                <select id="kanban-view-style" aria-describedby="kanban-style-help">
+                  <option value="default">Default</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </label>
+              <label class="native-accent-control settings-row" for="collapsed-categories">
+                <span>Collapsed Categories</span>
+                <input id="collapsed-categories" type="checkbox" role="switch" aria-describedby="kanban-collapse-help" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <p id="kanban-style-help">Balanced tightens spacing. Compact also wraps properties onto shared rows. Default keeps Anytype's layout.</p>
+            <p id="kanban-collapse-help">Show category headers only, then reveal cards on hover or keyboard focus. Touch devices keep cards visible.</p>
+          </section>
+
           <section class="settings-group typography-group" aria-labelledby="typography-heading">
             <div class="section-heading">
               <h2 id="typography-heading">Font</h2>
