@@ -34,6 +34,7 @@ struct Options {
 }
 
 fn main() {
+    println!("blobui-app {}", env!("BLOBUI_BUILD_VERSION"));
     let no_pause = match parse_args() {
         Ok(options) => {
             let no_pause = options.no_pause;

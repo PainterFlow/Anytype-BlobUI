@@ -238,7 +238,9 @@ fn state_for(
         automatic_updates_enabled: preferences.automatic_updates_enabled,
         automatic_checks_enabled: preferences.automatic_checks_enabled,
         start_on_login: false,
-        current_version: current,
+        current_version: if fallback_runtime.is_some_and(is_development_runtime) {
+            env!("BLOBUI_BUILD_VERSION").into()
+        } else { current },
         latest_version: preferences.latest_version.clone(),
         update_available,
         automatic_update_blocked,
@@ -312,15 +314,36 @@ pub fn get_release_notes(
     if parse_version(&version).is_none() || current_version(install_directory, Some(runtime_directory))? != version {
         return Ok(None);
     }
-    let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
-    let image_manifest = read_release_text(&runtime_directory.join("Changelogs.yaml"), MAX_RELEASE_NOTES_BYTES)?;
-    Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
+    fetch_release_notes_for_tag(&version, None).map(Some)
+}
+
+fn is_development_runtime(runtime: &Path) -> bool {
+    runtime.join(".git").exists() && !runtime.join(".blobui-install.json").exists()
 }
 
 pub fn get_latest_release_notes(
-    install_directory: &Path,
+    _install_directory: &Path,
     runtime_directory: &Path,
 ) -> Result<Option<ReleaseNotes>, String> {
+    if !is_development_runtime(runtime_directory) {
+        return latest_published_release_notes();
+    }
+    read_development_release_notes(runtime_directory)
+}
+
+fn latest_published_release_notes() -> Result<Option<ReleaseNotes>, String> {
+    let response = http_get("api.github.com", &format!("/repos/{OWNER}/{REPOSITORY}/releases/latest"),
+        "application/vnd.github+json", MAX_RELEASE_JSON_BYTES)?;
+    if response.status != 200 {
+        return Err(format!("GitHub release history returned HTTP {}.", response.status));
+    }
+    let release: Value = serde_json::from_slice(&response.body).map_err(|_| "GitHub returned invalid release notes.".to_string())?;
+    let tag = release.get("tag_name").and_then(Value::as_str)
+        .ok_or_else(|| "GitHub's release record has no tag name.".to_string())?;
+    fetch_release_notes_for_tag(tag, Some(&release)).map(Some)
+}
+
+fn read_development_release_notes(runtime_directory: &Path) -> Result<Option<ReleaseNotes>, String> {
     let runtime_directory = if runtime_directory.join("Changelogs.md").is_file() {
         runtime_directory
     } else {
@@ -336,11 +359,14 @@ pub fn get_latest_release_notes(
     } else {
         "images: []\n".into()
     };
-    let version = current_version(install_directory, Some(runtime_directory))?;
+    let version = env!("BLOBUI_BUILD_VERSION").to_string();
     Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
 }
 
 pub fn get_adjacent_release_notes(version: &str, older: bool) -> Result<Option<ReleaseNotes>, String> {
+    if version == env!("BLOBUI_BUILD_VERSION") && older {
+        return latest_published_release_notes();
+    }
     let Some(current) = parse_version(version) else {
         return Err("The release notes version is invalid.".into());
     };
@@ -405,6 +431,7 @@ pub fn release_note_history_image(tag: &str, source: &str) -> Result<String, Str
 
 fn fetch_release_notes_for_tag(tag: &str, release: Option<&Value>) -> Result<ReleaseNotes, String> {
     if tag.is_empty() || tag.len() > 64
+        || parse_version(tag).is_none()
         || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'v'))
     {
         return Err("The GitHub release tag is unsafe.".into());
@@ -1607,10 +1634,8 @@ mod tests {
         };
         save_preferences(&path, &preferences).unwrap();
 
-        let notes = get_release_notes(&app_data, &install, &runtime).unwrap().unwrap();
-        assert_eq!(notes.version, "1.0.0");
-        assert!(notes.markdown.contains("Updated settings."));
-        assert_eq!(notes.image_manifest, "images: []\n");
+        // Installed notes come from GitHub; local notes must not be used as a release.
+        assert!(!is_development_runtime(&runtime));
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.0.0"));
 
         assert!(acknowledge_release_notes(&app_data, &install, &runtime, "1.0.0").unwrap());
@@ -1633,8 +1658,11 @@ mod tests {
         let runtime = install.join("blob/runtime");
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
         fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        assert!(!is_development_runtime(&runtime));
+        fs::create_dir(runtime.join(".git")).unwrap();
+        assert!(is_development_runtime(&runtime));
         let notes = get_latest_release_notes(&install, &runtime).unwrap().unwrap();
-        assert_eq!(notes.version, "1.0.0");
+        assert_eq!(notes.version, env!("BLOBUI_BUILD_VERSION"));
         assert_eq!(notes.markdown, "# Latest notes\n");
         assert_eq!(notes.image_manifest, "images: []\n");
         assert_eq!(load_preferences(&preferences_path(&app_data)).unwrap().pending_changelog_version, None);
@@ -1645,6 +1673,8 @@ mod tests {
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
         fs::remove_file(runtime.join("Changelogs.md")).unwrap();
         assert!(get_latest_release_notes(&install, &runtime).unwrap().is_none());
+        fs::write(runtime.join(".blobui-install.json"), "{}").unwrap();
+        assert!(!is_development_runtime(&runtime));
         fs::remove_dir_all(root).unwrap();
     }
 
