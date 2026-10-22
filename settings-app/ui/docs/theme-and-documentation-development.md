@@ -13,7 +13,7 @@ CSS sources under `Dev` compile in relative-path order. Numeric prefixes group s
 
 1. Find the existing module and Anytype selector for the behavior.
 2. Make the smallest source change. Do not edit generated CSS or release copies.
-3. Build Settings with `scripts/Build-Settings.ps1 -s -c`, generate CSS against an intended test data folder, and inspect Anytype.
+3. Build Settings with `scripts/Build-App.ps1 -s -c`, generate CSS against an intended test data folder, and inspect Anytype.
 4. Check both themes, wrapping, keyboard use, and reduced motion where relevant.
 
 The compiler recognizes annotated placeholders such as `accentColor` and `bannerUrl`. Extend Rust validation and compilation when adding generated values rather than inserting unvalidated CSS from the UI.

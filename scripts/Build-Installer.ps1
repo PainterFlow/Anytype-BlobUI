@@ -47,7 +47,7 @@ function Copy-PackageTree {
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Installer Cargo manifest was not found: $manifestPath" }
 if (-not (Test-Path -LiteralPath $versionSource -PathType Leaf)) { throw "Release version source was not found: $versionSource" }
 if ($PackageRelease -and (-not (Test-Path -LiteralPath $changelogSource -PathType Leaf) -or -not (Test-Path -LiteralPath $changelogImageManifest -PathType Leaf))) { throw 'Release notes must include Changelogs.md and Changelogs.yaml.' }
-if ($PackageRelease -and -not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) { throw "Build BlobUI Settings separately before packaging: scripts/Build-Settings.ps1 -s -c" }
+if ($PackageRelease -and -not (Test-Path -LiteralPath $settingsExecutable -PathType Leaf)) { throw "Build BlobUI Settings separately before packaging: scripts/Build-App.ps1 -s -c" }
 
 $releaseManifest = Get-Content -LiteralPath $versionSource -Raw | ConvertFrom-Json
 if ($releaseManifest.formatVersion -ne 1 -or $releaseManifest.version -cnotmatch '^[0-9][0-9A-Za-z.+-]{0,63}$') { throw 'Invalid release metadata in blobui-release.json.' }

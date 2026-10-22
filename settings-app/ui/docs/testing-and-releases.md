@@ -27,7 +27,7 @@ Native tests cover CSS generation, API behavior with a local mock server, connec
 2. Run installer checks.
 
 ```powershell
-.\scripts\Build-Settings.ps1 -s -c
+.\scripts\Build-App.ps1 -s -c
 powershell -NoProfile -File scripts/tests/Test-Installer.ps1
 ```
 
@@ -56,7 +56,7 @@ F8 opens onboarding and F9 simulates an update by default. A simulation does not
 4. Build Settings and the release package.
 
 ```powershell
-.\scripts\Build-Settings.ps1 -s -c
+.\scripts\Build-App.ps1 -s -c
 .\scripts\Build-Installer.ps1 -PackageRelease
 ```
 
