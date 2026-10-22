@@ -31,3 +31,9 @@ The controller updates `aria-expanded`, `data-disclosure-state`, `inert`, and `h
 `BlobUI.createEditSession({ read, restore, equals })` tracks a saved baseline. Use `isDirty()` to show Save and Undo together, `discard()` to restore pending edits, and `commit()` after a successful save. `commit(patch)` advances only the successfully saved part when a save has multiple steps. Baseline snapshots contain settings and saved-key presence, without storing a decrypted API key.
 
 The API-key warning keeps edits when Escape or its backdrop dismisses it. Its X and Undo restore the saved baseline directly. It has no labeled Close button. The sidebar Undo opens a separate confirmation whose X dismisses it and whose red Undo restores that baseline.
+
+## Settings V2.1 experiment
+
+Advanced > Experiments always contains Settings V2.1. Its switch previews the layout immediately and participates in Save and Undo. Existing installations default to the original layout. The experiment changes only the Settings interface.
+
+The enabled layout uses full-width category tabs in Preferences and icon section links under Preferences and Advanced. These links reuse the Docs hierarchy, animation, and disclosure controller without a chevron. Accessibility has no child navigation or category dividers. Settings and Docs have no search fields. Calendar explains Alt+R to rebuild followed by Ctrl+R in Anytype to apply color changes.

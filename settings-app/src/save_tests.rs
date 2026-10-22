@@ -16,7 +16,27 @@ struct EnvironmentGuard(Vec<(&'static str, Option<OsString>)>);
 
 impl EnvironmentGuard {
     fn set(values: &[(&'static str, &Path)]) -> Self {
-        let previous = values
+        let mut isolated: Vec<(&'static str, PathBuf)> = values.iter()
+            .map(|(key, value)| (*key, value.to_path_buf())).collect();
+        if let Some((_, install)) = isolated.iter().find(|(key, _)| *key == "BLOBUI_INSTALL_DIRECTORY") {
+            let profile = install.parent().expect("fixture install has a parent").join("test-profile");
+            for (key, suffix) in [("APPDATA", "roaming"), ("LOCALAPPDATA", "local")] {
+                if !isolated.iter().any(|(existing, _)| *existing == key) {
+                    let directory = profile.join(suffix);
+                    fs::create_dir_all(&directory).unwrap();
+                    isolated.push((key, directory));
+                }
+            }
+        }
+        for (key, value) in &isolated {
+            if matches!(*key, "APPDATA" | "LOCALAPPDATA") {
+                let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+                assert!(value.starts_with(workspace.join(".test-run")), "test profile must be in workspace fixtures");
+                fs::create_dir_all(value).unwrap();
+            }
+            assert_fixture_path(value).expect("native tests must use workspace fixtures");
+        }
+        let previous = isolated
             .iter()
             .map(|(key, value)| {
                 let previous = env::var_os(key);
@@ -37,6 +57,35 @@ impl Drop for EnvironmentGuard {
             }
         }
     }
+}
+
+#[test]
+fn native_fixture_profile_overrides_inherited_saved_folder_without_touching_credentials() {
+    let _lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let fixture = source.join(".test-run").join(format!("profile-isolation-{}-{nonce}", std::process::id()));
+    let install = fixture.join("Test Anytype");
+    let other_install = fixture.join("Simulated user Anytype");
+    fs::create_dir_all(install.join("blob")).unwrap();
+    fs::create_dir_all(other_install.join("blob/credentials")).unwrap();
+    fs::write(install.join("blob/data.json"), b"{}").unwrap();
+    fs::write(other_install.join("blob/data.json"), b"{}").unwrap();
+    let sentinel = other_install.join("blob/credentials/anytype-api-key.dpapi");
+    fs::write(&sentinel, b"untouched simulated credential").unwrap();
+    let inherited_profile = fixture.join("inherited-profile");
+    let preferences = updater::preferences_path(&inherited_profile.join("anytype"));
+    fs::create_dir_all(preferences.parent().unwrap()).unwrap();
+    fs::write(&preferences, serde_json::to_vec(&json!({"installDirectory": other_install})).unwrap()).unwrap();
+    {
+        let _inherited = EnvironmentGuard::set(&[("APPDATA", &inherited_profile)]);
+        let _isolated = EnvironmentGuard::set(&[("BLOBUI_INSTALL_DIRECTORY", &install)]);
+        let resolved = resolve_install_directory(&app_data_directory()).unwrap();
+        assert_eq!(resolved.canonicalize().unwrap(), install.canonicalize().unwrap());
+        assert_fixture_path(&app_data_directory().parent().unwrap()).unwrap();
+    }
+    assert_eq!(fs::read(&sentinel).unwrap(), b"untouched simulated credential");
+    fs::remove_dir_all(fixture).unwrap();
 }
 
 fn copy_tree(source: &Path, destination: &Path) {
@@ -175,6 +224,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         kanban_view_style: "compact".into(),
         collapsed_categories: true,
         calendar_colors_enabled: true,
+        settings_v21_enabled: false,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
@@ -196,6 +246,12 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
+    let experimental = SettingsDraft { settings_v21_enabled: true, ..draft.clone() };
+    save_settings_blocking(experimental).unwrap();
+    assert!(settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
+    assert_eq!(saved_css, fs::read_to_string(&css_path).unwrap());
+    save_settings_blocking(draft.clone()).unwrap();
+    assert!(!settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
 
     assert!(saved_css.contains("--blobui-selection-fill:"));
     let selections_off = SettingsDraft { include_selections: false, ..draft.clone() };
@@ -272,6 +328,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
 }
 
 #[test]
+#[ignore = "Retired credential-reset flow. Use profile-isolation regressions; never run against a user profile."]
 fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();

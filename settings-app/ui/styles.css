@@ -694,3 +694,14 @@ button:focus-visible, input:focus-visible { outline: none; }
   [data-disclosure-panel], .documentation-children, .documentation-children::before { transition: none; }
 }
 :root[data-reduced-motion="true"] [data-disclosure-panel], :root[data-reduced-motion="true"] .documentation-children, :root[data-reduced-motion="true"] .documentation-children::before { transition: none; }
+
+/* Settings V2.1 reuses the Docs hierarchy and Anytype tab controls. */
+.advanced-tabs { gap: 0; overflow-x: auto; overflow-y: hidden; flex-shrink: 0; scrollbar-width: thin; }
+.advanced-tabs [role="tab"] { flex: 1 0 112px; min-width: 112px; white-space: nowrap; text-align: center; padding-inline: 10px; }
+.advanced-tabs::-webkit-scrollbar { height: 4px; }
+.advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+.advanced-tabs::-webkit-scrollbar-button { display: none; }
+.preference-tabs::after { display: none; }
+.preference-tabs [aria-selected="true"] { border-bottom-color: var(--text); }
+:root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.v21-section-link { font: inherit; }

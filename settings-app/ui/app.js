@@ -169,7 +169,7 @@
   document.addEventListener("focusin", (event) => {
     if (kanbanStyleMenu && !kanbanSelect.contains(event.target)) closeKanbanStyleMenu();
   });
-  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab")];
+  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
   function updateAdvancedTabIndicator() {
     if (advancedPage.hidden) return;
     const tab = advancedTabs.find((item) => item.getAttribute("aria-selected") === "true");
@@ -198,16 +198,7 @@
     if (index !== 0) resetAdvancedVisibility();
     updateAdvancedTabIndicator();
   }
-  advancedTabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => selectAdvancedTab(index));
-    tab.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const next = event.key === "Home" ? 0 : event.key === "End" ? advancedTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + advancedTabs.length) % advancedTabs.length;
-      selectAdvancedTab(next);
-      advancedTabs[next].focus();
-    });
-  });
+  if (window.BlobUI.SettingsV21) window.BlobUI.SettingsV21.tabs(advancedTabs, selectAdvancedTab);
   const installDirectory = el("install-directory");
   const startOnLogin = el("start-on-login");
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
@@ -616,7 +607,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1286,6 +1277,7 @@
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
     if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
@@ -1339,6 +1331,7 @@
       kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
+      settingsV21Enabled: settings.settingsV21Enabled === true,
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1354,6 +1347,8 @@
     syncKanbanStyleSelection(draft.kanbanViewStyle);
     collapsedCategories.checked = draft.collapsedCategories;
     calendarColorsEnabled.checked = draft.calendarColorsEnabled;
+    el("settings-v21-enabled").checked = draft.settingsV21Enabled;
+    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
@@ -1376,7 +1371,7 @@
       calendarApiAvailability = "unavailable";
     }
     help.textContent = calendarApiAvailability === "available"
-      ? "Changes apply after Save and reloading Anytype with Ctrl+R."
+      ? "Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes."
       : calendarApiAvailability === "missing"
         ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
         : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
@@ -1735,7 +1730,7 @@
       return;
     }
 
-    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && el("advanced-experiments-panel").hidden && settingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
       openKeyRemovalConfirmation();
@@ -2428,6 +2423,13 @@
     });
   }
 
+  window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
+  el("settings-v21-enabled").addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    draft.settingsV21Enabled = el("settings-v21-enabled").checked;
+    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
+    markDirty();
+  });
   window.appReady = false;
   loadState();
   window.setInterval(refreshTheme, 2000);
