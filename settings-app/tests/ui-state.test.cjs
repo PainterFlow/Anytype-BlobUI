@@ -184,6 +184,10 @@ const context = {
         };
       }
       if (name === 'get_release_notes') return releaseNotesPayload;
+      if (name === 'get_latest_release_notes') return {
+        version: releaseNotesScenario === 'history' ? '1.2.0' : '1.4.0',
+        markdown: '# Latest fixture notes', imageManifest: 'images: []',
+      };
       if (name === 'get_adjacent_release_notes') {
         if (releaseNotesScenario === 'offline') throw new Error('offline');
         if (releaseNotesScenario === 'history' && args.older) return {
@@ -251,6 +255,9 @@ assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="
 assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
 assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs inside Advanced Settings.');
 assert.match(settingsHtml, /role="tablist"/);
+  assert.match(settingsHtml, /id="release-notes-version"/);
+  assert.match(settingsHtml, /id="release-notes-current-tag"[^>]*hidden/);
+  assert.match(settingsHtml, /id="release-notes-latest-tag"[^>]*hidden/);
 assert.match(settingsHtml, /id="advanced-app-panel"[^>]*role="tabpanel"[^>]*hidden/);
 assert.match(settingsHtml, /Anytype data folder that contains custom\.css/);
 assert(settingsHtml.indexOf('id="install-directory"') < settingsHtml.indexOf('id="start-on-login"'), 'Launch at startup must follow Anytype Folder.');
@@ -379,6 +386,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     assert.equal(activeElement, element('release-notes-dialog'), 'The release notes dialog opens with its scrollable content focused.');
     await flush();
     await flush();
+    assert.equal(element('release-notes-version').textContent, 'Version 1.2.0', 'The displayed release version follows the selected notes.');
+    assert.equal(element('release-notes-current-tag').hidden, false, 'The installed release is marked Current.');
+    assert.equal(element('release-notes-latest-tag').hidden, releaseNotesScenario !== 'history', 'The latest-release marker follows the latest version request.');
     if (releaseNotesScenario === 'offline') {
       assert.equal(element('release-notes-previous').disabled, true, 'History navigation stays disabled when GitHub cannot be reached.');
     }
@@ -388,6 +398,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
       await flush();
       await flush();
       assert.equal(element('release-notes-content').innerHTML, '<p># Older fixture notes</p>', 'Previous loads the earlier release notes.');
+      assert.equal(element('release-notes-version').textContent, 'Version 1.1.0', 'The heading follows the historical release.');
+      assert.equal(element('release-notes-current-tag').hidden, true, 'Historical releases are not marked Current.');
+      assert.equal(element('release-notes-latest-tag').hidden, true, 'Historical releases are not marked Latest.');
       assert.equal(element('release-notes-after').hidden, false, 'Older notes expose the After navigation button.');
       context.navigator.onLine = false;
       context.window.handlers.offline();
@@ -401,6 +414,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
       await flush();
       await flush();
       assert.equal(element('release-notes-content').innerHTML, '<p># Fixture release notes</p>', 'After returns to the newer notes.');
+      assert.equal(element('release-notes-version').textContent, 'Version 1.2.0', 'Returning restores the newer release version heading.');
+      assert.equal(element('release-notes-current-tag').hidden, false, 'Returning restores the Current marker.');
+      assert.equal(element('release-notes-latest-tag').hidden, false, 'Returning restores the Latest marker.');
     }
     assert.deepEqual(releaseNotesAcknowledgements, [], 'Opening the dialog does not acknowledge the notes.');
     const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);

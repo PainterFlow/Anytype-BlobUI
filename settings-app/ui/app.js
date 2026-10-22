@@ -174,9 +174,17 @@
     if (advancedPage.hidden) return;
     const tab = advancedTabs.find((item) => item.getAttribute("aria-selected") === "true");
     if (!tab || !tab.offsetWidth) return;
+    const tabs = tab.parentElement;
+    const initializing = !tabs.classList.contains("indicator-ready");
+    if (initializing) tabs.classList.add("indicator-initializing");
     advancedPage.style.setProperty("--advanced-tab-left", `${tab.offsetLeft}px`);
     advancedPage.style.setProperty("--advanced-tab-width", `${tab.offsetWidth}px`);
-    tab.parentElement.classList.add("indicator-ready");
+    tabs.classList.add("indicator-ready");
+    if (initializing) {
+      // Commit the initial underline geometry while transitions are disabled.
+      void tabs.offsetWidth;
+      tabs.classList.remove("indicator-initializing");
+    }
   }
   window.addEventListener("resize", updateAdvancedTabIndicator);
   if (document.fonts) document.fonts.ready.then(updateAdvancedTabIndicator);
@@ -232,6 +240,9 @@
   const releaseNotesPrevious = el("release-notes-previous");
   const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
+  let releaseNotesCurrentVersion = null;
+  let releaseNotesLatestVersion = null;
+  let releaseNotesLatestVersionRequest = 0;
   let displayedReleaseNotes = null;
   let previousReleaseNotes = null;
   let newerReleaseNotes = [];
@@ -250,6 +261,10 @@
     onClose: () => {
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
+      releaseNotesCurrentVersion = null;
+      releaseNotesLatestVersion = null;
+      releaseNotesLatestVersionRequest += 1;
+      updateReleaseNotesHeading("");
       if (!version || !acknowledgeReleaseNotesOnClose) {
         acknowledgeReleaseNotesOnClose = true;
         return;
@@ -718,8 +733,28 @@
     checkForUpdates(true);
   }
 
+  function updateReleaseNotesHeading(version) {
+    const currentTag = el("release-notes-current-tag");
+    const latestTag = el("release-notes-latest-tag");
+    el("release-notes-version").textContent = version ? "Version " + version : "";
+    currentTag.hidden = !version || version !== releaseNotesCurrentVersion;
+    latestTag.hidden = !version || version !== releaseNotesLatestVersion;
+  }
+
+  function loadLatestReleaseNotesVersion() {
+    const request = ++releaseNotesLatestVersionRequest;
+    releaseNotesLatestVersion = null;
+    updateReleaseNotesHeading(displayedReleaseNotes && displayedReleaseNotes.version);
+    invoke("get_latest_release_notes").then((notes) => {
+      if (request !== releaseNotesLatestVersionRequest || !notes || typeof notes.version !== "string") return;
+      releaseNotesLatestVersion = notes.version;
+      updateReleaseNotesHeading(displayedReleaseNotes && displayedReleaseNotes.version);
+    }).catch(() => {});
+  }
+
   async function renderReleaseNotes(notes, historical = false) {
     historical = historical || !notes.version.startsWith("Dev+");
+    updateReleaseNotesHeading(notes.version);
     const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
     const entries = Object.entries(manifest);
     const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
@@ -837,14 +872,19 @@
         throw new TypeError("The release notes payload is incomplete.");
       }
       releaseNotesVersion = String(notes.version || "");
+      releaseNotesCurrentVersion = releaseNotesVersion;
+      releaseNotesLatestVersion = null;
       newerReleaseNotes = [];
       await displayReleaseNotes(notes);
       releaseNotesFailed = false;
       releaseNotesModal.open();
       if (!releaseNotesModal.isOpen()) throw new Error("The release notes dialog could not be opened.");
+      loadLatestReleaseNotesVersion();
       return true;
     } catch (error) {
       releaseNotesVersion = null;
+      releaseNotesCurrentVersion = null;
+      releaseNotesLatestVersion = null;
       releaseNotesLoaded = false;
       releaseNotesFailed = true;
       setStatus("Could not display the release notes. " + (error.message || String(error)), "error");
@@ -863,6 +903,8 @@
         throw new TypeError("The latest changelog is incomplete.");
       }
       releaseNotesVersion = notes.version;
+      releaseNotesCurrentVersion = String((updaterState && updaterState.currentVersion) || "");
+      releaseNotesLatestVersion = notes.version;
       newerReleaseNotes = [];
       await displayReleaseNotes(notes);
       acknowledgeReleaseNotesOnClose = false;

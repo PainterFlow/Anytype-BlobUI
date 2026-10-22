@@ -121,6 +121,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .settings-page[hidden] { display: none; }
 .advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
 .advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--advanced-tab-width, 0px); transform: translateX(var(--advanced-tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs.indicator-initializing::after { transition: none; }
 .advanced-tabs [role="tab"] { margin-bottom: -1px; padding: 0 0 12px; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font-weight: 400; cursor: pointer; transition: color .2s ease; }
 .advanced-tabs [role="tab"]:hover { color: var(--text); }
 .advanced-tabs [aria-selected="true"] { color: var(--text); }
@@ -338,6 +339,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .help-error-code { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--color-red) 35%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--color-red) 12%, var(--bg)); color: var(--color-red); font-size: 14px; line-height: 22px; letter-spacing: 0; }
 .help-error-dialog p { margin: 14px 0 0; padding-right: 20px; }
 .release-notes-dialog { width: min(100%, 720px); max-height: min(82vh, 760px); overflow-y: auto; padding: 28px; border-radius: 16px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.release-notes-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-right: 36px; }
+.release-notes-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
+.release-notes-version { color: var(--text-secondary); font-size: 12px; line-height: 20px; }
+.release-notes-tag { padding: 1px 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-secondary); font-size: 11px; line-height: 18px; }
+.release-notes-tag.latest { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .release-notes-image-warning { flex: 0 0 auto; margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; }
 .release-notes-content { padding: 18px 0 8px; color: var(--text); }
 .release-notes-content:focus { outline: none; }

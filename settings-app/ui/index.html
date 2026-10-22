@@ -514,6 +514,12 @@
     </div>
     <div id="release-notes-backdrop" class="confirm-backdrop" hidden>
       <section id="release-notes-dialog" class="confirm-dialog release-notes-dialog" role="dialog" aria-modal="true" aria-label="Changelog" tabindex="-1">
+        <div class="release-notes-heading" aria-live="polite">
+          <h2>Changelog</h2>
+          <span id="release-notes-version" class="release-notes-version"></span>
+          <span id="release-notes-current-tag" class="release-notes-tag" hidden>Current</span>
+          <span id="release-notes-latest-tag" class="release-notes-tag latest" hidden>Latest</span>
+        </div>
         <p id="release-notes-image-warning" class="release-notes-image-warning" role="status" hidden>Some release note images could not be loaded.</p>
         <div id="release-notes-content" class="release-notes-content markdown-content" role="region" aria-label="Release notes" tabindex="0"></div>
         <div class="release-notes-navigation" aria-label="Changelog navigation">
