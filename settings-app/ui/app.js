@@ -1304,6 +1304,7 @@
     reducedMotion.checked = draft.reducedMotion;
     root.dataset.reducedMotion = String(draft.reducedMotion);
     includeSelections.checked = draft.includeSelections;
+    root.dataset.includeSelections = String(draft.includeSelections);
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
@@ -1898,6 +1899,7 @@
       }
       draft[property] = control.checked;
       if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
+      if (property === "includeSelections") root.dataset.includeSelections = String(draft.includeSelections);
       markDirty();
     });
   }
