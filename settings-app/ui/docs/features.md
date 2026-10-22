@@ -20,6 +20,8 @@ Undo changes discards the unsaved draft after confirmation. Save errors appear i
 
 In Preferences, use the accent picker, hue control, or Hex or CSS color field. The native accent option follows Anytype's accent. BlobUI applies accents to controls including dates, properties, dataview hover states, toggles, publishing, and membership controls.
 
+Include selections is the first switch inside the Accent color box, above Anytype Accent Color. It starts on, including after upgrades. It applies the chosen accent to text and code selections, table ranges, selected blocks and records, drag selection and drop indicators, selected choices, and blue focus outlines. Ordinary text-colored typing carets keep their current color. Turn it off to restore Anytype selection styling while keeping other BlobUI accents. Save and reload Anytype to apply the change.
+
 Set the interface and code fonts separately using fonts available on your computer. Saved fonts also apply to Settings. The app follows the root theme setting in Anytype's `devconfig.json` for light, dark, and system appearance.
 
 ## Kanban views

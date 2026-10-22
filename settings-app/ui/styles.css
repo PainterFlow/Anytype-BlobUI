@@ -147,6 +147,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .native-accent-control input:checked + .switch-track { background: var(--accent); }
 .native-accent-control input:checked + .switch-track::after { transform: translateX(16px); }
 .native-accent-control input:focus-visible + .switch-track { outline: none; }
+#include-selections:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 .native-accent-control input:disabled + .switch-track { opacity: .4; }
 .accessibility-row:not(:last-child) { border-bottom: 1px solid var(--line); }
 .accessibility-row:last-child { border-bottom: 0; }

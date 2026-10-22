@@ -156,6 +156,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
 
     let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _environment = EnvironmentGuard::set(&[
+        ("APPDATA", &fixture.join("roaming")),
         ("BLOBUI_INSTALL_DIRECTORY", &install),
         ("BLOBUI_SOURCE_DIRECTORY", &runtime),
     ]);
@@ -165,6 +166,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
+        include_selections: true,
         banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,
         tab_hover_effect: true,
@@ -194,6 +196,12 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
+
+    assert!(saved_css.contains("--blobui-selection-fill:"));
+    let selections_off = SettingsDraft { include_selections: false, ..draft.clone() };
+    save_settings_blocking(selections_off).unwrap();
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("--blobui-selection-fill:"));
+    assert!(!settings_from_data(&read_json_file(&data_path).unwrap()).include_selections);
 
     let off = SettingsDraft { calendar_colors_enabled: false, ..draft.clone() };
     assert_eq!(save_settings_blocking(off).unwrap().calendar_status, "off");
