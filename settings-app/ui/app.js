@@ -42,6 +42,9 @@
   const kanbanStyleOptions = Array.from(kanbanStyleMenu.querySelectorAll('[role="option"]'));
   let kanbanStyleMotionTimer = null;
   let kanbanStyleMotionFrame = null;
+  const calendarColorsEnabled = el("calendar-colors-enabled");
+  let calendarApiAvailability = "checking";
+  let calendarApiRequest = 0;
   const collapsedCategories = el("collapsed-categories");
   const preferencesNav = el("preferences-nav");
   const accessibilityNav = el("accessibility-nav");
@@ -597,7 +600,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1240,6 +1243,7 @@
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
     if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
@@ -1290,6 +1294,7 @@
       objectMentionHoverEffect: settings.objectMentionHoverEffect === true,
       kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
       collapsedCategories: settings.collapsedCategories === true,
+      calendarColorsEnabled: settings.calendarColorsEnabled !== false,
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1302,10 +1307,33 @@
     closeKanbanStyleMenu();
     syncKanbanStyleSelection(draft.kanbanViewStyle);
     collapsedCategories.checked = draft.collapsedCategories;
+    calendarColorsEnabled.checked = draft.calendarColorsEnabled;
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
     initialDraft = { ...draft };
+    updateSaveButton();
+  }
+
+  async function refreshCalendarApiAvailability() {
+    const request = ++calendarApiRequest;
+    calendarApiAvailability = "checking";
+    const help = el("calendar-colors-help");
+    help.textContent = "Checking the Anytype API connection...";
+    updateSaveButton();
+    try {
+      const status = await invoke("get_calendar_api_availability");
+      if (request !== calendarApiRequest) return;
+      calendarApiAvailability = ["available", "missing"].includes(status) ? status : "unavailable";
+    } catch (_) {
+      if (request !== calendarApiRequest) return;
+      calendarApiAvailability = "unavailable";
+    }
+    help.textContent = calendarApiAvailability === "available"
+      ? "Changes apply after Save and reloading Anytype with Ctrl+R."
+      : calendarApiAvailability === "missing"
+        ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
+        : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
     updateSaveButton();
   }
 
@@ -1318,6 +1346,7 @@
       applyTheme(state.theme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       assignAdvancedConnection(state);
+      void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
@@ -1364,6 +1393,7 @@
     applyTheme(state.theme);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
     assignAdvancedConnection(state);
+    void refreshCalendarApiAvailability();
     assignDraftToForm(state.settings || {});
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
@@ -1483,6 +1513,7 @@
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
+    if (!isAccessibility && !isAdvanced && draft) void refreshCalendarApiAvailability();
     preferencesPage.hidden = isAccessibility || isAdvanced;
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
@@ -1539,6 +1570,10 @@
   }
 
   function saveStatus(result, connectionOnly) {
+    if (result.calendarStatus === "off") {
+      setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar Colors are off.");
+      return;
+    }
     if (result.calendarStatus === "disabled") {
       setStatus(connectionOnly
         ? "Connection saved. Press Ctrl+R in Anytype to apply. API features are disabled."
@@ -1728,6 +1763,7 @@
           : message, "error");
     } finally {
       saveBusy = false;
+      void refreshCalendarApiAvailability();
       updateSaveButton();
     }
   }
@@ -1848,9 +1884,14 @@
     [linkHoverEffect, "linkHoverEffect"],
     [objectMentionHoverEffect, "objectMentionHoverEffect"],
     [collapsedCategories, "collapsedCategories"],
+    [calendarColorsEnabled, "calendarColorsEnabled"],
   ]) {
     control.addEventListener("change", () => {
       if (!draft || saveBusy || isInstallingUpdate()) return;
+      if (property === "calendarColorsEnabled" && calendarColorsEnabled.disabled) {
+        control.checked = draft[property];
+        return;
+      }
       draft[property] = control.checked;
       if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
       markDirty();
@@ -2234,6 +2275,7 @@
       }
     } finally {
       setConnectionBusy(false);
+      void refreshCalendarApiAvailability();
     }
   }
 

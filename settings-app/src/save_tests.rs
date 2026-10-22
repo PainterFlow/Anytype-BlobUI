@@ -172,6 +172,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         object_mention_hover_effect: true,
         kanban_view_style: "compact".into(),
         collapsed_categories: true,
+        calendar_colors_enabled: true,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
@@ -193,6 +194,15 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
+
+    let off = SettingsDraft { calendar_colors_enabled: false, ..draft.clone() };
+    assert_eq!(save_settings_blocking(off).unwrap().calendar_status, "off");
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-fixture-event"));
+    let off_data = read_json_file(&data_path).unwrap();
+    assert!(!settings_from_data(&off_data).calendar_colors_enabled);
+    assert_eq!(off_data["calendarObjectColors"]["fixture-event"], "Green");
+    save_settings_blocking(draft.clone()).unwrap();
+    assert!(fs::read_to_string(&css_path).unwrap().contains("record-fixture-event"));
 
     // White passes settings validation but the native CSS compiler rejects it.
     // No installed file may change when compilation fails before commit.
@@ -357,6 +367,22 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     assert_eq!(fs::read(&css_path).unwrap(), saved_css);
     assert_eq!(fs::read(&credential_path).unwrap(), saved_key);
 
+    // Calendar opt-out still verifies a connection but never fetches colors.
+    let mut off_data = read_json_file(&data_path).unwrap();
+    off_data["settingsV2"]["settings"]["calendarColorsEnabled"] = json!(false);
+    fs::write(&data_path, serde_json::to_vec(&off_data).unwrap()).unwrap();
+    let (port, server) = mock_api_server("127.0.0.2", "fixture-key-two", vec![(200, json!({"data": []}))]);
+    let off_result = configure_connection_blocking(ConnectionDraft {
+        enabled: true, api_key: String::new(), keep_existing_key: true,
+        ip: Some("127.0.0.2".into()), port: Some(port),
+    }).unwrap();
+    assert_eq!(off_result.calendar_status, "off");
+    assert_eq!(server.join().unwrap().len(), 1);
+    let reconnected = read_json_file(&data_path).unwrap();
+    assert!(!settings_from_data(&reconnected).calendar_colors_enabled);
+    assert_eq!(reconnected["calendarObjectColors"], off_data["calendarObjectColors"]);
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event-1"));
+
     // Opt-out does not make an API request and removes both cache and key.
     let disabled = configure_connection_blocking(ConnectionDraft {
         enabled: false,
@@ -371,4 +397,33 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let canonical = fixture.canonicalize().unwrap();
     assert!(canonical.starts_with(source.join(".test-run").canonicalize().unwrap()));
     fs::remove_dir_all(canonical).unwrap();
+}
+
+#[test]
+fn calendar_api_availability_checks_saved_credentials_and_endpoint() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let fixture = source.join(".test-run").join(format!("calendar-api-{}-{nonce}", std::process::id()));
+    let credentials = fixture.join("blob/credentials");
+    fs::create_dir_all(&credentials).unwrap();
+    let data_path = fixture.join("blob/data.json");
+    fs::write(&data_path, b"{}").unwrap();
+    assert_eq!(calendar_api_availability_at(&fixture), "missing");
+    let credential = credentials.join("anytype-api-key.dpapi");
+    fs::write(&credential, b"invalid credential").unwrap();
+    assert_eq!(calendar_api_availability_at(&fixture), "unavailable");
+    fs::write(&credential, connection::encrypt_api_key("availability-key").unwrap()).unwrap();
+    for (http_status, body, expected) in [
+        (200, json!({"data": []}), "available"),
+        (401, json!({"error": "invalid key"}), "unavailable"),
+        (200, json!({"unexpected": []}), "unavailable"),
+    ] {
+        let (port, server) = mock_api_server("127.0.0.1", "availability-key", vec![(http_status, body)]);
+        fs::write(&data_path, serde_json::to_vec(&json!({"apiConnection": {"enabled": true, "port": port}})).unwrap()).unwrap();
+        assert_eq!(calendar_api_availability_at(&fixture), expected);
+        server.join().unwrap();
+    }
+    fs::write(&data_path, b"{\"apiConnection\":{\"enabled\":false}}").unwrap();
+    assert_eq!(calendar_api_availability_at(&fixture), "missing");
+    fs::remove_dir_all(fixture).unwrap();
 }

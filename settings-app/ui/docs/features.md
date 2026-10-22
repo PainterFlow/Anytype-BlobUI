@@ -82,3 +82,7 @@ Numpad 1 works with Num Lock on or off. The listener leaves other applications' 
 Open Logs to inspect activity and errors. Copy all logs copies the log text. Help provides Documentation, Keybinds, What's New?, version information, and author and repository links. Release notes appear when Settings reopens after an update.
 
 Advanced Settings contains API configuration and App Settings for the Anytype data folder, startup, updates, and uninstall. See [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) and [Installation and removal](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/installation-and-removal.md) for procedures. Setup and update-preview diagnostic bindings are covered in Development.
+
+## Calendar colors
+
+In Preferences, Calendar Colors controls API-derived object colors in calendar views and defaults to on. Changes apply after Save and reloading Anytype with Ctrl+R. The switch is locked while the API is being checked or cannot be used. Configure the connection in Advanced Settings. An API outage preserves your saved choice and cached colors. Turning Calendar Colors off keeps the cache but removes its colors from the generated CSS.

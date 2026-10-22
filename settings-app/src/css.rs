@@ -176,7 +176,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     let declaration = Regex::new(r"/\*\s*@blobui-placeholder\s+[A-Za-z][A-Za-z0-9]*\s+(?:font|color|url|number|boolean)\s*\*/").unwrap();
     css_text = declaration.replace_all(&css_text, "").into_owned();
     let api_disabled = data.pointer("/apiConnection/enabled").and_then(Value::as_bool) == Some(false);
-    if !api_disabled {
+    if !api_disabled && settings.get("calendarColorsEnabled").and_then(Value::as_bool).unwrap_or(true) {
         if let Some(calendar_css) = calendar_color_css(data.get("calendarObjectColors"))? {
             if !css_text.trim_end().is_empty() {
                 css_text = format!("{}{newline}{newline}{calendar_css}{newline}", css_text.trim_end());
@@ -500,7 +500,7 @@ mod tests {
         fs::write(root.join("Dev/10-test.css"), "/* @blobui-placeholder fontFamily font */\n/* @blobui-placeholder bannerUrl url */\nbody { font-family: \"{{fontFamily}}\"; --header-image: url(\"{{bannerUrl}}\"); }\n/* @blobui-if tabHoverEffect */\n.tab {}\n/* @blobui-endif tabHoverEffect */").unwrap();
         fs::write(root.join("Dev/nested/00-accent.css"), "/* @blobui-placeholder accentColor color */\n:root { color: {{accentColor}}; }").unwrap();
         let install = root.join("anytype");
-        let data = json!({"installDirectory": install, "settings": {
+        let mut data = json!({"installDirectory": install, "settings": {
             "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": "#27A879", "tabHoverEffect": true
         }, "calendarObjectColors": {"event-1": "Green"}});
         let css = compile(&root, &install, &data).unwrap();
@@ -508,6 +508,11 @@ mod tests {
         assert!(css.contains("color: #27A879"));
         assert!(css.contains(".tab {}"));
         assert!(css.contains("record-event-1"));
+        data["settings"]["calendarColorsEnabled"] = json!(false);
+        assert!(!compile(&root, &install, &data).unwrap().contains("record-event-1"));
+        assert_eq!(data["calendarObjectColors"]["event-1"], "Green");
+        data["settings"]["calendarColorsEnabled"] = json!(true);
+        assert!(compile(&root, &install, &data).unwrap().contains("record-event-1"));
         assert!(!css.contains("@blobui-placeholder"));
         fs::remove_dir_all(root).unwrap();
     }

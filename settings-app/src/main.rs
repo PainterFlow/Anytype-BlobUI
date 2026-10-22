@@ -102,6 +102,12 @@ struct SettingsDraft {
     kanban_view_style: String,
     #[serde(default)]
     collapsed_categories: bool,
+    #[serde(default = "default_calendar_colors_enabled")]
+    calendar_colors_enabled: bool,
+}
+
+fn default_calendar_colors_enabled() -> bool {
+    true
 }
 
 fn default_kanban_style() -> String {
@@ -569,6 +575,30 @@ fn with_startup_state(mut state: updater::UpdaterState) -> Result<updater::Updat
     Ok(state)
 }
 
+#[tauri::command]
+async fn get_calendar_api_availability() -> String {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Ok(install) = resolve_install_directory(&app_data_directory()) else { return "unavailable"; };
+        calendar_api_availability_at(&install)
+    }).await.unwrap_or("unavailable").to_string()
+}
+
+fn calendar_api_availability_at(install: &Path) -> &'static str {
+    let Ok(data) = read_json_file(&install.join("blob/data.json")) else { return "unavailable"; };
+    if data.pointer("/apiConnection/enabled").and_then(Value::as_bool) == Some(false)
+        || !install.join("blob/credentials/anytype-api-key.dpapi").is_file() {
+        return "missing";
+    }
+    let result = (|| {
+        let key = SecretString::new(read_saved_api_key_at(install)?);
+        let ip = normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
+        let port = data.pointer("/apiConnection/port").and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok()).filter(|port| *port > 0).unwrap_or(31009);
+        api::verify_connection(&key, &ip, port)
+    })();
+    if result.is_ok() { "available" } else { "unavailable" }
+}
+
 fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResult, String> {
     let mut connection = normalize_connection(connection)?;
     let mut api_key = SecretString::new(std::mem::take(&mut connection.api_key));
@@ -595,18 +625,25 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
             if !connection.keep_existing_key {
                 protected_key = Some(connection::encrypt_api_key(&api_key)?);
             }
-            Ok::<_, String>(api::calendar_colors(&api_key, ip, port))
+            Ok::<_, String>(if current_settings.calendar_colors_enabled {
+                api::calendar_colors(&api_key, ip, port).map(Some)
+            } else { Ok(None) })
         })();
         let colors_result = connection_result?;
         match colors_result {
-            Ok(colors) => {
+            Ok(Some(colors)) => {
                 data["calendarObjectColors"] = colors;
                 calendar_status = "refreshed";
             }
+            Ok(None) => { calendar_status = "off"; }
             Err(_) => {
                 // A connection change must not carry calendar data forward
                 // from a different API identity or an earlier permission set.
-                data["calendarObjectColors"] = json!({});
+                let same_endpoint = data.pointer("/apiConnection/ip").and_then(Value::as_str).unwrap_or(DEFAULT_API_IP) == ip
+                    && data.pointer("/apiConnection/port").and_then(Value::as_u64).unwrap_or(31009) == u64::from(port);
+                if !connection.keep_existing_key || !same_endpoint {
+                    data["calendarObjectColors"] = json!({});
+                }
                 calendar_status = "cached";
             }
         }
@@ -817,6 +854,8 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     if !api_enabled {
         data["calendarObjectColors"] = json!({});
         calendar_status = "disabled";
+    } else if !settings.calendar_colors_enabled {
+        calendar_status = "off";
     } else if credential_path.is_file() {
         let ip = api_connection
             .and_then(|value| read_string(Some(value), "ip"))
@@ -889,6 +928,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "objectMentionHoverEffect": settings.object_mention_hover_effect,
         "kanbanViewStyle": settings.kanban_view_style,
         "collapsedCategories": settings.collapsed_categories,
+        "calendarColorsEnabled": settings.calendar_colors_enabled,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -913,6 +953,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
             "kanbanViewStyle": settings.kanban_view_style,
             "collapsedCategories": settings.collapsed_categories,
+            "calendarColorsEnabled": settings.calendar_colors_enabled,
         }
     });
 }
@@ -1063,6 +1104,9 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         object_mention_hover_effect,
         kanban_view_style,
         collapsed_categories,
+        calendar_colors_enabled: read_bool(local, "calendarColorsEnabled")
+            .or_else(|| read_bool(Some(normalized), "calendarColorsEnabled"))
+            .unwrap_or(true),
     }
 }
 
@@ -1475,6 +1519,7 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             reveal_api_key,
+            get_calendar_api_availability,
             configure_connection,
             get_app_state,
             save_settings,
@@ -1550,6 +1595,7 @@ impl Default for SettingsDraft {
             object_mention_hover_effect: false,
             kanban_view_style: default_kanban_style(),
             collapsed_categories: false,
+            calendar_colors_enabled: true,
         }
     }
 }
@@ -1560,6 +1606,23 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_settings_default_and_round_trip() {
+        assert!(SettingsDraft::default().calendar_colors_enabled);
+        assert!(settings_from_data(&json!({"settings": {}})).calendar_colors_enabled);
+        let mut old = serde_json::to_value(SettingsDraft::default()).unwrap();
+        old.as_object_mut().unwrap().remove("calendarColorsEnabled");
+        assert!(serde_json::from_value::<SettingsDraft>(old).unwrap().calendar_colors_enabled);
+        for enabled in [false, true] {
+            let settings = SettingsDraft { calendar_colors_enabled: enabled, ..SettingsDraft::default() };
+            let mut data = json!({"unrelated": "keep"});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            assert_eq!(settings_from_data(&data).calendar_colors_enabled, enabled);
+            assert_eq!(data["settings"]["calendarColorsEnabled"], enabled);
+            assert_eq!(data["unrelated"], "keep");
+        }
+    }
 
     #[test]
     fn kanban_settings_default_validate_and_restore() {
