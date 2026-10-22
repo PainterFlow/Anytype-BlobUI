@@ -24,7 +24,6 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
       document.querySelector('.page-content').scrollTop = 80;
       document.getElementById('tab-0').focus({ preventScroll: true });
     });
-    const initialTop = await page.locator('.page-content').evaluate(node => node.scrollTop);
     assert.match(await page.locator('#tabs').evaluate(node => getComputedStyle(node, '::after').transitionProperty), /transform/);
     assert.equal(await page.locator('#tabs').evaluate(node => getComputedStyle(node, '::after').display), 'block');
     const movement = await page.evaluate(() => {
@@ -45,7 +44,7 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
     for (let repeat = 0; repeat < 3; repeat++) {
       await page.keyboard.press('End');
       assert.equal(await page.locator('#tab-4').getAttribute('aria-selected'), 'true');
-      assert.equal(await page.locator('.page-content').evaluate(node => node.scrollTop), initialTop);
+      assert.equal(await page.locator('.page-content').evaluate(node => node.scrollTop), 0);
       const geometry = await page.locator('#tabs').evaluate(node => {
         const tab = document.getElementById('tab-4');
         return { scroll: node.scrollLeft, left: tab.offsetLeft, right: tab.offsetLeft + tab.offsetWidth, width: node.clientWidth,
@@ -64,6 +63,24 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
     await page.locator('#tab-4').click();
     await page.setViewportSize({ width: 700, height: 650 });
     assert.equal(await page.locator('#tab-4').getAttribute('aria-selected'), 'true');
+    const recoveredFocus = await page.evaluate(() => {
+      const field = document.createElement('input');
+      document.getElementById('panel-4').append(field);
+      field.focus({ preventScroll: true });
+      window.tabs.select(0);
+      const focused = document.activeElement.id;
+      window.tabs.select(4);
+      return focused;
+    });
+    assert.equal(recoveredFocus, 'tab-0', 'Focus leaves a hidden panel without scrolling it into view');
+    const preserved = await page.evaluate(() => {
+      const scroller = document.querySelector('.page-content');
+      scroller.scrollTop = 100;
+      window.tabs.refresh();
+      window.tabs.select(4);
+      return scroller.scrollTop;
+    });
+    assert.equal(preserved, 100, 'Reselecting or refreshing does not undo user scrolling');
     await page.evaluate(() => { window.tabs.setEnabled(false); });
     assert.equal(await page.locator('section:not([hidden])').count(), 5);
     await page.evaluate(() => { window.tabs.setEnabled(true); });
@@ -74,7 +91,7 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
   } finally { await browser.close(); }
 });
 
-test('real settings tab widths stay fixed when panel height adds or removes a scrollbar', async () => {
+test('real settings tabs keep their width and open panels at the top across height changes', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const { pathToFileURL } = require('node:url');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
@@ -124,5 +141,37 @@ test('real settings tab widths stay fixed when panel height adds or removes a sc
         }
       }
     }
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.evaluate(() => document.querySelectorAll('.settings-page > section').forEach(panel => { panel.style.minHeight = '1400px'; }));
+    for (const [nav, ids] of [
+      ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2', 'preference-tab-3', 'preference-tab-4']],
+      ['advanced', ['advanced-api-tab', 'advanced-app-tab', 'advanced-experiments-tab']],
+    ]) {
+      await page.locator('#' + nav + '-nav').click();
+      for (const from of ids) {
+        for (const to of ids.filter(id => id !== from)) {
+          await page.locator('#' + from).evaluate(button => button.click());
+          await page.locator('.page-content').evaluate(scroller => { scroller.scrollTop = scroller.scrollHeight; });
+          assert.ok(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop > 0));
+          await page.locator('#' + to).evaluate(button => button.click());
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0, from + ' to ' + to + ' opens at the top');
+          assert.equal(await page.locator('#' + to).getAttribute('aria-selected'), 'true');
+        }
+      }
+    }
+    // Delayed content growth must not anchor a newly selected tall panel to its bottom.
+    await page.locator('#preferences-nav').click();
+    await page.locator('#preference-tab-4').evaluate(button => button.click());
+    await page.evaluate(() => {
+      const content = document.createElement('div'); content.style.height = '400px';
+      document.getElementById('preference-panel-4').prepend(content);
+    });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0);
+    // Sidebar navigation shares the policy and must not scroll past the tab strip.
+    await page.locator('#advanced-nav').click();
+    await page.locator('#advanced-section-links').getByRole('button', { name: 'Ap Settings', exact: true }).click();
+    assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0);
   } finally { await browser.close(); }
 });

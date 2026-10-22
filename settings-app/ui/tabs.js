@@ -2,7 +2,7 @@
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
 
-  function attach({ container, buttons, panels, onSelect }) {
+  function attach({ container, buttons, panels, onSelect, scrollContainer = container.closest?.(".page-content") }) {
     let selected = Math.max(0, buttons.findIndex(button => button.getAttribute("aria-selected") === "true"));
     let enabled = true;
     let destroyed = false;
@@ -44,14 +44,22 @@
 
     function select(index, { focus = false } = {}) {
       if (!Number.isInteger(index) || index < 0 || index >= buttons.length) return;
+      const changed = index !== selected;
+      const focusWasInPanel = panels[selected].contains(root.document?.activeElement);
       selected = index;
       syncPanels();
       refresh();
       if (enabled) {
         // Move only the tab strip. Scrolling ancestors makes the last tab jump.
-        if (focus) buttons[index].focus({ preventScroll: true });
+        if (focus || focusWasInPanel) buttons[index].focus({ preventScroll: true });
       }
       if (onSelect) onSelect(index);
+      if (changed && enabled && scrollContainer) {
+        // Every panel change starts at the top, regardless of the previous
+        // panel height, focus position, or navigation entry point.
+        if (scrollContainer.scrollTo) scrollContainer.scrollTo({ top: 0, behavior: "instant" });
+        else scrollContainer.scrollTop = 0;
+      }
     }
 
     buttons.forEach((button, index) => {

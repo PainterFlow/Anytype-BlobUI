@@ -33,7 +33,6 @@
     navButtons.forEach(button => controller.setExpanded(button, button.dataset.settingsPage === page));
     if (page === "preferences") selectPreference(tab);
     else api.selectAdvancedTab(tab);
-    target.scrollIntoView({ block: "start", behavior: "instant" });
     const heading = target.querySelector("h2");
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }
