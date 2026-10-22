@@ -2,6 +2,8 @@
 
 The Windows release package carries `Changelogs.md`, `Changelogs.yaml`, and any referenced image files. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
 
+The dialog shows the changelog's version and marks entries that match the running app's current version or the latest available changelog. These markers follow the selected entry when browsing release history.
+
 ## Markdown source
 
 Write release notes in the repository-root `Changelogs.md`. The renderer uses Marked with GitHub Flavored Markdown, including headings, paragraphs, emphasis, strikethrough, blockquotes, nested ordered and unordered lists, task lists, fenced code blocks, tables, and inline code.
