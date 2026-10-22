@@ -1,37 +1,40 @@
-# BlobUI 1.2.0
+# BlobUI 1.3.0 - What's new?
 
-Welcome to BlobUI, BlobUI is an “addon” for Anytype that adds a lot of cool new long requested features.
-For example, calendar event colors, text effects, changing the font and much more!
-This is the first ever public release and it’s a big one, adding the BlobUI settings app, which is built on Rust + Tauri for maximum performance.
-BlobUI only modifies Anytypes custom CSS(UI) and reads your data as context to use for modifying the UI in more advanced ways(*This part can also be disabled, but that will make some features unavailable*).
-I haven’t had the chance to implement MacOS support, as I don’t have a MacBook, so yeah, if anyone wants to help, the project is open src :3.
-*Developers Note: MacOS support might come soon though.*
+Welcome to v1.3.0 of BlobUI. This update introduces a lot of polishing changes, but also some new features too.
+The main big feature of this update is the kanban view rework.
+You can now control the UI of kanban views, but even cooler is the custom formula support for kanban views!
+Yes, you heard that right, kanban views now support custom formulas.
+In addition to that, v1.3.0 also ships a few minor improvements & fixes and a few new options here and there.
 
-## BlobUI App
-- BlobUI no longer uses ps1 scripts as backend, everything is done through the app now. ([PainterFlow11](https://github.com/PainterFlow))
-- BlobUI now supports changing the API key, together with the port, api key ip and Anytype instillation path. ([PainterFlow11](https://github.com/PainterFlow))
-- BlobUI now supports toggling the hover effects. ([PainterFlow11](https://github.com/PainterFlow))
-- You can now toggle reduced motion(*it’s on by default*). ([PainterFlow11](https://github.com/PainterFlow))
-- And a lot of other cool stuff, before it was just some weird Anytype properties reading thing, now it’s a built-out app which obviously has way better UI and a lot more possibilities. ([PainterFlow11](https://github.com/PainterFlow))
-- Added docs. ([PainterFlow11](https://github.com/PainterFlow))
+## General Changes
+- Added version tags to changelogs. (Issue#43)
 
-## Smaller Improvements & QoL Changes
-- You can now toggle whether you want to have hover effects for @ mentions and links. ([PainterFlow11](https://github.com/PainterFlow))
-- You can now toggle whether you want to have a hover effect when hovering over a tab in the tab bar. ([PainterFlow11](https://github.com/PainterFlow))
+## Kanban Views V2
+- Added new "Board layout" option, which controls the UI density of inline & full-page boards:
+    - Default: Anytypes default look, not much too say.
+    - Balanced: Slightly more compact, definitely a good option for anyone who wants a bit more content on their page.
+    - Compact: Very compact UI, properties now also wrap around instead of 1 new line for each property.
+- Added new "Collapsed Categories" option, which toggles collapsible kanban views. Hovering over the header will un-collapse the category. (*Works with inline-kanban views too :D*)
 
-## Bugfixes
-- Fixed A LOT of issues related to the accent color not effecting xyz. ([PainterFlow11](https://github.com/PainterFlow))
-- Fixed custom font not applying in the tab bar. ([PainterFlow11](https://github.com/PainterFlow))
-- Fixed the scrollbar in the properties and object types menu. ([PainterFlow11](https://github.com/PainterFlow))
-- Fixed the scrollbar in the channel sidebar. ([PainterFlow11](https://github.com/PainterFlow))
+## Accent Color
+- Added new "Include selections" option, which toggles whether selected text, objects, text blocks, etc. should be affected by the accent color.
 
-*Developers Note: We basically removed it, so if you are in a lot of channels, you might not see a scrollbar, but tbh, I’d rather have no scrollbar when I’m in a lot of channels then having an annoying big long grey box in my sidebar.*
+## Calendar Event Colors
+- Added new "Calendar Colors" option, which toggles whether calendar event colors render. (*on by default, the option is locked when the API key is unavailable*)
 
 ## Developer Changelogs
-- removed most non-testing related powershell scripts
-- added new `.\scripts\Build-Settings.ps1` script to build the blob ui app, it also has a few arguments ([PainterFlow11](https://github.com/PainterFlow))
-    - `-n` next time the app starts, it will start with onboarding.
-    - `-s` starts the app once it finished compiling.
-    - `-c` closes any old instances of the app.
-- added new `.\scripts\Build-Installer.ps1` script to build the installer ([PainterFlow11](https://github.com/PainterFlow))
-- integrated GitHub actions for deployment ([PainterFlow11](https://github.com/PainterFlow))
+- the compiled version now no longer always shows the update button.
+- the compiled version is now marked as the newest.
+- updated `AGENTS.md` to include notes about UI design + removed some older stuff.
+- renamed `Build-Settings.ps1` script to `Build-App.ps1`.
+
+## Bug fixes
+- Issue#47 - The red spelling underline thing is now no longer visible through the spoiler text effect.
+- Issue#46 - The red spelling underline now no longer interrupts the neon & rgb wave text effects.
+- Issue#44 - The today text in the date modal picker is not affected by the accent color.
+- Issue#41 - The default font is set to "Libron".
+- Issue#36 - The favorite buttons hover background color does not match the icons color (*when the item is favorited*)
+- Issue#35 - The settings tab/category animation can bug out when switching to the "Advanced" settings tab for the first time after fully restarting the app.
+
+---
+*Developers Note: All changes without explicitly denoted credits are made by [@PainterFlow11](https://github.com/PainterFlow)*
