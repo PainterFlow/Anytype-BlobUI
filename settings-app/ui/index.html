@@ -384,8 +384,10 @@
               <button id="advanced-experiments-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-experiments-panel" tabindex="-1">Experiments</button>
             </div>
             <section id="advanced-experiments-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-experiments-tab" hidden>
-              <div class="section-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p></div>
-              <div class="settings-list"><label class="native-accent-control settings-row accessibility-row" for="settings-v21-enabled"><span>Settings V2.1</span><input id="settings-v21-enabled" type="checkbox" role="switch" /><span class="switch-track" aria-hidden="true"></span></label></div>
+              <div class="section-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
+                <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"/><path d="M10 7v4"/><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"/></svg><span>Experiments may break things. Use at your own risk.</span></p>
+              </div>
+              <div class="settings-list"><label class="native-accent-control settings-row accessibility-row" for="settings-v21-enabled"><span>Settings Future Proof UI Refresh</span><input id="settings-v21-enabled" type="checkbox" role="switch" aria-describedby="experiments-warning" /><span class="switch-track" aria-hidden="true"></span></label></div>
             </section>
             <section id="advanced-api-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-api-tab">
               <div class="section-heading">

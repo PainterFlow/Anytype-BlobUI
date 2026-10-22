@@ -22,6 +22,11 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 ## Calendar Event Colors
 - Added new "Calendar Colors" option, which toggles whether calendar event colors render. (*on by default, the option is locked when the API key is unavailable*)
 
+## Experimental: Settings Future Proof UI Refresh
+- Adds tabs for settings.
+- Adds collapsible/uncollapsible setting categories.
+- Refreshes the look of setting tabs.
+
 ## Developer Changelogs
 - the compiled version now no longer always shows the update button.
 - the compiled version is now marked as the newest.

@@ -703,3 +703,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .advanced-tabs::-webkit-scrollbar-button { display: none; }
 :root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
 .v21-section-link { font: inherit; }
+
+.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
+.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

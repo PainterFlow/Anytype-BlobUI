@@ -34,8 +34,8 @@ The controller updates `aria-expanded`, `data-disclosure-state`, `inert`, and `h
 
 The API-key warning keeps edits when Escape or its backdrop dismisses it. Its X and Undo restore the saved baseline directly. It has no labeled Close button. The sidebar Undo opens a separate confirmation whose X dismisses it and whose red Undo restores that baseline.
 
-## Settings V2.1 experiment
+## Settings Future Proof UI Refresh experiment
 
-Advanced > Experiments always contains Settings V2.1. Its switch previews the layout immediately and participates in Save and Undo. Existing installations default to the original layout. The experiment changes only the Settings interface.
+Advanced > Experiments always contains Settings Future Proof UI Refresh. Its switch previews the layout immediately and participates in Save and Undo. Existing installations default to the original layout. The experiment changes only the Settings interface. Below the Experiments description, an amber warning icon and note explain that experiments may break things and are used at the user's own risk.
 
 The enabled layout uses full-width category tabs in Preferences and icon section links under Preferences and Advanced. These links reuse the Docs hierarchy, animation, and disclosure controller without a chevron. Accessibility has no child navigation or category dividers. Settings and Docs have no search fields. Calendar explains Alt+R to rebuild followed by Ctrl+R in Anytype to apply color changes.
