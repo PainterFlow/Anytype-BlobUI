@@ -2271,6 +2271,7 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
     if (event.key === "Escape" && kanbanViewStyle.getAttribute("aria-expanded") === "true") {
       event.preventDefault();
       closeKanbanStyleMenu(true);

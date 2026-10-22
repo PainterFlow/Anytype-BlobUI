@@ -845,6 +845,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.document.handlers.keydown({ ...quitKey, ctrlKey: false });
   context.document.handlers.keydown({ ...quitKey, repeat: true });
   context.document.handlers.keydown({ ...quitKey, altKey: true });
+  const beforeHandledComponentKey = calls.length;
+  context.document.handlers.keydown({ ...quitKey, defaultPrevented: true, preventDefault() {} });
+  assert.equal(calls.length, beforeHandledComponentKey, 'Handled component keys must not trigger a global shortcut.');
   assert.equal(calls.length, beforeIgnoredKeys);
   element('title-drag-region').handlers.pointerdown({ button: 0, target: { closest: () => null } });
   assert.equal(calls.at(-1), 'start_window_drag');
