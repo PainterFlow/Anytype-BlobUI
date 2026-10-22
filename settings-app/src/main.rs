@@ -106,6 +106,8 @@ struct SettingsDraft {
     collapsed_categories: bool,
     #[serde(default = "default_calendar_colors_enabled")]
     calendar_colors_enabled: bool,
+    #[serde(default)]
+    settings_v21_enabled: bool,
 }
 
 fn default_include_selections() -> bool {
@@ -895,7 +897,21 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     Ok(SaveResult { calendar_status: calendar_status.into() })
 }
 
+#[cfg(test)]
+fn assert_fixture_path(path: &Path) -> Result<(), String> {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixtures = workspace.join(".test-run").canonicalize().map_err(|e| e.to_string())?;
+    let resolved = path.canonicalize().map_err(|e| e.to_string())?;
+    if !resolved.starts_with(&fixtures) {
+        return Err("Native tests refuse to access profiles or credentials outside workspace .test-run fixtures.".into());
+    }
+    reject_reparse_component(path)?;
+    Ok(())
+}
+
 fn save_paths(install: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+    #[cfg(test)]
+    assert_fixture_path(install)?;
     ensure_not_release_path(install)?;
     let blob = install.join("blob");
     let data = blob.join("data.json");
@@ -936,6 +952,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "kanbanViewStyle": settings.kanban_view_style,
         "collapsedCategories": settings.collapsed_categories,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
+        "settingsV21Enabled": settings.settings_v21_enabled,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -962,6 +979,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "kanbanViewStyle": settings.kanban_view_style,
             "collapsedCategories": settings.collapsed_categories,
             "calendarColorsEnabled": settings.calendar_colors_enabled,
+        "settingsV21Enabled": settings.settings_v21_enabled,
         }
     });
 }
@@ -974,6 +992,8 @@ fn serialize_data(data: &Value) -> Result<Vec<u8>, String> {
 }
 
 fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
+    #[cfg(test)]
+    assert_fixture_path(install)?;
     let credential = install.join("blob/credentials/anytype-api-key.dpapi");
     reject_reparse_component(&credential)?;
     let encrypted = fs::read_to_string(&credential)
@@ -1115,6 +1135,9 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         object_mention_hover_effect,
         kanban_view_style,
         collapsed_categories,
+        settings_v21_enabled: read_bool(local, "settingsV21Enabled")
+            .or_else(|| read_bool(Some(normalized), "settingsV21Enabled"))
+            .unwrap_or(false),
         calendar_colors_enabled: read_bool(local, "calendarColorsEnabled")
             .or_else(|| read_bool(Some(normalized), "calendarColorsEnabled"))
             .unwrap_or(true),
@@ -1262,6 +1285,8 @@ fn non_empty_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 fn resolve_install_directory(app_data: &Path) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    assert_fixture_path(app_data.parent().unwrap_or(app_data))?;
     let saved = updater::saved_install_directory(&updater::preferences_path(app_data))?;
     resolve_install_directory_with_saved(
         app_data,
@@ -1608,6 +1633,7 @@ impl Default for SettingsDraft {
             kanban_view_style: default_kanban_style(),
             collapsed_categories: false,
             calendar_colors_enabled: true,
+            settings_v21_enabled: false,
         }
     }
 }
@@ -1618,6 +1644,35 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_tests_reject_real_profile_paths_before_credential_access() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        assert!(assert_fixture_path(workspace).is_err());
+        assert!(assert_fixture_path(&workspace.join(".test-run")).is_ok());
+        assert!(save_paths(workspace).unwrap_err().contains("outside workspace"));
+        assert!(read_saved_api_key_at(workspace).unwrap_err().contains("outside workspace"));
+    }
+
+    #[test]
+    fn settings_v21_defaults_and_round_trip() {
+        assert!(!SettingsDraft::default().settings_v21_enabled);
+        assert!(!settings_from_data(&json!({"settings": {}})).settings_v21_enabled);
+        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("settingsV21Enabled");
+        assert!(!serde_json::from_value::<SettingsDraft>(legacy).unwrap().settings_v21_enabled);
+        for enabled in [false, true] {
+            let settings = SettingsDraft { settings_v21_enabled: enabled, ..SettingsDraft::default() };
+            let mut data = json!({"unrelated": "keep"});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            assert_eq!(settings_from_data(&data).settings_v21_enabled, enabled);
+            assert_eq!(data["settings"]["settingsV21Enabled"], enabled);
+            assert_eq!(data["settingsV2"]["settings"]["settingsV21Enabled"], enabled);
+            assert_eq!(data["unrelated"], "keep");
+        }
+        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":"invalid"}})).settings_v21_enabled);
+        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":true},"settingsV2":{"settings":{"settingsV21Enabled":false}}})).settings_v21_enabled);
+    }
 
     #[test]
     fn calendar_settings_default_and_round_trip() {

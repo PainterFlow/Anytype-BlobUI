@@ -12,13 +12,15 @@ The following upstream files supplied the measurements and control behavior.
 
 Colors and font sizes also match the installed Anytype stylesheet. BlobUI's saved interface and code fonts still apply. The custom color picker and explicit Save action remain BlobUI controls. Decorative shadows, glows, theme cards, and font samples remain absent.
 
-Scrollbars follow the user's Anytype screenshot, with a 12px width, rounded thumb ends, no arrow buttons, and a transparent track. Their gray thumbs match the current theme, appear while scrolling, and fade after scrolling stops. Scroll areas without overflow show no scrollbar.
+Scrollbars follow the user's Anytype screenshot, with a 12px width, rounded thumb ends, no arrow buttons, and a transparent track. Their gray thumbs match the current theme, appear while scrolling, and fade after scrolling stops. Scroll areas without overflow show no scrollbar. The settings page reserves its scrollbar gutter even for short panels so switching Preferences or Advanced tabs cannot change the content or tab-strip width. Browser layout tests must keep scrollbars enabled.
 
 Advanced Settings uses API key and App settings tabs. App settings contains the folder and update controls. The tabs support arrow keys, Home, and End, and preserve pending edits when switching. The Anytype Folder field opens the native folder picker and has no surrounding group border. The update check button keeps its width and height across all labels. The update switches reuse Accessibility's grouped settings rows. The update action sits below Save and Undo and above Logs, with a fixed Blob Pink icon independent of the selected accent.
 
 ## Reusable settings controls
 
-Load `visibility-field.js`, `modal.js`, and `edit-session.js` before `app.js`.
+Load `visibility-field.js`, `modal.js`, `edit-session.js`, and `tabs.js` before `app.js`.
+
+`BlobUI.Tabs.attach({ container, buttons, panels, onSelect, scrollContainer })` owns tab selection, panel visibility, the animated underline, and keyboard navigation in both Advanced and Preferences. Use `select(index)`, `refresh()` after revealing a hidden page, `setEnabled(value)` to show all panels when tabs are disabled, and `destroy()` for cleanup. It measures the underline inside its own tab strip and scrolls only that strip when revealing a tab, including the last tab. Changing the selected tab resets its content scroll container to the top immediately. The controller defaults to the nearest `.page-content`; pass `scrollContainer` for another scroll layout. Clicking the selected tab, resizing, and font or underline refreshes preserve the current scroll position. Hidden-panel focus moves to the newly selected tab without scrolling. The settings scroll area disables browser scroll anchoring, and sidebar section links use this same selection behavior without a second scroll command. Resize, fonts, and reduced motion use the same behavior in both places.
 
 `disclosure.js` exposes `BlobUI.Disclosure.attach(container, { onToggle })` for expandable panels. Use a native button with `data-disclosure-toggle`, `aria-controls`, and an initial `aria-expanded` value. Give its panel the matching `id` and `data-disclosure-panel`. Add `data-disclosure-content` to an inner wrapper when CSS animates panel height.
 
@@ -31,3 +33,9 @@ The controller updates `aria-expanded`, `data-disclosure-state`, `inert`, and `h
 `BlobUI.createEditSession({ read, restore, equals })` tracks a saved baseline. Use `isDirty()` to show Save and Undo together, `discard()` to restore pending edits, and `commit()` after a successful save. `commit(patch)` advances only the successfully saved part when a save has multiple steps. Baseline snapshots contain settings and saved-key presence, without storing a decrypted API key.
 
 The API-key warning keeps edits when Escape or its backdrop dismisses it. Its X and Undo restore the saved baseline directly. It has no labeled Close button. The sidebar Undo opens a separate confirmation whose X dismisses it and whose red Undo restores that baseline.
+
+## Settings Future Proof UI Refresh experiment
+
+Advanced > Experiments always contains Settings Future Proof UI Refresh. Its switch previews the layout immediately and participates in Save and Undo. Existing installations default to the original layout. The experiment changes only the Settings interface. Below the Experiments description, an amber warning icon and note explain that experiments may break things and are used at the user's own risk.
+
+The enabled layout uses full-width category tabs in Preferences and icon section links under Preferences and Advanced. These links reuse the Docs hierarchy, animation, and disclosure controller without a chevron. Accessibility has no child navigation or category dividers. Settings and Docs have no search fields. Calendar explains Alt+R to rebuild followed by Ctrl+R in Anytype to apply color changes.

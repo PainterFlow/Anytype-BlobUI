@@ -282,7 +282,7 @@
                 <span class="switch-track" aria-hidden="true"></span>
               </label>
             </div>
-            <p id="calendar-colors-help" class="kanban-collapse-help" role="status" aria-live="polite">Checking the Anytype API connection...</p>
+            <p id="calendar-colors-help" class="kanban-collapse-help" role="status" aria-live="polite">Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes.</p>
           </section>
 
           <section class="settings-group typography-group" aria-labelledby="typography-heading">
@@ -378,10 +378,17 @@
             </section>
           </div>
           <div id="advanced-page" class="settings-page" hidden>
-            <div class="advanced-tabs" role="tablist" aria-label="Advanced settings">
+            <div id="advanced-tabs" class="advanced-tabs" role="tablist" aria-label="Advanced settings">
               <button id="advanced-api-tab" type="button" role="tab" aria-selected="true" aria-controls="advanced-api-panel">API key</button>
               <button id="advanced-app-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-app-panel" tabindex="-1">App settings</button>
+              <button id="advanced-experiments-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-experiments-panel" tabindex="-1">Experiments</button>
             </div>
+            <section id="advanced-experiments-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-experiments-tab" hidden>
+              <div class="section-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
+                <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"/><path d="M10 7v4"/><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"/></svg><span>Experiments may break things. Use at your own risk.</span></p>
+              </div>
+              <div class="settings-list"><label class="native-accent-control settings-row accessibility-row" for="settings-v21-enabled"><span>Settings Future Proof UI Refresh</span><input id="settings-v21-enabled" type="checkbox" role="switch" aria-describedby="experiments-warning" /><span class="switch-track" aria-hidden="true"></span></label></div>
+            </section>
             <section id="advanced-api-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-api-tab">
               <div class="section-heading">
                 <h2 id="advanced-api-heading">API key</h2>
@@ -554,6 +561,8 @@
     <script src="./docs-data.js"></script>
     <script src="./disclosure.js"></script>
     <script src="./docs.js"></script>
+    <script src="./tabs.js"></script>
+    <script src="./settings-v21.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

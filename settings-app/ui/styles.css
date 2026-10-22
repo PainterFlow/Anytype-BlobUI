@@ -102,7 +102,7 @@ button:focus-visible, input:focus-visible { outline: none; }
   initial-value: transparent;
 }
 
-.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
 .page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar { width: 12px; height: 12px; }
 .page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner { background: transparent; }
@@ -120,7 +120,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .settings-row { padding: 14px 16px; font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .settings-page[hidden] { display: none; }
 .advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
-.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--advanced-tab-width, 0px); transform: translateX(var(--advanced-tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: var(--tab-width, 0px); transform: translateX(var(--tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
 .advanced-tabs.indicator-initializing::after { transition: none; }
 .advanced-tabs [role="tab"] { margin-bottom: -1px; padding: 0 0 12px; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font-weight: 400; cursor: pointer; transition: color .2s ease; }
 .advanced-tabs [role="tab"]:hover { color: var(--text); }
@@ -694,3 +694,15 @@ button:focus-visible, input:focus-visible { outline: none; }
   [data-disclosure-panel], .documentation-children, .documentation-children::before { transition: none; }
 }
 :root[data-reduced-motion="true"] [data-disclosure-panel], :root[data-reduced-motion="true"] .documentation-children, :root[data-reduced-motion="true"] .documentation-children::before { transition: none; }
+
+/* Settings V2.1 reuses the Docs hierarchy and Anytype tab controls. */
+.advanced-tabs { gap: 0; overflow-x: auto; overflow-y: hidden; flex-shrink: 0; scrollbar-width: thin; }
+.advanced-tabs [role="tab"] { flex: 1 0 112px; min-width: 112px; white-space: nowrap; text-align: center; padding-inline: 10px; }
+.advanced-tabs::-webkit-scrollbar { height: 4px; }
+.advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+.advanced-tabs::-webkit-scrollbar-button { display: none; }
+:root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.v21-section-link { font: inherit; }
+
+.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
+.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
