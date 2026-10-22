@@ -8,7 +8,7 @@ const source = path.resolve(__dirname, '../ui');
 // a running Settings instance and cannot change a native API connection.
 test('settings experiment uses Docs disclosures, section icons and full-width tabs without search', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1000, height: 850 } });
     const errors = [];

@@ -102,7 +102,7 @@ button:focus-visible, input:focus-visible { outline: none; }
   initial-value: transparent;
 }
 
-.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; scrollbar-gutter: stable; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
 .page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar { width: 12px; height: 12px; }
 .page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner { background: transparent; }
