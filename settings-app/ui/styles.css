@@ -120,7 +120,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .settings-row { padding: 14px 16px; font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .settings-page[hidden] { display: none; }
 .advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
-.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--advanced-tab-width, 0px); transform: translateX(var(--advanced-tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: var(--tab-width, 0px); transform: translateX(var(--tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
 .advanced-tabs.indicator-initializing::after { transition: none; }
 .advanced-tabs [role="tab"] { margin-bottom: -1px; padding: 0 0 12px; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font-weight: 400; cursor: pointer; transition: color .2s ease; }
 .advanced-tabs [role="tab"]:hover { color: var(--text); }
@@ -701,7 +701,5 @@ button:focus-visible, input:focus-visible { outline: none; }
 .advanced-tabs::-webkit-scrollbar { height: 4px; }
 .advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
 .advanced-tabs::-webkit-scrollbar-button { display: none; }
-.preference-tabs::after { display: none; }
-.preference-tabs [aria-selected="true"] { border-bottom-color: var(--text); }
 :root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
 .v21-section-link { font: inherit; }

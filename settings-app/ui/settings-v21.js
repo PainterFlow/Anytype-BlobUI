@@ -2,7 +2,7 @@
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
   const doc = root.document;
-  let enabled = false, controller, api, preferenceTabs, selectedPreference = 0;
+  let enabled = false, controller, api, preferenceTabs, preferenceTabController;
   const panels = [], navButtons = [];
   const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
   const sectionIcons = {
@@ -27,25 +27,7 @@
     svg.setAttribute("viewBox", "0 0 20 20"); svg.setAttribute("aria-hidden", "true");
     svg.innerHTML = sectionIcons[label]; wrapper.append(svg); return wrapper;
   }
-  function tabs(buttons, select) {
-    buttons.forEach((button, index) => {
-      button.addEventListener("click", () => select(index));
-      button.addEventListener("keydown", event => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-        select(next); buttons[next].focus(); buttons[next].scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      });
-    });
-  }
-  function selectPreference(index) {
-    selectedPreference = index;
-    preferenceTabs.forEach((button, position) => {
-      const selected = position === index;
-      button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
-      panels[position].hidden = enabled && !selected;
-    });
-  }
+  function selectPreference(index) { preferenceTabController.select(index); }
   function navigate(page, target, tab) {
     api.showSettingsPage(page);
     navButtons.forEach(button => controller.setExpanded(button, button.dataset.settingsPage === page));
@@ -65,7 +47,8 @@
       button.id = `preference-tab-${index}`; button.setAttribute("role", "tab"); button.setAttribute("aria-controls", panel.id);
       bar.append(button); return button;
     });
-    preferences.prepend(bar); bar.hidden = true; tabs(preferenceTabs, selectPreference);
+    preferences.prepend(bar); bar.hidden = true;
+    preferenceTabController = UI.Tabs.attach({ container: bar, buttons: preferenceTabs, panels });
     const navigation = doc.getElementById("preferences-nav").parentElement;
     // Use the Docs hierarchy and shared disclosure controller without its chevron.
     for (const page of ["preferences", "advanced"]) {
@@ -100,11 +83,11 @@
       if (enabled) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", preferenceTabs[index].id); }
       else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", panel.querySelector("h2").id); }
     });
-    selectPreference(selectedPreference);
+    preferenceTabController.setEnabled(enabled);
     if (!enabled) {
       navButtons.forEach(button => controller.setExpanded(button, false));
       if (active?.closest(".preference-tabs,.v21-section-links")) doc.querySelector('.nav-item.active').focus();
     }
   }
-  UI.SettingsV21 = { init, setEnabled, tabs };
+  UI.SettingsV21 = { init, setEnabled, refreshTabs() { preferenceTabController?.refresh(); } };
 })(window);

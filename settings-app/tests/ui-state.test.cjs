@@ -341,8 +341,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(helperSession.isDirty(), true, 'A partial save advances only its saved baseline section.');
   helperSession.discard();
   assert.equal(JSON.stringify(helperState), JSON.stringify({ settings: { font: 'Libron' }, connection: { port: 31010 } }), 'Undo restores unsaved sections while retaining successful partial saves.');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/tabs.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/settings-v21.js'), 'utf8'), context);
-  // Layout is covered by the real-browser suite. Keep real tab bindings in this form harness.
+  // Layout is covered by the real-browser suite. Keep the shared tab controller in this form harness.
   context.window.BlobUI.SettingsV21.init = () => {};
   context.window.BlobUI.SettingsV21.setEnabled = () => {};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);

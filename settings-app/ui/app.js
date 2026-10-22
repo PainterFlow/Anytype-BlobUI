@@ -170,35 +170,13 @@
     if (kanbanStyleMenu && !kanbanSelect.contains(event.target)) closeKanbanStyleMenu();
   });
   const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
-  function updateAdvancedTabIndicator() {
-    if (advancedPage.hidden) return;
-    const tab = advancedTabs.find((item) => item.getAttribute("aria-selected") === "true");
-    if (!tab || !tab.offsetWidth) return;
-    const tabs = tab.parentElement;
-    const initializing = !tabs.classList.contains("indicator-ready");
-    if (initializing) tabs.classList.add("indicator-initializing");
-    advancedPage.style.setProperty("--advanced-tab-left", `${tab.offsetLeft}px`);
-    advancedPage.style.setProperty("--advanced-tab-width", `${tab.offsetWidth}px`);
-    tabs.classList.add("indicator-ready");
-    if (initializing) {
-      // Commit the initial underline geometry while transitions are disabled.
-      void tabs.offsetWidth;
-      tabs.classList.remove("indicator-initializing");
-    }
-  }
-  window.addEventListener("resize", updateAdvancedTabIndicator);
-  if (document.fonts) document.fonts.ready.then(updateAdvancedTabIndicator);
-  function selectAdvancedTab(index) {
-    advancedTabs.forEach((tab, position) => {
-      const selected = position === index;
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-      el(tab.getAttribute("aria-controls")).hidden = !selected;
-    });
-    if (index !== 0) resetAdvancedVisibility();
-    updateAdvancedTabIndicator();
-  }
-  if (window.BlobUI.SettingsV21) window.BlobUI.SettingsV21.tabs(advancedTabs, selectAdvancedTab);
+  const advancedTabController = window.BlobUI.Tabs.attach({
+    container: el("advanced-tabs"),
+    buttons: advancedTabs,
+    panels: [el("advanced-api-panel"), el("advanced-app-panel"), el("advanced-experiments-panel")],
+    onSelect(index) { if (index !== 0) resetAdvancedVisibility(); },
+  });
+  function selectAdvancedTab(index) { advancedTabController.select(index); }
   const installDirectory = el("install-directory");
   const startOnLogin = el("start-on-login");
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
@@ -1558,7 +1536,8 @@
     preferencesPage.hidden = isAccessibility || isAdvanced;
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
-    if (isAdvanced) updateAdvancedTabIndicator();
+    if (isAdvanced) advancedTabController.refresh();
+    else if (!isAccessibility) window.BlobUI.SettingsV21?.refreshTabs();
     pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
     accessibilityNav.classList.toggle("active", isAccessibility);

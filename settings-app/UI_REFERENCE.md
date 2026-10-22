@@ -18,7 +18,9 @@ Advanced Settings uses API key and App settings tabs. App settings contains the 
 
 ## Reusable settings controls
 
-Load `visibility-field.js`, `modal.js`, and `edit-session.js` before `app.js`.
+Load `visibility-field.js`, `modal.js`, `edit-session.js`, and `tabs.js` before `app.js`.
+
+`BlobUI.Tabs.attach({ container, buttons, panels, onSelect })` owns tab selection, panel visibility, the animated underline, and keyboard navigation in both Advanced and Preferences. Use `select(index)`, `refresh()` after revealing a hidden page, `setEnabled(value)` to show all panels when tabs are disabled, and `destroy()` for cleanup. It measures the underline inside its own tab strip and scrolls only that strip when revealing a tab, including the last tab. Resize, fonts, and reduced motion use the same behavior in both places.
 
 `disclosure.js` exposes `BlobUI.Disclosure.attach(container, { onToggle })` for expandable panels. Use a native button with `data-disclosure-toggle`, `aria-controls`, and an initial `aria-expanded` value. Give its panel the matching `id` and `data-disclosure-panel`. Add `data-disclosure-content` to an inner wrapper when CSS animates panel height.
 
