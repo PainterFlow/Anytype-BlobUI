@@ -91,6 +91,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
+    bool_settings.insert("includeSelections", settings.get("includeSelections").and_then(Value::as_bool).unwrap_or(true));
     let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
     bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
     bool_settings.insert("kanbanCompact", kanban_style == "compact");
@@ -545,6 +546,29 @@ mod tests {
         assert!(color_css("#FFFFFF", "Accent Color", false, true).is_err());
         let invalid = json!({"event/unsafe": "Green"});
         assert!(calendar_color_css(invalid.as_object().map(|_| &invalid)).is_err());
+    }
+
+    #[test]
+    fn selection_css_defaults_on_and_compiles_independently_of_accent_mode() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = root.join(".test-run/selections-compiled");
+        fs::create_dir_all(&fixture).unwrap();
+        let install = fixture.join("Anytype");
+        for (name, accent) in [("native", "Default"), ("preset", "Blob Pink"), ("custom", "#27A879"), ("alpha", "rgba(12, 34, 56, 0.5)")] {
+            for enabled in [None, Some(false), Some(true)] {
+                let mut data = serde_json::json!({"installDirectory": install, "settings": {
+                    "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": accent
+                }});
+                if let Some(value) = enabled { data["settings"]["includeSelections"] = serde_json::json!(value); }
+                let css = compile(root, &install, &data).unwrap();
+                assert_eq!(css.contains("--blobui-selection-fill:"), enabled.unwrap_or(true));
+                assert!(!css.contains("@blobui-"));
+                assert!(!css.contains("{{"));
+                if let Some(value) = enabled {
+                    fs::write(fixture.join(format!("{name}-{value}.css")), css).unwrap();
+                }
+            }
+        }
     }
 
     #[test]

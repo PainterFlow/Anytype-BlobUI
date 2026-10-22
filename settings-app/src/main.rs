@@ -92,6 +92,8 @@ struct SettingsDraft {
     accent_color: String,
     accent_mode: String,
     accent_preset: String,
+    #[serde(default = "default_include_selections")]
+    include_selections: bool,
     #[serde(default)]
     banner_image: String,
     reduced_motion: bool,
@@ -104,6 +106,10 @@ struct SettingsDraft {
     collapsed_categories: bool,
     #[serde(default = "default_calendar_colors_enabled")]
     calendar_colors_enabled: bool,
+}
+
+fn default_include_selections() -> bool {
+    true
 }
 
 fn default_calendar_colors_enabled() -> bool {
@@ -921,6 +927,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "fontFamily": settings.font_family,
         "codeFontFamily": settings.code_font_family,
         "accentColor": accent,
+        "includeSelections": settings.include_selections,
         "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
         "tabHoverEffect": settings.tab_hover_effect,
@@ -944,6 +951,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "fontFamily": settings.font_family,
             "codeFontFamily": settings.code_font_family,
             "accentColor": accent,
+            "includeSelections": settings.include_selections,
             "accentMode": settings.accent_mode,
             "accentPreset": settings.accent_preset,
             "bannerImage": settings.banner_image,
@@ -1097,6 +1105,9 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         accent_color,
         accent_mode,
         accent_preset,
+        include_selections: read_bool(local, "includeSelections")
+            .or_else(|| read_bool(Some(normalized), "includeSelections"))
+            .unwrap_or(true),
         banner_image,
         reduced_motion,
         tab_hover_effect,
@@ -1588,6 +1599,7 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
+            include_selections: true,
             banner_image: String::new(),
             reduced_motion: false,
             tab_hover_effect: false,
@@ -1622,6 +1634,26 @@ mod tests {
             assert_eq!(data["settings"]["calendarColorsEnabled"], enabled);
             assert_eq!(data["unrelated"], "keep");
         }
+    }
+
+    #[test]
+    fn selection_settings_migrate_and_preserve_explicit_values() {
+        assert!(SettingsDraft::default().include_selections);
+        assert!(settings_from_data(&json!({"settings": {}})).include_selections);
+        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("includeSelections");
+        assert!(serde_json::from_value::<SettingsDraft>(legacy).unwrap().include_selections);
+        for enabled in [false, true] {
+            let draft = SettingsDraft { include_selections: enabled, ..SettingsDraft::default() };
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &draft);
+            assert_eq!(data["settings"]["includeSelections"], enabled);
+            assert_eq!(data["settingsV2"]["settings"]["includeSelections"], enabled);
+            assert_eq!(settings_from_data(&data).include_selections, enabled);
+            assert_eq!(serde_json::from_value::<SettingsDraft>(serde_json::to_value(draft).unwrap()).unwrap().include_selections, enabled);
+        }
+        assert!(!settings_from_data(&json!({"settings": {"includeSelections": false}})).include_selections);
+        assert!(!settings_from_data(&json!({"settings": {"includeSelections": true}, "settingsV2": {"settings": {"includeSelections": false}}})).include_selections);
     }
 
     #[test]

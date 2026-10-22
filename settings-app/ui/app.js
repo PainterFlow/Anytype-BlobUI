@@ -22,6 +22,7 @@
   const hueInput = el("accent-hue");
   const saturationInput = el("accent-saturation");
   const brightnessInput = el("accent-brightness");
+  const includeSelections = el("include-selections");
   const nativeAccent = el("native-accent");
   const swatch = el("accent-swatch");
   const accentValue = el("accent-value");
@@ -600,7 +601,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1287,6 +1288,7 @@
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      includeSelections: settings.includeSelections !== false,
       bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,
       tabHoverEffect: settings.tabHoverEffect === true,
@@ -1301,6 +1303,8 @@
     accentValue.value = draft.accentColor;
     reducedMotion.checked = draft.reducedMotion;
     root.dataset.reducedMotion = String(draft.reducedMotion);
+    includeSelections.checked = draft.includeSelections;
+    root.dataset.includeSelections = String(draft.includeSelections);
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
@@ -1879,6 +1883,7 @@
     markDirty();
   });
   for (const [control, property] of [
+    [includeSelections, "includeSelections"],
     [reducedMotion, "reducedMotion"],
     [tabHoverEffect, "tabHoverEffect"],
     [linkHoverEffect, "linkHoverEffect"],
@@ -1894,6 +1899,7 @@
       }
       draft[property] = control.checked;
       if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
+      if (property === "includeSelections") root.dataset.includeSelections = String(draft.includeSelections);
       markDirty();
     });
   }
