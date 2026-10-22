@@ -35,12 +35,136 @@
   const tabHoverEffect = el("tab-hover-effect");
   const linkHoverEffect = el("link-hover-effect");
   const objectMentionHoverEffect = el("object-mention-hover-effect");
+  const kanbanViewStyle = el("kanban-view-style");
+  const kanbanSelect = el("kanban-select");
+  const kanbanStyleMenu = el("kanban-style-options");
+  const kanbanStyleValue = el("kanban-style-value");
+  const kanbanStyleOptions = Array.from(kanbanStyleMenu.querySelectorAll('[role="option"]'));
+  let kanbanStyleMotionTimer = null;
+  let kanbanStyleMotionFrame = null;
+  const collapsedCategories = el("collapsed-categories");
   const preferencesNav = el("preferences-nav");
   const accessibilityNav = el("accessibility-nav");
   const advancedNav = el("advanced-nav");
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
+  function cancelKanbanStyleMotion() {
+    if (kanbanStyleMotionTimer !== null) {
+      window.clearTimeout(kanbanStyleMotionTimer);
+      kanbanStyleMotionTimer = null;
+    }
+    if (kanbanStyleMotionFrame !== null) {
+      if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(kanbanStyleMotionFrame);
+      else window.clearTimeout(kanbanStyleMotionFrame);
+      kanbanStyleMotionFrame = null;
+    }
+  }
+  function kanbanStyleMotionReduced() {
+    return root.dataset.reducedMotion === "true"
+      || (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+  function closeKanbanStyleMenu(restoreFocus = false) {
+    if (!kanbanStyleMenu || kanbanViewStyle.getAttribute("aria-expanded") !== "true") {
+      if (restoreFocus || (kanbanStyleMenu && kanbanStyleMenu.contains(document.activeElement))) {
+        (kanbanViewStyle.disabled ? el("page-title") : kanbanViewStyle).focus();
+      }
+      return;
+    }
+    const focusWasInMenu = kanbanStyleMenu.contains(document.activeElement);
+    kanbanViewStyle.setAttribute("aria-expanded", "false");
+    kanbanStyleMenu.inert = true;
+    cancelKanbanStyleMotion();
+    if (kanbanStyleMotionReduced()) {
+      kanbanStyleMenu.hidden = true;
+      kanbanStyleMenu.dataset.state = "closed";
+    } else {
+      kanbanStyleMenu.dataset.state = "closing";
+      kanbanStyleMotionTimer = window.setTimeout(() => {
+        kanbanStyleMotionTimer = null;
+        if (kanbanViewStyle.getAttribute("aria-expanded") === "false") {
+          kanbanStyleMenu.hidden = true;
+          kanbanStyleMenu.dataset.state = "closed";
+        }
+      }, 100);
+    }
+    if (restoreFocus || focusWasInMenu) (kanbanViewStyle.disabled ? el("page-title") : kanbanViewStyle).focus();
+  }
+  function syncKanbanStyleSelection(value) {
+    const selected = ["default", "balanced", "compact"].includes(value) ? value : "default";
+    kanbanViewStyle.value = selected;
+    const option = kanbanStyleOptions.find((item) => item.dataset.value === selected);
+    kanbanStyleValue.textContent = option ? option.querySelector(".kanban-option-label").textContent : "Default";
+    kanbanStyleOptions.forEach((item) => item.setAttribute("aria-selected", String(item === option)));
+    return selected;
+  }
+  function focusKanbanStyleOption(index) {
+    const next = (index + kanbanStyleOptions.length) % kanbanStyleOptions.length;
+    kanbanStyleOptions[next].focus();
+  }
+  function openKanbanStyleMenu(focusSelected = true) {
+    if (kanbanViewStyle.disabled) return;
+    cancelKanbanStyleMotion();
+    kanbanStyleMenu.hidden = false;
+    kanbanStyleMenu.inert = false;
+    kanbanViewStyle.setAttribute("aria-expanded", "true");
+    if (kanbanStyleMotionReduced()) {
+      kanbanStyleMenu.dataset.state = "open";
+    } else {
+      kanbanStyleMenu.dataset.state = "opening";
+      const finishOpening = () => {
+        kanbanStyleMotionFrame = null;
+        if (kanbanViewStyle.getAttribute("aria-expanded") === "true") kanbanStyleMenu.dataset.state = "open";
+      };
+      kanbanStyleMotionFrame = typeof window.requestAnimationFrame === "function"
+        ? window.requestAnimationFrame(finishOpening)
+        : window.setTimeout(finishOpening, 0);
+    }
+    if (focusSelected) focusKanbanStyleOption(Math.max(0, kanbanStyleOptions.findIndex((item) => item.dataset.value === kanbanViewStyle.value)));
+  }
+  kanbanViewStyle.addEventListener("click", () => {
+    if (kanbanViewStyle.getAttribute("aria-expanded") !== "true") openKanbanStyleMenu();
+    else closeKanbanStyleMenu();
+  });
+  kanbanViewStyle.addEventListener("keydown", (event) => {
+    if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+      event.preventDefault();
+      if (kanbanViewStyle.getAttribute("aria-expanded") !== "true") openKanbanStyleMenu();
+      else focusKanbanStyleOption(event.key === "ArrowUp"
+        ? Math.max(0, kanbanStyleOptions.findIndex((item) => item.dataset.value === kanbanViewStyle.value) - 1)
+        : Math.max(0, kanbanStyleOptions.findIndex((item) => item.dataset.value === kanbanViewStyle.value)));
+    }
+  });
+  kanbanStyleOptions.forEach((option, index) => {
+    option.addEventListener("click", () => {
+      syncKanbanStyleSelection(option.dataset.value);
+      kanbanViewStyle.dispatchEvent(new Event("change", { bubbles: true }));
+      closeKanbanStyleMenu(true);
+    });
+    option.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        focusKanbanStyleOption(index + (event.key === "ArrowDown" ? 1 : -1));
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusKanbanStyleOption(event.key === "Home" ? 0 : kanbanStyleOptions.length - 1);
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        option.click();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeKanbanStyleMenu(true);
+      } else if (event.key === "Tab") {
+        closeKanbanStyleMenu(true);
+      }
+    });
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (kanbanSelect && !kanbanSelect.contains(event.target)) closeKanbanStyleMenu();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (kanbanStyleMenu && !kanbanSelect.contains(event.target)) closeKanbanStyleMenu();
+  });
   const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab")];
   function updateAdvancedTabIndicator() {
     if (advancedPage.hidden) return;
@@ -473,7 +597,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1108,6 +1232,7 @@
   function updateSaveButton() {
     const dirty = editSession.isDirty();
     const settingsLocked = saveBusy || isInstallingUpdate();
+    if (settingsLocked || !draft) closeKanbanStyleMenu();
     saveButton.hidden = !draft || !dirty;
     saveButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
     discardButton.hidden = !draft || !dirty;
@@ -1115,6 +1240,8 @@
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    kanbanViewStyle.disabled = settingsLocked || !draft;
+    if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
@@ -1142,7 +1269,7 @@
     const font = fontFamily.value.trim();
     const codeFont = codeFontFamily.value.trim();
     const validFamily = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
-    const interfaceFamily = validFamily.test(font) ? font : "Libron";
+    const interfaceFamily = validFamily.test(font) ? font : "Inter";
     const codeFamily = validFamily.test(codeFont) ? codeFont : "Consolas";
     root.style.setProperty("--font-interface", '"' + interfaceFamily + '", "Segoe UI", sans-serif');
     root.style.setProperty("--font-code", '"' + codeFamily + '", "Cascadia Code", monospace');
@@ -1151,7 +1278,7 @@
   function assignDraftToForm(settings) {
     const accent = normalizeForUi(settings);
     draft = {
-      fontFamily: String(settings.fontFamily || "Libron"),
+      fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
@@ -1161,6 +1288,8 @@
       tabHoverEffect: settings.tabHoverEffect === true,
       linkHoverEffect: settings.linkHoverEffect === true,
       objectMentionHoverEffect: settings.objectMentionHoverEffect === true,
+      kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
+      collapsedCategories: settings.collapsedCategories === true,
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1170,6 +1299,9 @@
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
+    closeKanbanStyleMenu();
+    syncKanbanStyleSelection(draft.kanbanViewStyle);
+    collapsedCategories.checked = draft.collapsedCategories;
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
@@ -1344,6 +1476,7 @@
   }
 
   function showSettingsPage(page) {
+    closeKanbanStyleMenu();
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
@@ -1714,6 +1847,7 @@
     [tabHoverEffect, "tabHoverEffect"],
     [linkHoverEffect, "linkHoverEffect"],
     [objectMentionHoverEffect, "objectMentionHoverEffect"],
+    [collapsedCategories, "collapsedCategories"],
   ]) {
     control.addEventListener("change", () => {
       if (!draft || saveBusy || isInstallingUpdate()) return;
@@ -1723,6 +1857,13 @@
     });
   }
   let folderPickerBusy = false;
+  kanbanViewStyle.addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!["default", "balanced", "compact"].includes(kanbanViewStyle.value)) return;
+    syncKanbanStyleSelection(kanbanViewStyle.value);
+    draft.kanbanViewStyle = kanbanViewStyle.value;
+    markDirty();
+  });
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
@@ -2130,6 +2271,12 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape" && kanbanViewStyle.getAttribute("aria-expanded") === "true") {
+      event.preventDefault();
+      closeKanbanStyleMenu(true);
+      return;
+    }
     if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     const matches = (action) => {
       const binding = shortcutBindings.find((item) => item.action === action);

@@ -578,6 +578,25 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
 
   element('preferences-nav').handlers.click();
   assert.equal(element('reduced-motion').checked, false, 'Reduced Motion must load disabled by default.');
+  assert.equal(element('kanban-view-style').value, 'default');
+  assert.equal(element('collapsed-categories').checked, false);
+  element('kanban-view-style').value = 'compact';
+  element('kanban-view-style').handlers.change();
+  await changeToggle('collapsed-categories', true);
+  assert.equal(element('save-button').hidden, false, 'Kanban edits mark the draft dirty.');
+  context.window.BlobUI.discardChanges();
+  assert.equal(element('kanban-view-style').value, 'default', 'Undo restores the saved style.');
+  assert.equal(element('collapsed-categories').checked, false, 'Undo restores collapse.');
+  for (const style of ['balanced', 'compact', 'default']) {
+    element('kanban-view-style').value = style;
+    element('kanban-view-style').handlers.change();
+    await changeToggle('collapsed-categories', style !== 'default');
+    await element('save-button').handlers.click();
+    await flush();
+    assert.equal(savedSettings.at(-1).kanbanViewStyle, style);
+    assert.equal(savedSettings.at(-1).collapsedCategories, style !== 'default');
+    assert.equal(element('save-button').hidden, true, 'Save establishes the Kanban baseline.');
+  }
   assert.equal(element('tab-hover-effect').checked, false, 'Tab hover previews must load disabled by default.');
   assert.equal(element('link-hover-effect').checked, false, 'Link hover previews must load disabled by default.');
   assert.equal(element('object-mention-hover-effect').checked, false, 'Object mention hover previews must load disabled by default.');
@@ -826,6 +845,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.document.handlers.keydown({ ...quitKey, ctrlKey: false });
   context.document.handlers.keydown({ ...quitKey, repeat: true });
   context.document.handlers.keydown({ ...quitKey, altKey: true });
+  const beforeHandledComponentKey = calls.length;
+  context.document.handlers.keydown({ ...quitKey, defaultPrevented: true, preventDefault() {} });
+  assert.equal(calls.length, beforeHandledComponentKey, 'Handled component keys must not trigger a global shortcut.');
   assert.equal(calls.length, beforeIgnoredKeys);
   element('title-drag-region').handlers.pointerdown({ button: 0, target: { closest: () => null } });
   assert.equal(calls.at(-1), 'start_window_drag');

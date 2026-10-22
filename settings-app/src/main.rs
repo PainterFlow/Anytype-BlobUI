@@ -61,7 +61,7 @@ fn acquire_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String
     }
 }
 
-const DEFAULT_FONT: &str = "Libron";
+const DEFAULT_FONT: &str = "Inter";
 const DEFAULT_CODE_FONT: &str = "Consolas";
 const DEFAULT_ACCENT: &str = "#DE50DE";
 const DEFAULT_API_IP: &str = "127.0.0.1";
@@ -98,6 +98,14 @@ struct SettingsDraft {
     tab_hover_effect: bool,
     link_hover_effect: bool,
     object_mention_hover_effect: bool,
+    #[serde(default = "default_kanban_style")]
+    kanban_view_style: String,
+    #[serde(default)]
+    collapsed_categories: bool,
+}
+
+fn default_kanban_style() -> String {
+    "default".into()
 }
 
 #[derive(Debug, Serialize)]
@@ -879,6 +887,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "tabHoverEffect": settings.tab_hover_effect,
         "linkHoverEffect": settings.link_hover_effect,
         "objectMentionHoverEffect": settings.object_mention_hover_effect,
+        "kanbanViewStyle": settings.kanban_view_style,
+        "collapsedCategories": settings.collapsed_categories,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -901,6 +911,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "tabHoverEffect": settings.tab_hover_effect,
             "linkHoverEffect": settings.link_hover_effect,
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
+            "kanbanViewStyle": settings.kanban_view_style,
+            "collapsedCategories": settings.collapsed_categories,
         }
     });
 }
@@ -921,6 +933,9 @@ fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
 }
 
 fn validate_settings(mut settings: SettingsDraft) -> Result<SettingsDraft, String> {
+    if !matches!(settings.kanban_view_style.as_str(), "default" | "balanced" | "compact") {
+        return Err("Kanban view style must be Default, Balanced, or Compact.".into());
+    }
     settings.font_family = validate_font_family(&settings.font_family, "Interface font")?;
     settings.code_font_family = validate_font_family(&settings.code_font_family, "Code font")?;
     settings.accent_color = settings.accent_color.trim().to_string();
@@ -1014,6 +1029,14 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         .filter(|value| css::validate_banner_image(value).is_ok())
         .unwrap_or_default();
 
+    let kanban_view_style = read_string(local, "kanbanViewStyle")
+        .or_else(|| read_string(Some(normalized), "kanbanViewStyle"))
+        .filter(|value| matches!(value.as_str(), "default" | "balanced" | "compact"))
+        .unwrap_or_else(default_kanban_style);
+    let collapsed_categories = read_bool(local, "collapsedCategories")
+        .or_else(|| read_bool(Some(normalized), "collapsedCategories"))
+        .unwrap_or(false);
+
     let local_mode = read_string(local, "accentMode");
     let local_preset = read_string(local, "accentPreset");
     let (accent_mode, accent_preset, accent_color) = match local_mode.as_deref() {
@@ -1038,6 +1061,8 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         tab_hover_effect,
         link_hover_effect,
         object_mention_hover_effect,
+        kanban_view_style,
+        collapsed_categories,
     }
 }
 
@@ -1523,6 +1548,8 @@ impl Default for SettingsDraft {
             tab_hover_effect: false,
             link_hover_effect: false,
             object_mention_hover_effect: false,
+            kanban_view_style: default_kanban_style(),
+            collapsed_categories: false,
         }
     }
 }
@@ -1533,6 +1560,42 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kanban_settings_default_validate_and_restore() {
+        let defaults = SettingsDraft::default();
+        assert_eq!(defaults.kanban_view_style, "default");
+        assert!(!defaults.collapsed_categories);
+        for style in ["default", "balanced", "compact"] {
+            let settings = SettingsDraft {
+                accent_mode: "custom".into(),
+                accent_preset: String::new(),
+                kanban_view_style: style.into(),
+                collapsed_categories: true,
+                ..SettingsDraft::default()
+            };
+            assert!(validate_settings(settings.clone()).is_ok());
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            let restored = settings_from_data(&data);
+            assert_eq!(restored.kanban_view_style, style);
+            assert!(restored.collapsed_categories);
+        }
+        let legacy = settings_from_data(&json!({"settings": {"kanbanViewStyle": "balanced", "collapsedCategories": true}}));
+        assert_eq!(legacy.kanban_view_style, "balanced");
+        assert!(legacy.collapsed_categories);
+        let invalid = settings_from_data(&json!({"settingsV2": {"settings": {"kanbanViewStyle": "bad", "collapsedCategories": "true"}}}));
+        assert_eq!(invalid.kanban_view_style, "default");
+        assert!(!invalid.collapsed_categories);
+        assert!(validate_settings(SettingsDraft { kanban_view_style: "bad".into(), ..SettingsDraft::default() }).is_err());
+        let old_draft = serde_json::to_value(SettingsDraft::default()).unwrap();
+        let mut old_draft = old_draft.as_object().unwrap().clone();
+        old_draft.remove("kanbanViewStyle");
+        old_draft.remove("collapsedCategories");
+        let restored: SettingsDraft = serde_json::from_value(Value::Object(old_draft)).unwrap();
+        assert_eq!(restored.kanban_view_style, "default");
+        assert!(!restored.collapsed_categories);
+    }
 
     #[test]
     fn reads_bom_prefixed_legacy_settings_json() {
