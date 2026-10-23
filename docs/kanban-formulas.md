@@ -2,7 +2,7 @@
 
 Open Kanban View Formulas in the Settings sidebar. With Settings Future Proof UI Refresh enabled, use Preferences > Kanban > Kanban View Formulas.
 
-The page follows Anytype's UI philosophy. Search the real views available to your API key, then expand a view to use its calculator. Each entry shows its space, source name, and source kind so duplicate names remain distinguishable.
+The page follows Anytype's UI philosophy. Search the real views available to your API key, then select its flat list row to open the calculator dialog. The magnifier expands into a search field, the filter narrows the list by space, and the reload icon reloads available views. Each entry shows its space, source name, and source kind so duplicate names remain distinguishable.
 
 ## Calculator
 
@@ -10,19 +10,19 @@ Use the keypad or type numbers, decimal points, parentheses, and `+ - * / ^`. Po
 
 Insert property lets you choose a numeric property followed by Total, Average, Minimum, or Maximum. Each readable term stores the property's stable key. Card count counts all cards in the current category. For example, insert Total Estimate, press Divide, then insert Card count.
 
-Arrow keys move between terms. Home and End move to the beginning or end. Backspace removes a digit or term; Delete removes the next term. C clears the calculation. Enter or = checks it against real category data. This check does not publish results.
+Arrow keys move between terms. Home and End move to the beginning or end. Backspace removes a digit or term; Delete removes the next term. C clears the calculation. Division appears as a stacked fraction. The five-column keypad supports keyboard editing. Use Save to publish the calculation. The dialog closes after a successful save; a failed save keeps the calculation open with its edits. The X, Escape, and backdrop close the dialog.
 
 Each category calculates independently using all matching cards, including cards Anytype has not rendered yet. Numeric aggregates ignore missing values. Empty totals and card counts return zero; other empty aggregates return No value. Invalid operations, incompatible property values, and deleted properties produce inline errors.
 
-## Save and refresh
+## Saving calculations
 
-The sidebar Save and Undo include calculations and the display preference. Searching, collapsing views, or changing Settings pages preserves pending edits.
+The sidebar Save and Undo include calculations and the display preference. Searching, changing filters, or changing Settings pages preserves pending edits.
 
-Save reads fresh data and publishes every saved calculation as one snapshot. Refresh results recalculates the saved configuration; it stays disabled while changes are pending. Press Ctrl+R in Anytype after either action. Results remain snapshots until refreshed. Settings shows the last successful calculation time.
+Save reads fresh data and publishes every saved calculation as one snapshot. Press Ctrl+R in Anytype after saving. Results remain snapshots until the next save. The toolbar reload action discovers views without publishing calculation results. Settings shows the last successful calculation time.
 
 Publication updates the workspace configuration, installed BlobUI data, and stylesheet in one transaction. A failed API read or file replacement retains the previous snapshot and pending edits. Normal appearance saves preserve the snapshot. The API key remains in the native backend; the browser never receives it.
 
-Display formulas under Preferences > Kanban is independent of Board layout. Balanced is the default and places results beside category titles. Spacious places them below the title. Compact uses a decorative f(x) indicator with a result bubble when the category header is hovered. Conservative container breakpoints use Compact where a result may not fit.
+Display formulas under Preferences > Kanban shares the grouped settings list and picker control with Board layout. Its value is independent of Board layout. Balanced is the default and places results beside category titles. Spacious places them below the title. Compact uses a decorative f(x) indicator with a result bubble when the category header is hovered. Conservative container breakpoints use Compact where a result may not fit.
 
 ## Compatibility and storage
 

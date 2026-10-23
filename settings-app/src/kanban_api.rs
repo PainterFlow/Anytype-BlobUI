@@ -6,6 +6,12 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
+
+const DISCOVERY_CONCURRENCY: usize = 4;
 
 pub struct Client {
     key: crate::SecretString,
@@ -57,10 +63,25 @@ impl Client {
             )
         })
     }
-    fn document(&self, space: &str, object: &str) -> Result<Value, String> {
+    fn document_blocks(&self, space: &str, object: &str) -> Result<Value, String> {
         self.request(
             "GET",
-            &format!("/v2/spaces/{}/objects/{}?ids=full", enc(space), enc(object)),
+            &format!(
+                "/v2/spaces/{}/objects/{}?ids=full&include=blocks",
+                enc(space),
+                enc(object)
+            ),
+            None,
+        )
+    }
+    fn document_properties(&self, space: &str, object: &str) -> Result<Value, String> {
+        self.request(
+            "GET",
+            &format!(
+                "/v2/spaces/{}/objects/{}?ids=full&include=properties",
+                enc(space),
+                enc(object)
+            ),
             None,
         )
     }
@@ -81,119 +102,249 @@ impl Client {
         .collect()
     }
 
+    fn discover_rows(
+        &self,
+        space_id: &str,
+        space_name: &str,
+        rows: &[Value],
+    ) -> Result<SpaceDiscovery, String> {
+        if rows.is_empty() {
+            return Ok(SpaceDiscovery::default());
+        }
+        if rows.len() == 1 {
+            return self.discover_row(space_id, space_name, &rows[0]).map(|object| {
+                SpaceDiscovery {
+                    views: object.views,
+                    unreadable: object.unreadable,
+                }
+            });
+        }
+
+        let next = AtomicUsize::new(0);
+        let discovery = Mutex::new(SpaceDiscovery::default());
+        let errors = Mutex::new(Vec::new());
+        let worker_count = rows.len().min(DISCOVERY_CONCURRENCY);
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let discovery = &discovery;
+                let errors = &errors;
+                let next = &next;
+                scope.spawn(move || loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    if index >= rows.len() {
+                        break;
+                    }
+                    match self.discover_row(space_id, space_name, &rows[index]) {
+                        Ok(object) => {
+                            if let Ok(mut aggregate) = discovery.lock() {
+                                aggregate.unreadable += object.unreadable;
+                                aggregate.views.extend(object.views);
+                            } else {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            if let Ok(mut failures) = errors.lock() {
+                                failures.push((index, error));
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        let mut failures = errors
+            .into_inner()
+            .map_err(|_| "The Kanban discovery task stopped. Try loading views again.".to_string())?;
+        if !failures.is_empty() {
+            failures.sort_by_key(|(index, _)| *index);
+            return Err(failures.remove(0).1);
+        }
+        discovery
+            .into_inner()
+            .map_err(|_| "The Kanban discovery task stopped. Try loading views again.".to_string())
+    }
+
+    fn discover_row(
+        &self,
+        space_id: &str,
+        space_name: &str,
+        row: &Value,
+    ) -> Result<ObjectDiscovery, String> {
+        let object_id = required(row, "id")?;
+        let document = match self.document_blocks(space_id, &object_id) {
+            Ok(document) => document,
+            Err(_) => {
+                return Ok(ObjectDiscovery {
+                    unreadable: 1,
+                    ..ObjectDiscovery::default()
+                });
+            }
+        };
+        let kind = list_kind(&document).or_else(|| list_kind(row));
+        let source = row
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled")
+            .to_string();
+        let mut candidates = Vec::new();
+        let mut unreadable = 0;
+
+        for block in document
+            .get("blocks")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            for raw in block
+                .get("views")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if raw
+                    .get("type")
+                    .or_else(|| raw.get("layout"))
+                    .and_then(Value::as_str)
+                    != Some("kanban")
+                {
+                    continue;
+                }
+                let (Ok(block_id), Ok(view_id)) =
+                    (required(block, "id"), required(raw, "id"))
+                else {
+                    unreadable += 1;
+                    continue;
+                };
+                let target = Target {
+                    space_id: space_id.into(),
+                    object_id: object_id.clone(),
+                    block_id,
+                    view_id,
+                };
+                let (available_keys, metadata_error) = match configured_view_keys(raw) {
+                    Ok(keys) => (keys, None),
+                    Err(error) => (None, Some(error)),
+                };
+                let mut candidate = DiscoveredView {
+                    target,
+                    name: raw
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Kanban")
+                        .into(),
+                    space: space_name.into(),
+                    source: source.clone(),
+                    kind: if kind == Some("collections") {
+                        "Collection"
+                    } else if kind.is_some() {
+                        "Query"
+                    } else {
+                        "Inline / type view"
+                    }
+                    .into(),
+                    raw: raw.clone(),
+                    available_keys,
+                    unsupported: metadata_error,
+                };
+                if kind.is_none() && candidate.unsupported.is_none() {
+                    candidate.unsupported = Some(
+                        "The API does not expose a filtered membership endpoint for this view."
+                            .into(),
+                    );
+                }
+                candidates.push(candidate);
+            }
+        }
+
+        if candidates.is_empty() {
+            return Ok(ObjectDiscovery {
+                views: candidates,
+                unreadable,
+            });
+        }
+
+        let exposed = if let Some(kind) = kind.filter(|_| {
+            candidates.iter().any(|candidate| candidate.unsupported.is_none())
+        }) {
+            match self.pages(
+                "GET",
+                &format!(
+                    "/v2/spaces/{}/{}/{}/views?ids=full",
+                    enc(space_id),
+                    kind,
+                    enc(&object_id)
+                ),
+                None,
+            ) {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    unreadable += 1;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        for candidate in &mut candidates {
+            if candidate.unsupported.is_some() {
+                continue;
+            }
+            let Some(exposed) = exposed.as_deref() else {
+                candidate.unsupported = Some(
+                    "The API does not expose a filtered membership endpoint for this view.".into(),
+                );
+                continue;
+            };
+            match exposed_view(&candidate.target, exposed) {
+                Ok(api_view) => match configured_view_keys(api_view) {
+                    Ok(Some(api_keys)) => match &candidate.available_keys {
+                        Some(document_keys) if document_keys != &api_keys => {
+                            candidate.unsupported = Some(
+                                "The API returned inconsistent properties for this view.".into(),
+                            );
+                        }
+                        Some(_) => {}
+                        None => candidate.available_keys = Some(api_keys),
+                    },
+                    Ok(None) => {}
+                    Err(error) => candidate.unsupported = Some(error),
+                },
+                Err(error) => candidate.unsupported = Some(error),
+            }
+        }
+
+        Ok(ObjectDiscovery {
+            views: candidates,
+            unreadable,
+        })
+    }
+
     pub fn discover(&self) -> Result<crate::kanban::Catalog, String> {
         let mut views = Vec::new();
         let mut unreadable = 0usize;
         for space in self.pages("GET", "/v2/spaces?ids=full", None)? {
             let sid = required(&space, "id")?;
             let name = space.get("name").and_then(Value::as_str).unwrap_or("Space");
-            let properties = self.properties(&sid)?;
             let rows = self.pages(
                 "POST",
                 &format!("/v2/spaces/{}/search", enc(&sid)),
                 Some(&json!({})),
             )?;
-            for row in rows {
-                let oid = required(&row, "id")?;
-                let document = match self.document(&sid, &oid) {
-                    Ok(document) => document,
-                    Err(_) => {
-                        unreadable += 1;
-                        continue;
-                    }
-                };
-                let source = row
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Untitled");
-                let kind = list_kind(&document);
-                let exposed = if let Some(kind) = kind {
-                    match self.pages(
-                        "GET",
-                        &format!(
-                            "/v2/spaces/{}/{}/{}/views?ids=full",
-                            enc(&sid),
-                            kind,
-                            enc(&oid)
-                        ),
-                        None,
-                    ) {
-                        Ok(value) => Some(value),
-                        Err(_) => {
-                            unreadable += 1;
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                for block in document
-                    .get("blocks")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                {
-                    for raw in block
-                        .get("views")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                    {
-                        if raw
-                            .get("type")
-                            .or_else(|| raw.get("layout"))
-                            .and_then(Value::as_str)
-                            != Some("kanban")
-                        {
-                            continue;
-                        }
-                        let (Ok(block_id), Ok(view_id)) =
-                            (required(block, "id"), required(raw, "id"))
-                        else {
-                            unreadable += 1;
-                            continue;
-                        };
-                        let target = Target {
-                            space_id: sid.clone(),
-                            object_id: oid.clone(),
-                            block_id,
-                            view_id,
-                        };
-                        let mut view = View {
-                            target,
-                            name: raw
-                                .get("name")
-                                .and_then(Value::as_str)
-                                .unwrap_or("Kanban")
-                                .into(),
-                            space: name.into(),
-                            source: source.into(),
-                            kind: if kind == Some("collections") {
-                                "Collection"
-                            } else if kind.is_some() {
-                                "Query"
-                            } else {
-                                "Inline / type view"
-                            }
-                            .into(),
-                            properties: properties
-                                .iter()
-                                .filter(|p| p.format == "number")
-                                .cloned()
-                                .collect(),
-                            unsupported: None,
-                        };
-                        let supported = (|| {
-                            verify_exposed(&view.target,exposed.as_deref().ok_or("The API does not expose a filtered membership endpoint for this view.")?)?;
-                            self.grouping(&view.target, raw, &properties)?;
-                            Ok::<(), String>(())
-                        })();
-                        if let Err(error) = supported {
-                            view.unsupported = Some(error);
-                        }
-                        views.push(view);
-                    }
-                }
+            let mut discovered = self.discover_rows(&sid, name, &rows)?;
+            unreadable += discovered.unreadable;
+            if discovered.views.is_empty() {
+                continue;
+            }
+
+            // Space property definitions are needed for names and formats, but
+            // only keys explicitly configured on each view are exposed below.
+            let properties = self.properties(&sid)?;
+            for candidate in discovered.views.drain(..) {
+                views.push(candidate.into_view(&properties));
             }
         }
         views.sort_by(|a, b| {
@@ -202,6 +353,7 @@ impl Client {
                 .cmp(&b.name.to_lowercase())
                 .then(a.space.cmp(&b.space))
                 .then(a.source.cmp(&b.source))
+                .then(a.target.cmp(&b.target))
         });
         let mut seen = BTreeSet::new();
         if views.iter().any(|v| !seen.insert(v.target.clone())) {
@@ -225,7 +377,7 @@ impl Client {
         calculator: &Calculator,
     ) -> Result<Vec<CategoryResult>, String> {
         target.validate()?;
-        let document = self.document(&target.space_id, &target.object_id)?;
+        let document = self.document_blocks(&target.space_id, &target.object_id)?;
         let kind = list_kind(&document)
             .ok_or("This view has no supported filtered membership endpoint.")?;
         let block = document["blocks"]
@@ -249,15 +401,28 @@ impl Client {
             ),
             None,
         )?;
-        verify_exposed(target, &exposed)?;
+        let api_view = exposed_view(target, &exposed)?;
+        let document_keys = configured_view_keys(raw)?;
+        let endpoint_keys = configured_view_keys(api_view)?;
+        let available_keys = match (document_keys, endpoint_keys) {
+            (Some(document), Some(endpoint)) if document != endpoint => {
+                return Err("The API returned inconsistent properties for this view.".into());
+            }
+            (Some(document), _) => document,
+            (_, Some(endpoint)) => endpoint,
+            (None, None) => {
+                return Err("The API does not expose which properties are available to this view.".into());
+            }
+        };
         let properties = self.properties(&target.space_id)?;
         let keys = calculator.properties();
         if keys.iter().any(|key| {
             !properties
                 .iter()
                 .any(|p| p.key == *key && p.format == "number")
+                || !available_keys.contains(key)
         }) {
-            return Err("A calculation property was deleted or is no longer numeric. Choose a replacement property.".into());
+            return Err("A calculation property is no longer numeric or available to this view. Choose a replacement property.".into());
         }
         let mut grouping = self.grouping(target, raw, &properties)?;
         let mut fields = keys;
@@ -320,14 +485,7 @@ impl Client {
         view: &Value,
         properties: &[Property],
     ) -> Result<Grouping, String> {
-        let property = required(view, "group_by")
-            .map_err(|_| "The API does not expose this view's grouping property.".to_string())?;
-        let format = properties
-            .iter()
-            .find(|p| p.key == property)
-            .ok_or("The grouping property is unavailable.")?
-            .format
-            .clone();
+        let (property, format) = grouping_property(view, properties)?;
         let mut grouping = Grouping {
             property,
             format: format.clone(),
@@ -359,40 +517,33 @@ impl Client {
                 option.get("id").and_then(Value::as_str),
                 option.get("name").and_then(Value::as_str),
             ) {
-                resolved.insert(name.to_string(), id.to_string());
+                insert_option_id(&mut resolved, name, id)?;
             }
         }
-        if format == "select" {
-            for group in view
-                .get("groups")
+
+        let options_need_ids = options.iter().any(|option| {
+            option["name"]
+                .as_str()
+                .is_none_or(|name| !resolved.contains_key(name))
+        });
+        let select_group_ids = if format == "select" {
+            view.get("groups")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-            {
-                let id = required(group, "id")?;
-                if id == "empty" {
-                    continue;
-                }
-                let object = self.document(&target.space_id, &id).map_err(|_| {
-                    "The API could not resolve a category's exact identity.".to_string()
-                })?;
-                let name = object
-                    .pointer("/properties/name")
-                    .and_then(Value::as_str)
-                    .ok_or("The API did not return a category option name.")?;
-                if resolved.get(name).is_some_and(|old| old != &id) {
-                    return Err("Duplicate option names prevent an exact category match.".into());
-                }
-                resolved.insert(name.into(), id);
-            }
-        }
-        // Some keys allow the legacy read endpoints, which expose stable option
-        // IDs for multi-select. A refusal is not bypassed or treated as success.
-        if options.iter().any(|o| {
-            o["name"]
-                .as_str()
-                .is_none_or(|name| !resolved.contains_key(name))
-        }) {
+                .map(|group| required(group, "id"))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
+        let group_needs_ids = select_group_ids.iter().any(|id| {
+            id.as_str() != "empty" && !resolved.values().any(|known| known == id)
+        });
+
+        // A single legacy tags read can resolve the whole option set. This
+        // avoids one document request per select group on API versions that
+        // omit IDs from v2 option rows.
+        if options_need_ids || group_needs_ids {
             if let Ok(tags) = self.pages(
                 "GET",
                 &format!(
@@ -404,55 +555,224 @@ impl Client {
             ) {
                 for tag in tags {
                     if let (Some(id), Some(name)) = (tag["id"].as_str(), tag["name"].as_str()) {
-                        if resolved.get(name).is_some_and(|old| old != id) {
-                            return Err(
-                                "Duplicate option names prevent an exact category match.".into()
-                            );
-                        }
-                        resolved.insert(name.into(), id.into());
+                        insert_option_id(&mut resolved, name, id)?;
                     }
                 }
             }
         }
+
+        // When neither v2 nor the legacy endpoint exposes stable IDs, resolve
+        // only groups whose exact IDs are absent from the option map.
+        let unresolved_group_ids = select_group_ids
+            .iter()
+            .filter(|id| {
+                id.as_str() != "empty" && !resolved.values().any(|known| known == *id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in &unresolved_group_ids {
+            let object = self.document_properties(&target.space_id, id).map_err(|_| {
+                "The API could not resolve a category's exact identity.".to_string()
+            })?;
+            let name = object
+                .pointer("/properties/name")
+                .and_then(Value::as_str)
+                .ok_or("The API did not return a category option name.")?;
+            insert_option_id(&mut resolved, name, id)?;
+        }
+
+        if options.iter().any(|option| {
+            option["name"]
+                .as_str()
+                .is_none_or(|name| !resolved.contains_key(name))
+        }) {
+            return Err("The API does not expose every option's stable ID. This view cannot publish results safely.".into());
+        }
         for option in options {
             let name = required(&option, "name")?;
-            let id=resolved.get(&name).ok_or("The API does not expose every option's stable ID. This view cannot publish results safely.")?;
+            let id = resolved
+                .get(&name)
+                .ok_or("The API does not expose every option's stable ID. This view cannot publish results safely.")?;
             crate::kanban::validate_id(id)?;
             if grouping.options.insert(name.clone(), id.clone()).is_some() {
                 return Err("Duplicate option names prevent an exact category match.".into());
             }
-            grouping.categories.insert(
-                if format == "multi_select" {
-                    md5(id)
-                } else {
-                    id.clone()
-                },
-                name,
-            );
+            let category_id = if format == "multi_select" {
+                md5(id)
+            } else {
+                id.clone()
+            };
+            if category_id == "empty"
+                || grouping
+                    .categories
+                    .insert(category_id, name)
+                    .is_some()
+            {
+                return Err("The API returned duplicate category identities.".into());
+            }
         }
         grouping.categories.insert("empty".into(), String::new());
         Ok(grouping)
     }
 }
 
-fn verify_exposed(target: &Target, exposed: &[Value]) -> Result<(), String> {
+#[derive(Default)]
+struct ObjectDiscovery {
+    views: Vec<DiscoveredView>,
+    unreadable: usize,
+}
+
+#[derive(Default)]
+struct SpaceDiscovery {
+    views: Vec<DiscoveredView>,
+    unreadable: usize,
+}
+
+struct DiscoveredView {
+    target: Target,
+    name: String,
+    space: String,
+    source: String,
+    kind: String,
+    raw: Value,
+    available_keys: Option<BTreeSet<String>>,
+    unsupported: Option<String>,
+}
+
+impl DiscoveredView {
+    fn into_view(mut self, space_properties: &[Property]) -> View {
+        let properties = self.available_keys.as_ref().map(|keys| {
+            space_properties
+                .iter()
+                .filter(|property| keys.contains(&property.key) && property.format == "number")
+                .cloned()
+                .collect()
+        }).unwrap_or_else(|| {
+            if self.unsupported.is_none() {
+                self.unsupported = Some(
+                    "The API does not expose which properties are available to this view.".into(),
+                );
+            }
+            Vec::new()
+        });
+        if self.unsupported.is_none() {
+            if let Err(error) = grouping_property(&self.raw, space_properties) {
+                self.unsupported = Some(error);
+            }
+        }
+        View {
+            target: self.target,
+            name: self.name,
+            space: self.space,
+            source: self.source,
+            kind: self.kind,
+            properties,
+            unsupported: self.unsupported,
+        }
+    }
+}
+
+fn exposed_view<'a>(target: &Target, exposed: &'a [Value]) -> Result<&'a Value, String> {
     // API routes accept a unique suffix, but storage/CSS always use the full ID
     // from the document. Ambiguous suffixes are refused, not guessed.
     let matches = exposed
         .iter()
-        .filter(|v| {
-            v["id"].as_str().is_some_and(|id| {
+        .filter(|view| {
+            view["id"].as_str().is_some_and(|id| {
                 id == target.view_id || (id.len() >= 6 && target.view_id.ends_with(id))
             })
         })
-        .count();
-    if matches != 1 {
-        return Err(
-            "The API does not expose an unambiguous filtered endpoint for this view.".into(),
-        );
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err("The API does not expose an unambiguous filtered endpoint for this view.".into());
     }
+    Ok(matches[0])
+}
+
+fn configured_view_keys(view: &Value) -> Result<Option<BTreeSet<String>>, String> {
+    let mut configured: Option<BTreeSet<String>> = None;
+    for field in ["relations", "columns"] {
+        let Some(raw) = view.get(field).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let items = raw
+            .as_array()
+            .ok_or("The API returned malformed properties for this view.")?;
+        let mut keys = BTreeSet::new();
+        for item in items {
+            let key = item
+                .as_str()
+                .or_else(|| item.get("key").and_then(Value::as_str))
+                .or_else(|| item.get("property_key").and_then(Value::as_str))
+                .or_else(|| item.get("propertyKey").and_then(Value::as_str))
+                .or_else(|| item.get("relation_key").and_then(Value::as_str))
+                .or_else(|| item.get("relationKey").and_then(Value::as_str))
+                .or_else(|| {
+                    item.get("property").and_then(|property| {
+                        property.as_str().or_else(|| {
+                            property
+                                .get("key")
+                                .or_else(|| property.get("property_key"))
+                                .and_then(Value::as_str)
+                        })
+                    })
+                })
+                .filter(|key| !key.is_empty())
+                .ok_or("The API returned a view property without a key.")?;
+            let visible = item
+                .get("is_visible")
+                .or_else(|| item.get("isVisible"))
+                .or_else(|| item.get("visible"));
+            match visible {
+                Some(Value::Bool(false)) => continue,
+                Some(Value::Bool(true)) | None => {}
+                _ => return Err("The API returned malformed visibility for a view property.".into()),
+            }
+            keys.insert(key.to_string());
+        }
+        if configured.as_ref().is_some_and(|previous| previous != &keys) {
+            return Err("The API returned inconsistent properties for this view.".into());
+        }
+        configured = Some(keys);
+    }
+    Ok(configured)
+}
+
+fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, String), String> {
+    let property = required(view, "group_by")
+        .map_err(|_| "The API does not expose this view's grouping property.".to_string())?;
+    let format = properties
+        .iter()
+        .find(|candidate| candidate.key == property)
+        .ok_or("The grouping property is unavailable.")?
+        .format
+        .clone();
+    if !matches!(format.as_str(), "checkbox" | "select" | "multi_select") {
+        return Err("This grouping format cannot be matched to Anytype headers safely.".into());
+    }
+    Ok((property, format))
+}
+
+fn insert_option_id(
+    resolved: &mut BTreeMap<String, String>,
+    name: &str,
+    id: &str,
+) -> Result<(), String> {
+    if resolved.get(name).is_some_and(|old| old.as_str() != id) {
+        return Err("Duplicate option names prevent an exact category match.".into());
+    }
+    if resolved
+        .iter()
+        .any(|(previous_name, previous_id)| {
+            previous_name.as_str() != name && previous_id.as_str() == id
+        })
+    {
+        return Err("The API returned duplicate category identities.".into());
+    }
+    resolved.insert(name.to_string(), id.to_string());
     Ok(())
 }
+
 fn list_kind(document: &Value) -> Option<&'static str> {
     match document["type"].as_str() {
         Some("collection") => Some("collections"),
@@ -680,14 +1000,16 @@ mod tests {
                     .nth(1)
                     .unwrap();
                 let page = |data: Value| json!({"data":data,"has_more":false});
-                let view = json!({"id":"view-a","type":"kanban","name":"Board","group_by":"status","groups":[{"id":"option-a"},{"id":"empty"}]});
+                let view = json!({"id":"view-a","type":"kanban","name":"Board","group_by":"status","groups":[{"id":"option-a"},{"id":"empty"}],"relations":[{"key":"estimate","isVisible":true},{"key":"status","isVisible":true},{"key":"hidden-metric","isVisible":false}]});
                 let response = if path.starts_with("/v2/spaces?") {
                     page(json!([{"id":"space","name":"Work"}]))
                 } else if path.starts_with("/v2/spaces/space/properties/status/options") {
                     page(json!([{"name":"A"}]))
+                } else if path.starts_with("/v1/spaces/space/properties/status/tags") {
+                    page(json!([{"id":"option-a","name":"A"}]))
                 } else if path.starts_with("/v2/spaces/space/properties") {
                     page(
-                        json!([{"key":"estimate","name":"Estimate","format":"number"},{"key":"status","name":"Status","format":"select"}]),
+                        json!([{"key":"estimate","name":"Estimate","format":"number"},{"key":"hidden-metric","name":"Hidden metric","format":"number"},{"key":"unused-metric","name":"Unused metric","format":"number"},{"key":"status","name":"Status","format":"select"}]),
                     )
                 } else if path.starts_with("/v2/spaces/space/search") {
                     page(json!([{"id":"object-a","name":"Tasks","type":"query"}]))
@@ -726,6 +1048,14 @@ mod tests {
         let catalog = client.discover().unwrap();
         assert_eq!(catalog.views.len(), 1);
         assert!(catalog.views[0].unsupported.is_none());
+        assert_eq!(
+            catalog.views[0]
+                .properties
+                .iter()
+                .map(|property| property.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["estimate"]
+        );
         let calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "estimate".into(),
             operation: "total".into(),
@@ -758,6 +1088,14 @@ mod tests {
         assert!(client
             .calculate(&catalog.views[0].target, &deleted)
             .is_err());
+        let unavailable = Calculator::parse(&[crate::calculator::Token::Aggregate {
+            property: "unused-metric".into(),
+            operation: "total".into(),
+        }])
+        .unwrap();
+        assert!(client
+            .calculate(&catalog.views[0].target, &unavailable)
+            .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
     }
@@ -783,6 +1121,33 @@ mod tests {
         ] {
             assert!(complete_pages(|_| Ok(response.clone())).is_err());
         }
+    }
+    #[test]
+    fn view_properties_are_scoped_to_configured_visible_relations_or_columns() {
+        let relations = json!({
+            "relations": [
+                {"key":"estimate","isVisible":true},
+                {"key":"hidden-metric","isVisible":false}
+            ]
+        });
+        assert_eq!(
+            configured_view_keys(&relations).unwrap().unwrap(),
+            BTreeSet::from(["estimate".to_string()])
+        );
+
+        let columns = json!({
+            "columns": [
+                {"property_key":"estimate"},
+                {"property_key":"hidden-metric","visible":false}
+            ]
+        });
+        assert_eq!(
+            configured_view_keys(&columns).unwrap().unwrap(),
+            BTreeSet::from(["estimate".to_string()])
+        );
+        assert!(configured_view_keys(&json!({"group_by":"estimate"}))
+            .unwrap()
+            .is_none());
     }
     #[test]
     fn exact_anytype_category_rules() {
