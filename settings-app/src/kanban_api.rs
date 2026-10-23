@@ -424,13 +424,22 @@ impl Client {
         };
         let properties = self.properties(&target.space_id)?;
         let keys = calculator.properties();
+        let mut boolean_keys = BTreeSet::new();
         if keys.iter().any(|key| {
-            !properties
+            let format = properties
                 .iter()
-                .any(|p| p.key == *key && p.format == "number")
-                || !available_keys.contains(key)
+                .find(|property| property.key == *key)
+                .map(|property| property.format.as_str());
+            match format {
+                Some("number") => !available_keys.contains(key),
+                Some(format) if is_boolean_format(format) => {
+                    boolean_keys.insert(key.clone());
+                    !available_keys.contains(key)
+                }
+                _ => true,
+            }
         }) {
-            return Err("A calculation property is no longer numeric or available to this view. Choose a replacement property.".into());
+            return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
         let mut grouping = self.grouping(target, raw, &properties)?;
         let mut fields = keys;
@@ -477,7 +486,7 @@ impl Client {
         grouped
             .into_iter()
             .map(|(id, cards)| {
-                let value = calculator.evaluate(&cards)?;
+                let value = calculator.evaluate_with_boolean_properties(&cards, &boolean_keys)?;
                 Ok(CategoryResult {
                     target: target.clone(),
                     category_id: id,
@@ -500,7 +509,7 @@ impl Client {
             options: BTreeMap::new(),
             categories: BTreeMap::new(),
         };
-        if format == "checkbox" {
+        if is_boolean_format(&format) {
             grouping.categories.insert("true".into(), String::new());
             grouping.categories.insert("false".into(), String::new());
             return Ok(grouping);
@@ -653,7 +662,10 @@ impl DiscoveredView {
         let properties = self.available_keys.as_ref().map(|keys| {
             space_properties
                 .iter()
-                .filter(|property| keys.contains(&property.key) && property.format == "number")
+                .filter(|property| {
+                    keys.contains(&property.key)
+                        && (property.format == "number" || is_boolean_format(&property.format))
+                })
                 .cloned()
                 .collect()
         }).unwrap_or_else(|| {
@@ -760,7 +772,8 @@ fn configured_view_keys(
             {
                 return Err("The API returned a source property without a format.".into());
             }
-            if item.get("format").and_then(Value::as_str) != Some("number") {
+            let format = item.get("format").and_then(Value::as_str).unwrap_or_default();
+            if format != "number" && !is_boolean_format(format) {
                 continue;
             }
             let property = item
@@ -885,10 +898,14 @@ fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, S
         .ok_or("The grouping property is unavailable.")?
         .format
         .clone();
-    if !matches!(format.as_str(), "checkbox" | "select" | "multi_select") {
+    if !(is_boolean_format(&format) || matches!(format.as_str(), "select" | "multi_select")) {
         return Err("This grouping format cannot be matched to Anytype headers safely.".into());
     }
     Ok((property, format))
+}
+
+fn is_boolean_format(format: &str) -> bool {
+    matches!(format, "checkbox" | "boolean")
 }
 
 fn insert_option_id(
@@ -987,7 +1004,7 @@ struct Grouping {
 }
 impl Grouping {
     fn category(&self, value: &Value) -> Result<String, String> {
-        if self.format == "checkbox" {
+        if is_boolean_format(&self.format) {
             return match value {
                 Value::Null => Ok("false".into()),
                 Value::Bool(value) => Ok(value.to_string()),
@@ -1147,23 +1164,23 @@ mod tests {
                     page(json!([{"id":"option-a","name":"A"}]))
                 } else if path.starts_with("/v2/spaces/space/properties") {
                     page(
-                        json!([{"key":"estimate","name":"Estimate","format":"number"},{"key":"hidden-metric","name":"Hidden metric","format":"number"},{"key":"unused-metric","name":"Unused metric","format":"number"},{"key":"status","name":"Status","format":"select"}]),
+                        json!([{"key":"estimate","name":"Estimate","format":"number"},{"key":"hidden-metric","name":"Hidden metric","format":"number"},{"key":"unused-metric","name":"Unused metric","format":"number"},{"key":"done","name":"Done","format":"checkbox"},{"key":"off-view-bool","name":"Off view boolean","format":"checkbox"},{"key":"status","name":"Status","format":"select"}]),
                     )
                 } else if path.starts_with("/v2/spaces/space/search") {
                     page(json!([{"id":"object-a","name":"Tasks","type":"query"}]))
                 } else if path.starts_with("/v2/spaces/space/objects/object-a") {
-                    json!({"id":"object-a","type":"query","blocks":[{"id":"board","object_id":"object-a","properties":[{"property":"estimate","format":"number"},{"property":"hidden-metric","format":"number"},{"property":"status","format":"select"}],"views":[view]}]})
+                    json!({"id":"object-a","type":"query","blocks":[{"id":"board","object_id":"object-a","properties":[{"property":"estimate","format":"number"},{"property":"hidden-metric","format":"number"},{"property":"done","format":"checkbox"},{"property":"status","format":"select"}],"views":[view]}]})
                 } else if path.starts_with("/v2/spaces/space/objects/option-a") {
                     json!({"id":"option-a","kind":"relation_option","properties":{"name":"A"}})
                 } else if path.starts_with("/v2/spaces/space/queries/object-a/views") {
                     page(json!([view]))
                 } else if path.starts_with("/v2/spaces/space/queries/object-a/objects") {
                     assert!(path.contains("view=view-a"));
-                    assert!(path.contains("fields=estimate%2Cstatus"));
+                    assert!(path.contains("fields=estimate%2Cstatus") || path.contains("fields=done%2Cstatus"));
                     if path.contains("offset=0") {
-                        json!({"data":[{"id":"card-a","properties":{"estimate":3,"status":"A"}}],"has_more":true,"total":2})
+                        json!({"data":[{"id":"card-a","properties":{"estimate":3,"done":true,"status":"A"}}],"has_more":true,"total":2})
                     } else {
-                        json!({"data":[{"id":"card-b","properties":{"estimate":7,"status":null}}],"has_more":false,"total":2})
+                        json!({"data":[{"id":"card-b","properties":{"estimate":7,"done":false,"status":null}}],"has_more":false,"total":2})
                     }
                 } else {
                     panic!("Unexpected fixture route {path}")
@@ -1192,7 +1209,7 @@ mod tests {
                 .iter()
                 .map(|property| property.key.as_str())
                 .collect::<Vec<_>>(),
-            vec!["estimate", "hidden-metric"]
+            vec!["estimate", "hidden-metric", "done"]
         );
         assert!(catalog.views[0].source_signature.is_some());
         let calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
@@ -1219,6 +1236,30 @@ mod tests {
                 .value,
             Some(7.0)
         );
+        let boolean_calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
+            property: "done".into(),
+            operation: "total".into(),
+        }])
+        .unwrap();
+        let boolean_results = client
+            .calculate(&catalog.views[0].target, &boolean_calculator)
+            .unwrap();
+        assert_eq!(
+            boolean_results
+                .iter()
+                .find(|result| result.category_id == "option-a")
+                .unwrap()
+                .value,
+            Some(1.0)
+        );
+        assert_eq!(
+            boolean_results
+                .iter()
+                .find(|result| result.category_id == "empty")
+                .unwrap()
+                .value,
+            Some(0.0)
+        );
         let deleted = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "deleted".into(),
             operation: "total".into(),
@@ -1234,6 +1275,14 @@ mod tests {
         .unwrap();
         assert!(client
             .calculate(&catalog.views[0].target, &unavailable)
+            .is_err());
+        let unavailable_boolean = Calculator::parse(&[crate::calculator::Token::Aggregate {
+            property: "off-view-bool".into(),
+            operation: "total".into(),
+        }])
+        .unwrap();
+        assert!(client
+            .calculate(&catalog.views[0].target, &unavailable_boolean)
             .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
@@ -1283,6 +1332,7 @@ mod tests {
         let source_schema = json!({
             "properties": [
                 {"property":"estimate","format":"number"},
+                {"property":"done","format":"checkbox"},
                 {"property":"status","format":"select"}
             ]
         });
@@ -1290,6 +1340,7 @@ mod tests {
             configured_view_keys(&columns, Some(&source_schema)).unwrap().unwrap(),
             BTreeSet::from([
                 "estimate".to_string(),
+                "done".to_string(),
                 "hidden-metric".to_string(),
                 "title".to_string()
             ])

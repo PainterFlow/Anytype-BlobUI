@@ -1,6 +1,7 @@
 //! Bounded calculator terms. Property identifiers are data, never executable text.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -83,7 +84,19 @@ impl Calculator {
         result
     }
 
+    #[cfg(test)]
     pub fn evaluate(&self, cards: &[Value]) -> Result<Option<f64>, String> {
+        self.evaluate_with_boolean_properties(cards, &BTreeSet::new())
+    }
+
+    /// Evaluate the expression using the source schema's boolean property keys.
+    /// Boolean aggregates always produce 0 or 1, while numeric aggregates keep
+    /// their existing unrestricted numeric behavior.
+    pub fn evaluate_with_boolean_properties(
+        &self,
+        cards: &[Value],
+        boolean_properties: &BTreeSet<String>,
+    ) -> Result<Option<f64>, String> {
         fn finite(value: f64) -> Result<Option<f64>, String> {
             if value.is_finite() {
                 Ok(Some(if value == 0.0 { 0.0 } else { value }))
@@ -91,28 +104,50 @@ impl Calculator {
                 Err("The result is outside the supported numeric range.".into())
             }
         }
-        fn run(node: &Expression, cards: &[Value]) -> Result<Option<f64>, String> {
+        fn run(
+            node: &Expression,
+            cards: &[Value],
+            boolean_properties: &BTreeSet<String>,
+        ) -> Result<Option<f64>, String> {
             match node {
                 Expression::Number(value) => finite(*value),
                 Expression::Count => finite(cards.len() as f64),
                 Expression::Aggregate(property, operation) => {
+                    let is_boolean = boolean_properties.contains(property);
                     let mut values = Vec::new();
                     for card in cards {
                         let value = card
                             .get("properties")
                             .and_then(|p| p.get(property))
                             .unwrap_or(&Value::Null);
-                        if value.is_null() {
+                        if value.is_null() && !is_boolean {
                             continue;
                         }
-                        let value = value
-                            .as_f64()
-                            .filter(|n| n.is_finite())
-                            .ok_or("A numeric property contains an incompatible value.")?;
+                        let value = if is_boolean {
+                            match value {
+                                Value::Null | Value::Bool(false) => 0.0,
+                                Value::Bool(true) => 1.0,
+                                Value::Number(_) => value
+                                    .as_f64()
+                                    .filter(|n| n.is_finite())
+                                    .ok_or("A boolean property contains an incompatible value.")?
+                                    .clamp(0.0, 1.0),
+                                _ => {
+                                    return Err(
+                                        "A boolean property contains an incompatible value.".into(),
+                                    )
+                                }
+                            }
+                        } else {
+                            value
+                                .as_f64()
+                                .filter(|n| n.is_finite())
+                                .ok_or("A numeric property contains an incompatible value.")?
+                        };
                         values.push(value);
                     }
                     if values.is_empty() {
-                        return Ok(if operation == "total" {
+                        return Ok(if is_boolean || operation == "total" {
                             Some(0.0)
                         } else {
                             None
@@ -123,18 +158,29 @@ impl Calculator {
                         "maximum" => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
                         "average" => {
                             let count = values.len() as f64;
-                            values.iter().map(|value| value / count).sum()
+                            if is_boolean {
+                                values.iter().sum::<f64>() / count
+                            } else {
+                                values.iter().map(|value| value / count).sum()
+                            }
                         }
                         _ => values.iter().sum(),
                     };
-                    finite(value)
+                    if is_boolean {
+                        finite(value.clamp(0.0, 1.0).round())
+                    } else {
+                        finite(value)
+                    }
                 }
-                Expression::Negate(value) => match run(value, cards)? {
+                Expression::Negate(value) => match run(value, cards, boolean_properties)? {
                     Some(value) => finite(-value),
                     None => Ok(None),
                 },
                 Expression::Binary(operator, left, right) => {
-                    let (Some(left), Some(right)) = (run(left, cards)?, run(right, cards)?) else {
+                    let (Some(left), Some(right)) = (
+                        run(left, cards, boolean_properties)?,
+                        run(right, cards, boolean_properties)?,
+                    ) else {
                         return Ok(None);
                     };
                     match operator.as_str() {
@@ -148,7 +194,10 @@ impl Calculator {
                     }
                 }
                 Expression::Root(value, degree) => {
-                    let (Some(value), Some(degree)) = (run(value, cards)?, run(degree, cards)?)
+                    let (Some(value), Some(degree)) = (
+                        run(value, cards, boolean_properties)?,
+                        run(degree, cards, boolean_properties)?,
+                    )
                     else {
                         return Ok(None);
                     };
@@ -164,7 +213,7 @@ impl Calculator {
                 }
             }
         }
-        run(&self.0, cards)
+        run(&self.0, cards, boolean_properties)
     }
 }
 
@@ -348,5 +397,69 @@ mod tests {
         }
         assert_eq!(format(Some(3.5)), "3.5");
         assert_eq!(format(Some(-0.0)), "0");
+    }
+
+    #[test]
+    fn boolean_aggregates_are_normalized_to_binary_results() {
+        let boolean_keys = BTreeSet::from(["done".to_string()]);
+        let aggregate = |operation: &str| {
+            Calculator::parse(&[Token::Aggregate {
+                property: "done".into(),
+                operation: operation.into(),
+            }])
+            .unwrap()
+        };
+        let evaluate = |operation: &str, values: Vec<Value>| {
+            aggregate(operation).evaluate_with_boolean_properties(
+                &values
+                    .into_iter()
+                    .map(|value| json!({"properties":{"done":value}}))
+                    .collect::<Vec<_>>(),
+                &boolean_keys,
+            )
+        };
+
+        assert_eq!(evaluate("total", vec![json!(true); 20]).unwrap(), Some(1.0));
+        assert_eq!(
+            evaluate("average", vec![json!(true), json!(false)]).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            evaluate("average", vec![json!(0.4), json!(0.4), json!(0.7)]).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(evaluate("average", vec![json!(0.49)]).unwrap(), Some(0.0));
+        assert_eq!(evaluate("average", vec![json!(0.5)]).unwrap(), Some(1.0));
+        assert_eq!(evaluate("average", vec![json!(0.51)]).unwrap(), Some(1.0));
+        assert_eq!(evaluate("total", vec![json!(-8.0)]).unwrap(), Some(0.0));
+        assert_eq!(evaluate("total", vec![json!(9.0)]).unwrap(), Some(1.0));
+        assert_eq!(
+            evaluate("minimum", vec![json!(true), json!(false)]).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            evaluate("maximum", vec![json!(true), json!(false)]).unwrap(),
+            Some(1.0)
+        );
+        for operation in ["total", "average", "minimum", "maximum"] {
+            assert_eq!(evaluate(operation, vec![]).unwrap(), Some(0.0));
+        }
+        assert!(evaluate("total", vec![json!("true")]).is_err());
+        assert!(evaluate("total", vec![json!({"value":true})]).is_err());
+
+        let numeric = aggregate("total");
+        assert!(numeric
+            .evaluate(&[json!({"properties":{"done":true}})])
+            .is_err());
+        assert_eq!(
+            Calculator::parse(&[Token::Aggregate {
+                property: "amount".into(),
+                operation: "total".into(),
+            }])
+            .unwrap()
+            .evaluate(&[json!({"properties":{"amount":4}})])
+            .unwrap(),
+            Some(4.0)
+        );
     }
 }

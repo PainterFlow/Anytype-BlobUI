@@ -50,10 +50,10 @@
 .formula-display[data-fraction="false"] .formula-numerator { border: 0; background: transparent; }
 .formula-placeholder { color: var(--text-secondary); font-size: 14px; }
 .formula-term { font-size: 12px; line-height: 18px; padding: 2px 5px; border-radius: 5px; background: var(--active); overflow-wrap: anywhere; }
-.formula-caret { display: inline-block; flex: 0 0 1px; width: 1px; height: 1em; background: var(--text); color: var(--text); font-size: inherit; animation: formula-caret-blink 1s steps(1) infinite; }
+.formula-caret { background: var(--text); color: var(--text); font-size: inherit; animation: formula-caret-blink 1s steps(1) infinite; }
 @keyframes formula-caret-blink { 50% { opacity: 0; } }
 .formula-variable-actions, .formula-calculator-actions { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
-.formula-variable-actions .formula-remove-calculation { margin-left: auto; }
+.formula-variable-actions .formula-remove-calculation { margin-left: 0; }
 .formula-variable-actions > button { flex-shrink: 0; }
 .formula-property-picker { position: relative; display: inline-flex; align-items: center; margin: 0; }
 .formula-property-picker label { color: var(--text-secondary); font-size: 12px; }
@@ -64,11 +64,11 @@
 .formula-keypad { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
 .formula-key { min-width: 0; height: 38px; padding: 2px; border: 0; border-radius: 9px; background: var(--input-bg); color: var(--text); font-size: 18px; line-height: 22px; cursor: pointer; }
 #formula-calculator-dialog .formula-calculator-status, #formula-calculator-dialog .formula-calculation-status { margin: 0; font-size: 12px; line-height: 16px; color: var(--text-secondary); overflow-wrap: anywhere; }
-.formula-calculator-utility { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 5px; }
+.formula-calculator-utility { display: flex; align-items: center; justify-content: flex-end; gap: 6px; height: 32px; min-height: 32px; margin: 0 0 5px; }
 .formula-calculator-utility .formula-key { min-width: 32px; height: 28px; font-size: 14px; }
-.formula-calculator-utility .formula-calculator-status { flex: 1; }
+#formula-calculator-dialog .formula-calculator-utility .formula-calculator-status { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #formula-calculator-save { font-size: 13px; }
-.formula-render-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0; min-height: 28px; font-size: 12px; color: var(--text-secondary); }
+.formula-render-toggle { margin: 0; color: var(--text-secondary); }
 .formula-latex-input { width: 100%; min-height: 76px; padding: 8px 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 18px; line-height: 24px; resize: none; overflow-wrap: anywhere; }
 .formula-rendered { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 #formulas-page button:disabled, #formula-calculator-dialog button:disabled { cursor: default; opacity: .45; }
@@ -76,13 +76,21 @@
 @media (prefers-reduced-motion: reduce) { .expandable-search, .expandable-search input, .formula-caret { transition: none; animation: none; } }
 @media (max-height: 600px) { .confirm-dialog.formula-calculator-dialog { padding: 14px; } .formula-key { height: 32px; } .formula-display { min-height: 60px; font-size: 20px; } #formula-calculator-dialog .formula-calculator-source { margin-bottom: 4px; } }
 
-.formula-render-toggle { padding: 4px 10px; border: 0; border-radius: 14px; background: transparent; cursor: pointer; }
-.formula-render-toggle:hover, .formula-render-toggle[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.formula-render-toggle:hover { background: var(--hover); color: var(--text); }
 
 #formula-filter.is-filtered:hover, #formula-filter.is-filtered[aria-expanded="true"], #formula-filter[aria-pressed="true"]:hover, #formula-filter[aria-pressed="true"][aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.formula-variable-actions { justify-content: space-between; gap: 4px; }
-.formula-variable-actions .formula-insert-property, .formula-variable-actions .formula-variable-button, .formula-variable-actions .formula-remove-calculation, .formula-variable-actions .formula-render-toggle { padding-inline: 7px; font-size: 12px; white-space: nowrap; }
-.formula-variable-actions .formula-render-toggle { justify-content: center; min-width: 94px; }
+.formula-variable-actions { justify-content: flex-start; gap: 6px; }
+.formula-variable-actions .formula-insert-property, .formula-variable-actions .formula-variable-button { padding-inline: 7px; font-size: 12px; white-space: nowrap; }
+.formula-variable-actions .formula-remove-calculation, .formula-variable-actions .formula-render-toggle { flex: 0 0 32px; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; border-radius: 50%; background: transparent; }
+.formula-variable-actions .formula-render-toggle { margin-left: auto; }
+.formula-variable-actions .formula-render-toggle svg { stroke: currentColor; }
+.formula-variable-actions .formula-remove-calculation { color: var(--color-red, #e05252); }
+.formula-variable-actions .formula-remove-calculation:hover:not(:disabled) { background: color-mix(in srgb, var(--color-red, #e05252) 15%, var(--hover)); }
+.formula-variable-actions .formula-remove-calculation:disabled { color: var(--text-secondary); background: transparent; }
+.formula-remove-calculation svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.formula-property-picker .kanban-select-option-description { display: block; margin-top: 2px; color: var(--text-secondary); font-family: var(--font-code), monospace; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; }
+.formula-property-picker .kanban-select-option:has(.kanban-select-option-description) { display: block; height: auto; min-height: 48px; padding: 6px 9px; text-align: left; }
+.formula-property-picker .kanban-select-option:has(.kanban-select-option-description) .kanban-option-label { display: block; }
 .formula-key svg { display: block; width: 20px; height: 20px; margin: auto; }
 /* Navigation animation runs when the page leaves the hidden state. */
 :root[data-settings-v21="true"] #formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }

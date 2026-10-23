@@ -43,7 +43,29 @@
         empty.textContent = emptyMessage;
         menu.append(empty);
       }
-      next.forEach(item => { const option = document.createElement('button'); option.type = 'button'; option.className = 'kanban-select-option'; option.setAttribute('role', 'option'); option.tabIndex = -1; option.dataset.value = item.value; const text = document.createElement('span'); text.className = 'kanban-option-label'; text.textContent = item.label; option.append(text); menu.append(option); });
+      next.forEach(item => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'kanban-select-option';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-label', item.label);
+        option.tabIndex = -1;
+        option.dataset.value = item.value;
+        const label = document.createElement('span');
+        label.className = 'kanban-option-label';
+        label.textContent = item.label;
+        if (item.description) {
+          const copy = document.createElement('span');
+          copy.className = 'kanban-option-copy';
+          copy.append(label);
+          const description = document.createElement('span');
+          description.className = 'kanban-select-option-description';
+          description.textContent = item.description;
+          copy.append(description);
+          option.append(copy);
+        } else option.append(label);
+        menu.append(option);
+      });
       setValue(trigger.value);
     }
     listen(trigger, 'click', () => trigger.getAttribute('aria-expanded') === 'true' ? close() : open());

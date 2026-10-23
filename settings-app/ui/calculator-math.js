@@ -85,10 +85,27 @@
     const property = (properties || []).find(item => item.key === key);
     return property ? property.name : "Unavailable property";
   }
+  function isSelectableProperty(property) {
+    return !!property && typeof property.key === "string" && typeof property.name === "string"
+      && (property.format === undefined || ["number", "boolean", "checkbox"].includes(property.format));
+  }
+  function propertyReference(key, properties) {
+    const property = (properties || []).find(item => isSelectableProperty(item) && item.key === key);
+    if (!property) throw Error("This property is unavailable in the current view.");
+    const duplicates = (properties || [])
+      .filter(item => isSelectableProperty(item) && item.name === property.name)
+      .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+    const ordinal = duplicates.findIndex(item => item.key === key);
+    if (ordinal < 0) throw Error("This property has no stable key in the current view.");
+    const encodedName = JSON.stringify(property.name);
+    return `\\property{${encodedName}}${duplicates.length > 1 ? `#${ordinal + 1}` : ""}`;
+  }
   function latexTree(node, properties) {
     switch (node.type) {
       case "number": return node.value;
-      case "aggregate": return `\\operatorname{${OPERATIONS[node.operation].toLowerCase()}}\\left(\\text{${escapeLatexText(textForProperty(node.property, properties))}}\\right)`;
+      case "aggregate": return node.operation === "total"
+        ? propertyReference(node.property, properties)
+        : `\\operatorname{${OPERATIONS[node.operation].toLowerCase()}}\\left(${propertyReference(node.property, properties)}\\right)`;
       case "count": return "\\operatorname{count}\\left(\\text{cards}\\right)";
       case "unary": return `${node.value}${latexTree(node.child, properties)}`;
       case "group": return `\\left(${latexTree(node.child, properties)}\\right)`;
@@ -118,7 +135,7 @@
   }
 
   function attrIndex(index) { return ` data-token-index="${Number(index)}"`; }
-  function caretMarkup() { return '<mspace class="formula-caret" width="0.12em" height="1em" aria-hidden="true"></mspace>'; }
+  function caretMarkup() { return '<mspace class="formula-caret" width="1px" height="0.85em" depth="0.15em" aria-hidden="true"></mspace>'; }
   function mathNode(node, properties, cursor, active) {
     const mark = index => active && cursor === index ? caretMarkup() : "";
     switch (node.type) {
@@ -218,6 +235,45 @@
       if (command !== "text") fail("Property names must use a text command.");
       return readGroup().replace(/\\([\\{}%$&#_])/g, "$1");
     };
+    const readPropertyReference = () => {
+      skip();
+      if (source[index] !== "{") fail("Property names must be quoted strings inside braces.");
+      index++;
+      skip();
+      if (source[index] !== '"') fail("Property names must be quoted strings inside braces.");
+      const start = index;
+      index++;
+      let escaped = false;
+      while (index < source.length) {
+        const character = source[index++];
+        if (escaped) { escaped = false; continue; }
+        if (character === "\\") { escaped = true; continue; }
+        if (character === '"') break;
+      }
+      const encodedName = source.slice(start, index);
+      skip();
+      if (source[index] !== "}") fail("Close the property name brace.");
+      index++;
+      let name;
+      try { name = JSON.parse(encodedName); }
+      catch (_) { fail("Property names must be valid quoted strings."); }
+      if (typeof name !== "string") fail("Property names must be quoted strings inside braces.");
+      let ordinal = null;
+      const selector = /^#(\d+)/.exec(source.slice(index));
+      if (selector) {
+        index += selector[0].length;
+        ordinal = Number(selector[1]);
+        if (!Number.isSafeInteger(ordinal) || ordinal < 1) fail("Property selectors start at #1.");
+      }
+      const matches = (properties || [])
+        .filter(item => isSelectableProperty(item) && item.name === name)
+        .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+      if (!matches.length) fail("This property is unavailable in the current view.");
+      if (ordinal === null && matches.length > 1) fail("This property name is ambiguous; choose its numbered reference from the property picker.");
+      const property = matches[ordinal === null ? 0 : ordinal - 1];
+      if (!property) fail("This numbered property reference is unavailable in the current view.");
+      return token("aggregate", { operation: "total", property: property.key });
+    };
     const matchParen = (left, right) => {
       skip();
       if (source.startsWith("\\left", index)) { index += 5; skip(); }
@@ -247,19 +303,31 @@
         } else if (command === "frac") {
           const numerator = parseLatex(readGroup(), properties), denominator = parseLatex(readGroup(), properties);
           output.push(token("open"), ...numerator, token("close"), token("operator", { value: "/" }), token("open"), ...denominator, token("close"));
+        } else if (command === "property") {
+          output.push(readPropertyReference());
         } else if (command === "operatorname") {
           const operation = readGroup().trim().toLowerCase();
           const close = matchParen("(", ")");
-          const label = readTextCommand(); close();
           if (operation === "count") {
+            const label = readTextCommand(); close();
             if (label.toLowerCase() !== "cards") fail("Card count uses the label cards.");
             output.push(token("count"));
           } else {
             const match = Object.entries(OPERATIONS).find(([, display]) => display.toLowerCase() === operation);
             if (!match) fail("Choose Total, Average, Minimum, or Maximum for a property.");
-            const matches = properties.filter(item => item.name === label);
-            if (matches.length !== 1) fail(matches.length ? "This property name is ambiguous; insert it from the property picker." : "This property is unavailable in the current view.");
-            output.push(token("aggregate", { operation: match[0], property: matches[0].key }));
+            skip();
+            if (source.startsWith("\\text", index)) {
+              const label = readTextCommand(); close();
+              const matches = properties.filter(item => isSelectableProperty(item) && item.name === label);
+              if (matches.length !== 1) fail(matches.length ? "This property name is ambiguous; insert it from the property picker." : "This property is unavailable in the current view.");
+              output.push(token("aggregate", { operation: match[0], property: matches[0].key }));
+            } else {
+              const argument = expression(0, depth + 1);
+              close();
+              if (argument.length !== 1 || argument[0].kind !== "aggregate") fail("An aggregation must contain one property reference.");
+              argument[0].operation = match[0];
+              output.push(...argument);
+            }
           }
         } else if (command === "text") {
           const label = readGroup().replace(/\\([\\{}%$&#_])/g, "$1");
@@ -289,5 +357,5 @@
     return tokens;
   }
 
-  UI.CalculatorMath = { parseTokens, parseLatex, toLatex, toMathML, toMathMLBody, groupedFraction };
+  UI.CalculatorMath = { parseTokens, parseLatex, toLatex, toMathML, toMathMLBody, groupedFraction, propertyReference };
 })(window);
