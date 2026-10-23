@@ -1138,6 +1138,7 @@
 
   function readEditSnapshot() {
     return {
+      formulas: window.BlobUI.FormulaPage.read(),
       settings: draft ? { ...draft } : null,
       updaterSettings: updaterDraft ? { ...updaterDraft } : null,
       connection: {
@@ -1164,6 +1165,7 @@
 
   function editSnapshotsEqual(left, right) {
     if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    if (JSON.stringify(left.formulas) !== JSON.stringify(right.formulas)) return false;
     if (left.updaterSettings || right.updaterSettings) {
       if (!updaterSettingsEqual(left.updaterSettings, right.updaterSettings)) return false;
     }
@@ -1188,6 +1190,7 @@
 
   function restoreEditSnapshot(snapshot) {
     if (!snapshot || !snapshot.settings || !snapshot.connection) return;
+    window.BlobUI.FormulaPage.restore(snapshot.formulas);
 
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
@@ -1246,15 +1249,17 @@
 
   function updateSaveButton() {
     const dirty = editSession.isDirty();
+    const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate();
     if (settingsLocked || !draft) closeKanbanStyleMenu();
     saveButton.hidden = !draft || !dirty;
-    saveButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
+    saveButton.disabled = settingsLocked || bannerReadPending || !draft || (!window.appReady && !prototypeDirty) || !dirty;
     discardButton.hidden = !draft || !dirty;
-    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
+    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
     el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
@@ -1375,6 +1380,7 @@
     }
 
     await loadUpdaterState();
+    await window.BlobUI.FormulaPage.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
       setStatus(stateError.message || String(stateError), "error");
@@ -1526,27 +1532,32 @@
 
   function showSettingsPage(page) {
     closeKanbanStyleMenu();
+    const isFormulas = page === "formulas";
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    if (!isAccessibility && !isAdvanced && draft) void refreshCalendarApiAvailability();
-    preferencesPage.hidden = isAccessibility || isAdvanced;
+    if (!isAccessibility && !isAdvanced && !isFormulas && draft) void refreshCalendarApiAvailability();
+    preferencesPage.hidden = isAccessibility || isAdvanced || isFormulas;
+    el("formulas-page").hidden = !isFormulas;
+    el("formulas-nav").classList.toggle("active", isFormulas);
+    el("formulas-nav").setAttribute("aria-current", isFormulas ? "page" : "false");
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
     if (isAdvanced) advancedTabController.refresh();
-    else if (!isAccessibility) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
-    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
+    else if (!isAccessibility && !isFormulas) window.BlobUI.SettingsV21?.refreshTabs();
+    pageTitle.textContent = isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isFormulas);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
-    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced ? "page" : "false");
+    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced && !isFormulas ? "page" : "false");
     accessibilityNav.setAttribute("aria-current", isAccessibility ? "page" : "false");
     advancedNav.setAttribute("aria-current", isAdvanced ? "page" : "false");
     pageContent.scrollTop = 0;
     updatePageScrollbar();
+    if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
   preferencesNav.addEventListener("click", () => showSettingsPage("preferences"));
@@ -1624,7 +1635,25 @@
   }
 
   async function save(options = {}) {
-    if (!draft || saveBusy || isInstallingUpdate() || !window.appReady) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    // Let the formula page report missing connection/setup requirements inline.
+    if (!window.appReady) {
+      const formulas = window.BlobUI.FormulaPage.read();
+      if (JSON.stringify(formulas) === JSON.stringify(editSession.getBaseline().formulas)) return;
+      saveBusy = true;
+      updateSaveButton();
+      try {
+        await window.BlobUI.FormulaPage.save(invoke, formulas);
+        editSession.commit({ formulas });
+        setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
+      } catch (_) {
+        setStatus("Kanban formulas could not be saved. Your edits are kept. Review the formula page.", "error", false);
+      } finally {
+        saveBusy = false;
+        updateSaveButton();
+      }
+      return;
+    }
     if (bannerReadPending) {
       setStatus("Wait for the selected banner image to finish loading before saving.", "warning");
       return;
@@ -1661,6 +1690,8 @@
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
     const settingsChanged = !settingsEqual(draft, initialDraft);
+    const submittedFormulas = window.BlobUI.FormulaPage.read();
+    const formulasChanged = JSON.stringify(submittedFormulas) !== JSON.stringify(editSession.getBaseline().formulas);
     const updaterSettingsChanged = !!updaterDraft && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
     if (updaterSettingsChanged) {
       const directory = installDirectory.value.trim();
@@ -1704,7 +1735,7 @@
       return;
     }
 
-    if (updaterPathChanged && (settingsChanged || connectionChanged)) {
+    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged)) {
       setStatus("Save or undo your appearance and Anytype API changes before changing the Anytype data folder.", "warning", false);
       return;
     }
@@ -1716,7 +1747,7 @@
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -1736,6 +1767,7 @@
       : "Saving your settings and rebuilding custom.css…", "working");
     let connectionSaved = false;
     let generalSettingsSaved = false;
+    let formulasSaved = false;
     let updaterSettingsSaved = false;
     try {
       let result = null;
@@ -1744,6 +1776,12 @@
         connectionSaved = true;
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
+        window.BlobUI.FormulaPage.reload();
+      }
+      if (formulasChanged) {
+        await window.BlobUI.FormulaPage.save(invoke, submittedFormulas);
+        editSession.commit({ formulas: submittedFormulas });
+        formulasSaved = true;
       }
       if (settingsChanged || options.forceRebuild) {
         result = await invoke("save_settings", { settings: submittedSettings });
@@ -1771,6 +1809,8 @@
         setStatus(updaterPathChanged
           ? "App Settings saved. Loaded settings from the selected Anytype data folder."
           : "App Settings saved.", "info");
+      } else if (formulasChanged && !connectionChanged) {
+        setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else {
         saveStatus(result || { calendarStatus: "disabled" }, true);
       }
@@ -1778,7 +1818,7 @@
       const message = error.message || String(error);
       setStatus(connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
-        : connectionSaved || generalSettingsSaved || updaterSettingsSaved
+        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
           : message, "error");
     } finally {
@@ -2402,6 +2442,7 @@
     });
   }
 
+  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
   el("settings-v21-enabled").addEventListener("change", () => {
     if (!draft || saveBusy || isInstallingUpdate()) return;

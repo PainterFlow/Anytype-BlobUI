@@ -18,6 +18,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
       .replace('<link rel="stylesheet" href="./styles.css" />', '');
     await page.setContent(html);
     await page.addStyleTag({ path: path.join(source, 'styles.css') });
+    await page.addStyleTag({ path: path.join(source, 'formula-page.css') });
     await page.evaluate(() => {
       window.mockCalls = [];
       window.__TAURI__ = { core: { invoke: async (command, args) => {
@@ -34,7 +35,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
         return {};
       } } };
     });
-    for (const name of ['vendor/marked.umd.js', 'visibility-field.js', 'modal.js', 'edit-session.js', 'markdown.js', 'docs-data.js', 'disclosure.js', 'docs.js', 'tabs.js', 'settings-v21.js', 'app.js']) {
+    for (const name of ['vendor/marked.umd.js', 'visibility-field.js', 'modal.js', 'edit-session.js', 'markdown.js', 'docs-data.js', 'disclosure.js', 'docs.js', 'tabs.js', 'settings-v21.js', 'formula-page.js', 'app.js']) {
       await page.addScriptTag({ path: path.join(source, name) });
     }
     await page.waitForFunction(() => window.appReady);
@@ -51,7 +52,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     await page.locator('#save-button').click();
     await page.waitForFunction(() => document.getElementById('status-message').textContent.includes('fixture save failed'));
     await page.evaluate(() => { window.failSave = false; window.BlobUI.discardChanges(); });
-    assert.equal(await page.locator('input[type="search"], .v21-search').count(), 0);
+    assert.equal(await page.locator('input[type="search"]:not(#formula-search), .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'Ap Settings');
     assert.equal(await page.locator('.v21-section-link svg').count(), 8);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);

@@ -346,6 +346,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   // Layout is covered by the real-browser suite. Keep the shared tab controller in this form harness.
   context.window.BlobUI.SettingsV21.init = () => {};
   context.window.BlobUI.SettingsV21.setEnabled = () => {};
+  // The formula page has its own browser and storage tests. Keep this form
+  // harness independent of its DOM while retaining a stable edit snapshot.
+  context.window.BlobUI.FormulaPage = {
+    read: () => ({ version: 2, display: 'balanced', definitions: [] }),
+    restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},
+  };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];

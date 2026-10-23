@@ -187,6 +187,9 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     if Regex::new(r"\{\{[^}]+\}\}").unwrap().is_match(&css_text) {
         return Err("Compiled CSS still contains an unresolved placeholder.".into());
     }
+    if !api_disabled {
+        css_text.push_str(&crate::kanban_css::render(data.get("kanbanFormulaResults"))?);
+    }
     Ok(css_text)
 }
 
