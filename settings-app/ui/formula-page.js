@@ -17,6 +17,9 @@
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
   let selectedSpace = "", searchControl, filterControl, displayControl;
+  const localDrafts = new Map();
+  let draftGeneration=0;
+  const math = UI.CalculatorMath;
 
   function make(tag, className, text) {
     const node = doc.createElement(tag);
@@ -45,6 +48,7 @@
     return ({ open: "(", close: ")", comma: "," })[token.kind] || "?";
   }
   function updateTimestamp() {
+    if (!el("formula-calculated-at")) return;
     const target = el("formula-calculated-at");
     if (!target) return;
     const timestamp = calculatedAt ? new Date(calculatedAt) : null;
@@ -94,8 +98,7 @@
   function updateSaveActions(record) {
     if (!record) return;
     if (record.remove) record.remove.hidden = !hasSaveableDefinition(record);
-    if (record.save) record.save.disabled = locked || loading || modalSaving || !hasSaveableDefinition(record)
-      || (!record.view.unsupported && record.fraction && (!record.numerator.length || !record.denominator.length));
+    if (record.save) record.save.disabled = locked || loading;
     if (record.actions) record.actions.hidden = !record.view.unsupported && (!record.remove || record.remove.hidden);
   }
   function syncLocks() {
@@ -121,10 +124,12 @@
   }
   function openCalculator(record) {
     if (!record || locked || loading || !calculatorModal || !modalContent) return;
-    const saved = targetDefinition(record.view.target);
+    const matches = UI.ViewCatalog?.definitionsForView(record.view, state.definitions) || [];
+    const saved = targetDefinition(record.view.target) || matches[0];
+    const editingView = saved ? { ...record.view, target: saved.target } : record.view;
     const savedTokens = copy(saved ? saved.tokens : []), fraction = parseFraction(savedTokens);
     activeRecord = {
-      view: record.view,
+      view: editingView,
       viewKey: record.key,
       row: record.row,
       numerator: fraction ? fraction.numerator : savedTokens,
@@ -133,10 +138,12 @@
       cursors: { numerator: 0, denominator: 0 },
       active: "numerator",
       fieldset: null, display: null, status: null, save: null, remove: null,
-      generation: 0,
+      generation: 0, draftGeneration,
     };
     activeRecord.cursors.numerator = activeRecord.numerator.length;
     activeRecord.cursors.denominator = activeRecord.denominator.length;
+    const pending = localDrafts.get(record.key);
+    if (pending) { restoreRecordSnapshot(activeRecord, copy(pending)); activeRecord.source = pending.source; activeRecord.sourceMode = pending.sourceMode; activeRecord.sourceError=pending.sourceError; }
     buildCalculator(activeRecord);
     updateRows();
     calculatorModal.open();
@@ -161,11 +168,18 @@
   }
   function updateDisplay(record) {
     if (!record.display) return;
+    record.display.hidden = !!record.sourceMode;
+    if (record.sourceInput) record.sourceInput.hidden = !record.sourceMode;
     record.linearDisplay.hidden = record.fraction;
     record.fractionDisplay.hidden = !record.fraction;
     record.display.dataset.fraction = String(record.fraction);
-    renderSequence(record, record.fraction ? record.numeratorDisplay : record.linearDisplay, record.numerator, record.cursors.numerator, "numerator", "x");
-    if (record.fraction) renderSequence(record, record.denominatorDisplay, record.denominator, record.cursors.denominator, "denominator", "y");
+    const renderMath = (host, tokens, section) => { host.innerHTML = math.toMathML(tokens, record.view.properties, record.cursors[section], record.active === section); };
+    renderMath(record.fraction ? record.numeratorDisplay : record.linearDisplay, record.numerator, "numerator");
+    if (record.fraction) {
+      record.fractionDisplay.innerHTML='<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mrow data-section="numerator">'+math.toMathMLBody(record.numerator,record.view.properties,record.cursors.numerator,record.active==='numerator')+'</mrow><mrow data-section="denominator">'+math.toMathMLBody(record.denominator,record.view.properties,record.cursors.denominator,record.active==='denominator')+'</mrow></mfrac></math>';
+      record.numeratorDisplay=record.fractionDisplay.querySelector('[data-section="numerator"]');record.denominatorDisplay=record.fractionDisplay.querySelector('[data-section="denominator"]');
+      for(const section of ['numerator','denominator']) record[section+'Display'].addEventListener('click',event=>displayTokenClick(record,section,event));
+    }
     else { record.numeratorDisplay.replaceChildren(); record.denominatorDisplay.replaceChildren(); }
     record.display.dataset.active = record.active;
     record.numeratorDisplay.classList.toggle("is-active", record.fraction && record.active === "numerator");
@@ -193,6 +207,13 @@
   function changed(record) {
     const tokens = serializedTokens(record);
     if (tokens.length > 256) return false;
+    localDrafts.set(record.viewKey, { ...recordSnapshot(record), source: record.source, sourceMode: record.sourceMode, sourceError: record.sourceError });
+    try {
+      if (record.sourceError) throw Error(record.sourceError);
+      if (record.fraction && (!record.numerator.length || !record.denominator.length)) throw Error("Complete both sides of the fraction.");
+      if (tokens.length) math.parseTokens(tokens);
+      setActiveStatus(record, "");
+    } catch (error) { setActiveStatus(record, error.message); updateDisplay(record); updateSaveActions(record); return true; }
     if (record.fraction && (!record.numerator.length || !record.denominator.length)) {
       record.generation++;
       updateDisplay(record);
@@ -374,6 +395,7 @@
     record.display.focus({ preventScroll: true });
   }
   function insertVariable(record, token) {
+    record.sourceMode=false;record.sourceError="";
     if (locked || loading || modalSaving || record.view.unsupported) return;
     const before = recordSnapshot(record);
     if (record.active === "denominator") activateFraction(record);
@@ -401,76 +423,24 @@
     record.propertyButton.setAttribute("aria-expanded", "false");
   }
   function createPropertyControls(record, host) {
-    const area = make("div", "formula-variable-actions");
-    record.propertyButton = button("Insert property", () => openPropertyPicker(record), "formula-insert-property");
-    record.propertyButton.setAttribute("aria-expanded", "false");
-    record.propertyButton.setAttribute("aria-controls", "formula-property-panel");
-    const count = button("Card count", () => insertVariable(record, { kind: "count" }), "formula-variable-button");
-    area.append(record.propertyButton, count);
-    const panel = make("div", "formula-property-picker");
-    panel.id = "formula-property-panel";
-    panel.hidden = true;
-    panel.setAttribute("aria-label", "Insert numeric property");
-    const propertyLabel = make("label", "", "Property"), property = make("select");
-    property.id = "formula-property-select";
-    propertyLabel.htmlFor = property.id;
-    property.append(new Option("Choose a numeric property", ""));
-    (record.view.properties || []).forEach(item => property.append(new Option(item.name, item.key)));
-    const aggregateLabel = make("label", "", "Aggregation"), aggregate = make("select");
-    aggregate.id = "formula-aggregate-select";
-    aggregateLabel.htmlFor = aggregate.id;
-    aggregate.append(new Option("Choose aggregation", ""));
-    Object.entries(operations).forEach(([value, name]) => aggregate.append(new Option(name, value)));
-    aggregate.hidden = aggregateLabel.hidden = true;
-    const insert = button("Insert", () => {
-      if (!property.value || !aggregate.value) return;
-      insertVariable(record, { kind: "aggregate", property: property.value, operation: aggregate.value });
-      property.value = ""; aggregate.value = "";
-      aggregate.hidden = aggregateLabel.hidden = true;
-      closePropertyPicker(record);
-    }, "formula-property-insert");
-    insert.disabled = true;
-    property.addEventListener("change", () => {
-      aggregate.value = "";
-      aggregate.hidden = aggregateLabel.hidden = !property.value;
-      insert.disabled = !property.value || !aggregate.value;
-    });
-    aggregate.addEventListener("change", () => { insert.disabled = !property.value || !aggregate.value; });
-    panel.addEventListener("keydown", event => {
-      if (event.key === "Escape") { event.preventDefault(); closePropertyPicker(record); record.propertyButton.focus(); }
-    });
-    panel.append(propertyLabel, property, aggregateLabel, aggregate, insert);
-    record.propertyPanel = panel;
-    record.propertySelect = property;
-    host.append(area, panel);
+    const area = make('div', 'formula-variable-actions'); record.variableActions=area;
+    const picker = make('div', 'kanban-select formula-property-picker');
+    const trigger = button('Insert property', () => {}, 'formula-insert-property');
+    trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
+    const menu=make('div','kanban-select-menu'); menu.setAttribute('role','listbox'); menu.setAttribute('aria-label','Insert property'); menu.hidden=true;
+    picker.append(trigger,menu); area.append(picker,button('Card count',()=>insertVariable(record,{kind:'count'}),'formula-variable-button'));
+    let selectedProperty=null;
+    const properties=()=>record.view.properties.map(p=>({value:p.key,label:p.name}));
+    record.propertyPicker=UI.PickControl.attach({root:picker,options:properties(),onChange(value){
+      if(!selectedProperty){ selectedProperty=value; record.propertyPicker.setOptions(Object.entries(operations).map(([value,label])=>({value,label}))); trigger.textContent='Aggregation'; queueMicrotask(()=>record.propertyPicker.open()); }
+      else { insertVariable(record,{kind:'aggregate',property:selectedProperty,operation:value}); selectedProperty=null;record.propertyPicker.setOptions(properties());trigger.textContent='Insert property'; }
+    }});
+    host.append(area);
   }
-  async function saveCalculator(record) {
-    if (!record || record !== activeRecord || locked || loading || modalSaving) return;
-    if (!record.view.unsupported && record.fraction && (!record.numerator.length || !record.denominator.length)) {
-      setActiveStatus(record, "Enter both a numerator and denominator before saving the fraction.");
-      return;
-    }
-    if (!hasSaveableDefinition(record)) return;
-    if (typeof api.onSave !== "function") {
-      setActiveStatus(record, "Use Save changes in Settings to publish this calculation.");
-      api.onChange();
-      return;
-    }
-    modalSaving = true;
-    if (record.save) record.save.textContent = "Saving…";
-    syncLocks();
-    setActiveStatus(record, "Saving calculation…");
-    try {
-      const committed = await api.onSave();
-      if (committed === true) calculatorModal.close();
-      else setActiveStatus(record, "The calculation is still pending. Review the Save status and try again.");
-    } catch (error) {
-      setActiveStatus(record, String(error && error.message || error));
-    } finally {
-      modalSaving = false;
-      if (record.save && record.save.isConnected) record.save.textContent = "Save";
-      syncLocks();
-    }
+
+  function saveCalculator(record) {
+    if (!record || record !== activeRecord || locked || loading) return;
+    calculatorModal.close();
   }
   function removeCalculation(record) {
     if (!record || locked || loading || modalSaving) return;
@@ -566,8 +536,27 @@
       actions.append(record.save);
     }
     if (record.remove.hidden && !view.unsupported) actions.hidden = true;
-    host.append(actions);
-    if (!view.unsupported) updateDisplay(record);
+    if (record.variableActions) record.variableActions.append(record.remove);
+    else host.append(actions);
+    if (!view.unsupported) {
+      const source=make('textarea','formula-latex-input');source.setAttribute('aria-label','LaTeX source');source.spellcheck=false;source.hidden=true;record.sourceInput=source;
+      const toggle=button('Show LaTeX',()=>{
+        record.sourceMode=!record.sourceMode;
+        if(record.sourceMode && !record.sourceError){try{record.source=record.fraction?math.toLatex(record,view.properties,true):record.numerator.length?math.toLatex(record.numerator,view.properties):'';}catch(_){record.source=record.numerator.map(t=>tokenLabel(t,view)).join(' ');}}
+        source.value=record.source||'';toggle.textContent=record.sourceMode?'Show rendered':'Show LaTeX';toggle.setAttribute('aria-pressed',String(record.sourceMode));
+        updateDisplay(record);(record.sourceMode?source:record.display).focus();
+      },'formula-render-toggle');
+      record.fieldset.insertBefore(toggle,record.display);record.fieldset.insertBefore(source,record.display);
+      source.addEventListener('input',()=>{
+        record.source=source.value;record.sourceError='';
+        try{const tokens=source.value.trim()?math.parseLatex(source.value,view.properties):[];const fraction=parseFraction(tokens);record.numerator=fraction?fraction.numerator:tokens;record.denominator=fraction?fraction.denominator:[];record.fraction=!!fraction;record.cursors={numerator:record.numerator.length,denominator:record.denominator.length};}
+        catch(error){record.sourceError=error.message;}
+        changed(record);
+      });
+      const utility=record.fieldset.querySelector('.formula-calculator-utility');utility.prepend(record.status);
+      source.value=record.source||''; toggle.textContent=record.sourceMode?'Show rendered':'Show LaTeX';
+      updateDisplay(record);
+    }
     updateSaveActions(record);
   }
   function filter() {
@@ -613,6 +602,7 @@
         root: filterRoot,
         options: [{ value: "", label: "All spaces" }],
         value: selectedSpace,
+        closeOnSelect: false,
         onChange(value) { selectedSpace = value || ""; filter(); },
       });
     }
@@ -624,9 +614,9 @@
     contents.replaceChildren();
     records = [];
     syncDisplayPicker();
-    const views = catalog.slice();
+    const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(catalog).views : catalog.slice();
     for (const saved of state.definitions) {
-      if (!views.some(view => identity(view.target) === identity(saved.target))) {
+      if (!views.some(view => identity(view.target) === identity(saved.target)) && !UI.ViewCatalog?.findViewForTarget(views,saved.target)) {
         views.push({
           target: saved.target, name: "Unavailable view", space: "Saved calculation",
           source: "Reload the list or remove this calculation", kind: "Unavailable", properties: [],
@@ -636,13 +626,13 @@
     }
     views.sort((left, right) => left.name.localeCompare(right.name) || left.space.localeCompare(right.space) || left.source.localeCompare(right.source));
     views.forEach(view => {
-      const item = make("section", "settings-list formula-view");
+      const item = make("section", "formula-view");
       let record;
       const row = button("", () => openCalculator(record), "formula-view-row");
       row.setAttribute("aria-pressed", "false");
       row.append(make("span", "formula-view-name", view.name));
       row.append(make("span", "formula-source", view.space + " · " + view.source + " · " + view.kind));
-      if (targetDefinition(view.target)) row.append(make("span", "formula-view-saved", "Calculation saved"));
+
       if (view.unsupported) row.append(make("span", "formula-view-warning", view.unsupported));
       item.append(row);
       record = { view, item, row, key: identity(view.target) };
@@ -693,6 +683,7 @@
       fallbackFocus: () => activeRecord && activeRecord.row ? activeRecord.row : reload,
       inertTargets: [el("settings-shell"), el("title-drag-region")].filter(Boolean),
       onClose() {
+        if(activeRecord && activeRecord.draftGeneration===draftGeneration) { localDrafts.set(activeRecord.viewKey,{...recordSnapshot(activeRecord),source:activeRecord.source,sourceMode:activeRecord.sourceMode,sourceError:activeRecord.sourceError});activeRecord.propertyPicker?.destroy(); }
         if (activeRecord && activeRecord.row) {
           activeRecord.row.dataset.active = "false";
           activeRecord.row.setAttribute("aria-pressed", "false");
@@ -728,6 +719,9 @@
     read: () => copy(state),
     isPersisted: () => JSON.stringify(state) === JSON.stringify(persistedState),
     restore(value) {
+      draftGeneration++;
+      if(calculatorModal?.isOpen()) calculatorModal.close({restoreFocus:false});
+      localDrafts.clear();
       state = copy(value || defaults());
       persistedState = copy(state);
       if (calculatorModal && calculatorModal.isOpen()) calculatorModal.close({ restoreFocus: false });
@@ -768,7 +762,7 @@
         throw Error("Kanban formulas could not be saved. Review the message on the Kanban View Formulas page and retry.");
       }
     },
-    setLocked(value, pending) { locked = value; dirty = !!pending; syncLocks(); },
+    setLocked(value, pending) { const wasLocked=locked; locked = value; dirty = !!pending; syncLocks(); if(wasLocked && !locked && !loading && !discovered && !el("formulas-page").hidden) void discover(); },
     refresh() { if (!discovered && !discovering && !loading) void discover(); },
     reload() { discovered = false; if (!el("formulas-page") || !el("formulas-page").hidden) void discover(); },
     destroy() {

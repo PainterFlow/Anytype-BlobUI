@@ -356,16 +356,14 @@
           </section>
           </div>
           <div id="formulas-page" class="settings-page" hidden>
-            <p class="formula-intro">Choose a Kanban view and build a calculation for each category.</p>
             <div class="formula-toolbar">
               <div id="formula-search-control" class="expandable-search" data-expanded="false">
-                <button id="formula-search-toggle" class="neutral-icon-button" type="button" aria-label="Search Kanban views" aria-controls="formula-search" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg></button>
+                <button id="formula-search-toggle" class="neutral-icon-button" type="button" aria-label="Search Kanban views" aria-controls="formula-search" aria-expanded="false"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9867 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z" fill="currentColor"></path></svg></button>
                 <label for="formula-search" class="sr-only">Search Kanban views</label><input id="formula-search" type="search" placeholder="Search Kanban views" tabindex="-1" />
               </div>
-              <button id="formula-reload" class="neutral-icon-button" type="button" aria-label="Reload available views" title="Reload available views"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg></button>
-              <div id="formula-filter-control" class="kanban-select"><button id="formula-filter" class="neutral-icon-button" type="button" aria-label="Filter by space" title="Filter by space" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-filter-options"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg></button><div id="formula-filter-options" class="kanban-select-menu" role="listbox" aria-label="Filter by space" hidden></div></div>
+              <button id="formula-reload" class="neutral-icon-button" type="button" aria-label="Reload available views" title="Reload available views"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4"/></svg></button>
+              <div id="formula-filter-control" class="kanban-select"><button id="formula-filter" class="neutral-icon-button" type="button" aria-label="Filter by space" title="Filter by space" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-filter-options"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3 6C3 5.58579 3.29381 5.25 3.65625 5.25H16.3438C16.7062 5.25 17 5.58579 17 6C17 6.41421 16.7062 6.75 16.3438 6.75H3.65625C3.29381 6.75 3 6.41421 3 6ZM6 10C6 9.58579 6.26863 9.25 6.6 9.25H13.4C13.7314 9.25 14 9.58579 14 10C14 10.4142 13.7314 10.75 13.4 10.75H6.6C6.26863 10.75 6 10.4142 6 10ZM8.75 13.25C8.33579 13.25 8 13.5858 8 14C8 14.4142 8.33579 14.75 8.75 14.75H11.25C11.6642 14.75 12 14.4142 12 14C12 13.5858 11.6642 13.25 11.25 13.25H8.75Z" fill="currentColor"></path></svg></button><div id="formula-filter-options" class="kanban-select-menu" role="listbox" aria-label="Filter by space" hidden></div></div>
             </div>
-            <p id="formula-calculated-at" role="status"></p>
             <p id="formula-storage-message" class="field-error" role="status" aria-live="polite"></p>
             <fieldset id="formula-fields" aria-label="Kanban formulas">
               <div id="formula-contents"></div>
@@ -604,6 +602,8 @@
     <script src="./settings-v21.js"></script>
     <script src="./pick-control.js"></script>
     <script src="./expandable-search.js"></script>
+    <script src="./calculator-math.js"></script>
+    <script src="./view-catalog.js"></script>
     <script src="./formula-page.js"></script>
     <script src="./app.js"></script>
   </body>

@@ -27,7 +27,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
           target: target(viewId), name: 'Board', space: 'Work', source: viewId === 'view-b' ? 'Tasks' : 'Launch plan',
           kind: viewId === 'view-b' ? 'Query' : 'Collection',
           properties: window.__hideProperty ? [] : [{ key: 'estimate', name: 'Estimate', format: 'number' }], unsupported: null,
-        })), warning: null };
+        })).flatMap(view=>view.target.viewId === "view-a" ? [view,{...view,target:{...view.target,blockId:"inline-copy"},kind:"Inline / type view"}] : [view]), warning: null };
       }
       if (command === 'evaluate_kanban_formula') throw Error('Calculator edits must not evaluate on every key.');
       if (command === 'save_kanban_formulas') {
@@ -41,163 +41,81 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
       return null;
     } } };
   });
-  const openFormulaPage = async () => {
-    await page.locator('#formulas-nav').click();
-    await page.locator('.formula-view-row').first().waitFor();
-  };
-  const waitForToolbarMotion = async () => page.locator('.formula-toolbar').evaluate(async toolbar => {
-    await Promise.all(toolbar.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
-  });
-  const openFilter = async () => {
-    await page.locator('#formula-filter').click();
-    await page.waitForFunction(() => document.getElementById('formula-filter-options').dataset.state === 'open');
-    await waitForToolbarMotion();
-    const menuBox = await page.locator('#formula-filter-options').boundingBox();
-    const contentBox = await page.locator('#formulas-page').boundingBox();
-    assert.ok(menuBox.x >= contentBox.x, 'The space menu stays inside the content left edge.');
-    assert.ok(menuBox.x + menuBox.width <= page.viewportSize().width, 'The space menu stays inside the viewport.');
-  };
+  const modal=page.locator('#formula-calculator-dialog');
+  const key=name=>modal.getByRole('button',{name,exact:true});
+  const open=async()=>{await page.locator('.formula-view-row').filter({hasText:'Launch plan'}).click();await modal.waitFor({state:'visible'});};
+  const close=async()=>{await key('Save calculation').click();await modal.waitFor({state:'hidden'});};
+  const read=()=>page.evaluate(()=>window.BlobUI.FormulaPage.read());
   try {
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
-    await page.waitForFunction(() => window.appReady && !document.getElementById('formula-fields').disabled);
-    await openFormulaPage();
-    assert.equal(await page.locator('.formula-view-row').count(), 2);
-    assert.equal(await page.locator('#formula-refresh-results, .formula-view-toggle').count(), 0);
-
-    await openFilter();
-    const options = page.locator('#formula-filter-options [role="option"]');
-    await page.screenshot({ path: path.join(root, 'calculator-toolbar-filter.png') });
-    assert.equal(await options.count(), 3);
-    assert.deepEqual(await options.allInnerTexts(), ['All spaces', 'Work · spc001', 'Work · spc002']);
-    await options.filter({ hasText: 'spc002' }).click();
-    assert.equal(await page.locator('.formula-view-row:visible').count(), 1);
-    assert.match(await page.locator('.formula-view-row:visible').innerText(), /Tasks/);
-    await page.waitForFunction(() => document.getElementById('formula-filter-options').hidden);
-    await page.locator('#formula-search-toggle').click();
-    await page.waitForFunction(() => document.getElementById('formula-search-control').dataset.expanded === 'true');
-    await waitForToolbarMotion();
-    assert.equal(await page.locator('#formula-search-control').getAttribute('data-expanded'), 'true');
-    assert.ok((await page.locator('#formula-search').boundingBox()).width > 200, 'The expanded search field finishes opening before capture.');
-    await page.screenshot({ path: path.join(root, 'calculator-toolbar-filter-search.png') });
-    await openFilter(); await page.locator('#formula-filter-options [data-value=""]').click();
-    await page.locator('#formula-search-toggle').click();
-    await page.locator('#formula-search').fill('query');
-    assert.equal(await page.locator('.formula-view-row:visible').count(), 1);
-    await page.locator('#formula-search').fill('not here');
-    assert.match(await page.locator('#formula-no-matches').innerText(), /No matching/);
-    await page.locator('#formula-search').fill('');
-    const beforeReloads = await page.evaluate(() => window.__calls.filter(command => command === 'discover_kanban_views').length);
-    await page.locator('#formula-reload').click();
-    await page.waitForFunction(previous => window.__calls.filter(command => command === 'discover_kanban_views').length > previous, beforeReloads);
-
-    const modal = page.locator('#formula-calculator-dialog');
-    const key = label => modal.locator('.formula-keypad').getByRole('button', { name: label, exact: true });
-    await page.locator('.formula-view-row').filter({ hasText: 'Tasks' }).click();
-    await modal.waitFor({ state: 'visible' });
-    await key('Fraction').click(); await key('2').click();
-    assert.equal(await modal.locator('#formula-calculator-save').isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.BlobUI.FormulaPage.read().definitions.length), 0);
-    assert.equal(await page.evaluate(() => window.__calls.includes('evaluate_kanban_formula')), false);
-    await modal.locator('#formula-calculator-close').click();
-    await modal.waitFor({ state: 'hidden' });
-    assert.equal(await page.evaluate(() => window.BlobUI.FormulaPage.read().definitions.length), 0);
-
-    const launchRow = page.locator('.formula-view-row').filter({ hasText: 'Launch plan' });
-    await launchRow.click();
-    await modal.waitFor({ state: 'visible' });
-    assert.equal(await modal.locator('.formula-keypad .formula-key').count(), 25);
-    assert.equal(await modal.locator('.formula-calculator-utility .formula-key').count(), 2);
-    assert.equal(await modal.locator('#formula-calculator-save').count(), 1);
-    assert.equal(await modal.locator('.formula-calculator-actions button').filter({ hasText: 'Save' }).count(), 0);
-    assert.equal(await modal.locator('.formula-linear').isVisible(), true);
-    assert.equal(await modal.locator('.formula-fraction').isVisible(), false);
-
-    await key('1').click(); await key('2').click(); await key('3').click();
-    await modal.getByRole('button', { name: 'Backspace', exact: true }).click();
-    await key('4').click();
-    assert.equal((await modal.locator('.formula-linear').innerText()).replaceAll('│', '').trim(), '124');
-    await key('Change sign').click();
-    assert.match((await modal.locator('.formula-linear').innerText()).replace(/[\s│]/g, ''), /−124/);
-    await modal.getByRole('button', { name: 'Clear calculation' }).click();
-
-    await modal.getByRole('button', { name: 'Insert property', exact: true }).click();
-    await modal.getByLabel('Property', { exact: true }).selectOption('estimate');
-    await modal.getByLabel('Aggregation', { exact: true }).selectOption('average');
-    await modal.getByRole('button', { name: 'Insert', exact: true }).click();
-    assert.match(await modal.locator('.formula-linear').innerText(), /Average Estimate/);
-    assert.equal(await page.evaluate(() => window.__calls.includes('evaluate_kanban_formula')), false);
-
-    await key('Fraction').click();
-    assert.equal(await modal.locator('.formula-fraction').isVisible(), true);
-    assert.equal(await modal.locator('.formula-denominator .formula-placeholder').innerText(), 'y');
-    assert.equal(await modal.locator('#formula-calculator-save').isDisabled(), true);
-    await key('2').click(); await key('Change sign').click();
-    assert.match((await modal.locator('.formula-denominator').innerText()).replace(/[\s│]/g, ''), /−2/);
-    assert.equal(await modal.locator('#formula-calculator-save').isEnabled(), true);
-    assert.equal(await page.evaluate(() => window.__calls.includes('evaluate_kanban_formula')), false);
-    await page.screenshot({ path: path.join(root, 'calculator-modal-dark.png') });
-    await page.evaluate(() => document.documentElement.dataset.theme = 'light');
-    await page.setViewportSize({ width: 800, height: 740 });
-    await page.screenshot({ path: path.join(root, 'calculator-modal-light-narrow.png') });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
-    await page.setViewportSize({ width: 1050, height: 1000 });
-
-    await modal.getByRole('button', { name: 'Save calculation' }).click();
-    await modal.waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => window.__saves.length === 1);
-    const saved = await page.evaluate(() => window.__saves[0].definitions[0].tokens);
-    assert.deepEqual(saved.map(token => token.kind), ['open', 'aggregate', 'close', 'operator', 'open', 'operator', 'number', 'close']);
-    assert.equal(saved[1].property, 'estimate');
-    assert.equal(saved[1].operation, 'average');
-    assert.equal(saved[5].value, '-');
-    assert.equal(saved[6].value, '2');
-    assert.match(await page.locator('#formula-calculated-at').innerText(), /Last calculated:/);
-    assert.equal(await page.evaluate(() => window.__calls.includes('evaluate_kanban_formula')), false);
-
-    await page.locator('.formula-view-row').filter({ hasText: 'Launch plan' }).click();
-    await modal.waitFor({ state: 'visible' });
-    assert.match(await modal.locator('.formula-numerator').innerText(), /Average Estimate/);
-    assert.match((await modal.locator('.formula-denominator').innerText()).replace(/[\s│]/g, ''), /−2/);
-    await modal.locator('.formula-display').focus();
-    await page.keyboard.press('ArrowDown');
-    assert.equal(await modal.locator('.formula-display').getAttribute('data-active'), 'denominator');
-    assert.equal(await modal.locator('.formula-caret').count(), 1);
-    assert.equal(await modal.locator('.formula-caret').evaluate(node => node.closest('.formula-denominator') !== null), true);
-    await page.keyboard.press('ArrowUp');
-    assert.equal(await modal.locator('.formula-display').getAttribute('data-active'), 'numerator');
-    await key('Add').click(); await key('1').click();
-
-    await page.evaluate(() => window.__failSave = true);
-    await modal.getByRole('button', { name: 'Save calculation' }).click();
-    await page.locator('#formula-storage-message').filter({ hasText: /board is unavailable/ }).waitFor();
-    assert.equal(await modal.isVisible(), true);
-    assert.equal(await page.evaluate(() => window.__saves.length), 1);
-    await page.evaluate(() => window.__failSave = false);
-    await modal.getByRole('button', { name: 'Save calculation' }).click();
-    await modal.waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => window.__saves.length === 2);
-
-    await page.evaluate(() => window.__hideProperty = true);
-    await page.locator('#formula-reload').click();
-    await page.locator('.formula-view-row').filter({ hasText: 'Launch plan' }).click();
-    await modal.waitFor({ state: 'visible' });
-    await modal.locator('.formula-calculator-status').filter({ hasText: /saved property is unavailable/i }).waitFor();
-    await modal.locator('#formula-calculator-close').click();
-    await modal.waitFor({ state: 'hidden' });
-    await page.evaluate(() => { window.__hideView = true; });
-    await page.locator('#formula-reload').click();
-    const unavailable = page.locator('.formula-view-row').filter({ hasText: 'Unavailable view' });
-    await unavailable.waitFor();
-    await unavailable.click();
-    await modal.waitFor({ state: 'visible' });
-    await modal.getByRole('button', { name: 'Remove calculation' }).click();
-    await modal.locator('.formula-calculator-actions').getByRole('button', { name: 'Save', exact: true }).click();
-    await modal.waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => window.__saves.length === 3 && window.__saves[2].definitions.length === 0);
-    assert.equal(await page.evaluate(() => window.__calls.includes('evaluate_kanban_formula')), false);
-    assert.deepEqual(errors, []);
-  } finally { await browser.close(); }
+    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await page.waitForFunction(()=>window.appReady);
+    await page.locator('#formulas-nav').click();await page.locator('.formula-view-row').first().waitFor();
+    assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
+    assert.equal(await page.locator('.formula-view-row').count(),2);
+    const rows=await page.locator('.formula-view-row').evaluateAll(nodes=>nodes.map(n=>({font:getComputedStyle(n.querySelector('.formula-view-name')).fontSize,radius:getComputedStyle(n).borderRadius})));
+    assert.equal(rows[0].font,rows[1].font);assert.notEqual(rows[0].radius,'0px');
+    assert.equal(await page.locator('.formula-view').first().evaluate(n=>getComputedStyle(n).borderTopWidth),'0px');
+    assert.ok(await page.evaluate(()=>window.__calls.includes('discover_kanban_views')));
+    await page.locator('#formula-filter').click();
+    await page.locator('#formula-filter-options [data-value="spc001"]').click();
+    assert.equal(await page.locator('#formula-filter').getAttribute('aria-expanded'),'true');
+    await page.locator('#formula-filter-options [data-value="spc002"]').click();
+    assert.equal(await page.locator('#formula-filter-options [data-value="spc001"]').getAttribute('aria-selected'),'false');
+    assert.equal(await page.locator('.formula-view-row:visible').count(),1);
+    await page.locator('#formula-filter-options [data-value=""]').click();
+    await page.keyboard.press('Escape');
+    await page.locator('#formula-search-toggle').click();await page.locator('#formula-search').fill('Launch');
+    assert.equal(await page.locator('.formula-view-row:visible').count(),1);
+    assert.equal(await page.locator('#formula-search').evaluate(n=>getComputedStyle(n).borderTopWidth),'0px');
+    await page.locator('#formula-search').fill('');await page.locator('#page-title').click();
+    await open();
+    assert.equal(await modal.locator('select').count(),0);
+    assert.doesNotMatch(await modal.locator('.formula-display').innerText(),/^[xy]$/);
+    await key('1').click();await key('2').click();await key('3').click();await key('Backspace').click();await key('4').click();
+    assert.equal((await read()).definitions[0].tokens[0].value,'124');
+    await key('Clear calculation').click();
+    await key('Insert property').click();await modal.getByRole('option',{name:'Estimate',exact:true}).click();
+    await modal.getByRole('option',{name:'Average',exact:true}).click();
+    assert.equal((await read()).definitions[0].tokens[0].property,'estimate');
+    await key('Fraction').click();await key('2').click();await key('Change sign').click();
+    assert.equal(await modal.locator('mfrac').count(),1);
+    await modal.locator('.formula-display').focus();await page.keyboard.press('ArrowUp');
+    assert.equal(await modal.locator('.formula-display').getAttribute('data-active'),'numerator');
+    await key('Show LaTeX').click();
+    const source=modal.getByRole('textbox',{name:'LaTeX source'});
+    assert.match(await source.inputValue(),/\\frac/);
+    const valid=await read();await source.fill('\\frac{1}{');
+    assert.match(await modal.locator('.formula-calculator-utility .formula-calculator-status').innerText(),/brace|calculation|number/i);
+    assert.deepEqual(await read(),valid);
+    await close();assert.equal(await page.evaluate(()=>window.__saves.length),0);
+    assert.equal(await page.evaluate(()=>window.__calls.includes('save_settings')),false);
+    await open();assert.equal(await source.inputValue(),'\\frac{1}{');
+    await source.fill('\\frac{8}{2}+{3}^{2}');await key('Show rendered').click();
+    assert.ok(await modal.locator('mfrac').count()>0);assert.ok(await modal.locator('msup').count()>0);
+    await page.screenshot({path:path.join(root,'calculator-modal-dark.png')});
+    for(const size of [{width:800,height:740},{width:640,height:600}]){
+      await page.setViewportSize(size);
+      const bounds=await modal.boundingBox();assert.ok(bounds.y>=0&&bounds.y+bounds.height<=size.height);
+      assert.equal(await modal.evaluate(n=>n.scrollHeight<=n.clientHeight),true);
+      assert.ok(Math.abs(bounds.x+bounds.width/2-size.width/2)<2);
+    }
+    await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:path.join(root,'calculator-modal-light-narrow.png')});
+    await page.setViewportSize({width:1050,height:1000});await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+    await close();assert.equal(await page.evaluate(()=>window.__saves.length),0);
+    await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal((await read()).definitions.length,0);
+    await open();assert.equal(await modal.locator('msup').count(),0);await key('4').click();await close();
+    await page.locator('#save-button').click();await page.waitForFunction(()=>window.__saves.length===1);
+    await open();await key('Add').click();await key('2').click();await close();
+    await page.evaluate(()=>window.__failSave=true);await page.locator('#save-button').click();
+    await page.locator('#formula-storage-message').filter({hasText:/pending edits/}).waitFor();
+    assert.equal(await page.evaluate(()=>window.__saves.length),1);
+    await page.evaluate(()=>window.__failSave=false);await page.locator('#save-button').click();await page.waitForFunction(()=>window.__saves.length===2);
+    assert.equal(await page.evaluate(()=>window.__calls.includes('evaluate_kanban_formula')),false);
+    const before=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
+    await page.locator('#formula-reload').click();await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,before);
+    await page.screenshot({path:path.join(root,'calculator-toolbar-filter-search.png')});
+    assert.deepEqual(errors,[]);
+  } finally {await browser.close();}
 });
 
 test('native-generated CSS scopes exact view/category IDs and falls back on narrow headers', async () => {

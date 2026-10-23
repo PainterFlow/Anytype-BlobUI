@@ -2328,7 +2328,7 @@
     });
   }
 
-  window.BlobUI.FormulaPage.init({ async onSave() { await save(); return window.BlobUI.FormulaPage.isPersisted(); }, navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
   el("settings-v21-enabled").addEventListener("change", () => {
     if (!draft || saveBusy || isInstallingUpdate()) return;

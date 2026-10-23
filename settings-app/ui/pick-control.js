@@ -1,7 +1,7 @@
 (function (root) {
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
-  UI.PickControl = { attach({ root: container, options, value, onChange }) {
+  UI.PickControl = { attach({ root: container, options, value, onChange, closeOnSelect = true }) {
     const trigger = container.querySelector('[aria-haspopup="listbox"]');
     const menu = container.querySelector('[role="listbox"]');
     const label = trigger.querySelector('[data-pick-value]') || trigger.querySelector('span:not(.sr-only)');
@@ -41,7 +41,7 @@
     }
     listen(trigger, 'click', () => trigger.getAttribute('aria-expanded') === 'true' ? close() : open());
     listen(trigger, 'keydown', event => { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) { event.preventDefault(); if (trigger.getAttribute('aria-expanded') !== 'true') open(); else { const selected = items().findIndex(item => item.dataset.value === trigger.value); focus(Math.max(0, selected - (event.key === 'ArrowUp' ? 1 : 0))); } } else if (event.key === 'Escape') close(true); });
-    listen(menu, 'click', event => { const item = event.target.closest('[role="option"]'); if (!item || !menu.contains(item)) return; setValue(item.dataset.value); trigger.dispatchEvent(new Event('change', { bubbles: true })); onChange?.(trigger.value); close(true); });
+    listen(menu, 'click', event => { const item = event.target.closest('[role="option"]'); if (!item || !menu.contains(item)) return; setValue(item.dataset.value); trigger.dispatchEvent(new Event('change', { bubbles: true })); onChange?.(trigger.value); if (closeOnSelect) close(true); else if (item.isConnected) item.focus(); });
     listen(menu, 'keydown', event => {
       const index = items().indexOf(document.activeElement);
       if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); focus(event.key === 'Home' ? 0 : event.key === 'End' ? items().length - 1 : index + (event.key === 'ArrowDown' ? 1 : -1)); }
