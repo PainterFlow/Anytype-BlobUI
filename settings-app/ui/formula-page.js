@@ -16,7 +16,8 @@
   let state = defaults(), persistedState = defaults(), catalog = [], api, invoke, calculatorModal;
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
-  let selectedSpace = "", searchControl, filterControl, displayControl;
+  let selectedSpace = "", searchControl, filterControl, displayControl, reloadController, unregisterReload;
+  let discoveryRequested = false;
   const localDrafts = new Map();
   let draftGeneration=0;
   const math = UI.CalculatorMath;
@@ -426,12 +427,13 @@
     const area = make('div', 'formula-variable-actions'); record.variableActions=area;
     const picker = make('div', 'kanban-select formula-property-picker');
     const trigger = button('Insert property', () => {}, 'formula-insert-property');
+    trigger.tabIndex = -1;
     trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
     const menu=make('div','kanban-select-menu'); menu.setAttribute('role','listbox'); menu.setAttribute('aria-label','Insert property'); menu.hidden=true;
     picker.append(trigger,menu); area.append(picker,button('Card count',()=>insertVariable(record,{kind:'count'}),'formula-variable-button'));
     let selectedProperty=null;
-    const properties=()=>record.view.properties.map(p=>({value:p.key,label:p.name}));
-    record.propertyPicker=UI.PickControl.attach({root:picker,options:properties(),onChange(value){
+    const properties=()=>(record.view.properties||[]).filter(property=>property.format==="number").map(property=>({value:property.key,label:property.name}));
+    record.propertyPicker=UI.PickControl.attach({root:picker,options:properties(),focusOnOpen:false,restoreFocusOnSelect:false,emptyMessage:'No number properties in this view',onChange(value){
       if(!selectedProperty){ selectedProperty=value; record.propertyPicker.setOptions(Object.entries(operations).map(([value,label])=>({value,label}))); trigger.textContent='Aggregation'; queueMicrotask(()=>record.propertyPicker.open()); }
       else { insertVariable(record,{kind:'aggregate',property:selectedProperty,operation:value}); selectedProperty=null;record.propertyPicker.setOptions(properties());trigger.textContent='Insert property'; }
     }});
@@ -466,6 +468,8 @@
       record.fieldset = fieldset;
       fieldset.append(make("legend", "sr-only", "Calculator for " + view.name));
       const display = make("div", "formula-display");
+      const displaySlot = make("div", "formula-display-slot");
+      record.displaySlot = displaySlot;
       display.tabIndex = 0;
       display.setAttribute("role", "textbox");
       display.setAttribute("aria-multiline", "false");
@@ -487,12 +491,33 @@
       numerator.addEventListener("click", event => displayTokenClick(record, "numerator", event));
       denominator.addEventListener("click", event => displayTokenClick(record, "denominator", event));
       display.addEventListener("keydown", event => handleDisplayKeydown(record, event));
-      fieldset.append(display);
+      displaySlot.append(display);
+      fieldset.append(displaySlot);
       createPropertyControls(record, fieldset);
       const utility = make("div", "formula-calculator-utility");
-      [["C", "clear", "Clear calculation"], ["⌫", "backspace", "Backspace"]].forEach(([label, action, accessible]) => {
+      [["C", "clear", "Clear calculation"], ["", "backspace", "Backspace"]].forEach(([label, action, accessible]) => {
         const key = button(label, () => edit(record, action), "formula-key");
+        key.tabIndex = -1;
         key.setAttribute("aria-label", accessible); key.title = accessible;
+        if (action === "backspace") {
+          const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+          icon.setAttribute("viewBox", "0 0 20 20");
+          icon.setAttribute("aria-hidden", "true");
+          const outline = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+          outline.setAttribute("d", "M8 4.5h9.5v11H8L3.5 10 8 4.5Z");
+          outline.setAttribute("fill", "none");
+          outline.setAttribute("stroke", "currentColor");
+          outline.setAttribute("stroke-width", "1.5");
+          outline.setAttribute("stroke-linejoin", "round");
+          const cross = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+          cross.setAttribute("d", "m11 8 4 4m0-4-4 4");
+          cross.setAttribute("fill", "none");
+          cross.setAttribute("stroke", "currentColor");
+          cross.setAttribute("stroke-width", "1.5");
+          cross.setAttribute("stroke-linecap", "round");
+          icon.append(outline, cross);
+          key.append(icon);
+        }
         utility.append(key);
       });
       fieldset.append(utility);
@@ -509,6 +534,7 @@
           if (action === "save") void saveCalculator(record);
           else edit(record, action);
         }, "formula-key");
+        key.tabIndex = -1;
         if (accessible) { key.setAttribute("aria-label", accessible); key.title = accessible; }
         if (action === "save") { key.id = "formula-calculator-save"; record.save = key; }
         keypad.append(key);
@@ -546,7 +572,9 @@
         source.value=record.source||'';toggle.textContent=record.sourceMode?'Show rendered':'Show LaTeX';toggle.setAttribute('aria-pressed',String(record.sourceMode));
         updateDisplay(record);(record.sourceMode?source:record.display).focus();
       },'formula-render-toggle');
-      record.fieldset.insertBefore(toggle,record.display);record.fieldset.insertBefore(source,record.display);
+      toggle.tabIndex=-1;
+      record.variableActions.insertBefore(toggle, record.remove);
+      record.displaySlot.insertBefore(source,record.display);
       source.addEventListener('input',()=>{
         record.source=source.value;record.sourceError='';
         try{const tokens=source.value.trim()?math.parseLatex(source.value,view.properties):[];const fraction=parseFraction(tokens);record.numerator=fraction?fraction.numerator:tokens;record.denominator=fraction?fraction.denominator:[];record.fraction=!!fraction;record.cursors={numerator:record.numerator.length,denominator:record.denominator.length};}
@@ -556,6 +584,9 @@
       const utility=record.fieldset.querySelector('.formula-calculator-utility');utility.prepend(record.status);
       source.value=record.source||''; toggle.textContent=record.sourceMode?'Show rendered':'Show LaTeX';
       updateDisplay(record);
+      record.fieldset.addEventListener('mousedown', event => {
+        if (event.target.closest('button,[role="option"]')) event.preventDefault();
+      });
     }
     updateSaveActions(record);
   }
@@ -610,7 +641,10 @@
   }
   function render() {
     if (!initialized || !contents) return;
-    if (calculatorModal && calculatorModal.isOpen()) calculatorModal.close({ restoreFocus: false });
+    if (calculatorModal && calculatorModal.isOpen()) {
+      updateTimestamp();
+      return;
+    }
     contents.replaceChildren();
     records = [];
     syncDisplayPicker();
@@ -640,7 +674,7 @@
       contents.append(item);
     });
     if (!views.length) {
-      const text = discovering ? "Loading Kanban views…" : discovered ? "No accessible Kanban views found." : "Open this page to discover Kanban views.";
+      const text = discovering || !discovered ? "Loading Kanban views…" : "No accessible Kanban views found.";
       contents.append(make("p", "input-hint formula-empty-message", text));
     }
     let empty = el("formula-no-matches");
@@ -657,7 +691,10 @@
     updateTimestamp();
   }
   async function discover() {
-    if (!invoke || discovering || locked || loading) return;
+    if (!invoke) return;
+    if (loading || locked) { discoveryRequested = true; return; }
+    if (discovering) return;
+    discoveryRequested = false;
     discovering = true;
     if (message) message.textContent = loadError;
     syncLocks();
@@ -695,6 +732,18 @@
         render();
       },
     });
+    modalDialog.addEventListener("keydown", event => {
+      if (event.key !== "Tab" || modalBackdrop.hidden) return;
+      const focusable = [activeRecord && activeRecord.display, activeRecord && activeRecord.sourceMode && activeRecord.sourceInput]
+        .filter(element => element && !element.hidden && !element.disabled);
+      if (!focusable.length) return;
+      event.preventDefault();
+      const index = focusable.indexOf(doc.activeElement);
+      const next = event.shiftKey
+        ? index <= 0 ? focusable.length - 1 : index - 1
+        : index < 0 || index === focusable.length - 1 ? 0 : index + 1;
+      focusable[next].focus({ preventScroll: true });
+    }, true);
     if (modalClose) modalClose.addEventListener("click", () => calculatorModal.close());
   }
   UI.FormulaPage = {
@@ -711,7 +760,11 @@
         api.onChange();
       });
       if (search) search.addEventListener("input", filter);
-      if (reload) reload.addEventListener("click", () => void discover());
+      if (UI.AppReload) {
+        reloadController = UI.AppReload;
+        reloadController.bindButton(reload);
+        unregisterReload = reloadController.register(discover);
+      }
       configureModal();
       attachSharedControls();
       render();
@@ -747,6 +800,8 @@
       }
       loading = false;
       render();
+      if (reloadController) void reloadController.run();
+      else void discover();
     },
     async save(bridge, submitted) {
       try {
@@ -762,13 +817,27 @@
         throw Error("Kanban formulas could not be saved. Review the message on the Kanban View Formulas page and retry.");
       }
     },
-    setLocked(value, pending) { const wasLocked=locked; locked = value; dirty = !!pending; syncLocks(); if(wasLocked && !locked && !loading && !discovered && !el("formulas-page").hidden) void discover(); },
-    refresh() { if (!discovered && !discovering && !loading) void discover(); },
-    reload() { discovered = false; if (!el("formulas-page") || !el("formulas-page").hidden) void discover(); },
+    setLocked(value, pending) {
+      const wasLocked = locked;
+      locked = value;
+      dirty = !!pending;
+      syncLocks();
+      if (wasLocked && !locked && !loading && discoveryRequested) {
+        void discover();
+      }
+    },
+    refresh() { if (!discovered && !discovering && !loading) return reloadController ? reloadController.run() : discover(); },
+    reload() {
+      discovered = false;
+      discoveryRequested = true;
+      return reloadController ? reloadController.run() : !discovering && !loading && !locked ? discover() : undefined;
+    },
     destroy() {
       if (searchControl) searchControl.destroy();
       if (filterControl) filterControl.destroy();
       if (displayControl) displayControl.destroy();
+      unregisterReload?.();
+      if (reloadController) reloadController.bindButton(null);
       if (calculatorModal) calculatorModal.close({ restoreFocus: false });
     },
   };

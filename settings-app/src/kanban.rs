@@ -91,6 +91,8 @@ pub struct View {
     pub space: String,
     pub source: String,
     pub kind: String,
+    #[serde(rename = "sourceSignature", skip_serializing_if = "Option::is_none")]
+    pub source_signature: Option<String>,
     pub properties: Vec<Property>,
     pub unsupported: Option<String>,
 }

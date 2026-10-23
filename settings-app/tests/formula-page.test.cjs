@@ -25,8 +25,15 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
       if (command === 'discover_kanban_views') {
         return { views: ['view-a', 'view-b'].filter(id => !window.__hideView || id !== 'view-a').map(viewId => ({
           target: target(viewId), name: 'Board', space: 'Work', source: viewId === 'view-b' ? 'Tasks' : 'Launch plan',
+          sourceSignature: viewId === 'view-b' ? 'source-signature-b' : 'source-signature-a',
           kind: viewId === 'view-b' ? 'Query' : 'Collection',
-          properties: window.__hideProperty ? [] : [{ key: 'estimate', name: 'Estimate', format: 'number' }], unsupported: null,
+          properties: window.__hideProperty ? [] : viewId === 'view-b'
+            ? [{ key: 'notes', name: 'Notes', format: 'text' }, { key: 'due-date', name: 'Due date', format: 'date' }]
+            : [
+              { key: 'estimate', name: 'Estimate', format: 'number' },
+              { key: 'notes', name: 'Notes', format: 'text' },
+              { key: 'due-date', name: 'Due date', format: 'date' },
+            ], unsupported: null,
         })).flatMap(view=>view.target.viewId === "view-a" ? [view,{...view,target:{...view.target,blockId:"inline-copy"},kind:"Inline / type view"}] : [view]), warning: null };
       }
       if (command === 'evaluate_kanban_formula') throw Error('Calculator edits must not evaluate on every key.');
@@ -49,13 +56,26 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
   try {
     await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
     await page.waitForFunction(()=>window.appReady);
+    await page.waitForFunction(()=>document.querySelector('#status-message').textContent.includes('Settings loaded from this device.'));
+    await page.waitForFunction(()=>window.__calls.includes('discover_kanban_views'));
+    await page.locator('.formula-view-row').first().waitFor({state:'attached'});
+    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Startup discovery runs before opening the formula page.');
+    const initialDiscoveries=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
+    await page.evaluate(()=>{
+      window.BlobUI.FormulaPage.setLocked(true,false);
+      window.BlobUI.FormulaPage.reload();
+      queueMicrotask(()=>window.BlobUI.FormulaPage.setLocked(false,false));
+    });
+    await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,initialDiscoveries);
+    await page.waitForFunction(()=>!document.getElementById('formula-reload').disabled);
+    assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
+    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Unlock retries queued discovery while the formula page is hidden.');
     await page.locator('#formulas-nav').click();await page.locator('.formula-view-row').first().waitFor();
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);
     const rows=await page.locator('.formula-view-row').evaluateAll(nodes=>nodes.map(n=>({font:getComputedStyle(n.querySelector('.formula-view-name')).fontSize,radius:getComputedStyle(n).borderRadius})));
     assert.equal(rows[0].font,rows[1].font);assert.notEqual(rows[0].radius,'0px');
     assert.equal(await page.locator('.formula-view').first().evaluate(n=>getComputedStyle(n).borderTopWidth),'0px');
-    assert.ok(await page.evaluate(()=>window.__calls.includes('discover_kanban_views')));
     await page.locator('#formula-filter').click();
     await page.locator('#formula-filter-options [data-value="spc001"]').click();
     assert.equal(await page.locator('#formula-filter').getAttribute('aria-expanded'),'true');
@@ -70,23 +90,48 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.locator('#formula-search').fill('');await page.locator('#page-title').click();
     await open();
     assert.equal(await modal.locator('select').count(),0);
+    assert.deepEqual(await modal.locator('.formula-variable-actions').evaluate(row=>[...row.children].map(node=>node.classList.contains('formula-property-picker')?'property':node.classList.contains('formula-variable-button')?'count':node.classList.contains('formula-render-toggle')?'latex':'remove')),['property','count','latex','remove']);
     assert.doesNotMatch(await modal.locator('.formula-display').innerText(),/^[xy]$/);
+    assert.ok(await modal.locator('.formula-key[aria-label="Backspace"] svg').count());
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('formula-display')),true,'Tab stays on the calculation editor in rendered mode.');
+    assert.equal(await page.evaluate(()=>document.activeElement.tagName), 'DIV');
     await key('1').click();await key('2').click();await key('3').click();await key('Backspace').click();await key('4').click();
     assert.equal((await read()).definitions[0].tokens[0].value,'124');
     await key('Clear calculation').click();
-    await key('Insert property').click();await modal.getByRole('option',{name:'Estimate',exact:true}).click();
+    await key('Insert property').click();
+    assert.deepEqual(await modal.locator('.formula-property-picker [role="option"]').allTextContents(),['Estimate'],'Only numeric properties are offered.');
+    await modal.getByRole('option',{name:'Estimate',exact:true}).click();
     await modal.getByRole('option',{name:'Average',exact:true}).click();
     assert.equal((await read()).definitions[0].tokens[0].property,'estimate');
+    assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('formula-display')),true,'Mouse property selection returns focus to the calculation editor.');
     await key('Fraction').click();await key('2').click();await key('Change sign').click();
     assert.equal(await modal.locator('mfrac').count(),1);
     await modal.locator('.formula-display').focus();await page.keyboard.press('ArrowUp');
     assert.equal(await modal.locator('.formula-display').getAttribute('data-active'),'numerator');
+    const renderedBox=await modal.locator('.formula-display-slot').boundingBox();
     await key('Show LaTeX').click();
     const source=modal.getByRole('textbox',{name:'LaTeX source'});
+    assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'LaTeX source');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'LaTeX source','Tab does not leave the native source editor for calculator buttons.');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'LaTeX source','Tab cycles between the editor and source without landing on buttons.');
+    const sourceBox=await modal.locator('.formula-display-slot').boundingBox();
+    assert.ok(Math.abs(renderedBox.height-sourceBox.height)<0.5 && Math.abs(renderedBox.width-sourceBox.width)<0.5,'Rendered and source modes reserve the same display box.');
     assert.match(await source.inputValue(),/\\frac/);
     const valid=await read();await source.fill('\\frac{1}{');
     assert.match(await modal.locator('.formula-calculator-utility .formula-calculator-status').innerText(),/brace|calculation|number/i);
     assert.deepEqual(await read(),valid);
+    const nativeWrites=await page.evaluate(()=>({settings:window.__calls.filter(c=>c==='save_settings').length,formulas:window.__saves.length}));
+    const sourceDraft=await source.inputValue(), stateDraft=await read();
+    const beforeCtrlR=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
+    await page.keyboard.press('Control+r');
+    await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,beforeCtrlR);
+    assert.equal(await modal.isVisible(),true,'Ctrl+R leaves the calculator open.');
+    assert.equal(await source.inputValue(),sourceDraft,'Ctrl+R preserves unsaved LaTeX text.');
+    assert.deepEqual(await read(),stateDraft,'Ctrl+R preserves the calculator draft.');
+    assert.deepEqual(await page.evaluate(()=>({settings:window.__calls.filter(c=>c==='save_settings').length,formulas:window.__saves.length})),nativeWrites,'Editing and reload do not write native settings.');
     await close();assert.equal(await page.evaluate(()=>window.__saves.length),0);
     assert.equal(await page.evaluate(()=>window.__calls.includes('save_settings')),false);
     await open();assert.equal(await source.inputValue(),'\\frac{1}{');
@@ -113,6 +158,11 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await page.evaluate(()=>window.__calls.includes('evaluate_kanban_formula')),false);
     const before=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
     await page.locator('#formula-reload').click();await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,before);
+    await page.locator('.formula-view-row').filter({hasText:'Tasks'}).click();await modal.waitFor({state:'visible'});
+    await key('Insert property').click();
+    assert.equal(await modal.locator('.formula-property-picker [role="option"]').count(),0,'An empty numeric property list adds no fake option.');
+    assert.equal(await modal.locator('.formula-property-picker [role="status"]').innerText(),'No number properties in this view');
+    await key('Save calculation').click();await modal.waitFor({state:'hidden'});
     await page.screenshot({path:path.join(root,'calculator-toolbar-filter-search.png')});
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}

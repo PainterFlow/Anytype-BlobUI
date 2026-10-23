@@ -2328,6 +2328,7 @@
     });
   }
 
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
   el("settings-v21-enabled").addEventListener("change", () => {

@@ -111,6 +111,7 @@ const context = {
         return result === undefined ? previousResult : result;
       } : handler;
     },
+    removeEventListener() {},
     documentElement: element('root'),
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
@@ -363,6 +364,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     element('kanban-style-options').append(option);
   }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/pick-control.js'), 'utf8'), context);
+  context.window.document = context.document;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];

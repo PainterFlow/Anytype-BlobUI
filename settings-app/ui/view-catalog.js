@@ -13,9 +13,15 @@
   function sourceViewIdentity(view) {
     const target = view && view.target;
     if (!targetIdentity(target)) return null;
-    // The discovery API exposes the owning query/collection as target.objectId.
-    // blockId can differ between an inline embed and the canonical list view.
-    return JSON.stringify([target.spaceId, target.objectId, target.viewId]);
+    if (typeof view.sourceSignature === "string" && view.sourceSignature) {
+      // Inline embeds can belong to a different document than their canonical
+      // query. The backend signature is based on that native source identity
+      // and the complete view definition, so keep it scoped to its space.
+      return JSON.stringify(["signature", target.spaceId, view.sourceSignature]);
+    }
+    // Without enough native metadata to prove semantic equivalence, only an
+    // exact saved target is safe to deduplicate.
+    return JSON.stringify(["target", targetIdentity(target)]);
   }
 
   function canonicalRank(view) {

@@ -1,7 +1,7 @@
 (function (root) {
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
-  UI.PickControl = { attach({ root: container, options, value, onChange, closeOnSelect = true }) {
+  UI.PickControl = { attach({ root: container, options, value, onChange, closeOnSelect = true, focusOnOpen = true, restoreFocusOnSelect = true, emptyMessage = "" }) {
     const trigger = container.querySelector('[aria-haspopup="listbox"]');
     const menu = container.querySelector('[role="listbox"]');
     const label = trigger.querySelector('[data-pick-value]') || trigger.querySelector('span:not(.sr-only)');
@@ -32,16 +32,23 @@
       cancel(); menu.hidden = false; menu.inert = false; trigger.setAttribute('aria-expanded', 'true');
       menu.dataset.state = reduced() ? 'open' : 'opening';
       if (!reduced()) frame = root.requestAnimationFrame(() => { menu.dataset.state = 'open'; });
-      focus(Math.max(0, items().findIndex(item => item.dataset.value === trigger.value)));
+      if (focusOnOpen) focus(Math.max(0, items().findIndex(item => item.dataset.value === trigger.value)));
     }
     function setOptions(next) {
       close(); menu.replaceChildren();
+      if (!next.length && emptyMessage) {
+        const empty = document.createElement('div');
+        empty.className = 'kanban-select-empty';
+        empty.setAttribute('role', 'status');
+        empty.textContent = emptyMessage;
+        menu.append(empty);
+      }
       next.forEach(item => { const option = document.createElement('button'); option.type = 'button'; option.className = 'kanban-select-option'; option.setAttribute('role', 'option'); option.tabIndex = -1; option.dataset.value = item.value; const text = document.createElement('span'); text.className = 'kanban-option-label'; text.textContent = item.label; option.append(text); menu.append(option); });
       setValue(trigger.value);
     }
     listen(trigger, 'click', () => trigger.getAttribute('aria-expanded') === 'true' ? close() : open());
     listen(trigger, 'keydown', event => { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) { event.preventDefault(); if (trigger.getAttribute('aria-expanded') !== 'true') open(); else { const selected = items().findIndex(item => item.dataset.value === trigger.value); focus(Math.max(0, selected - (event.key === 'ArrowUp' ? 1 : 0))); } } else if (event.key === 'Escape') close(true); });
-    listen(menu, 'click', event => { const item = event.target.closest('[role="option"]'); if (!item || !menu.contains(item)) return; setValue(item.dataset.value); trigger.dispatchEvent(new Event('change', { bubbles: true })); onChange?.(trigger.value); if (closeOnSelect) close(true); else if (item.isConnected) item.focus(); });
+    listen(menu, 'click', event => { const item = event.target.closest('[role="option"]'); if (!item || !menu.contains(item)) return; setValue(item.dataset.value); trigger.dispatchEvent(new Event('change', { bubbles: true })); onChange?.(trigger.value); if (closeOnSelect) close(restoreFocusOnSelect); else if (item.isConnected && focusOnOpen) item.focus(); });
     listen(menu, 'keydown', event => {
       const index = items().indexOf(document.activeElement);
       if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); focus(event.key === 'Home' ? 0 : event.key === 'End' ? items().length - 1 : index + (event.key === 'ArrowDown' ? 1 : -1)); }

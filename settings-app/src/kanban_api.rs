@@ -5,6 +5,7 @@ use crate::{
     kanban::{CategoryResult, Property, Target, View},
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -224,7 +225,9 @@ impl Client {
                     block_id,
                     view_id,
                 };
-                let (available_keys, metadata_error) = match configured_view_keys(raw) {
+                let view_source_signature = source_signature(&target, kind, block, raw);
+                let (available_keys, metadata_error) =
+                    match configured_view_keys(raw, Some(block)) {
                     Ok(keys) => (keys, None),
                     Err(error) => (None, Some(error)),
                 };
@@ -246,6 +249,7 @@ impl Client {
                     }
                     .into(),
                     raw: raw.clone(),
+                    source_signature: view_source_signature,
                     available_keys,
                     unsupported: metadata_error,
                 };
@@ -300,9 +304,11 @@ impl Client {
                 continue;
             };
             match exposed_view(&candidate.target, exposed) {
-                Ok(api_view) => match configured_view_keys(api_view) {
+                Ok(api_view) => match configured_view_keys(api_view, None) {
                     Ok(Some(api_keys)) => match &candidate.available_keys {
-                        Some(document_keys) if document_keys != &api_keys => {
+                        Some(document_keys)
+                            if api_keys.iter().any(|key| !document_keys.contains(key)) =>
+                        {
                             candidate.unsupported = Some(
                                 "The API returned inconsistent properties for this view.".into(),
                             );
@@ -402,10 +408,12 @@ impl Client {
             None,
         )?;
         let api_view = exposed_view(target, &exposed)?;
-        let document_keys = configured_view_keys(raw)?;
-        let endpoint_keys = configured_view_keys(api_view)?;
+        let document_keys = configured_view_keys(raw, Some(block))?;
+        let endpoint_keys = configured_view_keys(api_view, None)?;
         let available_keys = match (document_keys, endpoint_keys) {
-            (Some(document), Some(endpoint)) if document != endpoint => {
+            (Some(document), Some(endpoint))
+                if endpoint.iter().any(|key| !document.contains(key)) =>
+            {
                 return Err("The API returned inconsistent properties for this view.".into());
             }
             (Some(document), _) => document,
@@ -635,6 +643,7 @@ struct DiscoveredView {
     source: String,
     kind: String,
     raw: Value,
+    source_signature: Option<String>,
     available_keys: Option<BTreeSet<String>>,
     unsupported: Option<String>,
 }
@@ -666,6 +675,7 @@ impl DiscoveredView {
             space: self.space,
             source: self.source,
             kind: self.kind,
+            source_signature: self.source_signature,
             properties,
             unsupported: self.unsupported,
         }
@@ -689,8 +699,12 @@ fn exposed_view<'a>(target: &Target, exposed: &'a [Value]) -> Result<&'a Value, 
     Ok(matches[0])
 }
 
-fn configured_view_keys(view: &Value) -> Result<Option<BTreeSet<String>>, String> {
-    let mut configured: Option<BTreeSet<String>> = None;
+fn configured_view_keys(
+    view: &Value,
+    dataview_block: Option<&Value>,
+) -> Result<Option<BTreeSet<String>>, String> {
+    let mut configured = BTreeSet::new();
+    let mut found = false;
     for field in ["relations", "columns"] {
         let Some(raw) = view.get(field).filter(|value| !value.is_null()) else {
             continue;
@@ -698,7 +712,6 @@ fn configured_view_keys(view: &Value) -> Result<Option<BTreeSet<String>>, String
         let items = raw
             .as_array()
             .ok_or("The API returned malformed properties for this view.")?;
-        let mut keys = BTreeSet::new();
         for item in items {
             let key = item
                 .as_str()
@@ -713,29 +726,154 @@ fn configured_view_keys(view: &Value) -> Result<Option<BTreeSet<String>>, String
                             property
                                 .get("key")
                                 .or_else(|| property.get("property_key"))
+                                .or_else(|| property.get("propertyKey"))
+                                .or_else(|| property.get("relation_key"))
                                 .and_then(Value::as_str)
                         })
                     })
                 })
                 .filter(|key| !key.is_empty())
                 .ok_or("The API returned a view property without a key.")?;
-            let visible = item
-                .get("is_visible")
-                .or_else(|| item.get("isVisible"))
-                .or_else(|| item.get("visible"));
-            match visible {
-                Some(Value::Bool(false)) => continue,
-                Some(Value::Bool(true)) | None => {}
-                _ => return Err("The API returned malformed visibility for a view property.".into()),
-            }
-            keys.insert(key.to_string());
+            // Anytype keeps configured but hidden columns in the dataview.
+            // They remain properties of the view and can be used in formulas.
+            configured.insert(key.to_string());
         }
-        if configured.as_ref().is_some_and(|previous| previous != &keys) {
-            return Err("The API returned inconsistent properties for this view.".into());
-        }
-        configured = Some(keys);
+        found = true;
     }
-    Ok(configured)
+
+    // The dataview block's `properties` list is the source type's relation
+    // schema: Anytype serializes entries as { property, format }. It includes
+    // properties the board does not currently display as columns.
+    if let Some(raw) = dataview_block
+        .and_then(|block| block.get("properties"))
+        .filter(|value| !value.is_null())
+    {
+        let items = raw
+            .as_array()
+            .ok_or("The API returned malformed source properties for this view.")?;
+        for item in items {
+            if item
+                .get("format")
+                .and_then(Value::as_str)
+                .filter(|format| !format.is_empty())
+                .is_none()
+            {
+                return Err("The API returned a source property without a format.".into());
+            }
+            if item.get("format").and_then(Value::as_str) != Some("number") {
+                continue;
+            }
+            let property = item
+                .get("property")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    item.get("property").and_then(|property| {
+                        property
+                            .get("key")
+                            .or_else(|| property.get("property_key"))
+                            .or_else(|| property.get("propertyKey"))
+                            .and_then(Value::as_str)
+                    })
+                })
+                .filter(|property| !property.is_empty())
+                .ok_or("The API returned a source property without a key.")?;
+            configured.insert(property.to_string());
+        }
+        found = true;
+    }
+
+    Ok(found.then_some(configured))
+}
+
+fn source_signature(
+    target: &Target,
+    kind: Option<&str>,
+    block: &Value,
+    view: &Value,
+) -> Option<String> {
+    let source_id = match kind {
+        Some("queries" | "collections") => target.object_id.as_str(),
+        _ => block.get("object_id").and_then(Value::as_str)?,
+    };
+    let view_id = view.get("id").and_then(Value::as_str)?;
+    let layout = view
+        .get("type")
+        .or_else(|| view.get("layout"))
+        .and_then(Value::as_str)?;
+    let group_by = view.get("group_by").and_then(Value::as_str)?;
+    // Empty filter/sort lists are omitted by some serialized document blocks,
+    // while the canonical views endpoint emits them as arrays. Missing and
+    // null therefore mean the same as no configured filters or sorts.
+    let empty_list = Value::Array(Vec::new());
+    let filters = view
+        .get("filters")
+        .filter(|value| !value.is_null())
+        .unwrap_or(&empty_list);
+    let sorts = view
+        .get("sorts")
+        .filter(|value| !value.is_null())
+        .unwrap_or(&empty_list);
+    if !filters.is_array() || !sorts.is_array() {
+        return None;
+    }
+    let filters = strip_view_editor_ids(filters);
+    let sorts = strip_view_editor_ids(sorts);
+    let signature = serde_json::to_vec(&json!([
+        target.space_id.as_str(),
+        source_id,
+        view_id,
+        layout,
+        group_by,
+        filters,
+        sorts
+    ]))
+    .ok()?;
+    let digest = Sha256::digest(signature);
+    Some(
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
+fn strip_view_editor_ids(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.iter().map(strip_view_editor_ids).collect()),
+        Value::Object(fields) => {
+            let is_filter_or_sort = [
+                "property",
+                "property_key",
+                "propertyKey",
+                "relation_key",
+                "relationKey",
+            ]
+            .iter()
+            .any(|key| fields.contains_key(*key))
+                && (fields.contains_key("condition")
+                    || fields.contains_key("direction")
+                    || fields.contains_key("sort_type")
+                    || fields.contains_key("sortType"));
+            let is_filter_group = fields.contains_key("operator") && fields.contains_key("filters");
+            Value::Object(
+                fields
+                    .iter()
+                    .filter(|(key, _)| {
+                        !(key.as_str() == "id" && (is_filter_or_sort || is_filter_group))
+                    })
+                    .map(|(key, value)| {
+                        let value = if key == "filters" && (is_filter_group || is_filter_or_sort) {
+                            strip_view_editor_ids(value)
+                        } else {
+                            value.clone()
+                        };
+                        (key.clone(), value)
+                    })
+                    .collect(),
+            )
+        }
+        value => value.clone(),
+    }
 }
 
 fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, String), String> {
@@ -1000,7 +1138,7 @@ mod tests {
                     .nth(1)
                     .unwrap();
                 let page = |data: Value| json!({"data":data,"has_more":false});
-                let view = json!({"id":"view-a","type":"kanban","name":"Board","group_by":"status","groups":[{"id":"option-a"},{"id":"empty"}],"relations":[{"key":"estimate","isVisible":true},{"key":"status","isVisible":true},{"key":"hidden-metric","isVisible":false}]});
+                let view = json!({"id":"view-a","type":"kanban","name":"Board","group_by":"status","filters":[],"sorts":[],"groups":[{"id":"option-a"},{"id":"empty"}],"columns":[{"property":"title","width":180},{"property":"status","width":140}]});
                 let response = if path.starts_with("/v2/spaces?") {
                     page(json!([{"id":"space","name":"Work"}]))
                 } else if path.starts_with("/v2/spaces/space/properties/status/options") {
@@ -1014,7 +1152,7 @@ mod tests {
                 } else if path.starts_with("/v2/spaces/space/search") {
                     page(json!([{"id":"object-a","name":"Tasks","type":"query"}]))
                 } else if path.starts_with("/v2/spaces/space/objects/object-a") {
-                    json!({"id":"object-a","type":"query","blocks":[{"id":"board","views":[view]}]})
+                    json!({"id":"object-a","type":"query","blocks":[{"id":"board","object_id":"object-a","properties":[{"property":"estimate","format":"number"},{"property":"hidden-metric","format":"number"},{"property":"status","format":"select"}],"views":[view]}]})
                 } else if path.starts_with("/v2/spaces/space/objects/option-a") {
                     json!({"id":"option-a","kind":"relation_option","properties":{"name":"A"}})
                 } else if path.starts_with("/v2/spaces/space/queries/object-a/views") {
@@ -1054,8 +1192,9 @@ mod tests {
                 .iter()
                 .map(|property| property.key.as_str())
                 .collect::<Vec<_>>(),
-            vec!["estimate"]
+            vec!["estimate", "hidden-metric"]
         );
+        assert!(catalog.views[0].source_signature.is_some());
         let calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "estimate".into(),
             operation: "total".into(),
@@ -1123,7 +1262,7 @@ mod tests {
         }
     }
     #[test]
-    fn view_properties_are_scoped_to_configured_visible_relations_or_columns() {
+    fn view_properties_are_scoped_to_source_schema_and_configured_columns() {
         let relations = json!({
             "relations": [
                 {"key":"estimate","isVisible":true},
@@ -1131,23 +1270,100 @@ mod tests {
             ]
         });
         assert_eq!(
-            configured_view_keys(&relations).unwrap().unwrap(),
-            BTreeSet::from(["estimate".to_string()])
+            configured_view_keys(&relations, None).unwrap().unwrap(),
+            BTreeSet::from(["estimate".to_string(), "hidden-metric".to_string()])
         );
 
         let columns = json!({
             "columns": [
-                {"property_key":"estimate"},
-                {"property_key":"hidden-metric","visible":false}
+                {"property":"title"},
+                {"property":"hidden-metric","hidden":true}
+            ]
+        });
+        let source_schema = json!({
+            "properties": [
+                {"property":"estimate","format":"number"},
+                {"property":"status","format":"select"}
             ]
         });
         assert_eq!(
-            configured_view_keys(&columns).unwrap().unwrap(),
-            BTreeSet::from(["estimate".to_string()])
+            configured_view_keys(&columns, Some(&source_schema)).unwrap().unwrap(),
+            BTreeSet::from([
+                "estimate".to_string(),
+                "hidden-metric".to_string(),
+                "title".to_string()
+            ])
         );
-        assert!(configured_view_keys(&json!({"group_by":"estimate"}))
+        assert!(configured_view_keys(&json!({"group_by":"estimate"}), None)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn source_signature_matches_inline_and_canonical_query_definitions_safely() {
+        let canonical_target = Target {
+            space_id: "space-a".into(),
+            object_id: "query-a".into(),
+            block_id: "query-block".into(),
+            view_id: "view-a".into(),
+        };
+        let inline_target = Target {
+            object_id: "parent-document".into(),
+            block_id: "embed-block".into(),
+            ..canonical_target.clone()
+        };
+        let canonical_block = json!({"id":"query-block"});
+        let inline_block = json!({"id":"embed-block","object_id":"query-a"});
+        let mut definition = json!({
+            "id":"view-a",
+            "type":"kanban",
+            "group_by":"status",
+            "filters":[{"id":"editor-filter-a","property_key":"status","condition":"eq","value":{"id":"option-a"}}],
+            "sorts":[{"id":"editor-sort-a","property_key":"created","sort_type":"desc"}]
+        });
+
+        let canonical_signature = source_signature(&canonical_target, Some("queries"), &canonical_block, &definition);
+        let inline_signature = source_signature(&inline_target, None, &inline_block, &definition);
+        assert_eq!(canonical_signature, inline_signature);
+
+        let mut empty_lists = definition.clone();
+        empty_lists["filters"] = json!([]);
+        empty_lists["sorts"] = json!([]);
+        let mut omitted_empty_lists = empty_lists.clone();
+        omitted_empty_lists.as_object_mut().unwrap().remove("filters");
+        omitted_empty_lists.as_object_mut().unwrap().remove("sorts");
+        assert_eq!(
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &empty_lists),
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &omitted_empty_lists),
+            "omitted empty filter/sort lists are equivalent to explicit empty lists"
+        );
+
+        definition["filters"][0]["id"] = json!("editor-filter-b");
+        definition["sorts"][0]["id"] = json!("editor-sort-b");
+        assert_eq!(
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &definition),
+            canonical_signature,
+            "generated filter/sort row ids do not change semantic identity"
+        );
+        definition["filters"][0]["value"]["id"] = json!("option-b");
+        assert_ne!(
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &definition),
+            canonical_signature,
+            "nested option ids are filter meaning and must remain significant"
+        );
+        let mut different_group = definition.clone();
+        different_group["group_by"] = json!("assignee");
+        assert_ne!(
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &different_group),
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &definition)
+        );
+        let mut different_space = canonical_target.clone();
+        different_space.space_id = "space-b".into();
+        assert_ne!(
+            source_signature(&canonical_target, Some("queries"), &canonical_block, &definition),
+            source_signature(&different_space, Some("queries"), &canonical_block, &definition)
+        );
+        assert!(source_signature(&inline_target, None, &canonical_block, &definition).is_none());
     }
     #[test]
     fn exact_anytype_category_rules() {
