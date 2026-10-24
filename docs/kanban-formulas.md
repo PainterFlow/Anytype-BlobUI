@@ -32,7 +32,7 @@ Save reads fresh data and publishes every saved calculation as one snapshot. Pre
 
 Publication updates the workspace configuration, installed BlobUI data, and stylesheet in one transaction. A failed API read or file replacement retains the previous snapshot and pending edits. Normal appearance saves preserve the snapshot. The API key remains in the native backend; the browser never receives it.
 
-Display formulas under Preferences > Kanban shares the grouped settings list and picker control with Board layout. Its value is independent of Board layout. Balanced is the default and places results beside category titles. Spacious places them below the title. Compact uses a decorative f(x) indicator with a result bubble when the category header is hovered. Conservative container breakpoints use Compact where a result may not fit.
+Display formulas under Preferences > Kanban shares the grouped settings list and picker control with Board layout. Its value is independent of Board layout. Balanced is the default and places results beside category titles, wrapping results to a second line when needed. Spacious places them below the title. With Collapsed Categories enabled, results fade in while a category is hovered or focused and fade out when it is left.
 
 ## Compatibility and storage
 

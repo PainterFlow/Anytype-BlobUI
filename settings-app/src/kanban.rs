@@ -62,7 +62,7 @@ impl Default for Configuration {
 impl Configuration {
     fn validate(&self) -> Result<(), String> {
         if self.version != 2
-            || !matches!(self.display.as_str(), "compact" | "balanced" | "spacious")
+            || !matches!(self.display.as_str(), "balanced" | "spacious")
             || self.definitions.len() > 100
         {
             return Err("This Kanban formula configuration is unsupported or too large.".into());
@@ -148,10 +148,13 @@ fn load_at(path: &Path, legacy: &Path) -> Result<Configuration, String> {
             if !metadata.is_file() || metadata.len() > 1024 * 1024 {
                 return Err("The Kanban formula file is unsupported or too large. It has been left unchanged.".into());
             }
-            let configuration: Configuration = serde_json::from_slice(
+            let mut configuration: Configuration = serde_json::from_slice(
                 &fs::read(path).map_err(|_| "Could not read the Kanban formula file.")?,
             )
             .map_err(|_| "The Kanban formula file is malformed. It has been left unchanged.")?;
+            if configuration.display == "compact" {
+                configuration.display = "balanced".into();
+            }
             configuration.validate()?;
             Ok(configuration)
         }
@@ -161,13 +164,14 @@ fn load_at(path: &Path, legacy: &Path) -> Result<Configuration, String> {
             if fs::metadata(legacy).is_ok_and(|m| m.is_file() && m.len() <= 65536) {
                 if let Ok(bytes) = fs::read(legacy) {
                     if let Ok(old) = serde_json::from_slice::<Value>(&bytes) {
-                        if old["version"] == 1
-                            && matches!(
-                                old["display"].as_str(),
-                                Some("compact" | "balanced" | "spacious")
-                            )
-                        {
-                            configuration.display = old["display"].as_str().unwrap().into();
+                        if old["version"] == 1 {
+                            match old["display"].as_str() {
+                                Some("compact" | "balanced") => {
+                                    configuration.display = "balanced".into()
+                                }
+                                Some("spacious") => configuration.display = "spacious".into(),
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -392,9 +396,12 @@ mod tests {
         let old=br#"{"version":1,"display":"compact","formulas":{"work/tasks":{"expression":"sum(estimate)"}}}"#;
         fs::write(&legacy, old).unwrap();
         let configuration = load_at(&current, &legacy).unwrap();
-        assert_eq!(configuration.display, "compact");
+        assert_eq!(configuration.display, "balanced");
         assert!(configuration.definitions.is_empty());
         assert_eq!(fs::read(&legacy).unwrap(), old);
+        fs::write(&current, br#"{"version":2,"display":"compact","definitions":[]}"#).unwrap();
+        let configuration = load_at(&current, &legacy).unwrap();
+        assert_eq!(configuration.display, "balanced");
         fs::write(&current, b"broken").unwrap();
         assert!(load_at(&current, &legacy).is_err());
         assert_eq!(fs::read(&current).unwrap(), b"broken");

@@ -240,7 +240,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
   } finally {await browser.close();}
 });
 
-test('native-generated CSS scopes exact view/category IDs and falls back on narrow headers', async () => {
+test('native-generated CSS scopes exact view/category IDs and wraps results on narrow headers', async () => {
   const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   const page = await browser.newPage();
   // Reduced from captured standalone and inline Anytype markup. The root ID
@@ -248,22 +248,29 @@ test('native-generated CSS scopes exact view/category IDs and falls back on narr
   const board = (object, block = 'board', view = 'view-a', inline = false) => `<div class="pageMain"><div id="block-${block}" class="block blockDataview ${inline ? 'isInline' : ''}">${inline ? '<div class="dropTarget" data-root-id="'+object+'">' : ''}<div class="dataviewHead"><div id="views" style="display:none"><div class="dropTarget" data-root-id="${object}"><div id="view-item-${block}-${view}" class="viewItem active"></div></div></div></div><div class="viewContent viewBoard"><div id="columns">${['option-a', 'empty', 'other'].map(id => `<div id="column-${id}" class="column"><div class="head"><div class="sides"><div class="side left"><span>Category</span></div><div class="side right"><button class="more">More</button></div></div></div></div>`).join('')}</div></div>${inline ? '</div>' : ''}</div></div>`;
 
   try {
-    for (const inline of [false, true]) for (const mode of ['balanced', 'spacious', 'compact']) {
-      await page.setContent(`<style>:root{--color-bg-primary:#202020;--color-text-primary:#eee;--color-shape-secondary:#555}body{font:14px sans-serif;color:#eee;background:#171717}.head{width:400px;margin:20px}.sides{display:flex;height:28px}.side.left{flex:1;overflow:hidden}.side.right{display:none}.column:hover .side.right{display:flex}</style><section id="correct">${board('object-a', 'board', 'view-a', inline)}</section><section id="wrong-object">${board('object-b', 'board', 'view-a', inline)}</section><section id="wrong-block">${board('object-a', 'other-board', 'view-a', inline)}</section><section id="wrong-view">${board('object-a', 'board', 'view-b', inline)}</section>`);
+    for (const inline of [false, true]) for (const mode of ['balanced', 'spacious']) {
+      await page.setContent(`<style>:root{--color-bg-primary:#202020;--color-text-primary:#eee;--color-shape-secondary:#555}body{font:14px sans-serif;color:#eee;background:#171717}.head{width:400px;margin:20px}.sides{display:flex;height:28px}.side.left{flex:1;overflow:hidden}.side.left>span{width:100%}.side.right{display:none}.column:hover .side.right{display:flex}#correct .column{--blobui-kanban-result-opacity:0;--blobui-kanban-motion:60ms}#correct .column:hover>.head{--blobui-kanban-result-opacity:.7}</style><section id="correct">${board('object-a', 'board', 'view-a', inline)}</section><section id="wrong-object">${board('object-b', 'board', 'view-a', inline)}</section><section id="wrong-block">${board('object-a', 'other-board', 'view-a', inline)}</section><section id="wrong-view">${board('object-a', 'board', 'view-b', inline)}</section>`);
       await page.addStyleTag({ content: fs.readFileSync(path.join(root, `${mode}.css`), 'utf8') });
       const correct = page.locator('#correct #column-option-a');
       assert.equal(await correct.locator('.side.right').evaluate(el => getComputedStyle(el).display), 'flex');
       const pseudo = selector => page.locator(selector).evaluate(el => getComputedStyle(el, '::after').content);
-      if (mode !== 'compact') assert.match(await correct.locator('.side.left').evaluate(el => getComputedStyle(el, '::after').content), /12/);
+      assert.match(await correct.locator('.side.left').evaluate(el => getComputedStyle(el, '::after').content), /12/);
+      assert.equal(await correct.locator('.side.left').evaluate(el => getComputedStyle(el, '::before').content), 'none');
+      assert.equal(await correct.locator('.side.right').evaluate(el => getComputedStyle(el, '::after').content), 'none');
       for (const scope of ['wrong-object', 'wrong-block', 'wrong-view']) {
         assert.equal(await pseudo('#' + scope + ' #column-option-a .side.left'), 'none');
       }
       assert.equal(await pseudo('#correct #column-other .side.left'), 'none');
       assert.match(await pseudo('#correct #column-empty .side.left'), /No value/);
-      await correct.locator('.head').evaluate(el => el.style.width = '100px');
-      await page.waitForFunction(() => getComputedStyle(document.querySelector('#correct #column-option-a .side.left'), '::after').display === 'none');
+      if (mode === 'balanced') assert.equal(await correct.locator('.head > .sides').evaluate(el => el.getBoundingClientRect().height), 28);
+      await correct.locator('.head').evaluate(el => el.style.width = '80px');
+      await page.waitForFunction(() => document.querySelector('#correct #column-option-a .head > .sides').getBoundingClientRect().height > 28);
+      const hiddenOpacity = await correct.locator('.side.left').evaluate(el => getComputedStyle(el, '::after').opacity);
+      assert.equal(hiddenOpacity, '0');
       await correct.locator('.head').hover();
-      assert.equal(await correct.locator('.side.right').evaluate(el => getComputedStyle(el, '::after').visibility), 'visible');
+      await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('#correct #column-option-a .side.left'), '::after').opacity) > 0.65);
+      await page.mouse.move(1200, 700);
+      await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('#correct #column-option-a .side.left'), '::after').opacity) < 0.05);
       await page.locator('#correct .viewItem').evaluate(el => el.classList.remove('active'));
       assert.equal(await pseudo('#correct #column-option-a .side.left'), 'none');
     }

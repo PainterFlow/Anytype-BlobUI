@@ -63,6 +63,9 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
     await menu.waitFor({ state: 'hidden' });
     assert.equal(await menu.isVisible(), false);
     assert.equal(await page.locator('#formula-display').evaluate(el => el === document.activeElement), true);
+    const formulaOptions = page.locator('#formula-display-options [role="option"]');
+    assert.equal(await formulaOptions.count(), 2);
+    assert.deepEqual(await formulaOptions.allTextContents(), ['Balanced', 'Spacious']);
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('#collapsed-categories').evaluate(el => el === document.activeElement), true);
     const section = page.locator('section[aria-labelledby="kanban-heading"]');

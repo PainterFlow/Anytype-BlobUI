@@ -487,6 +487,8 @@ mod tests {
                 assert_eq!(compiled.contains("column-gap: 8px"), matches!(style, "balanced" | "compact"));
                 assert_eq!(compiled.contains("flex-wrap: wrap"), style == "compact");
                 assert_eq!(compiled.contains(":focus-within"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: 0;"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: .7;"), collapsed);
                 if matches!(style, "default" | "invalid") && !collapsed {
                     assert!(!compiled.contains("#columns"));
                 }

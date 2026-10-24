@@ -830,7 +830,7 @@
       if (open) open.addEventListener("click", () => { api.navigate("formulas"); if (title) title.focus({ preventScroll: true }); });
       if (preference) preference.addEventListener("change", () => {
         if (locked || loading) return;
-        state.display = ["compact", "balanced", "spacious"].includes(preference.value) ? preference.value : "balanced";
+        state.display = ["balanced", "spacious"].includes(preference.value) ? preference.value : "balanced";
         syncDisplayPicker();
         api.onChange();
       });
@@ -861,7 +861,7 @@
         const result = await invoke("load_kanban_formulas");
         if (result) {
           if (!result.configuration || result.configuration.version !== 2 || !Array.isArray(result.configuration.definitions)
-            || !["compact", "balanced", "spacious"].includes(result.configuration.display)) throw Error("Unsupported configuration");
+            || !["balanced", "spacious"].includes(result.configuration.display)) throw Error("Unsupported configuration");
           state = copy(result.configuration);
           persistedState = copy(state);
           calculatedAt = result.calculatedAt || "";
