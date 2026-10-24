@@ -103,6 +103,7 @@
   function updateSaveActions(record) {
     if (!record) return;
     if (record.save) record.save.disabled = locked || loading;
+    if (record.remove) record.remove.disabled = locked || loading;
     if (record.actions) record.actions.hidden = false;
   }
   function syncLocks() {
@@ -629,6 +630,20 @@
     const actions = make("div", "formula-calculator-actions");
     record.actions = actions;
     if (view.unsupported) {
+      if (targetDefinition(view.target)) {
+        record.remove = button("Remove calculation", () => {
+          if (record !== activeRecord || locked || loading) return;
+          record.numerator = [];
+          record.denominator = [];
+          record.fraction = false;
+          record.cursors = { numerator: 0, denominator: 0 };
+          record.source = "";
+          record.sourceError = "";
+          changed(record);
+          calculatorModal.close();
+        }, "formula-calculator-save");
+        actions.append(record.remove);
+      }
       record.save = button("Save", () => void saveCalculator(record), "formula-calculator-save");
       record.save.id = "formula-calculator-save";
       actions.append(record.save);

@@ -236,6 +236,28 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(count=>window.__saves.length===count+1,savedCount);
     assert.equal(await page.evaluate(()=>window.__saves.at(-1).definitions[0].tokens[0].value),true);
     await open();assert.equal(await source.inputValue(),'true ? 1 < 2 : false');await close();
+    const baseline = await read();
+    await page.evaluate(() => { window.__hideView = true; });
+    await page.locator('#formula-reload').click();
+    const unavailable = page.locator('.formula-view-row').filter({ hasText: 'Unavailable view' });
+    await unavailable.waitFor();
+    await unavailable.click();
+    const remove = key('Remove calculation');
+    await remove.waitFor();
+    await page.evaluate(() => window.BlobUI.FormulaPage.setLocked(true, false));
+    assert.equal(await remove.isDisabled(), true);
+    await page.evaluate(() => window.BlobUI.FormulaPage.setLocked(false, false));
+    await remove.click();
+    await modal.waitFor({ state: 'hidden' });
+    assert.equal((await read()).definitions.length, 0);
+    assert.equal(await unavailable.count(), 0);
+    assert.equal(await page.evaluate(() => window.BlobUI.FormulaPage.isPersisted()), false);
+    await page.evaluate(value => window.BlobUI.FormulaPage.restore(value), baseline);
+    await unavailable.click();
+    await remove.click();
+    await page.locator('#save-button').click();
+    await page.waitForFunction(() => window.__saves.at(-1).definitions.length === 0);
+    assert.equal(await page.evaluate(() => window.BlobUI.FormulaPage.isPersisted()), true);
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}
 });
