@@ -12,7 +12,7 @@
   const displayPickerRoot = el("formula-display-select");
   const modalBackdrop = el("formula-calculator-backdrop"), modalDialog = el("formula-calculator-dialog");
   const modalClose = el("formula-calculator-close"), modalContent = el("formula-calculator-content");
-  const operations = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum" };
+  const operations = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum", median: "Median" };
   let state = defaults(), persistedState = defaults(), catalog = [], api, invoke, calculatorModal;
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
@@ -39,9 +39,10 @@
   }
   function tokenLabel(token, view) {
     if (token.kind === "number") return token.value;
-    if (token.kind === "aggregate") {
+    if (token.kind === "aggregate" || token.kind === "property") {
       const property = (view.properties || []).find(item => item.key === token.property);
-      return (operations[token.operation] || "Aggregate") + " " + (property ? property.name : "Unavailable property");
+      const name = property ? property.name : "Unavailable property";
+      return token.kind === "property" ? name : (operations[token.operation] || "Aggregate") + " " + name;
     }
     if (token.kind === "count") return "Card count";
     if (token.kind === "operator") return ({ "*": "×", "/": "÷", "-": "−" })[token.value] || token.value;
@@ -100,7 +101,6 @@
   }
   function updateSaveActions(record) {
     if (!record) return;
-    if (record.remove) record.remove.disabled = locked || loading || modalSaving || !hasCalculatorInput(record);
     if (record.save) record.save.disabled = locked || loading;
     if (record.actions) record.actions.hidden = false;
   }
@@ -177,10 +177,10 @@
     record.linearDisplay.hidden = record.fraction;
     record.fractionDisplay.hidden = !record.fraction;
     record.display.dataset.fraction = String(record.fraction);
-    const renderMath = (host, tokens, section) => { host.innerHTML = math.toMathML(tokens, record.view.properties, record.cursors[section], record.active === section); };
+    const renderMath = (host, tokens, section) => { host.innerHTML = math.toMathML(tokens, record.view.properties, record.cursors[section], false); };
     renderMath(record.fraction ? record.numeratorDisplay : record.linearDisplay, record.numerator, "numerator");
     if (record.fraction) {
-      record.fractionDisplay.innerHTML='<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mrow data-section="numerator">'+math.toMathMLBody(record.numerator,record.view.properties,record.cursors.numerator,record.active==='numerator')+'</mrow><mrow data-section="denominator">'+math.toMathMLBody(record.denominator,record.view.properties,record.cursors.denominator,record.active==='denominator')+'</mrow></mfrac></math>';
+      record.fractionDisplay.innerHTML='<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mrow data-section="numerator">'+math.toMathMLBody(record.numerator,record.view.properties,record.cursors.numerator,false)+'</mrow><mrow data-section="denominator">'+math.toMathMLBody(record.denominator,record.view.properties,record.cursors.denominator,false)+'</mrow></mfrac></math>';
       record.numeratorDisplay=record.fractionDisplay.querySelector('[data-section="numerator"]');record.denominatorDisplay=record.fractionDisplay.querySelector('[data-section="denominator"]');
       for(const section of ['numerator','denominator']) record[section+'Display'].addEventListener('click',event=>displayTokenClick(record,section,event));
     }
@@ -192,8 +192,8 @@
     const topLabel = record.numerator.map(token => tokenLabel(token, record.view)).join(" ") || "empty";
     const bottomLabel = record.denominator.map(token => tokenLabel(token, record.view)).join(" ") || "empty";
     record.display.setAttribute("aria-label", record.fraction
-      ? "Calculation numerator " + topLabel + ", denominator " + bottomLabel + ". Use arrow up or down to change fields."
-      : "Calculation " + topLabel + ". Press x/y to enter a fraction.");
+      ? "Calculation numerator " + topLabel + ", denominator " + bottomLabel + ". Read only. Show LaTeX to edit."
+      : "Calculation " + topLabel + ". Read only. Show LaTeX to edit.");
   }
   function syncRenderToggle(record) {
     if (!record || !record.renderToggle) return;
@@ -312,103 +312,52 @@
   }
   function edit(record, action) {
     if (!record || locked || loading || modalSaving || record.view.unsupported) return;
-    const before = recordSnapshot(record);
-    if (record.active === "denominator") activateFraction(record);
-    const tokens = sectionTokens(record), cursor = record.cursors[record.active];
-    if (action === "fraction") activateFraction(record);
-    else if (/^[0-9.]$/.test(action)) insertNumeric(record, action);
-    else if (action === "clear") {
-      tokens.length = 0;
-      record.cursors[record.active] = 0;
-    } else if (action === "backspace") {
-      if (!cursor) { restoreRecordSnapshot(record, before); return; }
-      const previous = tokens[cursor - 1];
-      if (previous.kind === "number" && previous.value.length > 1) previous.value = previous.value.slice(0, -1);
-      else { tokens.splice(cursor - 1, 1); record.cursors[record.active]--; }
-    } else if (action === "delete") {
-      if (cursor >= tokens.length) { restoreRecordSnapshot(record, before); return; }
-      tokens.splice(cursor, 1);
-    } else if (action === "sign") toggleSign(record);
-    else if (action === "square") {
-      if (!isValueBefore(tokens, record.cursors[record.active])) {
-        restoreRecordSnapshot(record, before);
-        setActiveStatus(record, "Enter a value before squaring it.");
-        return;
-      }
-      tokens.splice(record.cursors[record.active], 0, { kind: "operator", value: "^" }, { kind: "number", value: "2" });
-      record.cursors[record.active] += 2;
-    } else {
-      const inserted = action === "sqrt" || action === "root"
-        ? [{ kind: "function", value: action }, { kind: "open" }]
-        : action === "(" ? [{ kind: "open" }]
-          : action === ")" ? [{ kind: "close" }]
-            : action === "," ? [{ kind: "comma" }]
-              : [{ kind: "operator", value: action }];
-      tokens.splice(record.cursors[record.active], 0, ...inserted);
-      record.cursors[record.active] += inserted.length;
-    }
-    if (serializedTokens(record).length > 256 || sectionTokens(record).some(token => token.kind === "number" && token.value.length > 32)) {
-      restoreRecordSnapshot(record, before);
-      setActiveStatus(record, "Use at most 256 calculator terms and 32 characters per number.");
-      updateDisplay(record);
+    if (!record.sourceMode || !record.sourceInput) return;
+    const source = record.sourceInput;
+    if (action === "clear") {
+      source.value = "";
+      source.setSelectionRange(0, 0);
+      source.dispatchEvent(new root.Event("input", { bubbles: true }));
+      source.focus({ preventScroll: true });
       return;
     }
-    setActiveStatus(record, "");
-    if (!changed(record)) {
-      restoreRecordSnapshot(record, before);
-      setActiveStatus(record, "Use at most 256 calculator terms.");
-      updateDisplay(record);
+    const start = source.selectionStart, end = source.selectionEnd;
+    if (action === "backspace" || action === "delete") {
+      const left = start === end && action === "backspace" ? Math.max(0, start - 1) : start;
+      const right = start === end && action === "delete" ? Math.min(source.value.length, end + 1) : end;
+      insertSource(record, "", left, right);
       return;
     }
-    record.display.focus({ preventScroll: true });
+    const snippets = { fraction: "\\frac{}{}", sqrt: "\\sqrt{}", root: "\\sqrt[]{}", square: "^{2}", sign: "-", "*": "\\times ", "/": "\\div " };
+    const insertionStart = source.selectionStart;
+    const snippet = snippets[action] ?? action;
+    insertSource(record, snippet);
+    const placeholder = action === "root" ? snippet.indexOf("[") : ["fraction", "sqrt"].includes(action) ? snippet.indexOf("{") : -1;
+    if (placeholder >= 0) source.setSelectionRange(insertionStart + placeholder + 1, insertionStart + placeholder + 1);
   }
+  function insertSource(record, snippet, start, end) {
+    if (!record.sourceMode || !record.sourceInput || locked || loading || modalSaving || record.view.unsupported) return;
+    const source = record.sourceInput;
+    start ??= source.selectionStart;
+    end ??= source.selectionEnd;
+    source.setRangeText(snippet, start, end, "end");
+    source.dispatchEvent(new root.Event("input", { bubbles: true }));
+    source.focus({ preventScroll: true });
+  }
+
   function setActiveStatus(record, text) {
     if (!record || !record.status) return;
     record.status.textContent = text || "";
     record.status.title = text || "";
   }
   function handleDisplayKeydown(record, event) {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-      event.preventDefault();
-      const cursor = record.cursors[record.active], length = sectionTokens(record).length;
-      record.cursors[record.active] = event.key === "Home" ? 0 : event.key === "End" ? length
-        : Math.max(0, Math.min(length, cursor + (event.key === "ArrowLeft" ? -1 : 1)));
-      updateDisplay(record);
-      return;
-    }
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-      event.preventDefault();
-      if (event.key === "ArrowDown") {
-        activateFraction(record);
-        record.active = "denominator";
-        updateSaveActions(record);
-      }
-      else if (record.fraction) record.active = "numerator";
-      updateDisplay(record);
-      return;
-    }
     if (event.key === "Enter" || event.key === "=") {
       event.preventDefault();
       void saveCalculator(record);
-      return;
-    }
-    const action = ({ Backspace: "backspace", Delete: "delete", x: "*", "×": "*", "÷": "/" })[event.key] || event.key;
-    if (/^[0-9.+\-*/^(),]$/.test(action) || ["backspace", "delete"].includes(action)) {
-      event.preventDefault();
-      edit(record, action);
     }
   }
-  function displayTokenClick(record, section, event) {
-    const target = event.target.closest("[data-token-index]");
-    record.active = section;
-    if (target) {
-      const index = Number(target.dataset.tokenIndex), bounds = target.getBoundingClientRect();
-      record.cursors[section] = index + (event.clientX >= bounds.left + bounds.width / 2 ? 1 : 0);
-    } else record.cursors[section] = section === "numerator" ? record.numerator.length : record.denominator.length;
-    updateDisplay(record);
-    record.display.focus({ preventScroll: true });
-  }
+  function displayTokenClick() { /* The rendered formula is read only. */ }
+
   function endsValue(tokens, cursor) {
     const previous = tokens[cursor - 1];
     return !!previous && ["number", "aggregate", "count", "close"].includes(previous.kind);
@@ -417,33 +366,54 @@
     const next = tokens[cursor];
     return !!next && ["number", "aggregate", "count", "open", "function"].includes(next.kind);
   }
-  function propertyReferenceRange(source, start) {
-    const command = "\\property{";
-    let cursor = start + command.length;
-    if (source.slice(start, cursor) !== command) return -1;
-    while (/\s/.test(source[cursor] || "")) cursor++;
-    if (source[cursor] !== '"') return -1;
-    cursor++;
-    let escaped = false;
-    while (cursor < source.length) {
-      const character = source[cursor++];
-      if (escaped) { escaped = false; continue; }
-      if (character === "\\") { escaped = true; continue; }
-      if (character === '"') break;
+  // Scan source without parsing it so incomplete drafts retain their insertion scope.
+  function sourcePropertyRanges(source) {
+    const ranges = [];
+    const skipSpace = index => { while (/\s/.test(source[index] || "")) index++; return index; };
+    function group(start) {
+      if (source[start] !== "{") return null;
+      let depth = 1, quoted = false, escaped = false;
+      for (let index = start + 1; index < source.length; index++) {
+        const character = source[index];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (character === "\\") escaped = true;
+          else if (character === '"') quoted = false;
+        } else if (character === '"') quoted = true;
+        else if (character === "{") depth++;
+        else if (character === "}" && --depth === 0) return { start, end: index + 1, closed: true };
+      }
+      return { start, end: source.length, closed: false };
     }
-    while (/\s/.test(source[cursor] || "")) cursor++;
-    if (source[cursor] !== "}") return -1;
-    cursor++;
-    const selector = /^#\d+/.exec(source.slice(cursor));
-    if (selector) cursor += selector[0].length;
-    return cursor;
+    let quoted = false, escaped = false;
+    for (let index = 0; index < source.length; index++) {
+      const character = source[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') { quoted = true; continue; }
+      if (!/^\\property\b/.test(source.slice(index))) continue;
+      const first = group(skipSpace(index + 9));
+      if (!first) continue;
+      let end = first.end;
+      const selector = /^#\d+/.exec(source.slice(end));
+      if (selector) end += selector[0].length;
+      const second = first.closed ? group(skipSpace(end)) : null;
+      if (second) end = second.end;
+      const third = second?.closed ? group(skipSpace(end)) : null;
+      ranges.push({ start: index, metadataEnd: end, third });
+    }
+    return ranges;
+  }
+  function sourceIsPerCard(source, start, end = start) {
+    return sourcePropertyRanges(source).some(({ third }) => third && start > third.start
+      && end <= third.end - (third.closed ? 1 : 0));
   }
   function sourceBoundaryIsInsideProperty(source, position) {
-    const command = "\\property{";
-    const start = source.lastIndexOf(command, position);
-    if (start < 0 || start >= position) return false;
-    const end = propertyReferenceRange(source, start);
-    return end >= 0 && position < end;
+    return sourcePropertyRanges(source).some(range => position > range.start && position < range.metadataEnd);
   }
   function sourceEndsValue(source, position) {
     if (!position || sourceBoundaryIsInsideProperty(source, position)) return false;
@@ -453,14 +423,14 @@
   function sourceStartsValue(source, position) {
     if (position >= source.length || sourceBoundaryIsInsideProperty(source, position)) return false;
     const rest = source.slice(position);
-    return /^(?:\d|\.|\(|\{|\\(?:property\b|frac\b|sqrt\b|operatorname\s*\{(?:total|average|minimum|maximum|count)\}|left\())/.test(rest);
+    return /^(?:\d|\.|\(|\{|\\(?:property\b|frac\b|sqrt\b|count\b|left\())/.test(rest);
   }
   function insertVariable(record, token) {
-    if (locked || loading || modalSaving || record.view.unsupported) return;
+    if (!record.sourceMode || locked || loading || modalSaving || record.view.unsupported) return;
     if (record.sourceMode && record.sourceInput) {
       const source = record.sourceInput;
       let snippet;
-      try { snippet = math.toLatex([token], record.view.properties); }
+      try { snippet = token.kind === "property" ? math.propertyReference(token.property, record.view.properties) : math.toLatex([token], record.view.properties); }
       catch (error) { setActiveStatus(record, error.message); return; }
       const start = Number.isInteger(source.selectionStart) ? source.selectionStart : source.value.length;
       const end = Number.isInteger(source.selectionEnd) ? source.selectionEnd : start;
@@ -478,29 +448,21 @@
       source.setSelectionRange(caret, caret);
       return;
     }
-    if (record.sourceError) {
-      setActiveStatus(record, "Fix the LaTeX source before editing the rendered calculation.");
-      return;
-    }
-    const before = recordSnapshot(record);
-    if (record.active === "denominator") activateFraction(record);
-    const tokens = sectionTokens(record), cursor = record.cursors[record.active];
-    const leftJoin = endsValue(tokens, cursor) ? [{ kind: "operator", value: "*" }] : [];
-    const rightJoin = startsValue(tokens, cursor) ? [{ kind: "operator", value: "*" }] : [];
-    tokens.splice(cursor, 0, ...leftJoin, copy(token), ...rightJoin);
-    record.cursors[record.active] = cursor + leftJoin.length + 1;
-    if (serializedTokens(record).length > 256 || !changed(record)) {
-      restoreRecordSnapshot(record, before);
-      setActiveStatus(record, "Use at most 256 calculator terms.");
-      updateDisplay(record);
-      return;
-    }
-    record.display.focus({ preventScroll: true });
   }
+
   function createPropertyControls(record, host) {
     const area = make('div', 'formula-variable-actions'); record.variableActions=area;
     const picker = make('div', 'kanban-select formula-property-picker');
-    const trigger = button('Insert property', () => {}, 'formula-insert-property');
+    const trigger = button('Insert property', event => {
+      if (!record.sourceMode) { event.preventDefault(); event.stopImmediatePropagation(); }
+      else if (trigger.getAttribute('aria-expanded') !== 'true') record.resetPropertyPicker?.();
+    }, 'formula-insert-property');
+    trigger.addEventListener('keydown', event => {
+      if (!record.sourceMode && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    });
     trigger.tabIndex = -1;
     trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
     const menu=make('div','kanban-select-menu'); menu.setAttribute('role','listbox'); menu.setAttribute('aria-label','Insert property'); menu.hidden=true;
@@ -513,8 +475,30 @@
         label:property.name,
         description:math.propertyReference(property.key,record.view.properties),
       }));
+    let pendingProperty = null;
+    record.resetPropertyPicker = () => {
+      pendingProperty = null;
+      record.propertyPicker?.setOptions(properties());
+      trigger.textContent = "Insert property";
+    };
     record.propertyPicker=UI.PickControl.attach({root:picker,options:properties(),focusOnOpen:false,restoreFocusOnSelect:false,emptyMessage:'No number or boolean properties in this view',onChange(value){
-      insertVariable(record,{kind:'aggregate',property:value,operation:'total'});
+      if (!record.sourceMode) return;
+      if (!pendingProperty) {
+        const source = record.sourceInput;
+        if (source && sourceIsPerCard(source.value, source.selectionStart, source.selectionEnd)) {
+          insertVariable(record, { kind: 'property', property: value });
+          return;
+        }
+        pendingProperty = value;
+        record.propertyPicker.setOptions(Object.entries(operations).map(([operation, label]) => ({ value: operation, label })));
+        trigger.textContent = 'Choose aggregation';
+        queueMicrotask(() => record.propertyPicker.open());
+        return;
+      }
+      insertVariable(record,{kind:'aggregate',property:pendingProperty,operation:value});
+      pendingProperty = null;
+      record.propertyPicker.setOptions(properties());
+      trigger.textContent = 'Insert property';
     }});
     host.append(area);
   }
@@ -522,21 +506,6 @@
   function saveCalculator(record) {
     if (!record || record !== activeRecord || locked || loading) return;
     calculatorModal.close();
-  }
-  function removeCalculation(record) {
-    if (!record || locked || loading || modalSaving || !hasCalculatorInput(record)) return;
-    record.numerator = [];
-    record.denominator = [];
-    record.fraction = false;
-    record.cursors = { numerator: 0, denominator: 0 };
-    record.active = "numerator";
-    record.source = "";
-    record.sourceError = "";
-    record.sourceMode = false;
-    if (record.sourceInput) record.sourceInput.value = "";
-    changed(record);
-    setActiveStatus(record, "Calculation removed from the draft. Save to publish its removal.");
-    updateDisplay(record);
   }
   function buildCalculator(record) {
     const view = record.view, host = modalContent;
@@ -554,6 +523,7 @@
       const displaySlot = make("div", "formula-display-slot");
       record.displaySlot = displaySlot;
       display.tabIndex = 0;
+      display.setAttribute("aria-readonly", "true");
       display.setAttribute("role", "textbox");
       display.setAttribute("aria-multiline", "false");
       display.setAttribute("aria-label", "Calculation numerator and denominator");
@@ -629,41 +599,27 @@
       record.status.setAttribute("role", "status");
       record.status.setAttribute("aria-live", "polite");
       display.setAttribute("aria-describedby", record.status.id);
-      if ([...record.numerator, ...record.denominator].some(token => token.kind === "aggregate" && !(view.properties || []).some(item => item.key === token.property))) {
+      const unavailableProperty = tokens => tokens.some(token => (["aggregate", "property"].includes(token.kind)
+        && !(view.properties || []).some(item => item.key === token.property)) || (token.calculation && unavailableProperty(token.calculation)));
+      if (unavailableProperty([...record.numerator, ...record.denominator])) {
         record.status.textContent = "A saved property is unavailable. Remove the calculation and choose a replacement.";
       }
       host.append(record.status);
     }
     const actions = make("div", "formula-calculator-actions");
     record.actions = actions;
-    record.remove = button("", () => removeCalculation(record), "neutral-icon-button formula-remove-calculation");
-    record.remove.setAttribute("aria-label", "Remove calculation");
-    record.remove.title = "Remove calculation";
-    const trash = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
-    trash.setAttribute("viewBox", "0 0 20 20");
-    trash.setAttribute("aria-hidden", "true");
-    const trashPath = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-    trashPath.setAttribute("d", "M4 6h12M8 6V4.5h4V6m2 0-.7 9.5H6.7L6 6m2.5 3v4m3-4v4");
-    trashPath.setAttribute("fill", "none");
-    trashPath.setAttribute("stroke", "currentColor");
-    trashPath.setAttribute("stroke-width", "1.5");
-    trashPath.setAttribute("stroke-linecap", "round");
-    trashPath.setAttribute("stroke-linejoin", "round");
-    trash.append(trashPath);
-    record.remove.append(trash);
-    actions.append(record.remove);
     if (view.unsupported) {
       record.save = button("Save", () => void saveCalculator(record), "formula-calculator-save");
       record.save.id = "formula-calculator-save";
       actions.append(record.save);
     }
-    if (record.variableActions) record.variableActions.append(record.remove);
-    else host.append(actions);
+    if (view.unsupported) host.append(actions);
     if (!view.unsupported) {
       const source=make('textarea','formula-latex-input');source.setAttribute('aria-label','LaTeX source');source.spellcheck=false;source.hidden=true;record.sourceInput=source;
       const toggle=button('',()=>{
+        record.resetPropertyPicker?.();
         record.sourceMode=!record.sourceMode;
-        if(record.sourceMode && !record.sourceError){try{record.source=record.fraction?math.toLatex(record,view.properties,true):record.numerator.length?math.toLatex(record.numerator,view.properties):'';}catch(_){record.source=record.numerator.map(t=>tokenLabel(t,view)).join(' ');}}
+        if(record.sourceMode && record.source === undefined){try{record.source=record.fraction?math.toLatex(record,view.properties,true):record.numerator.length?math.toLatex(record.numerator,view.properties):'';}catch(_){record.source=record.numerator.map(t=>tokenLabel(t,view)).join(' ');}}
         source.value=record.source||'';
         updateDisplay(record);(record.sourceMode?source:record.display).focus();
       },'formula-render-toggle');
@@ -674,6 +630,7 @@
       record.variableActions.append(toggle);
       record.displaySlot.insertBefore(source,record.display);
       source.addEventListener('input',()=>{
+        if (!record.sourceMode || locked || loading || modalSaving) { source.value=record.source||''; return; }
         record.source=source.value;record.sourceError='';
         try{const tokens=source.value.trim()?math.parseLatex(source.value,view.properties):[];const fraction=parseFraction(tokens);record.numerator=fraction?fraction.numerator:tokens;record.denominator=fraction?fraction.denominator:[];record.fraction=!!fraction;record.cursors={numerator:record.numerator.length,denominator:record.denominator.length};}
         catch(error){record.sourceError=error.message;}

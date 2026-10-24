@@ -1,20 +1,29 @@
 (function (root) {
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
-  const OPERATIONS = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum" };
+  const OPERATIONS = { total: "Total", sum: "Sum", average: "Average", avg: "Average", median: "Median", minimum: "Minimum", min: "Minimum", maximum: "Maximum", max: "Maximum" };
+  const CANONICAL_OPERATION = { total: "total", sum: "total", average: "average", avg: "average", median: "median", minimum: "minimum", min: "minimum", maximum: "maximum", max: "maximum" };
   const escapeXml = value => String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
   const token = (kind, fields = {}) => ({ kind, ...fields });
 
-  function parseTokens(tokens) {
+  function parseTokens(tokens, context = {}) {
+    const budget = { count: 0 };
+    return parseTokensInternal(tokens, context.allowPerCard === true, budget, 0);
+  }
+  function parseTokensInternal(tokens, allowPerCard, budget, nesting) {
     if (!Array.isArray(tokens) || !tokens.length) throw Error("Enter a calculation.");
-    if (tokens.length > 256) throw Error("Use at most 256 calculator terms.");
+    if (nesting > 48) throw Error("This calculation is nested too deeply.");
+    budget.count += tokens.length;
+    if (budget.count > 256) throw Error("Use at most 256 calculator terms.");
     tokens.forEach(item => {
       if (!item || typeof item !== "object") throw Error("This calculation contains an invalid term.");
       if (item.kind === "number") {
         if (typeof item.value !== "string" || item.value.length > 32) throw Error("This number is too long.");
         if (!/^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(item.value) || !Number.isFinite(Number(item.value))) throw Error("Complete the number.");
       } else if (item.kind === "aggregate") {
-        if (typeof item.property !== "string" || !item.property || item.property.length > 256 || !Object.hasOwn(OPERATIONS, item.operation)) throw Error("Choose a supported numeric property and aggregation.");
+        if (typeof item.property !== "string" || !item.property || item.property.length > 256 || !Object.hasOwn(CANONICAL_OPERATION, item.operation)) throw Error("Choose a supported numeric property and aggregation.");
+      } else if (item.kind === "property") {
+        if (!allowPerCard || typeof item.property !== "string" || !item.property || item.property.length > 256) throw Error("A per-card property requires an aggregation calculation.");
       } else if (item.kind === "operator") {
         if (!['+', '-', '*', '/', '^'].includes(item.value)) throw Error("Choose a supported operator.");
       } else if (item.kind === "function") {
@@ -28,12 +37,16 @@
       return cursor++;
     };
     function expression(minimum = 0, depth = 0) {
-      if (depth > 48) throw Error("This calculation is nested too deeply.");
+      if (depth + nesting > 48) throw Error("This calculation is nested too deeply.");
       const start = cursor, item = tokens[cursor++];
       if (!item) throw Error("Complete the calculation.");
       let left;
       if (item.kind === "number") left = { type: "number", value: item.value, index: start, start, end: cursor };
-      else if (item.kind === "aggregate") left = { type: "aggregate", property: item.property, operation: item.operation, index: start, start, end: cursor };
+      else if (item.kind === "aggregate") {
+        const calculation = item.calculation === undefined ? null : parseTokensInternal(item.calculation, true, budget, nesting + depth + 1);
+        left = { type: "aggregate", property: item.property, operation: CANONICAL_OPERATION[item.operation], calculation, index: start, start, end: cursor };
+      }
+      else if (item.kind === "property") left = { type: "property", property: item.property, index: start, start, end: cursor };
       else if (item.kind === "count") left = { type: "count", index: start, start, end: cursor };
       else if (item.kind === "operator" && (item.value === "-" || item.value === "+")) {
         const child = expression(20, depth + 1);
@@ -47,7 +60,7 @@
         if (item.value === "root") { commaIndex = expect("comma"); degree = expression(0, depth + 1); }
         const closeIndex = expect("close");
         left = { type: "root", value: item.value, index: start, openIndex, closeIndex, commaIndex, child: value, degree, start, end: cursor };
-      } else throw Error("Choose a number, property, or root.");
+      } else throw Error("Choose a number, aggregate, or root.");
 
       while (tokens[cursor]?.kind === "operator") {
         const op = tokens[cursor].value, precedence = op === '+' || op === '-' ? 10 : op === '*' || op === '/' ? 20 : 30;
@@ -103,10 +116,9 @@
   function latexTree(node, properties) {
     switch (node.type) {
       case "number": return node.value;
-      case "aggregate": return node.operation === "total"
-        ? propertyReference(node.property, properties)
-        : `\\operatorname{${OPERATIONS[node.operation].toLowerCase()}}\\left(${propertyReference(node.property, properties)}\\right)`;
-      case "count": return "\\operatorname{count}\\left(\\text{cards}\\right)";
+      case "aggregate": return `${propertyReference(node.property, properties)}{${JSON.stringify(node.operation)}}${node.calculation ? `{${latexTree(node.calculation, properties)}}` : ""}`;
+      case "property": return propertyReference(node.property, properties);
+      case "count": return "\\count";
       case "unary": return `${node.value}${latexTree(node.child, properties)}`;
       case "group": return `\\left(${latexTree(node.child, properties)}\\right)`;
       case "root": return node.value === "sqrt"
@@ -120,9 +132,6 @@
       }
       default: return "";
     }
-  }
-  function escapeLatexText(value) {
-    return String(value).replace(/[\\{}%$&#_]/g, character => `\\${character}`);
   }
   function toLatex(tokens, properties = [], fraction = false) {
     if (fraction) {
@@ -143,8 +152,10 @@
       case "aggregate": {
         const label = textForProperty(node.property, properties);
         const operation = OPERATIONS[node.operation] || "Aggregate";
-        return `${mark(node.index)}<mrow${attrIndex(node.index)}><mtext>${escapeXml(operation)}</mtext><mo>(</mo><mtext>${escapeXml(label)}</mtext><mo>)</mo></mrow>`;
+        const calculation = node.calculation ? `<mo>[</mo>${mathNode(node.calculation, properties, cursor, active)}<mo>]</mo>` : "";
+        return `${mark(node.index)}<mrow${attrIndex(node.index)}><mtext>${escapeXml(operation)}</mtext><mo>(</mo><mtext>${escapeXml(label)}</mtext>${calculation}<mo>)</mo></mrow>`;
       }
+      case "property": return `${mark(node.index)}<mtext${attrIndex(node.index)}>${escapeXml(textForProperty(node.property, properties))}</mtext>`;
       case "count": return `${mark(node.index)}<mrow${attrIndex(node.index)}><mo>#</mo><mtext>cards</mtext></mrow>`;
       case "unary": return `${mark(node.index)}<mrow><mo${attrIndex(node.index)}>${node.value === '-' ? '−' : '+'}</mo>${mathNode(node.child, properties, cursor, active)}</mrow>`;
       case "group":
@@ -172,6 +183,7 @@
       pieces.push(mark(index));
       if (item.kind === "number") pieces.push(`<mn${attrIndex(index)}>${escapeXml(item.value)}</mn>`);
       else if (item.kind === "aggregate") pieces.push(`<mtext${attrIndex(index)}>${escapeXml(OPERATIONS[item.operation] || "Property")}</mtext>`);
+      else if (item.kind === "property") pieces.push(`<mtext${attrIndex(index)}>Property</mtext>`);
       else if (item.kind === "count") pieces.push(`<mtext${attrIndex(index)}>cards</mtext>`);
       else if (item.kind === "function") pieces.push(`<mi${attrIndex(index)}>${item.value === "sqrt" ? '√' : 'ⁿ√'}</mi>`);
       else if (item.kind === "operator") pieces.push(`<mo${attrIndex(index)}>${escapeXml(({ "*": "×", "/": "÷", "-": "−" })[item.value] || item.value)}</mo>`);
@@ -191,7 +203,11 @@
     return `<math xmlns="http://www.w3.org/1998/Math/MathML">${toMathMLBody(tokens, properties, cursor, active)}</math>`;
   }
 
-  function parseLatex(source, properties = []) {
+  function parseLatex(source, properties = [], context = {}) {
+    return parseLatexInternal(source, properties, context.allowPerCard === true, 0);
+  }
+  function parseLatexInternal(source, properties, allowPerCard, nesting) {
+    if (nesting > 48) throw Error("This calculation is nested too deeply.");
     if (typeof source !== "string" || source.length > 4096) throw Error("LaTeX source is limited to 4,096 characters.");
     let index = 0;
     const skip = () => { while (/\s/.test(source[index] || "")) index++; };
@@ -210,11 +226,18 @@
     };
     const readGroup = () => {
       skip(); if (source[index] !== "{") fail("Expected a braced LaTeX argument.");
-      index++; const start = index; let depth = 1, escaped = false;
+      index++; const start = index; let depth = 1, escaped = false, inString = false;
       while (index < source.length) {
         const char = source[index++];
+        if (inString) {
+          if (escaped) { escaped = false; continue; }
+          if (char === "\\") { escaped = true; continue; }
+          if (char === '"') inString = false;
+          continue;
+        }
         if (escaped) { escaped = false; continue; }
         if (char === "\\") { escaped = true; continue; }
+        if (char === '"') { inString = true; continue; }
         if (char === "{") depth++;
         else if (char === "}" && --depth === 0) return source.slice(start, index - 1);
       }
@@ -222,18 +245,22 @@
     };
     const readOptionalGroup = () => {
       skip(); if (source[index] !== "[") return null;
-      index++; const start = index; let depth = 1;
+      index++; const start = index; let depth = 1, escaped = false, inString = false;
       while (index < source.length) {
         const char = source[index++];
+        if (inString) {
+          if (escaped) { escaped = false; continue; }
+          if (char === "\\") { escaped = true; continue; }
+          if (char === '"') inString = false;
+          continue;
+        }
+        if (escaped) { escaped = false; continue; }
+        if (char === "\\") { escaped = true; continue; }
+        if (char === '"') { inString = true; continue; }
         if (char === "[") depth++;
         else if (char === "]" && --depth === 0) return source.slice(start, index - 1);
       }
       fail("Close the optional root degree.");
-    };
-    const readTextCommand = () => {
-      skip(); const command = readCommand();
-      if (command !== "text") fail("Property names must use a text command.");
-      return readGroup().replace(/\\([\\{}%$&#_])/g, "$1");
     };
     const readPropertyReference = () => {
       skip();
@@ -272,7 +299,19 @@
       if (ordinal === null && matches.length > 1) fail("This property name is ambiguous; choose its numbered reference from the property picker.");
       const property = matches[ordinal === null ? 0 : ordinal - 1];
       if (!property) fail("This numbered property reference is unavailable in the current view.");
-      return token("aggregate", { operation: "total", property: property.key });
+      skip();
+      if (source[index] !== "{") return token("property", { property: property.key });
+      let operation;
+      try { operation = JSON.parse(readGroup()); }
+      catch (_) { fail("Aggregation must be a quoted operation name."); }
+      if (typeof operation !== "string") fail("Aggregation must be a quoted operation name.");
+      const normalizedOperation = operation.trim().toLowerCase();
+      if (!Object.hasOwn(CANONICAL_OPERATION, normalizedOperation)) fail("Choose avg, total, sum, median, min, or max for a property.");
+      const canonical = CANONICAL_OPERATION[normalizedOperation];
+      skip();
+      let calculation;
+      if (source[index] === "{") calculation = parseLatexInternal(readGroup(), properties, true, nesting + 1);
+      return token("aggregate", calculation ? { operation: canonical, property: property.key, calculation } : { operation: canonical, property: property.key });
     };
     const matchParen = (left, right) => {
       skip();
@@ -283,7 +322,7 @@
     };
     const precedence = op => op === "+" || op === "-" ? 10 : op === "*" || op === "/" ? 20 : op === "^" ? 30 : -1;
     function expression(minimum = 0, depth = 0) {
-      if (depth > 48) fail("This calculation is nested too deeply.");
+      if (depth + nesting > 48) fail("This calculation is nested too deeply.");
       skip(); let output = [];
       if (source[index] === "+" || source[index] === "-") {
         output.push(token("operator", { value: source[index++] }));
@@ -292,52 +331,27 @@
         const close = matchParen("(", ")");
         output.push(token("open"), ...expression(0, depth + 1)); close(); output.push(token("close"));
       } else if (source[index] === "{") {
-        output.push(token("open"), ...parseLatex(readGroup(), properties), token("close"));
+        output.push(token("open"), ...parseLatexInternal(readGroup(), properties, allowPerCard, nesting + 1), token("close"));
       } else if (source[index] === "\\") {
         const command = readCommand();
         if (command === "sqrt") {
           const optional = readOptionalGroup();
           const body = readGroup();
-          if (optional === null) output.push(token("function", { value: "sqrt" }), token("open"), ...parseLatex(body, properties), token("close"));
-          else output.push(token("function", { value: "root" }), token("open"), ...parseLatex(body, properties), token("comma"), ...parseLatex(optional, properties), token("close"));
+          if (optional === null) output.push(token("function", { value: "sqrt" }), token("open"), ...parseLatexInternal(body, properties, allowPerCard, nesting + 1), token("close"));
+          else output.push(token("function", { value: "root" }), token("open"), ...parseLatexInternal(body, properties, allowPerCard, nesting + 1), token("comma"), ...parseLatexInternal(optional, properties, allowPerCard, nesting + 1), token("close"));
         } else if (command === "frac") {
-          const numerator = parseLatex(readGroup(), properties), denominator = parseLatex(readGroup(), properties);
+          const numerator = parseLatexInternal(readGroup(), properties, allowPerCard, nesting + 1), denominator = parseLatexInternal(readGroup(), properties, allowPerCard, nesting + 1);
           output.push(token("open"), ...numerator, token("close"), token("operator", { value: "/" }), token("open"), ...denominator, token("close"));
         } else if (command === "property") {
-          output.push(readPropertyReference());
-        } else if (command === "operatorname") {
-          const operation = readGroup().trim().toLowerCase();
-          const close = matchParen("(", ")");
-          if (operation === "count") {
-            const label = readTextCommand(); close();
-            if (label.toLowerCase() !== "cards") fail("Card count uses the label cards.");
-            output.push(token("count"));
-          } else {
-            const match = Object.entries(OPERATIONS).find(([, display]) => display.toLowerCase() === operation);
-            if (!match) fail("Choose Total, Average, Minimum, or Maximum for a property.");
-            skip();
-            if (source.startsWith("\\text", index)) {
-              const label = readTextCommand(); close();
-              const matches = properties.filter(item => isSelectableProperty(item) && item.name === label);
-              if (matches.length !== 1) fail(matches.length ? "This property name is ambiguous; insert it from the property picker." : "This property is unavailable in the current view.");
-              output.push(token("aggregate", { operation: match[0], property: matches[0].key }));
-            } else {
-              const argument = expression(0, depth + 1);
-              close();
-              if (argument.length !== 1 || argument[0].kind !== "aggregate") fail("An aggregation must contain one property reference.");
-              argument[0].operation = match[0];
-              output.push(...argument);
-            }
-          }
-        } else if (command === "text") {
-          const label = readGroup().replace(/\\([\\{}%$&#_])/g, "$1");
-          if (label.toLowerCase() === "cards") output.push(token("count"));
-          else fail("Properties need an aggregation command.");
-        } else fail("Unsupported LaTeX command.");
+          const ref = readPropertyReference();
+          if (ref.kind === "property" && !allowPerCard) fail("A per-card property requires an aggregation calculation.");
+          output.push(ref);
+        } else if (command === "count") output.push(token("count"));
+        else fail("Unsupported LaTeX command.");
       } else {
         const number = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(source.slice(index));
         if (number) { index += number[0].length; output.push(token("number", { value: number[0] })); }
-        else fail("Enter a number, property, count, or supported LaTeX function.");
+        else fail("Enter a number, aggregate, count, or supported LaTeX function.");
       }
       while (true) {
         skip(); const operatorStart = index; let op = source[index];
@@ -353,7 +367,7 @@
     }
     const tokens = expression(); skip();
     if (index !== source.length) fail("Check the LaTeX source near “" + source.slice(index, index + 12) + "”.");
-    parseTokens(tokens);
+    parseTokens(tokens, { allowPerCard });
     return tokens;
   }
 

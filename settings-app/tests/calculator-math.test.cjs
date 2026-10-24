@@ -56,7 +56,7 @@ test('property references quote names and number duplicates by stable key for ev
  }
  const escaped=math.toLatex([{kind:'aggregate',property:'unique',operation:'total'}],properties);
  assert.equal(math.parseLatex(escaped,properties)[0].property,'unique');
- assert.equal(math.parseLatex('\\operatorname{average}\\left(\\text{Unique #2}\\right)',properties)[0].operation,'average','Legacy aggregation source remains readable.');
+ assert.equal(math.toLatex([{kind:'aggregate',property:'unique',operation:'sum'}],properties),'\\property{"Unique #2"}{"total"}','Legacy aggregate tokens serialize with the canonical operation and explicit second argument.');
 });
 
 test('property command handles braces and escaped quotes inside its JSON name',()=>{
@@ -65,8 +65,83 @@ test('property command handles braces and escaped quotes inside its JSON name',(
   {key:'quote',name:'A "quote" \\ path #4',format:'number'},
  ];
  for(const property of properties){
-  const source=`\\property{${JSON.stringify(property.name)}}`;
-  assert.equal(math.parseLatex(source,properties)[0].property,property.key);
-  assert.equal(math.toLatex(math.parseLatex(source,properties),properties),source);
+  const source=`\\property{${JSON.stringify(property.name)}}{"sum"}`;
+  const parsed=math.parseLatex(source,properties);
+  assert.equal(parsed[0].property,property.key);
+  assert.equal(parsed[0].operation,'total');
+  assert.equal(math.toLatex(math.parseLatex(source,properties),properties),`\\property{${JSON.stringify(property.name)}}{"total"}`);
  }
+ assert.throws(()=>math.parseLatex(`\\property{${JSON.stringify(properties[0].name)}}`,properties),/requires an aggregation/i);
+});
+
+test('nested formula groups keep JSON property-name braces and escapes intact',()=>{
+ const name='A}B {C "quoted" \\path';
+ const properties=[{key:'odd',name,format:'number'},{key:'total',name:'Total',format:'number'}];
+ const source=`\\property{"Total"}{"sum"}{\\property{${JSON.stringify(name)}} + 1}`;
+ const parsed=math.parseLatex(source,properties);
+ assert.equal(parsed[0].calculation[0].property,'odd');
+ const latex=math.toLatex(parsed,properties);
+ assert.equal(math.toLatex(math.parseLatex(latex,properties),properties),latex);
+ assert.match(math.toMathML(parsed,properties),/A\}B \{C &quot;quoted&quot;/);
+});
+
+test('optional root groups keep closing brackets inside quoted property names',()=>{
+ const properties=[{key:'degree',name:'A]B',format:'number'},{key:'total',name:'Total',format:'number'}];
+ const source='\\property{"Total"}{"sum"}{\\sqrt[\\property{"A]B"}]{8}}';
+ const parsed=math.parseLatex(source,properties);
+ assert.equal(parsed[0].calculation[0].kind,'function');
+ assert.equal(parsed[0].calculation[0].value,'root');
+ assert.equal(parsed[0].calculation[4].kind,'property');
+ assert.equal(parsed[0].calculation[4].property,'degree');
+ const latex=math.toLatex(parsed,properties);
+ assert.equal(math.toLatex(math.parseLatex(latex,properties),properties),latex);
+});
+
+test('aggregate aliases canonicalize and unsupported text commands stay rejected',()=>{
+ const properties=[{key:'amount',name:'Amount',format:'number'}];
+ for(const [alias,canonical] of [['avg','average'],['average','average'],['sum','total'],['total','total'],['min','minimum'],['minimum','minimum'],['max','maximum'],['maximum','maximum'],['median','median']]){
+  const parsed=math.parseLatex(`\\property{"Amount"}{${JSON.stringify(alias)}}`,properties);
+  assert.equal(parsed[0].operation,canonical);
+  assert.equal(math.toLatex(parsed,properties),`\\property{"Amount"}{${JSON.stringify(canonical)}}`);
+ }
+ assert.throws(()=>math.parseLatex('\\property{"Amount"}{["sum"]}',properties),/quoted operation name/i);
+ assert.throws(()=>math.parseLatex('\\property{"Amount"}{4}',properties),/quoted operation name/i);
+ for(const source of ['\\text{Amount}', '\\operatorname{sum}', '\\newline', '\\quad', '\\,']) assert.throws(()=>math.parseLatex(source,properties));
+});
+
+test('per-card formula arguments parse, validate, roundtrip, and render safely',()=>{
+ const properties=[
+  {key:'price',name:'Price & tax',format:'number'},
+  {key:'qty',name:'Quantity',format:'number'},
+  {key:'discount',name:'Discount',format:'number'},
+ ];
+ const source='\\property{"Price & tax"}{"sum"}{\\property{"Price & tax"} * \\property{"Quantity"} + \\property{"Discount"}}';
+ const parsed=math.parseLatex(source,properties);
+ assert.equal(parsed[0].kind,'aggregate');
+ assert.equal(parsed[0].operation,'total');
+ assert.deepEqual(JSON.parse(JSON.stringify(parsed[0].calculation)),[
+  {kind:'property',property:'price'}, {kind:'operator',value:'*'}, {kind:'property',property:'qty'},
+  {kind:'operator',value:'+'}, {kind:'property',property:'discount'},
+ ]);
+ const latex=math.toLatex(parsed,properties);
+ assert.equal(math.toLatex(math.parseLatex(latex,properties),properties),latex);
+ assert.match(math.toMathML(parsed,properties),/Price &amp; tax/);
+ assert.match(math.toMathML(parsed,properties),/Quantity/);
+ assert.throws(()=>math.parseLatex('\\property{"Price & tax"}',properties),/aggregation calculation/i);
+ assert.throws(()=>math.parseTokens([{kind:'property',property:'price'}]),/aggregation calculation/i);
+ assert.doesNotThrow(()=>math.parseTokens([{kind:'aggregate',property:'price',operation:'total',calculation:[{kind:'property',property:'price'}]}]),'A raw property is valid inside the calculation argument.');
+ assert.doesNotThrow(()=>math.parseTokens(parsed));
+});
+
+test('saved aggregate tokens remain valid and nested scopes enforce shared limits',()=>{
+ const properties=[{key:'price',name:'Price',format:'number'}];
+ const old=[{kind:'aggregate',property:'price',operation:'sum'}];
+ assert.equal(math.toLatex(old,properties),'\\property{"Price"}{"total"}');
+ assert.deepEqual(JSON.parse(JSON.stringify(math.parseLatex(math.toLatex(old,properties),properties))),[{kind:'aggregate',property:'price',operation:'total'}]);
+ let nested=[{kind:'property',property:'price'}];
+ for(let i=0;i<49;i++) nested=[{kind:'aggregate',property:'price',operation:'total',calculation:nested}];
+ assert.throws(()=>math.parseTokens(nested),/nested too deeply/i);
+ assert.throws(()=>math.parseLatex('\\property{"Price"}{"sum"}{'.concat('\\property{"Price"}{"sum"}{'.repeat(48),'1','}'.repeat(49)),properties),/nested too deeply/i);
+ const overBudget=[{kind:'aggregate',property:'price',operation:'total',calculation:Array.from({length:257},(_,i)=>i%2?{kind:'operator',value:'+'}:{kind:'number',value:'1'})}];
+ assert.throws(()=>math.parseTokens(overBudget),/256 calculator terms/i);
 });

@@ -1215,6 +1215,7 @@ mod tests {
         let calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "estimate".into(),
             operation: "total".into(),
+            calculation: None,
         }])
         .unwrap();
         let results = client
@@ -1239,6 +1240,7 @@ mod tests {
         let boolean_calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "done".into(),
             operation: "total".into(),
+            calculation: None,
         }])
         .unwrap();
         let boolean_results = client
@@ -1263,6 +1265,7 @@ mod tests {
         let deleted = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "deleted".into(),
             operation: "total".into(),
+            calculation: None,
         }])
         .unwrap();
         assert!(client
@@ -1271,6 +1274,7 @@ mod tests {
         let unavailable = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "unused-metric".into(),
             operation: "total".into(),
+            calculation: None,
         }])
         .unwrap();
         assert!(client
@@ -1279,6 +1283,7 @@ mod tests {
         let unavailable_boolean = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "off-view-bool".into(),
             operation: "total".into(),
+            calculation: None,
         }])
         .unwrap();
         assert!(client

@@ -53,7 +53,6 @@
 .formula-caret { background: var(--text); color: var(--text); font-size: inherit; animation: formula-caret-blink 1s steps(1) infinite; }
 @keyframes formula-caret-blink { 50% { opacity: 0; } }
 .formula-variable-actions, .formula-calculator-actions { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
-.formula-variable-actions .formula-remove-calculation { margin-left: 0; }
 .formula-variable-actions > button { flex-shrink: 0; }
 .formula-property-picker { position: relative; display: inline-flex; align-items: center; margin: 0; }
 .formula-property-picker label { color: var(--text-secondary); font-size: 12px; }
@@ -81,13 +80,8 @@
 #formula-filter.is-filtered:hover, #formula-filter.is-filtered[aria-expanded="true"], #formula-filter[aria-pressed="true"]:hover, #formula-filter[aria-pressed="true"][aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .formula-variable-actions { justify-content: flex-start; gap: 6px; }
 .formula-variable-actions .formula-insert-property, .formula-variable-actions .formula-variable-button { padding-inline: 7px; font-size: 12px; white-space: nowrap; }
-.formula-variable-actions .formula-remove-calculation, .formula-variable-actions .formula-render-toggle { flex: 0 0 32px; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; border-radius: 50%; background: transparent; }
 .formula-variable-actions .formula-render-toggle { margin-left: auto; }
 .formula-variable-actions .formula-render-toggle svg { stroke: currentColor; }
-.formula-variable-actions .formula-remove-calculation { color: var(--color-red, #e05252); }
-.formula-variable-actions .formula-remove-calculation:hover:not(:disabled) { background: color-mix(in srgb, var(--color-red, #e05252) 15%, var(--hover)); }
-.formula-variable-actions .formula-remove-calculation:disabled { color: var(--text-secondary); background: transparent; }
-.formula-remove-calculation svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .formula-property-picker .kanban-select-option-description { display: block; margin-top: 2px; color: var(--text-secondary); font-family: var(--font-code), monospace; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; }
 .formula-property-picker .kanban-select-option:has(.kanban-select-option-description) { display: block; height: auto; min-height: 48px; padding: 6px 9px; text-align: left; }
 .formula-property-picker .kanban-select-option:has(.kanban-select-option-description) .kanban-option-label { display: block; }
@@ -97,3 +91,9 @@
 @keyframes formula-page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 :root[data-settings-v21="true"][data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
 @media (prefers-reduced-motion: reduce) { #formulas-page { animation: none !important; } }
+
+/* Rendered calculations never expose an editing caret or pointer. */
+.formula-display, .formula-display * { cursor: default; caret-color: transparent; }
+.formula-display .formula-caret { display: none; }
+
+.formula-variable-actions .formula-render-toggle { flex: 0 0 32px; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 6px; border-radius: 50%; background: transparent; }
