@@ -131,7 +131,7 @@
     </section>
     <div class="app-shell" id="settings-shell">
       <aside class="sidebar" aria-label="Settings navigation">
-        <nav class="sidebar-nav" aria-label="Settings">
+        <nav id="sidebar-nav" class="sidebar-nav" aria-label="Settings">
           <span class="nav-group-label">Application</span>
           <button id="preferences-nav" class="nav-item active" type="button" aria-current="page" data-settings-page="preferences">
             <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"/><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"/></svg>
@@ -582,7 +582,7 @@
       <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" aria-describedby="keybinds-description" tabindex="-1">
         <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keyboard shortcuts" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
         <h2 id="keybinds-title">Keyboard shortcuts</h2>
-        <div class="keybinds-content">
+        <div id="keybinds-content" class="keybinds-content">
           <p id="keybinds-description">Click a shortcut to change it. Changes are saved automatically.</p>
           <div id="keybind-list" class="keybind-list"></div>
           <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>

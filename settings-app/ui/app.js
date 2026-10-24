@@ -272,6 +272,8 @@
     update();
     return update;
   }
+  setupScrollbar(el("sidebar-nav"), ".nav-item");
+  setupScrollbar(el("keybinds-content"), "#keybind-list");
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
   const updateReleaseNotesScrollbar = setupScrollbar(el("release-notes-dialog"), "#release-notes-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");

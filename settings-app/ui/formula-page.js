@@ -649,6 +649,16 @@
       record.renderToggle=toggle;
       record.variableActions.append(toggle);
       record.displaySlot.insertBefore(source,record.display);
+      for (const scrollArea of [record.display, source]) {
+        let hideScrollbarTimer;
+        scrollArea.addEventListener('scroll', () => {
+          scrollArea.classList.add('is-scrolling');
+          window.clearTimeout(hideScrollbarTimer);
+          hideScrollbarTimer = window.setTimeout(() => {
+            scrollArea.classList.remove('is-scrolling');
+          }, 900);
+        }, { passive: true });
+      }
       source.addEventListener('input',()=>{
         if (!record.sourceMode || locked || loading || modalSaving) { source.value=record.source||''; return; }
         record.source=source.value;record.sourceError='';
