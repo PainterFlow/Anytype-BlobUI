@@ -187,6 +187,9 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     if Regex::new(r"\{\{[^}]+\}\}").unwrap().is_match(&css_text) {
         return Err("Compiled CSS still contains an unresolved placeholder.".into());
     }
+    if !api_disabled {
+        css_text.push_str(&crate::kanban_css::render(data.get("kanbanFormulaResults"))?);
+    }
     Ok(css_text)
 }
 
@@ -484,6 +487,8 @@ mod tests {
                 assert_eq!(compiled.contains("column-gap: 8px"), matches!(style, "balanced" | "compact"));
                 assert_eq!(compiled.contains("flex-wrap: wrap"), style == "compact");
                 assert_eq!(compiled.contains(":focus-within"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: 0;"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: .7;"), collapsed);
                 if matches!(style, "default" | "invalid") && !collapsed {
                     assert!(!compiled.contains("#columns"));
                 }

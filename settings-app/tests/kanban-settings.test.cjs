@@ -20,7 +20,7 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
     await page.addInitScript(() => {
       window.__saves = [];
       window.__TAURI__ = { core: { invoke: async (name, args) => {
-        if (name === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: { fontFamily: 'Segoe UI', codeFontFamily: 'Consolas', accentColor: 'Default', accentMode: 'native', kanbanViewStyle: 'default', collapsedCategories: false } };
+        if (name === 'get_app_state') return { ready: true, theme: document.documentElement.dataset.theme || 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: { fontFamily: 'Segoe UI', codeFontFamily: 'Consolas', accentColor: 'Default', accentMode: 'native', kanbanViewStyle: 'default', collapsedCategories: false } };
         if (name === 'save_settings') { window.__saves.push(args.settings); return { calendarStatus: 'cached' }; }
         if (name === 'get_theme') return 'dark';
         return null;
@@ -62,6 +62,11 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
     await page.keyboard.press('Tab');
     await menu.waitFor({ state: 'hidden' });
     assert.equal(await menu.isVisible(), false);
+    assert.equal(await page.locator('#formula-display').evaluate(el => el === document.activeElement), true);
+    const formulaOptions = page.locator('#formula-display-options [role="option"]');
+    assert.equal(await formulaOptions.count(), 2);
+    assert.deepEqual(await formulaOptions.allTextContents(), ['Balanced', 'Spacious']);
+    await page.keyboard.press('Tab');
     assert.equal(await page.locator('#collapsed-categories').evaluate(el => el === document.activeElement), true);
     const section = page.locator('section[aria-labelledby="kanban-heading"]');
     for (const theme of ['dark', 'light']) {
@@ -69,12 +74,12 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
       await section.scrollIntoViewIfNeeded();
       await section.screenshot({ path: path.join(root, `settings-${theme}.png`) });
       await trigger.click();
-      assert.equal(await page.getByRole('option', { name: /Compact/ }).getAttribute('aria-selected'), 'true');
+      assert.equal(await menu.getByRole('option', { name: /Compact/ }).getAttribute('aria-selected'), 'true');
       assert.equal(await menu.locator('.kanban-option-description').count(), 0);
-      const selected = page.getByRole('option', { name: 'Compact', exact: true });
+      const selected = menu.getByRole('option', { name: 'Compact', exact: true });
       assert.equal(await selected.evaluate(el => el.getBoundingClientRect().height), 34);
       const selectedBackground = await selected.evaluate(el => getComputedStyle(el).backgroundColor);
-      const otherOption = page.getByRole('option', { name: 'Balanced', exact: true });
+      const otherOption = menu.getByRole('option', { name: 'Balanced', exact: true });
       await otherOption.hover();
       assert.equal(await otherOption.evaluate(el => getComputedStyle(el).backgroundColor), selectedBackground);
       assert.equal(await trigger.evaluate(el => getComputedStyle(el).borderTopWidth), '0px');

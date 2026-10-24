@@ -43,6 +43,9 @@ function element(id) {
       getClientRects() { return this.hidden ? [] : [{}]; },
       focus() { this.focused = true; activeElement = this; },
       querySelector(selector) {
+        if (id === 'kanban-select' && selector === '[aria-haspopup="listbox"]') return element('kanban-view-style');
+        if (id === 'kanban-select' && selector === '[role="listbox"]') return element('kanban-style-options');
+        if (id === 'kanban-view-style' && selector === '[data-pick-value]') return element('kanban-style-value');
         const match = selector.match(/^\[data-shortcut-action="([^"]+)"\]$/);
         if (id === 'keybind-list' && match) {
           return this.children.flatMap(row => row.children).find(child => child.dataset.shortcutAction === match[1]) || element(id + selector);
@@ -108,6 +111,7 @@ const context = {
         return result === undefined ? previousResult : result;
       } : handler;
     },
+    removeEventListener() {},
     documentElement: element('root'),
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
@@ -346,6 +350,22 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   // Layout is covered by the real-browser suite. Keep the shared tab controller in this form harness.
   context.window.BlobUI.SettingsV21.init = () => {};
   context.window.BlobUI.SettingsV21.setEnabled = () => {};
+  // The formula page has its own browser and storage tests. Keep this form
+  // harness independent of its DOM while retaining a stable edit snapshot.
+  context.window.BlobUI.FormulaPage = {
+    read: () => ({ version: 2, display: 'balanced', definitions: [] }),
+    restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},
+  };
+  // Use the real shared picker; browser coverage verifies its layout and keyboard behavior.
+  for (const value of ['default', 'balanced', 'compact']) {
+    const option = element('kanban-option-' + value);
+    option.dataset.value = value;
+    option.querySelector('.kanban-option-label').textContent = value[0].toUpperCase() + value.slice(1);
+    element('kanban-style-options').append(option);
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/pick-control.js'), 'utf8'), context);
+  context.window.document = context.document;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];

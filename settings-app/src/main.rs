@@ -14,6 +14,10 @@ mod autostart;
 mod css;
 mod connection;
 mod folder_dialog;
+mod calculator;
+mod kanban;
+mod kanban_api;
+mod kanban_css;
 mod hotkey;
 mod storage;
 mod updater;
@@ -1554,6 +1558,11 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            kanban::load_kanban_formulas,
+            kanban::discover_kanban_views,
+            kanban::evaluate_kanban_formula,
+            kanban::save_kanban_formulas,
+            kanban::refresh_kanban_results,
             reveal_api_key,
             get_calendar_api_availability,
             configure_connection,

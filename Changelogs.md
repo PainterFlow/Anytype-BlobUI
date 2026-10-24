@@ -16,6 +16,17 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
     - Compact: Very compact UI, properties now also wrap around instead of 1 new line for each property.
 - Added new "Collapsed Categories" option, which toggles collapsible kanban views. Hovering over the header will un-collapse the category. (*Works with inline-kanban views too :D*)
 
+### Kanban Custom Formulas (*Requires API key*)
+- Kanban views now support custom formulas.
+    - Inserting properties are supported
+    - Per card calculations are supported
+    - Boolean and number properties are supported
+    - "Card Count" is supported
+    - Per category calculations
+    - Ternary operators are supported
+    - Boolean operators are supported
+    - LaTeX is supported
+
 ## Accent Color
 - Added new "Include selections" option, which toggles whether selected text, objects, text blocks, etc. should be affected by the accent color.
 

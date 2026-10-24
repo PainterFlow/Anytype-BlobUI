@@ -1,6 +1,24 @@
 (function (root) {
   "use strict";
 
+  function createIcon() {
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("class", "visibility-icon");
+    [
+      ["path", { class: "visibility-eye", d: "M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" }],
+      ["circle", { class: "visibility-eye", cx: "10", cy: "10", r: "2.25" }],
+      ["path", { class: "visibility-slash", d: "m3 3 14 14" }],
+    ].forEach(([tag, attributes]) => {
+      const element = document.createElementNS(namespace, tag);
+      Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+      svg.append(element);
+    });
+    return svg;
+  }
+
   function bind(options) {
     const input = options.input;
     const button = options.button;
@@ -87,4 +105,5 @@
   }
 
   root.VisibilityField = { bind };
+  root.VisibilityIcon = { create: createIcon };
 })(window);
