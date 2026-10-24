@@ -1227,7 +1227,7 @@ mod tests {
                 .find(|r| r.category_id == "option-a")
                 .unwrap()
                 .value,
-            Some(3.0)
+            Some((3.0).into())
         );
         assert_eq!(
             results
@@ -1235,7 +1235,7 @@ mod tests {
                 .find(|r| r.category_id == "empty")
                 .unwrap()
                 .value,
-            Some(7.0)
+            Some((7.0).into())
         );
         let boolean_calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "done".into(),
@@ -1252,7 +1252,7 @@ mod tests {
                 .find(|result| result.category_id == "option-a")
                 .unwrap()
                 .value,
-            Some(1.0)
+            Some((1.0).into())
         );
         assert_eq!(
             boolean_results
@@ -1260,8 +1260,22 @@ mod tests {
                 .find(|result| result.category_id == "empty")
                 .unwrap()
                 .value,
-            Some(0.0)
+            Some((0.0).into())
         );
+        let comparison = Calculator::parse(&[
+            crate::calculator::Token::Aggregate { property: "done".into(), operation: "sum".into(), calculation: None },
+            crate::calculator::Token::Operator { value: ">".into() },
+            crate::calculator::Token::Number { value: "0".into() },
+        ]).unwrap();
+        assert!(client.calculate(&catalog.views[0].target, &comparison).unwrap().iter().all(|result| matches!(result.value, Some(crate::calculator::CalculationValue::Boolean(_)))));
+        let skipped_deleted = Calculator::parse(&[
+            crate::calculator::Token::Boolean { value: true },
+            crate::calculator::Token::Operator { value: "?".into() },
+            crate::calculator::Token::Number { value: "1".into() },
+            crate::calculator::Token::Operator { value: ":".into() },
+            crate::calculator::Token::Aggregate { property: "deleted".into(), operation: "sum".into(), calculation: None },
+        ]).unwrap();
+        assert!(client.calculate(&catalog.views[0].target, &skipped_deleted).is_err());
         let deleted = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "deleted".into(),
             operation: "total".into(),

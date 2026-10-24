@@ -38,6 +38,7 @@
     return (source || state).definitions.find(item => identity(item.target) === identity(target));
   }
   function tokenLabel(token, view) {
+    if (token.kind === "boolean") return token.value ? "True" : "False";
     if (token.kind === "number") return token.value;
     if (token.kind === "aggregate" || token.kind === "property") {
       const property = (view.properties || []).find(item => item.key === token.property);
@@ -582,16 +583,35 @@
         [",", ",", "Comma"], ["1", "1"], ["2", "2"], ["3", "3"], ["+", "+", "Add"],
         ["x/y", "fraction", "Fraction"], ["±", "sign", "Change sign"], ["0", "0"], [".", ".", "Decimal point"], ["Save", "save", "Save calculation"],
       ];
-      keys.forEach(([label, action, accessible]) => {
-        const key = button(label, () => {
-          if (action === "save") void saveCalculator(record);
-          else edit(record, action);
-        }, "formula-key");
-        key.tabIndex = -1;
-        if (accessible) { key.setAttribute("aria-label", accessible); key.title = accessible; }
-        if (action === "save") { key.id = "formula-calculator-save"; record.save = key; }
-        keypad.append(key);
+      const logicKeys = [
+        ['=', '==', 'Equal'], ['≠', '!=', 'Not equal'], ['<', '<', 'Less than'], ['≤', '<=', 'Less than or equal'], ['Save', 'save', 'Save calculation'],
+        ['>', '>', 'Greater than'], ['≥', '>=', 'Greater than or equal'], ['AND', '&&', 'Logical AND'], ['OR', '||', 'Logical OR'], ['NOT', '!', 'Logical NOT'],
+        ['True', 'true', 'True'], ['False', 'false', 'False'], ['(', '(', 'Open parenthesis'], [')', ')', 'Close parenthesis'], ['?', '?', 'Conditional question mark'],
+        [':', ':', 'Conditional colon'],
+      ];
+      const modes = make('div', 'formula-keypad-modes');
+      modes.setAttribute('role', 'group'); modes.setAttribute('aria-label', 'Calculator keypad');
+      const modeButtons = ['Math', 'Logic'].map(label => {
+        const control = button(label, () => showKeys(label), 'formula-key');
+        control.addEventListener('mousedown', event => event.preventDefault());
+        modes.append(control); return control;
       });
+      fieldset.append(modes);
+      function showKeys(mode) {
+        modeButtons.forEach(control => control.setAttribute('aria-pressed', String(control.textContent === mode)));
+        keypad.replaceChildren();
+        (mode === 'Logic' ? logicKeys : keys).forEach(([label, action, accessible]) => {
+          const key = button(label, () => {
+            if (action === "save") void saveCalculator(record);
+            else edit(record, action);
+          }, "formula-key");
+          key.tabIndex = -1;
+          if (accessible) { key.setAttribute("aria-label", accessible); key.title = accessible; }
+          if (action === "save") { key.id = "formula-calculator-save"; record.save = key; }
+          keypad.append(key);
+        });
+      }
+      showKeys('Math');
       fieldset.append(keypad);
       host.append(fieldset);
       record.status = make("p", "formula-calculator-status");

@@ -15,7 +15,7 @@ pub fn render(value: Option<&Value>) -> Result<String, String> {
     };
     let snapshot: Snapshot = serde_json::from_value(value.clone())
         .map_err(|_| "The saved Kanban result snapshot is malformed.".to_string())?;
-    if snapshot.version != 1
+    if !matches!(snapshot.version, 1 | 2)
         || !matches!(
             snapshot.display.as_str(),
             "compact" | "balanced" | "spacious"
@@ -29,6 +29,11 @@ pub fn render(value: Option<&Value>) -> Result<String, String> {
     for result in snapshot.results {
         result.target.validate()?;
         crate::kanban::validate_id(&result.category_id)?;
+        if snapshot.version == 1
+            && matches!(result.value, Some(calculator::CalculationValue::Boolean(_)))
+        {
+            return Err("Version 1 snapshots require numeric values.".into());
+        }
         if result.value.is_some_and(|v| !v.is_finite()) {
             return Err("A Kanban result is outside the numeric range.".into());
         }
@@ -36,10 +41,11 @@ pub fn render(value: Option<&Value>) -> Result<String, String> {
             return Err("Duplicate Kanban result identities cannot be published.".into());
         }
         let text = calculator::format(result.value);
-        // data-root-id comes from Anytype's drop target; IDs below come from
-        // full AnyBlock documents and the core Kanban grouping rules.
+        // Anytype nests the view's drop target inside the dataview block.
+        // Bind the object identity to the active view within that drop target,
+        // rather than requiring data-root-id on an ancestor of the block.
         let t = &result.target;
-        let head=format!("[data-root-id={}] [id={}]:has([id={}].viewItem.active) .viewContent.viewBoard #columns > [id={}] > .head",quote(&t.object_id),quote(&format!("block-{}",t.block_id)),quote(&format!("view-item-{}-{}",t.block_id,t.view_id)),quote(&format!("column-{}",result.category_id)));
+        let head=format!("[id={}]:has([data-root-id={}] > [id={}].viewItem.active) .viewContent.viewBoard #columns > [id={}] > .head",quote(&format!("block-{}",t.block_id)),quote(&t.object_id),quote(&format!("view-item-{}-{}",t.block_id,t.view_id)),quote(&format!("column-{}",result.category_id)));
         css.push_str(&format!("\n{head} {{ --blobui-kanban-result: {}; }}\n{head} > .sides {{ container: blobui-kanban / inline-size; }}\n{head} .side.left {{ display: flex; min-width: 0; flex: 1; gap: 6px; }}\n{head} .side.left > :first-child {{ min-width: 0; overflow: hidden; }}\n{head} .side.left::after {{ content: var(--blobui-kanban-result); flex: none; font-size: 12px; opacity: .7; white-space: nowrap; }}\n{head} .side.right {{ position: relative; }}\n{head} .side.right::before {{ content: 'f(x)'; display: none; font-size: 12px; margin-right: 6px; opacity: .7; pointer-events: none; }}\n{head} .side.right::after {{ content: var(--blobui-kanban-result); visibility: hidden; position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 100; width: max-content; max-width: 240px; padding: 8px 12px; border-radius: 8px; background: var(--color-bg-primary, #202020); border: 1px solid var(--color-shape-secondary, #888); color: var(--color-text-primary, inherit); pointer-events: none; }}\n",quote(&text)));
         css.push_str(&format!("{head} .side.right {{ display: flex; }}\n{head} .side.right > :is(.more, .add) {{ visibility: hidden; }}\n{head}:hover .side.right > :is(.more, .add), {head}:focus-within .side.right > :is(.more, .add) {{ visibility: visible; }}\n"));
         let compact=format!("{head} .side.left::after {{ display: none; }}\n{head} .side.right::before {{ display: inline-block; }}\n{head}:hover .side.right::after, {head}:focus-within .side.right::after {{ visibility: visible; }}\n");
@@ -96,5 +102,20 @@ mod tests {
         escaped["results"][0]["categoryId"] = json!("x\"]{color:red}/*");
         let css = render(Some(&escaped)).unwrap();
         assert!(!css.contains("color:red"));
+    }
+    #[test]
+    fn boolean_snapshots_format_and_validate_versions() {
+        let mut value = json!({"version":2,"display":"balanced","calculatedAt":"now","results":[{"target":{"spaceId":"space","objectId":"object","blockId":"board","viewId":"view"},"categoryId":"empty","value":true}]});
+        for boolean in [true, false] {
+            value["results"][0]["value"] = json!(boolean);
+            let css = render(Some(&value)).unwrap();
+            assert!(css.contains(&quote(if boolean { "True" } else { "False" })));
+        }
+        value["version"] = json!(1);
+        assert!(render(Some(&value)).is_err());
+        value["results"][0]["value"] = json!(12);
+        assert!(render(Some(&value)).is_ok());
+        value["version"] = json!(3);
+        assert!(render(Some(&value)).is_err());
     }
 }

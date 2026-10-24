@@ -108,6 +108,23 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.deepEqual(await styles(),renderedStyles,'Keypad appearance stays identical in either mode.');
     const sourceBox=await modal.locator('.formula-display-slot').boundingBox();
     assert.ok(Math.abs(sourceBox.height-renderedBox.height)<0.5);
+    assert.equal(await key('Math').getAttribute('aria-pressed'),'true');
+    await source.fill('true ? 10 : 0');await source.evaluate(n=>n.setSelectionRange(7,9));
+    await key('Logic').click();
+    assert.equal(await key('Logic').getAttribute('aria-pressed'),'true');
+    assert.deepEqual(await source.evaluate(n=>[n.selectionStart,n.selectionEnd]),[7,9]);
+    await key('False').click();assert.equal(await source.inputValue(),'true ? false : 0');
+    await source.fill('1 < 2 && !false ? true : false');await key('Show rendered').click();
+    assert.match(await modal.locator('.formula-display').innerText(),/True/);
+    const booleanDraft=await read();await key('True').click();assert.deepEqual(await read(),booleanDraft);
+    await page.screenshot({path:path.join(root,'calculator-logic-dark.png')});
+    await page.setViewportSize({width:480,height:700});
+    await page.evaluate(()=>document.documentElement.dataset.theme='light');
+    await page.screenshot({path:path.join(root,'calculator-logic-light-narrow.png')});
+    assert.ok(await modal.evaluate(n=>n.getBoundingClientRect().bottom <= innerHeight));
+    await page.setViewportSize({width:1050,height:1000});
+    await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+    await key('Show LaTeX').click();await key('Math').click();
     await source.fill('12');await source.evaluate(n=>n.setSelectionRange(1,2));await key('3').click();
     assert.equal(await source.inputValue(),'13');
     await source.fill('\\frac{1}{'.replaceAll('\\\\','\\'));
@@ -207,6 +224,18 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await key('Insert property').click();await modal.getByRole('option',{name:'Quantity',exact:true}).click();
     assert.equal(await source.inputValue(),quotedPrefix+'*\\property{"Quantity"}}','Quoted braces do not hide a nested property boundary or its per-card scope.');
     await close();
+    await open();
+    assert.equal(await key('Math').getAttribute('aria-pressed'),'true','Reopening resets keypad mode.');
+    await source.fill('true ? 1 < 2 : false');
+    await close();
+    const savedCount=await page.evaluate(()=>window.__saves.length);
+    await page.evaluate(()=>window.__failSave=true);await page.locator('#save-button').click();
+    await page.locator('#formula-storage-message').filter({hasText:/pending edits/}).waitFor();
+    assert.equal(await page.evaluate(()=>window.__saves.length),savedCount);
+    await page.evaluate(()=>window.__failSave=false);await page.locator('#save-button').click();
+    await page.waitForFunction(count=>window.__saves.length===count+1,savedCount);
+    assert.equal(await page.evaluate(()=>window.__saves.at(-1).definitions[0].tokens[0].value),true);
+    await open();assert.equal(await source.inputValue(),'true ? 1 < 2 : false');await close();
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}
 });
@@ -214,24 +243,29 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
 test('native-generated CSS scopes exact view/category IDs and falls back on narrow headers', async () => {
   const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   const page = await browser.newPage();
-  const board = object => `<div data-root-id="${object}"><div id="block-board"><div id="views" style="display:none"><div id="view-item-board-view-a" class="viewItem active"></div></div><div class="viewContent viewBoard"><div id="columns">${['option-a', 'empty', 'other'].map(id => `<div id="column-${id}" class="column"><div class="head"><div class="sides"><div class="side left"><span>Category</span></div><div class="side right"><button>More</button></div></div></div></div>`).join('')}</div></div></div></div>`;
+  // Reduced from captured standalone and inline Anytype markup. The root ID
+  // belongs to the view drop target inside the block, beside the board content.
+  const board = (object, block = 'board', view = 'view-a', inline = false) => `<div class="pageMain"><div id="block-${block}" class="block blockDataview ${inline ? 'isInline' : ''}">${inline ? '<div class="dropTarget" data-root-id="'+object+'">' : ''}<div class="dataviewHead"><div id="views" style="display:none"><div class="dropTarget" data-root-id="${object}"><div id="view-item-${block}-${view}" class="viewItem active"></div></div></div></div><div class="viewContent viewBoard"><div id="columns">${['option-a', 'empty', 'other'].map(id => `<div id="column-${id}" class="column"><div class="head"><div class="sides"><div class="side left"><span>Category</span></div><div class="side right"><button class="more">More</button></div></div></div></div>`).join('')}</div></div>${inline ? '</div>' : ''}</div></div>`;
+
   try {
-    for (const mode of ['balanced', 'spacious', 'compact']) {
-      await page.setContent(`<style>:root{--color-bg-primary:#202020;--color-text-primary:#eee;--color-shape-secondary:#555}body{font:14px sans-serif;color:#eee;background:#171717}.head{width:400px;margin:20px}.sides{display:flex;height:28px}.side.left{flex:1;overflow:hidden}.side.right{display:none}.column:hover .side.right{display:flex}</style>${board('object-a')}${board('object-b')}`);
+    for (const inline of [false, true]) for (const mode of ['balanced', 'spacious', 'compact']) {
+      await page.setContent(`<style>:root{--color-bg-primary:#202020;--color-text-primary:#eee;--color-shape-secondary:#555}body{font:14px sans-serif;color:#eee;background:#171717}.head{width:400px;margin:20px}.sides{display:flex;height:28px}.side.left{flex:1;overflow:hidden}.side.right{display:none}.column:hover .side.right{display:flex}</style><section id="correct">${board('object-a', 'board', 'view-a', inline)}</section><section id="wrong-object">${board('object-b', 'board', 'view-a', inline)}</section><section id="wrong-block">${board('object-a', 'other-board', 'view-a', inline)}</section><section id="wrong-view">${board('object-a', 'board', 'view-b', inline)}</section>`);
       await page.addStyleTag({ content: fs.readFileSync(path.join(root, `${mode}.css`), 'utf8') });
-      const correct = page.locator('[data-root-id="object-a"] #column-option-a');
+      const correct = page.locator('#correct #column-option-a');
       assert.equal(await correct.locator('.side.right').evaluate(el => getComputedStyle(el).display), 'flex');
       const pseudo = selector => page.locator(selector).evaluate(el => getComputedStyle(el, '::after').content);
       if (mode !== 'compact') assert.match(await correct.locator('.side.left').evaluate(el => getComputedStyle(el, '::after').content), /12/);
-      assert.equal(await pseudo('[data-root-id="object-b"] #column-option-a .side.left'), 'none');
-      assert.equal(await pseudo('[data-root-id="object-a"] #column-other .side.left'), 'none');
-      assert.match(await pseudo('[data-root-id="object-a"] #column-empty .side.left'), /No value/);
+      for (const scope of ['wrong-object', 'wrong-block', 'wrong-view']) {
+        assert.equal(await pseudo('#' + scope + ' #column-option-a .side.left'), 'none');
+      }
+      assert.equal(await pseudo('#correct #column-other .side.left'), 'none');
+      assert.match(await pseudo('#correct #column-empty .side.left'), /No value/);
       await correct.locator('.head').evaluate(el => el.style.width = '100px');
-      await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-root-id="object-a"] #column-option-a .side.left'), '::after').display === 'none');
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('#correct #column-option-a .side.left'), '::after').display === 'none');
       await correct.locator('.head').hover();
       assert.equal(await correct.locator('.side.right').evaluate(el => getComputedStyle(el, '::after').visibility), 'visible');
-      await page.locator('[data-root-id="object-a"] .viewItem').evaluate(el => el.classList.remove('active'));
-      assert.equal(await pseudo('[data-root-id="object-a"] #column-option-a .side.left'), 'none');
+      await page.locator('#correct .viewItem').evaluate(el => el.classList.remove('active'));
+      assert.equal(await pseudo('#correct #column-option-a .side.left'), 'none');
     }
   } finally { await browser.close(); }
 });

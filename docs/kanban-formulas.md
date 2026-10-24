@@ -6,15 +6,23 @@ The page follows Anytype's UI philosophy. Search the real views available to you
 
 ## Calculator
 
-Use the keypad or type numbers, decimal points, parentheses, and `+ - * / ^`. Powers associate to the right. Square root uses `√(value)` and nth root uses `ⁿ√(value, degree)`. Root degrees must be whole numbers from 1 to 1024. Odd roots accept negative values; even roots require nonnegative values.
+The eye toggle switches between read-only notation and editable LaTeX. The Math/Logic switch changes the five-column keypad without moving the source selection. Each dialog opens with Math selected. Keys insert at the selection in source mode, including in incomplete drafts. C clears the source. Save closes the dialog and keeps valid edits in the shared draft. Sidebar Save publishes them and Undo restores the saved calculation.
 
-Insert property lets you choose a number or checkbox/boolean property and inserts Total immediately. Average, Minimum, and Maximum remain editable in LaTeX. Each choice includes its LaTeX code below its name. Each readable term stores the property's stable key. Card count counts all cards in the current category. For example, insert Total Estimate, press Divide, then insert Card count.
+Arithmetic supports `+ - * / ^`. Powers associate to the right. Use `\sqrt{value}` or `\sqrt[degree]{value}` for roots. Root degrees are whole numbers from 1 to 1024. Odd roots accept negative values.
 
-Arrow keys move between terms. Home and End move to the beginning or end. Backspace removes a digit or term; Delete removes the next term. C clears the calculation. Division appears as a stacked fraction. The five-column keypad supports keyboard editing. The eye icon switches between rendered notation and editable LaTeX. Insert property, Card count, and the red trash icon stay together on the left. The trash icon clears the calculation and stays disabled when it is empty. Save closes the calculator and keeps its edits in the shared draft. The X, Escape, and backdrop also close the dialog while preserving valid draft edits. Use the sidebar Save to publish or Undo to restore the saved calculation.
+Logic supports `&&`, `||`, `!` and the literals `true` and `false`. Comparisons support `==`, `!=`, `<`, `<=`, `>`, `>=`. The `=` alias also means equality. LaTeX aliases are `\land`, `\lor`, `\neg`, `\ne`, `\le`, and `\ge`. Boolean results display as True or False.
 
-In LaTeX, `\property{"Estimate"}` inserts Total Estimate. Other aggregates wrap that reference, for example `\operatorname{average}\left(\property{"Estimate"}\right)`. The quoted name uses JSON string escaping. Properties with the same name receive numbered references such as `\property{"Estimate"}#1`; choose the exact reference shown in the picker. The saved calculation retains the property's stable key.
+A conditional `condition ? a : b` selects one value and can appear inside a larger calculation. For example, `(\count > 0 ? 10 : 0) + 5` returns 15 for a nonempty category. Zero is false and other finite numbers are true in conditions. AND, OR, and conditional branches evaluate only as needed. A skipped branch cannot cause a runtime division error, but every branch must have valid syntax and available properties.
 
-Each category calculates independently using all matching cards, including cards Anytype has not rendered yet. Numeric aggregates ignore missing values. Checkbox values become 1 for checked and 0 for unchecked. Their aggregate results stay in the range 0 to 1 and round to the nearest whole number, with 0.5 rounding up. Empty checkbox aggregates return 0. Empty numeric totals and card counts return zero; other empty numeric aggregates return No value. Invalid operations, incompatible property values, and deleted properties produce inline errors.
+Arithmetic, ordering comparisons, roots, and aggregations require numeric values. Convert a boolean with `condition ? 1 : 0`. Equality does not convert types, so `true == 1` is false. An evaluated missing value produces No value, including in a condition.
+
+Precedence runs from conditional, OR, AND, equality, ordering comparisons, addition/subtraction, multiplication/division, to powers. Prefix NOT binds above arithmetic. Existing unary signs keep their arithmetic precedence. Parentheses override precedence. Powers and conditionals associate to the right.
+
+Insert property asks for a number or checkbox property and an aggregation. References use stable keys internally and readable quoted names in source, for example `\property{"Estimate"}{"sum"}`. Duplicate names use numbered selectors shown in the picker. Supported aggregations are Total, Average, Minimum, Maximum, and Median.
+
+The optional third argument calculates a value per card before aggregation. To count checked cards, use `\property{"Done"}{"sum"}{\property{"Done"} ? 1 : 0}`. Bare property references are allowed inside that argument. Checkbox reads and ordinary checkbox aggregates retain their numeric behavior. Checked values are 1, unchecked or missing values are 0, and ordinary checkbox aggregates round their clamped result to 0 or 1. Per-card conditional totals can exceed 1.
+
+Each category uses all matching cards. Numeric aggregates ignore missing values. Empty numeric totals and card counts return zero; other empty numeric aggregates return No value. Empty checkbox aggregates return zero. Invalid operations, incompatible values, and unavailable properties produce inline errors.
 
 ## Saving calculations
 
@@ -33,6 +41,8 @@ This uses the official Anytype app and its local API. It does not patch Anytype,
 Results require an exact object, block, active-view, and category identity. Select grouping uses option IDs. Checkbox grouping uses true and false. Multi-select grouping follows Anytype's hash of sorted option IDs, including combination categories rather than counting each option separately.
 
 Some API versions or grants expose option names without stable IDs. Some inline or type views lack a filtered membership endpoint. These views remain listed with an explanation, and BlobUI refuses to publish guessed results. A missing saved view or property retains its calculation until you remove or replace it and save. API loading warnings or incomplete pagination prevent publication.
+
+Result snapshots use version 2 with number, boolean, or null values. Version 1 numeric snapshots remain readable. Older app versions cannot read new boolean formulas or snapshots.
 
 The version 2 configuration is `.blobui-kanban-formulas.json` at the source workspace root and is ignored by Git. Definitions retain full space, object, block, and view IDs. A previous `.blobui-formula-prototype.json` stays unchanged; only its display choice migrates when no live configuration exists. A malformed live file stays unchanged until an explicit successful save replaces it.
 

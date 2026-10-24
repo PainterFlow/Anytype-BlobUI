@@ -6,17 +6,28 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Token {
-    Number { value: String },
+    Number {
+        value: String,
+    },
+    Boolean {
+        value: bool,
+    },
     Aggregate {
         property: String,
         operation: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         calculation: Option<Vec<Token>>,
     },
-    Property { property: String },
+    Property {
+        property: String,
+    },
     Count,
-    Operator { value: String },
-    Function { value: String },
+    Operator {
+        value: String,
+    },
+    Function {
+        value: String,
+    },
     Open,
     Close,
     Comma,
@@ -25,6 +36,10 @@ pub enum Token {
 #[derive(Debug)]
 enum Expression {
     Number(f64),
+    Boolean(bool),
+    Not(Box<Expression>),
+    Positive(Box<Expression>),
+    Conditional(Box<Expression>, Box<Expression>, Box<Expression>),
     Aggregate(String, String, Option<Box<Expression>>),
     Property(String),
     Count,
@@ -33,6 +48,39 @@ enum Expression {
     Root(Box<Expression>, Box<Expression>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CalculationValue {
+    Number(f64),
+    Boolean(bool),
+}
+impl From<f64> for CalculationValue {
+    fn from(value: f64) -> Self {
+        Self::Number(value)
+    }
+}
+impl CalculationValue {
+    fn number(self) -> Result<f64, String> {
+        match self {
+            Self::Number(n) => Ok(n),
+            Self::Boolean(_) => {
+                Err("Use numbers here. Convert a condition with condition ? 1 : 0.".into())
+            }
+        }
+    }
+    fn truth(self) -> bool {
+        match self {
+            Self::Number(n) => n != 0.0,
+            Self::Boolean(b) => b,
+        }
+    }
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::Number(n) => n.is_finite(),
+            Self::Boolean(_) => true,
+        }
+    }
+}
 pub struct Calculator(Expression);
 fn canonical_operation(operation: &str) -> Option<&'static str> {
     match operation.trim().to_ascii_lowercase().as_str() {
@@ -77,9 +125,7 @@ impl Calculator {
                 } if property.len() > 256
                     || property.is_empty()
                     || canonical_operation(operation).is_none()
-                    || calculation
-                        .as_ref()
-                        .is_some_and(|tokens| tokens.is_empty()) =>
+                    || calculation.as_ref().is_some_and(|tokens| tokens.is_empty()) =>
                 {
                     return Err("Choose a supported numeric property and aggregation.".into())
                 }
@@ -118,7 +164,14 @@ impl Calculator {
                         output.push(property.clone());
                     }
                 }
-                Expression::Negate(inner) => visit(inner, output),
+                Expression::Negate(inner)
+                | Expression::Not(inner)
+                | Expression::Positive(inner) => visit(inner, output),
+                Expression::Conditional(condition, yes, no) => {
+                    visit(condition, output);
+                    visit(yes, output);
+                    visit(no, output);
+                }
                 Expression::Binary(_, left, right) | Expression::Root(left, right) => {
                     visit(left, output);
                     visit(right, output);
@@ -132,7 +185,7 @@ impl Calculator {
     }
 
     #[cfg(test)]
-    pub fn evaluate(&self, cards: &[Value]) -> Result<Option<f64>, String> {
+    pub fn evaluate(&self, cards: &[Value]) -> Result<Option<CalculationValue>, String> {
         self.evaluate_with_boolean_properties(cards, &BTreeSet::new())
     }
 
@@ -143,10 +196,14 @@ impl Calculator {
         &self,
         cards: &[Value],
         boolean_properties: &BTreeSet<String>,
-    ) -> Result<Option<f64>, String> {
-        fn finite(value: f64) -> Result<Option<f64>, String> {
+    ) -> Result<Option<CalculationValue>, String> {
+        fn finite(value: f64) -> Result<Option<CalculationValue>, String> {
             if value.is_finite() {
-                Ok(Some(if value == 0.0 { 0.0 } else { value }))
+                Ok(Some(CalculationValue::Number(if value == 0.0 {
+                    0.0
+                } else {
+                    value
+                })))
             } else {
                 Err("The result is outside the supported numeric range.".into())
             }
@@ -155,9 +212,22 @@ impl Calculator {
             node: &Expression,
             cards: &[Value],
             boolean_properties: &BTreeSet<String>,
-        ) -> Result<Option<f64>, String> {
+        ) -> Result<Option<CalculationValue>, String> {
             match node {
                 Expression::Number(value) => finite(*value),
+                Expression::Boolean(value) => Ok(Some(CalculationValue::Boolean(*value))),
+                Expression::Not(value) => Ok(run(value, cards, boolean_properties)?
+                    .map(|v| CalculationValue::Boolean(!v.truth()))),
+                Expression::Positive(value) => match run(value, cards, boolean_properties)? {
+                    Some(v) => finite(v.number()?),
+                    None => Ok(None),
+                },
+                Expression::Conditional(condition, yes, no) => {
+                    match run(condition, cards, boolean_properties)? {
+                        Some(v) => run(if v.truth() { yes } else { no }, cards, boolean_properties),
+                        None => Ok(None),
+                    }
+                }
                 Expression::Count => finite(cards.len() as f64),
                 Expression::Property(property) => {
                     let Some(card) = cards.first() else {
@@ -175,7 +245,11 @@ impl Calculator {
                         match value {
                             Value::Null => 0.0,
                             Value::Bool(value) => {
-                                if *value { 1.0 } else { 0.0 }
+                                if *value {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
                             Value::Number(_) => value
                                 .as_f64()
@@ -184,7 +258,7 @@ impl Calculator {
                                 .clamp(0.0, 1.0),
                             _ => {
                                 return Err(
-                                    "A boolean property contains an incompatible value.".into(),
+                                    "A boolean property contains an incompatible value.".into()
                                 )
                             }
                         }
@@ -201,12 +275,10 @@ impl Calculator {
                     let mut values = Vec::new();
                     for card in cards {
                         if let Some(calculation) = calculation {
-                            if let Some(value) = run(
-                                calculation,
-                                std::slice::from_ref(card),
-                                boolean_properties,
-                            )? {
-                                values.push(value);
+                            if let Some(value) =
+                                run(calculation, std::slice::from_ref(card), boolean_properties)?
+                            {
+                                values.push(value.number()?);
                             }
                             continue;
                         }
@@ -243,7 +315,7 @@ impl Calculator {
                     if values.is_empty() {
                         return Ok(
                             if (is_boolean && calculation.is_none()) || operation == "total" {
-                                Some(0.0)
+                                Some(CalculationValue::Number(0.0))
                             } else {
                                 None
                             },
@@ -278,16 +350,36 @@ impl Calculator {
                     }
                 }
                 Expression::Negate(value) => match run(value, cards, boolean_properties)? {
-                    Some(value) => finite(-value),
+                    Some(value) => finite(-value.number()?),
                     None => Ok(None),
                 },
                 Expression::Binary(operator, left, right) => {
-                    let (Some(left), Some(right)) = (
-                        run(left, cards, boolean_properties)?,
-                        run(right, cards, boolean_properties)?,
-                    ) else {
+                    let Some(left) = run(left, cards, boolean_properties)? else {
                         return Ok(None);
                     };
+                    if operator == "&&" && !left.truth() {
+                        return Ok(Some(CalculationValue::Boolean(false)));
+                    }
+                    if operator == "||" && left.truth() {
+                        return Ok(Some(CalculationValue::Boolean(true)));
+                    }
+                    let Some(right) = run(right, cards, boolean_properties)? else {
+                        return Ok(None);
+                    };
+                    let boolean = match operator.as_str() {
+                        "&&" | "||" => Some(right.truth()),
+                        "=" | "==" => Some(left == right),
+                        "!=" => Some(left != right),
+                        "<" => Some(left.number()? < right.number()?),
+                        "<=" => Some(left.number()? <= right.number()?),
+                        ">" => Some(left.number()? > right.number()?),
+                        ">=" => Some(left.number()? >= right.number()?),
+                        _ => None,
+                    };
+                    if let Some(value) = boolean {
+                        return Ok(Some(CalculationValue::Boolean(value)));
+                    }
+                    let (left, right) = (left.number()?, right.number()?);
                     match operator.as_str() {
                         "+" => finite(left + right), "-" => finite(left - right), "*" => finite(left * right),
                         "/" if right == 0.0 => Err("Cannot divide by zero.".into()),
@@ -302,10 +394,10 @@ impl Calculator {
                     let (Some(value), Some(degree)) = (
                         run(value, cards, boolean_properties)?,
                         run(degree, cards, boolean_properties)?,
-                    )
-                    else {
+                    ) else {
                         return Ok(None);
                     };
+                    let (value, degree) = (value.number()?, degree.number()?);
                     if degree.fract() != 0.0 || !(1.0..=1024.0).contains(&degree) {
                         return Err("Root degrees must be whole numbers from 1 to 1024.".into());
                     }
@@ -363,12 +455,9 @@ impl Parser<'_> {
                     .expect("aggregation was validated before parsing")
                     .to_string(),
                 if let Some(calculation) = calculation {
-                    Some(Box::new(Calculator::parse_scoped(
-                        calculation,
-                        true,
-                        depth + 1,
-                        self.total_terms,
-                    )?.0))
+                    Some(Box::new(
+                        Calculator::parse_scoped(calculation, true, depth + 1, self.total_terms)?.0,
+                    ))
                 } else {
                     None
                 },
@@ -377,12 +466,16 @@ impl Parser<'_> {
                 Expression::Property(property.clone())
             }
             Token::Count => Expression::Count,
+            Token::Boolean { value } => Expression::Boolean(*value),
+            Token::Operator { value } if value == "!" => {
+                Expression::Not(Box::new(self.expression(40, depth + 1)?))
+            }
             Token::Operator { value } if value == "-" || value == "+" => {
                 let expression = self.expression(20, depth + 1)?;
                 if value == "-" {
                     Expression::Negate(Box::new(expression))
                 } else {
-                    expression
+                    Expression::Positive(Box::new(expression))
                 }
             }
             Token::Open => {
@@ -405,7 +498,25 @@ impl Parser<'_> {
             _ => return Err("Choose a number, property, or root.".into()),
         };
         while let Some(Token::Operator { value }) = self.tokens.get(self.cursor) {
+            if value == ":" {
+                break;
+            }
+            if value == "?" {
+                if minimum > 0 {
+                    break;
+                }
+                self.cursor += 1;
+                let yes = self.expression(0, depth + 1)?;
+                self.expect(Token::Operator { value: ":".into() })?;
+                let no = self.expression(0, depth + 1)?;
+                left = Expression::Conditional(Box::new(left), Box::new(yes), Box::new(no));
+                continue;
+            }
             let precedence = match value.as_str() {
+                "||" => 1,
+                "&&" => 2,
+                "=" | "==" | "!=" => 3,
+                "<" | "<=" | ">" | ">=" => 4,
                 "+" | "-" => 10,
                 "*" | "/" => 20,
                 "^" => 30,
@@ -422,9 +533,13 @@ impl Parser<'_> {
     }
 }
 
-pub fn format(value: Option<f64>) -> String {
+pub fn format(value: Option<CalculationValue>) -> String {
     let Some(value) = value else {
         return "No value".into();
+    };
+    let value = match value {
+        CalculationValue::Number(n) => n,
+        CalculationValue::Boolean(b) => return if b { "True" } else { "False" }.into(),
     };
     if value == 0.0 {
         return "0".into();
@@ -442,7 +557,7 @@ pub fn format(value: Option<f64>) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-    fn evaluate(tokens: Value, cards: Vec<Value>) -> Result<Option<f64>, String> {
+    fn evaluate(tokens: Value, cards: Vec<Value>) -> Result<Option<CalculationValue>, String> {
         Calculator::parse(&serde_json::from_value::<Vec<Token>>(tokens).unwrap())?.evaluate(&cards)
     }
     #[test]
@@ -451,20 +566,20 @@ mod tests {
         let op = |v: &str| json!({"kind":"operator","value":v});
         assert_eq!(
             evaluate(json!([n("2"), op("+"), n("3"), op("*"), n("4")]), vec![]).unwrap(),
-            Some(14.0)
+            Some((14.0).into())
         );
         assert_eq!(
             evaluate(json!([n("2"), op("^"), n("3"), op("^"), n("2")]), vec![]).unwrap(),
-            Some(512.0)
+            Some((512.0).into())
         );
         assert_eq!(
             evaluate(json!([op("-"), n("2"), op("^"), n("2")]), vec![]).unwrap(),
-            Some(-4.0)
+            Some((-4.0).into())
         );
-        assert_eq!(evaluate(json!([{"kind":"function","value":"root"},{"kind":"open"},n("-8"),{"kind":"comma"},n("3"),{"kind":"close"}]), vec![]).unwrap(), Some(-2.0));
+        assert_eq!(evaluate(json!([{"kind":"function","value":"root"},{"kind":"open"},n("-8"),{"kind":"comma"},n("3"),{"kind":"close"}]), vec![]).unwrap(), Some((-2.0).into()));
         assert_eq!(
             evaluate(json!([n("10"), op("-"), n("4"), op("/"), n("2")]), vec![]).unwrap(),
-            Some(8.0)
+            Some((8.0).into())
         );
         assert_eq!(
             evaluate(
@@ -472,11 +587,11 @@ mod tests {
                 vec![]
             )
             .unwrap(),
-            Some(3.0)
+            Some((3.0).into())
         );
         assert_eq!(
             evaluate(json!([{"kind":"count"}]), vec![json!({}), json!({})]).unwrap(),
-            Some(2.0)
+            Some((2.0).into())
         );
         for degree in ["0", "-1", "1.5", "1025"] {
             assert!(evaluate(json!([{"kind":"function","value":"root"},{"kind":"open"},n("8"),{"kind":"comma"},n(degree),{"kind":"close"}]),vec![]).is_err());
@@ -493,11 +608,11 @@ mod tests {
             assert!(evaluate(tokens, vec![]).is_err());
         }
         for (operation, expected) in [
-            ("total", Some(8.0)),
-            ("average", Some(4.0)),
-            ("median", Some(4.0)),
-            ("minimum", Some(3.0)),
-            ("maximum", Some(5.0)),
+            ("total", Some((8.0).into())),
+            ("average", Some((4.0).into())),
+            ("median", Some((4.0).into())),
+            ("minimum", Some((3.0).into())),
+            ("maximum", Some((5.0).into())),
         ] {
             let tokens = json!([{"kind":"aggregate","property":"estimate","operation":operation}]);
             assert_eq!(
@@ -515,7 +630,7 @@ mod tests {
             assert_eq!(
                 evaluate(tokens.clone(), vec![]).unwrap(),
                 if operation == "total" {
-                    Some(0.0)
+                    Some((0.0).into())
                 } else {
                     None
                 }
@@ -523,13 +638,23 @@ mod tests {
             assert!(evaluate(tokens, vec![json!({"properties":{"estimate":"bad"}})]).is_err());
         }
         for (alias, canonical, expected) in [
-            ("sum", "total", Some(8.0)),
-            ("avg", "average", Some(4.0)),
-            ("min", "minimum", Some(3.0)),
-            ("max", "maximum", Some(5.0)),
+            ("sum", "total", Some((8.0).into())),
+            ("avg", "average", Some((4.0).into())),
+            ("min", "minimum", Some((3.0).into())),
+            ("max", "maximum", Some((5.0).into())),
         ] {
             let tokens = json!([{"kind":"aggregate","property":"estimate","operation":alias}]);
-            assert_eq!(evaluate(tokens, vec![json!({"properties":{"estimate":3}}), json!({"properties":{"estimate":5}})]).unwrap(), expected);
+            assert_eq!(
+                evaluate(
+                    tokens,
+                    vec![
+                        json!({"properties":{"estimate":3}}),
+                        json!({"properties":{"estimate":5}})
+                    ]
+                )
+                .unwrap(),
+                expected
+            );
             assert_eq!(canonical_operation(alias), Some(canonical));
         }
         let median = json!([{"kind":"aggregate","property":"estimate","operation":"median"}]);
@@ -543,7 +668,7 @@ mod tests {
                 ],
             )
             .unwrap(),
-            Some(7.0)
+            Some((7.0).into())
         );
         assert_eq!(
             evaluate(
@@ -555,7 +680,7 @@ mod tests {
                 ],
             )
             .unwrap(),
-            Some(4.5)
+            Some((4.5).into())
         );
         assert_eq!(
             evaluate(
@@ -566,10 +691,10 @@ mod tests {
                 ],
             )
             .unwrap(),
-            Some(f64::MAX)
+            Some((f64::MAX).into())
         );
-        assert_eq!(format(Some(3.5)), "3.5");
-        assert_eq!(format(Some(-0.0)), "0");
+        assert_eq!(format(Some((3.5).into())), "3.5");
+        assert_eq!(format(Some((-0.0).into())), "0");
     }
 
     #[test]
@@ -593,30 +718,48 @@ mod tests {
             )
         };
 
-        assert_eq!(evaluate("total", vec![json!(true); 20]).unwrap(), Some(1.0));
+        assert_eq!(
+            evaluate("total", vec![json!(true); 20]).unwrap(),
+            Some((1.0).into())
+        );
         assert_eq!(
             evaluate("average", vec![json!(true), json!(false)]).unwrap(),
-            Some(1.0)
+            Some((1.0).into())
         );
         assert_eq!(
             evaluate("average", vec![json!(0.4), json!(0.4), json!(0.7)]).unwrap(),
-            Some(1.0)
+            Some((1.0).into())
         );
-        assert_eq!(evaluate("average", vec![json!(0.49)]).unwrap(), Some(0.0));
-        assert_eq!(evaluate("average", vec![json!(0.5)]).unwrap(), Some(1.0));
-        assert_eq!(evaluate("average", vec![json!(0.51)]).unwrap(), Some(1.0));
-        assert_eq!(evaluate("total", vec![json!(-8.0)]).unwrap(), Some(0.0));
-        assert_eq!(evaluate("total", vec![json!(9.0)]).unwrap(), Some(1.0));
+        assert_eq!(
+            evaluate("average", vec![json!(0.49)]).unwrap(),
+            Some((0.0).into())
+        );
+        assert_eq!(
+            evaluate("average", vec![json!(0.5)]).unwrap(),
+            Some((1.0).into())
+        );
+        assert_eq!(
+            evaluate("average", vec![json!(0.51)]).unwrap(),
+            Some((1.0).into())
+        );
+        assert_eq!(
+            evaluate("total", vec![json!(-8.0)]).unwrap(),
+            Some((0.0).into())
+        );
+        assert_eq!(
+            evaluate("total", vec![json!(9.0)]).unwrap(),
+            Some((1.0).into())
+        );
         assert_eq!(
             evaluate("minimum", vec![json!(true), json!(false)]).unwrap(),
-            Some(0.0)
+            Some((0.0).into())
         );
         assert_eq!(
             evaluate("maximum", vec![json!(true), json!(false)]).unwrap(),
-            Some(1.0)
+            Some((1.0).into())
         );
         for operation in ["total", "average", "median", "minimum", "maximum"] {
-            assert_eq!(evaluate(operation, vec![]).unwrap(), Some(0.0));
+            assert_eq!(evaluate(operation, vec![]).unwrap(), Some((0.0).into()));
         }
         assert!(evaluate("total", vec![json!("true")]).is_err());
         assert!(evaluate("total", vec![json!({"value":true})]).is_err());
@@ -634,7 +777,7 @@ mod tests {
             .unwrap()
             .evaluate(&[json!({"properties":{"amount":4}})])
             .unwrap(),
-            Some(4.0)
+            Some((4.0).into())
         );
     }
 
@@ -650,8 +793,8 @@ mod tests {
                 {"kind":"property","property":"quantity"}
             ]
         }]);
-        let calculator = Calculator::parse(&serde_json::from_value::<Vec<Token>>(tokens).unwrap())
-            .unwrap();
+        let calculator =
+            Calculator::parse(&serde_json::from_value::<Vec<Token>>(tokens).unwrap()).unwrap();
         assert_eq!(
             calculator.properties(),
             vec!["price".to_string(), "quantity".to_string()]
@@ -663,7 +806,7 @@ mod tests {
                     json!({"properties":{"price":3,"quantity":4}}),
                 ])
                 .unwrap(),
-            Some(32.0)
+            Some((32.0).into())
         );
 
         // An explicit aggregate inside the calculation sees only its current card.
@@ -694,7 +837,7 @@ mod tests {
                     json!({"properties":{"price":20,"tax":2}}),
                 ])
                 .unwrap(),
-            Some(33.0)
+            Some((33.0).into())
         );
     }
 
@@ -737,7 +880,7 @@ mod tests {
                     &boolean_keys,
                 )
                 .unwrap(),
-            Some(10.0)
+            Some((10.0).into())
         );
         assert!(Calculator::parse(&[Token::Property {
             property: "done".into(),
@@ -764,5 +907,149 @@ mod tests {
             calculation: Some(vec![Token::Number { value: "1".into() }; 256]),
         };
         assert!(Calculator::parse(&[formula]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod boolean_tests {
+    use super::*;
+    use serde_json::json;
+    fn n(v: &str) -> Value {
+        json!({"kind":"number","value":v})
+    }
+    fn b(v: bool) -> Value {
+        json!({"kind":"boolean","value":v})
+    }
+    fn op(v: &str) -> Value {
+        json!({"kind":"operator","value":v})
+    }
+    fn calc(tokens: Vec<Value>) -> Calculator {
+        Calculator::parse(&serde_json::from_value::<Vec<Token>>(json!(tokens)).unwrap()).unwrap()
+    }
+    #[test]
+    fn logic_comparisons_and_lazy_conditionals() {
+        for (tokens, expected) in [
+            (
+                vec![b(false), op("&&"), n("1"), op("/"), n("0"), op(">"), n("0")],
+                CalculationValue::Boolean(false),
+            ),
+            (
+                vec![b(true), op("||"), n("1"), op("/"), n("0")],
+                CalculationValue::Boolean(true),
+            ),
+            (
+                vec![b(true), op("?"), n("10"), op(":"), n("1"), op("/"), n("0")],
+                10.0.into(),
+            ),
+            (
+                vec![
+                    b(false),
+                    op("?"),
+                    n("1"),
+                    op(":"),
+                    b(true),
+                    op("?"),
+                    n("2"),
+                    op(":"),
+                    n("3"),
+                ],
+                2.0.into(),
+            ),
+            (vec![n("2"), op("?"), n("8"), op(":"), n("0")], 8.0.into()),
+            (vec![n("0"), op("?"), n("8"), op(":"), n("5")], 5.0.into()),
+            (
+                vec![
+                    op("!"),
+                    n("0"),
+                    op("&&"),
+                    n("1"),
+                    op("<"),
+                    n("2"),
+                    op("||"),
+                    b(false),
+                ],
+                CalculationValue::Boolean(true),
+            ),
+            (
+                vec![b(true), op("=="), n("1")],
+                CalculationValue::Boolean(false),
+            ),
+            (
+                vec![n("1"), op("="), n("1")],
+                CalculationValue::Boolean(true),
+            ),
+            (
+                vec![n("1"), op("!="), n("2")],
+                CalculationValue::Boolean(true),
+            ),
+            (
+                vec![n("2"), op("<="), n("2")],
+                CalculationValue::Boolean(true),
+            ),
+            (
+                vec![n("3"), op(">="), n("2")],
+                CalculationValue::Boolean(true),
+            ),
+        ] {
+            assert_eq!(calc(tokens).evaluate(&[]).unwrap(), Some(expected));
+        }
+        for tokens in [
+            vec![b(true), op("+"), n("1")],
+            vec![op("+"), b(true)],
+            vec![b(true), op("<"), n("2")],
+        ] {
+            assert!(calc(tokens)
+                .evaluate(&[])
+                .unwrap_err()
+                .contains("condition ? 1 : 0"));
+        }
+        let missing = json!({"kind":"aggregate","property":"missing","operation":"average"});
+        assert_eq!(
+            calc(vec![missing.clone(), op("?"), n("1"), op(":"), n("2")])
+                .evaluate(&[])
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            calc(vec![missing, op("=="), n("1")]).evaluate(&[]).unwrap(),
+            None
+        );
+        assert_eq!(format(Some(CalculationValue::Boolean(true))), "True");
+        assert_eq!(format(Some(CalculationValue::Boolean(false))), "False");
+    }
+    #[test]
+    fn conditional_aggregations_and_property_discovery() {
+        let tokens = json!([{"kind":"aggregate","property":"done","operation":"sum","calculation":[{"kind":"property","property":"done"},op("?"),n("1"),op(":"),n("0")]}]);
+        let calculator =
+            Calculator::parse(&serde_json::from_value::<Vec<Token>>(tokens).unwrap()).unwrap();
+        assert_eq!(
+            calculator
+                .evaluate_with_boolean_properties(
+                    &[
+                        json!({"properties":{"done":true}}),
+                        json!({"properties":{"done":true}}),
+                        json!({"properties":{"done":false}})
+                    ],
+                    &BTreeSet::from(["done".into()])
+                )
+                .unwrap(),
+            Some(2.0.into())
+        );
+        let property = json!({"kind":"aggregate","property":"hidden","operation":"sum"});
+        assert_eq!(
+            calc(vec![b(true), op("?"), n("1"), op(":"), property]).properties(),
+            vec!["hidden"]
+        );
+        let invalid = json!([b(true), op("?"), n("1"), op(":"), n("1"), op("+")]);
+        assert!(
+            Calculator::parse(&serde_json::from_value::<Vec<Token>>(invalid).unwrap()).is_err()
+        );
+        let tokens = json!([{"kind":"aggregate","property":"done","operation":"sum","calculation":[b(true)]}]);
+        assert!(
+            Calculator::parse(&serde_json::from_value::<Vec<Token>>(tokens).unwrap())
+                .unwrap()
+                .evaluate(&[json!({})])
+                .is_err()
+        );
     }
 }

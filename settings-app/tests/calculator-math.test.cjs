@@ -145,3 +145,19 @@ test('saved aggregate tokens remain valid and nested scopes enforce shared limit
  const overBudget=[{kind:'aggregate',property:'price',operation:'total',calculation:Array.from({length:257},(_,i)=>i%2?{kind:'operator',value:'+'}:{kind:'number',value:'1'})}];
  assert.throws(()=>math.parseTokens(overBudget),/256 calculator terms/i);
 });
+
+test('boolean operators and conditionals roundtrip through LaTeX and MathML',()=>{
+ for(const source of ['true && false || !false','1+2*3 >= 7 ? 10 : 0','false ? 1 : true ? 2 : 3','(true ? 10 : 0)+5','true == 1','1 != 2','1 <= 2','1 > 0','1 = 1','!2^2']) {
+  const tokens=math.parseLatex(source), tree=math.parseTokens(tokens);
+  const saved=math.toLatex(tokens), roundtrip=math.parseTokens(math.parseLatex(saved));
+  const shape=n=>JSON.stringify(n,(k,v)=>v?.type==='group'?v.child:['index','start','end','operatorIndex','colonIndex','openIndex','closeIndex'].includes(k)?undefined:k==='value'&&v==='=='?'=':v);
+  assert.equal(shape(roundtrip),shape(tree),saved);
+  assert.doesNotMatch(math.toMathML(tokens),/formula-placeholder/);
+ }
+ const tree=math.parseTokens(math.parseLatex('1 < 2 && true || false ? 3 : 4'));
+ assert.equal(tree.type,'conditional');assert.equal(tree.condition.value,'||');assert.equal(tree.condition.left.value,'&&');
+ assert.match(math.toMathML(math.parseLatex('1 < 2 && !false')), /&lt;/);
+ for(const source of ['true ? 1','true : 1','true ? : 2','1 ! 2','true &&','truefalse','true ? 1 : 2 : 3'])assert.throws(()=>math.parseLatex(source),source);
+ assert.throws(()=>math.parseTokens([{kind:'boolean',value:'true'}]));
+ assert.doesNotThrow(()=>math.parseLatex('\\neg false \\land true \\lor 1 \\ne 2 \\le 3 \\ge 0'));
+});

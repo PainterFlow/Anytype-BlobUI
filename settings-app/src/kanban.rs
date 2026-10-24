@@ -106,7 +106,7 @@ pub struct Catalog {
 pub struct CategoryResult {
     pub target: Target,
     pub category_id: String,
-    pub value: Option<f64>,
+    pub value: Option<crate::calculator::CalculationValue>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -206,7 +206,7 @@ fn publish_at(
     let calculated_at = chrono::Utc::now().to_rfc3339();
     let categories = results.len();
     data["kanbanFormulaResults"] = json!(Snapshot {
-        version: 1,
+        version: 2,
         display: configuration.display.clone(),
         calculated_at: calculated_at.clone(),
         results
@@ -347,11 +347,14 @@ mod tests {
             Ok(vec![CategoryResult {
                 target: target.clone(),
                 category_id: "empty".into(),
-                value: Some(2.0),
+                value: Some(crate::calculator::CalculationValue::Boolean(true)),
             }])
         })
         .unwrap();
         assert_eq!(published.categories, 1);
+        let saved: Value = serde_json::from_slice(&fs::read(&data).unwrap()).unwrap();
+        assert_eq!(saved["kanbanFormulaResults"]["version"], json!(2));
+        assert_eq!(saved["kanbanFormulaResults"]["results"][0]["value"], json!(true));
         let before = [
             fs::read(&config).unwrap(),
             fs::read(&data).unwrap(),
@@ -366,7 +369,7 @@ mod tests {
             CategoryResult {
                 target: target.clone(),
                 category_id: "empty".into(),
-                value: Some(9.0)
+                value: Some((9.0).into())
             }
         ]))
         .is_err());

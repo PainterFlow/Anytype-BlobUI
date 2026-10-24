@@ -6,6 +6,9 @@
   const escapeXml = value => String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
   const token = (kind, fields = {}) => ({ kind, ...fields });
 
+  const ranks = { '?': 0, '||': 1, '&&': 2, '=': 3, '==': 3, '!=': 3, '<': 4, '<=': 4, '>': 4, '>=': 4, '+': 10, '-': 10, '*': 20, '/': 20, '^': 30 };
+  const symbols = { '&&': '∧', '||': '∨', '!': '¬', '=': '=', '==': '=', '!=': '≠', '<=': '≤', '>=': '≥' };
+  const latexOperators = { '&&': ' \\land ', '||': ' \\lor ', '!': '\\neg ', '!=': ' \\ne ', '<=': ' \\le ', '>=': ' \\ge ', '==': '=' };
   function parseTokens(tokens, context = {}) {
     const budget = { count: 0 };
     return parseTokensInternal(tokens, context.allowPerCard === true, budget, 0);
@@ -20,12 +23,14 @@
       if (item.kind === "number") {
         if (typeof item.value !== "string" || item.value.length > 32) throw Error("This number is too long.");
         if (!/^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(item.value) || !Number.isFinite(Number(item.value))) throw Error("Complete the number.");
+      } else if (item.kind === "boolean") {
+        if (typeof item.value !== "boolean") throw Error("Choose True or False.");
       } else if (item.kind === "aggregate") {
         if (typeof item.property !== "string" || !item.property || item.property.length > 256 || !Object.hasOwn(CANONICAL_OPERATION, item.operation)) throw Error("Choose a supported numeric property and aggregation.");
       } else if (item.kind === "property") {
         if (!allowPerCard || typeof item.property !== "string" || !item.property || item.property.length > 256) throw Error("A per-card property requires an aggregation calculation.");
       } else if (item.kind === "operator") {
-        if (!['+', '-', '*', '/', '^'].includes(item.value)) throw Error("Choose a supported operator.");
+        if (!Object.hasOwn(ranks, item.value) && !['!', ':'].includes(item.value)) throw Error("Choose a supported operator.");
       } else if (item.kind === "function") {
         if (!['sqrt', 'root'].includes(item.value)) throw Error("Choose a supported root function.");
       } else if (!['count', 'open', 'close', 'comma'].includes(item.kind)) throw Error("This calculation contains an unsupported term.");
@@ -42,14 +47,15 @@
       if (!item) throw Error("Complete the calculation.");
       let left;
       if (item.kind === "number") left = { type: "number", value: item.value, index: start, start, end: cursor };
+      else if (item.kind === "boolean") left = { type: "boolean", value: item.value, index: start, start, end: cursor };
       else if (item.kind === "aggregate") {
         const calculation = item.calculation === undefined ? null : parseTokensInternal(item.calculation, true, budget, nesting + depth + 1);
         left = { type: "aggregate", property: item.property, operation: CANONICAL_OPERATION[item.operation], calculation, index: start, start, end: cursor };
       }
       else if (item.kind === "property") left = { type: "property", property: item.property, index: start, start, end: cursor };
       else if (item.kind === "count") left = { type: "count", index: start, start, end: cursor };
-      else if (item.kind === "operator" && (item.value === "-" || item.value === "+")) {
-        const child = expression(20, depth + 1);
+      else if (item.kind === "operator" && (item.value === "-" || item.value === "+" || item.value === "!")) {
+        const child = expression(item.value === "!" ? 40 : 20, depth + 1);
         left = { type: "unary", value: item.value, index: start, child, start, end: cursor };
       } else if (item.kind === "open") {
         const child = expression(0, depth + 1), closeIndex = expect("close");
@@ -63,7 +69,20 @@
       } else throw Error("Choose a number, aggregate, or root.");
 
       while (tokens[cursor]?.kind === "operator") {
-        const op = tokens[cursor].value, precedence = op === '+' || op === '-' ? 10 : op === '*' || op === '/' ? 20 : 30;
+        const op = tokens[cursor].value;
+        if (op === ':') break;
+        if (op === '?') {
+          if (minimum > 0) break;
+          const operatorIndex = cursor++;
+          const yes = expression(0, depth + 1);
+          if (tokens[cursor]?.kind !== 'operator' || tokens[cursor].value !== ':') throw Error('Complete the conditional with ? and : .');
+          const colonIndex = cursor++;
+          const no = expression(0, depth + 1);
+          left = { type: 'conditional', condition: left, yes, no, operatorIndex, colonIndex, start: left.start, end: cursor };
+          continue;
+        }
+        const precedence = ranks[op];
+        if (precedence === undefined) throw Error('Choose a supported binary operator.');
         if (precedence < minimum) break;
         const operatorIndex = cursor++;
         const right = expression(precedence + (op === '^' ? 0 : 1), depth + 1);
@@ -116,10 +135,12 @@
   function latexTree(node, properties) {
     switch (node.type) {
       case "number": return node.value;
+      case "boolean": return String(node.value);
+      case "conditional": return `${latexTree(node.condition, properties)} ? ${latexTree(node.yes, properties)} : ${latexTree(node.no, properties)}`;
       case "aggregate": return `${propertyReference(node.property, properties)}{${JSON.stringify(node.operation)}}${node.calculation ? `{${latexTree(node.calculation, properties)}}` : ""}`;
       case "property": return propertyReference(node.property, properties);
       case "count": return "\\count";
-      case "unary": return `${node.value}${latexTree(node.child, properties)}`;
+      case "unary": return `${latexOperators[node.value] || node.value}${latexTree(node.child, properties)}`;
       case "group": return `\\left(${latexTree(node.child, properties)}\\right)`;
       case "root": return node.value === "sqrt"
         ? `\\sqrt{${latexTree(node.child, properties)}}`
@@ -127,7 +148,7 @@
       case "binary": {
         if (node.value === "^") return `${latexTree(node.left, properties)}^{${latexTree(node.right, properties)}}`;
         if (node.value === "/") return `\\frac{${latexTree(node.left, properties)}}{${latexTree(node.right, properties)}}`;
-        const symbol = node.value === "*" ? " \\cdot " : node.value;
+        const symbol = node.value === "*" ? " \\cdot " : (latexOperators[node.value] || node.value);
         return `${latexTree(node.left, properties)}${symbol}${latexTree(node.right, properties)}`;
       }
       default: return "";
@@ -148,6 +169,8 @@
   function mathNode(node, properties, cursor, active) {
     const mark = index => active && cursor === index ? caretMarkup() : "";
     switch (node.type) {
+      case "boolean": return `${mark(node.index)}<mi${attrIndex(node.index)}>${node.value ? 'True' : 'False'}</mi>`;
+      case "conditional": return `<mrow>${mathNode(node.condition, properties, cursor, active)}<mo>?</mo>${mathNode(node.yes, properties, cursor, active)}<mo>:</mo>${mathNode(node.no, properties, cursor, active)}</mrow>`;
       case "number": return `${mark(node.index)}<mn${attrIndex(node.index)}>${escapeXml(node.value)}</mn>`;
       case "aggregate": {
         const label = textForProperty(node.property, properties);
@@ -157,7 +180,7 @@
       }
       case "property": return `${mark(node.index)}<mtext${attrIndex(node.index)}>${escapeXml(textForProperty(node.property, properties))}</mtext>`;
       case "count": return `${mark(node.index)}<mrow${attrIndex(node.index)}><mo>#</mo><mtext>cards</mtext></mrow>`;
-      case "unary": return `${mark(node.index)}<mrow><mo${attrIndex(node.index)}>${node.value === '-' ? '−' : '+'}</mo>${mathNode(node.child, properties, cursor, active)}</mrow>`;
+      case "unary": return `${mark(node.index)}<mrow><mo${attrIndex(node.index)}>${node.value === '-' ? '−' : node.value === '!' ? '¬' : '+'}</mo>${mathNode(node.child, properties, cursor, active)}</mrow>`;
       case "group":
         if(["number","count","aggregate"].includes(node.child.type)) return `${mark(node.openIndex)}<mrow>${mathNode(node.child,properties,cursor,active)}${mark(node.closeIndex)}</mrow>`;
         return `${mark(node.openIndex)}<mrow><mo${attrIndex(node.openIndex)}>(</mo>${mathNode(node.child, properties, cursor, active)}${mark(node.closeIndex)}<mo${attrIndex(node.closeIndex)}>)</mo></mrow>`;
@@ -170,8 +193,8 @@
       }
       case "binary": {
         if(node.value === "/" || node.value === "^") {const tag=node.value === "/"?"mfrac":"msup";return `<${tag}><mrow>${mathNode(node.left, properties,cursor,active)}</mrow><mrow>${mark(node.operatorIndex)}${mathNode(node.right, properties,cursor,active)}</mrow></${tag}>`;}
-        const symbol = ({ "*": "×", "/": "÷", "-": "−" })[node.value] || node.value;
-        return `<mrow>${mathNode(node.left, properties, cursor, active)}${mark(node.operatorIndex)}<mo${attrIndex(node.operatorIndex)}>${symbol}</mo>${mathNode(node.right, properties, cursor, active)}</mrow>`;
+        const symbol = ({ "*": "×", "/": "÷", "-": "−" })[node.value] || symbols[node.value] || node.value;
+        return `<mrow>${mathNode(node.left, properties, cursor, active)}${mark(node.operatorIndex)}<mo${attrIndex(node.operatorIndex)}>${escapeXml(symbol)}</mo>${mathNode(node.right, properties, cursor, active)}</mrow>`;
       }
       default: return "";
     }
@@ -182,6 +205,7 @@
     (tokens || []).forEach((item, index) => {
       pieces.push(mark(index));
       if (item.kind === "number") pieces.push(`<mn${attrIndex(index)}>${escapeXml(item.value)}</mn>`);
+      else if (item.kind === "boolean") pieces.push(`<mi>${item.value ? "True" : "False"}</mi>`);
       else if (item.kind === "aggregate") pieces.push(`<mtext${attrIndex(index)}>${escapeXml(OPERATIONS[item.operation] || "Property")}</mtext>`);
       else if (item.kind === "property") pieces.push(`<mtext${attrIndex(index)}>Property</mtext>`);
       else if (item.kind === "count") pieces.push(`<mtext${attrIndex(index)}>cards</mtext>`);
@@ -320,13 +344,13 @@
       index++;
       return () => { skip(); if (source.startsWith("\\right", index)) { index += 6; skip(); } if (source[index] !== right) fail("Close the parenthesis."); index++; };
     };
-    const precedence = op => op === "+" || op === "-" ? 10 : op === "*" || op === "/" ? 20 : op === "^" ? 30 : -1;
+    const precedence = op => ranks[op] ?? -1;
     function expression(minimum = 0, depth = 0) {
       if (depth + nesting > 48) fail("This calculation is nested too deeply.");
       skip(); let output = [];
-      if (source[index] === "+" || source[index] === "-") {
+      if (source[index] === "+" || source[index] === "-" || source[index] === "!") {
         output.push(token("operator", { value: source[index++] }));
-        output.push(...expression(20, depth + 1));
+        output.push(...expression(output[0].value === "!" ? 40 : 20, depth + 1));
       } else if (source[index] === "(" || source.startsWith("\\left(", index)) {
         const close = matchParen("(", ")");
         output.push(token("open"), ...expression(0, depth + 1)); close(); output.push(token("close"));
@@ -334,7 +358,8 @@
         output.push(token("open"), ...parseLatexInternal(readGroup(), properties, allowPerCard, nesting + 1), token("close"));
       } else if (source[index] === "\\") {
         const command = readCommand();
-        if (command === "sqrt") {
+        if (command === "neg") { output.push(token('operator', { value: '!' }), ...expression(40, depth + 1)); }
+        else if (command === "sqrt") {
           const optional = readOptionalGroup();
           const body = readGroup();
           if (optional === null) output.push(token("function", { value: "sqrt" }), token("open"), ...parseLatexInternal(body, properties, allowPerCard, nesting + 1), token("close"));
@@ -349,13 +374,31 @@
         } else if (command === "count") output.push(token("count"));
         else fail("Unsupported LaTeX command.");
       } else {
+        const literal = /^(true|false)\b/.exec(source.slice(index));
+        if (literal) { index += literal[0].length; output.push(token('boolean', { value: literal[0] === 'true' })); }
+        else {
         const number = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(source.slice(index));
         if (number) { index += number[0].length; output.push(token("number", { value: number[0] })); }
-        else fail("Enter a number, aggregate, count, or supported LaTeX function.");
+        else fail("Enter a number, boolean, aggregate, count, or supported LaTeX function.");
+        }
       }
       while (true) {
         skip(); const operatorStart = index; let op = source[index];
-        if (source.startsWith("\\cdot", index) || source.startsWith("\\times", index)) { op = "*"; index += source.startsWith("\\cdot", index) ? 5 : 6; }
+        if (op === ':') break;
+        if (op === '?') {
+          if (minimum > 0) break;
+          index++;
+          output.push(token('operator', { value: '?' }), ...expression(0, depth + 1)); skip();
+          if (source[index] !== ':') fail('Complete the conditional with ? and : .');
+          index++;
+          output.push(token('operator', { value: ':' }), ...expression(0, depth + 1));
+          continue;
+        }
+        const alias = /^\\(land|lor|ne|le|ge)(?![A-Za-z])/.exec(source.slice(index));
+        const ascii = /^(\&\&|\|\||==|!=|<=|>=|=|<|>)/.exec(source.slice(index));
+        if (alias) { op = ({land:'&&',lor:'||',ne:'!=',le:'<=',ge:'>='})[alias[1]]; index += alias[0].length; }
+        else if (ascii) { op = ascii[0]; index += op.length; }
+        else if (source.startsWith("\\cdot", index) || source.startsWith("\\times", index)) { op = "*"; index += source.startsWith("\\cdot", index) ? 5 : 6; }
         else if (source.startsWith("\\div", index)) { op = "/"; index += 4; }
         else if (["+", "-", "*", "/", "^"].includes(op)) index++;
         else break;
