@@ -29,10 +29,9 @@
     return node;
   }
   function button(text, action, className) {
-    const node = make("button", className || "formula-button", text);
-    node.type = "button";
-    node.addEventListener("click", action);
-    return node;
+    return UI.Components.Button({ label: text, onClick: action,
+      attributes: { class: className || "formula-button" },
+    }).element;
   }
   function targetDefinition(target, source) {
     return (source || state).definitions.find(item => identity(item.target) === identity(target));
@@ -483,7 +482,7 @@
       record.propertyPicker?.setOptions(properties());
       trigger.textContent = "Insert property";
     };
-    record.propertyPicker=UI.PickControl.attach({root:picker,options:properties(),focusOnOpen:false,restoreFocusOnSelect:false,emptyMessage:'No number or boolean properties in this view',onChange(value){
+    record.propertyPicker=UI.Components.Picker({root:picker,options:properties(),focusOnOpen:false,restoreFocusOnSelect:false,emptyMessage:'No number or boolean properties in this view',onChange(value){
       if (!record.sourceMode) return;
       if (!pendingProperty) {
         const source = record.sourceInput;
@@ -511,6 +510,7 @@
   }
   function buildCalculator(record) {
     const view = record.view, host = modalContent;
+    UI.Components.destroyTree(host);
     host.replaceChildren();
     const heading = make("div", "formula-calculator-heading");
     heading.append(make("h2", "formula-calculator-title", view.name));
@@ -664,16 +664,8 @@
       record.renderToggle=toggle;
       record.variableActions.append(toggle);
       record.displaySlot.insertBefore(source,record.display);
-      for (const scrollArea of [record.display, source]) {
-        let hideScrollbarTimer;
-        scrollArea.addEventListener('scroll', () => {
-          scrollArea.classList.add('is-scrolling');
-          window.clearTimeout(hideScrollbarTimer);
-          hideScrollbarTimer = window.setTimeout(() => {
-            scrollArea.classList.remove('is-scrolling');
-          }, 900);
-        }, { passive: true });
-      }
+      const scrollbars = [record.display, source].map(scrollArea => UI.Scrollbar.attach(scrollArea));
+      UI.Components.component(record.fieldset, {}, undefined, () => scrollbars.forEach(controller => controller.destroy()));
       source.addEventListener('input',()=>{
         if (!record.sourceMode || locked || loading || modalSaving) { source.value=record.source||''; return; }
         record.source=source.value;record.sourceError='';
@@ -726,10 +718,10 @@
   }
   function attachSharedControls() {
     if (UI.ExpandableSearch && searchRoot && searchToggle && search) {
-      searchControl = UI.ExpandableSearch.attach({ container: searchRoot, button: searchToggle, input: search });
+      searchControl = UI.Components.Search({ container: searchRoot, button: searchToggle, input: search });
     }
     if (UI.PickControl && filterRoot && filterButton && filterMenu) {
-      filterControl = UI.PickControl.attach({
+      filterControl = UI.Components.Picker({
         root: filterRoot,
         options: [{ value: "", label: "All spaces" }],
         value: selectedSpace,
@@ -737,7 +729,7 @@
         onChange(value) { selectedSpace = value || ""; filter(); },
       });
     }
-    if (UI.PickControl && displayPickerRoot) displayControl = UI.PickControl.attach({ root: displayPickerRoot });
+    if (UI.PickControl && displayPickerRoot) displayControl = UI.Components.Picker({ root: displayPickerRoot });
   }
   function render() {
     if (!initialized || !contents) return;
@@ -745,6 +737,7 @@
       updateTimestamp();
       return;
     }
+    UI.Components.destroyTree(contents);
     contents.replaceChildren();
     records = [];
     syncDisplayPicker();
@@ -813,7 +806,7 @@
   }
   function configureModal() {
     if (!modalBackdrop || !modalDialog || !modalContent || !UI.createModalController) return;
-    calculatorModal = UI.createModalController({
+    calculatorModal = UI.Components.Modal({
       backdrop: modalBackdrop,
       dialog: modalDialog,
       initialFocus: () => activeRecord && activeRecord.display ? activeRecord.display : modalClose,
@@ -827,6 +820,7 @@
         }
         activeRecord = null;
         modalSaving = false;
+        UI.Components.destroyTree(modalContent);
         modalContent.replaceChildren();
         updateRows();
         render();

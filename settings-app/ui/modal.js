@@ -16,6 +16,7 @@
     let returnFocus = null;
     let closeTimer = null;
     let savedInert = [];
+    let destroyed = false;
 
     function resolveElement(value) {
       return typeof value === "function" ? value() : value;
@@ -55,6 +56,7 @@
     }
 
     function open() {
+      if (destroyed) return;
       if (closeTimer !== null) {
         window.clearTimeout(closeTimer);
         closeTimer = null;
@@ -104,15 +106,25 @@
       focusable[nextIndex].focus();
     }
 
-    backdrop.addEventListener("pointerdown", (event) => {
+    function handleBackdrop(event) {
       if (!backdrop.hidden && !backdrop.classList.contains("is-closing") && event.target === backdrop) close();
-    });
+    }
+    backdrop.addEventListener("pointerdown", handleBackdrop);
     document.addEventListener("keydown", handleKeydown);
 
     return {
       open,
       close,
       isOpen: () => !backdrop.hidden,
+      destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        if (closeTimer !== null) window.clearTimeout(closeTimer);
+        closeTimer = null;
+        if (!backdrop.hidden) finishClose(true);
+        backdrop.removeEventListener("pointerdown", handleBackdrop);
+        document.removeEventListener("keydown", handleKeydown);
+      },
     };
   };
 })();

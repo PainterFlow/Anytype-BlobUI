@@ -31,6 +31,7 @@ function element(id) {
           return result === undefined ? previousResult : result;
         } : handler;
       },
+      removeEventListener(name, handler) { if (this.handlers[name] === handler) delete this.handlers[name]; },
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; if (name === 'src') this.src = undefined; },
       click() { this.clickCount += 1; if (this.handlers.click) this.handlers.click({ target: this }); },
@@ -248,71 +249,20 @@ const changeToggle = async (id, checked) => {
   await element(id).handlers.change();
 };
 const status = () => element('status-message').textContent;
-const settingsHtml = fs.readFileSync(path.join(__dirname, '../ui/index.html'), 'utf8');
+// DOM contracts are exercised against mounted components in markup-contract.test.cjs.
 const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
-assert.match(settingsHtml, /id="help-button"[^>]*aria-controls="help-popup"/);
-assert(settingsHtml.indexOf('id="help-whats-new"') < settingsHtml.indexOf('id="help-documentation"'));
-assert(settingsHtml.indexOf('id="help-documentation"') < settingsHtml.indexOf('id="help-keybinds"'));
-assert(settingsHtml.indexOf('class="help-divider"') < settingsHtml.indexOf('id="blobui-version"'));
 for (const shortcut of ['openSettings', 'rebuildCss', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
-assert(settingsHtml.indexOf('id="preferences-nav"') < settingsHtml.indexOf('id="accessibility-nav"'), 'Accessibility must be the second Settings navigation page.');
-assert(settingsHtml.indexOf('id="accessibility-nav"') < settingsHtml.indexOf('id="advanced-nav"'), 'Advanced must be directly below Accessibility.');
-assert(!settingsHtml.includes('id="app-settings-nav"'), 'App Settings belongs inside Advanced Settings.');
-assert.match(settingsHtml, /role="tablist"/);
-  assert.match(settingsHtml, /id="release-notes-version"/);
-  assert.match(settingsHtml, /id="release-notes-current-tag"[^>]*hidden/);
-  assert.match(settingsHtml, /id="release-notes-latest-tag"[^>]*hidden/);
-assert.match(settingsHtml, /id="advanced-app-panel"[^>]*role="tabpanel"[^>]*hidden/);
-assert.match(settingsHtml, /Anytype data folder that contains custom\.css/);
-assert(settingsHtml.indexOf('id="install-directory"') < settingsHtml.indexOf('id="start-on-login"'), 'Launch at startup must follow Anytype Folder.');
-assert(settingsHtml.indexOf('id="start-on-login"') < settingsHtml.indexOf('id="updates-heading"'), 'Launch at startup must precede Updates.');
-assert.match(settingsHtml, /<label class="native-accent-control settings-row accessibility-row" for="start-on-login">\s*<span>Launch at startup<\/span>/, 'The startup toggle uses the concise setting row label.');
-assert.match(settingsHtml, /id="install-directory"[^>]*readonly[^>]*aria-haspopup="dialog"/);
-for (const label of ['Anytype API key', 'API key IP', 'API key port']) {
-  assert(settingsHtml.includes('>' + label + '</label>'), `${label} must have a visible label.`);
-}
-for (const [inputId, buttonId] of [
-  ['connection-key', 'connection-key-visibility'], ['connection-port', 'connection-port-visibility'],
-  ['advanced-api-key', 'advanced-api-key-visibility'], ['advanced-api-ip', 'advanced-api-ip-visibility'],
-  ['advanced-api-port', 'advanced-api-port-visibility'],
-]) {
-  const fieldId = inputId + '-field';
-  assert.match(settingsHtml, new RegExp(`<div id="${fieldId}" class="visibility-field" data-filled="false">\\s*<input id="${inputId}"[\\s\\S]*?<button id="${buttonId}"`), `${inputId} must have an adjacent visibility control outside its input.`);
-  assert.match(settingsHtml, new RegExp(`id="${buttonId}"[^>]*aria-pressed="(?:true|false)"[^>]*aria-label="[^"]+"[^>]*title="[^"]+"`), `${buttonId} must expose its state and accessible name.`);
-}
-assert(!settingsHtml.includes('id="connection-ip"'), 'Onboarding must not add an IP field.');
-assert.match(settingsHtml, /id="connection-port" type="text" inputmode="numeric"/);
-assert.match(settingsHtml, /id="advanced-api-ip" type="text" inputmode="decimal"/);
-assert.match(settingsHtml, /id="advanced-api-port" type="text" inputmode="numeric"/);
-assert.match(settingsHtml, /id="banner-image-input" class="sr-only" type="file"[^>]*accept="[^"]*image\/png[^"]*image\/jpeg[^"]*image\/webp/);
-assert.match(settingsHtml, /class="space-sidebar-preview" inert role="img"/);
-for (const label of ['Space', 'Homepage', 'Private', 'Work']) assert(settingsHtml.includes('>' + label + '<'), `The inert space preview must show the generic ${label} label.`);
 assert.match(settingsCss, /\.space-preview-row[^}]*font-family:\s*var\(--font-interface\)/);
 assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
 assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field:focus-within \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field\[data-filled="true"\] \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-toggle:focus-visible/);
-assert.match(settingsHtml, /role="alertdialog" aria-modal="true"/, 'Key removal must use an accessible modal dialog.');
-assert.match(settingsHtml, /id="api-key-removal-title">Are you sure you want to do this\?<\/h2>/);
-assert.match(settingsHtml, /id="api-key-removal-message">Removing the API key will make some features unavailable\.<\/p>/);
-assert.match(settingsHtml, /id="discard-button"[^>]*title="Undo changes"/);
-assert(!settingsHtml.includes('id="api-key-removal-dismiss"'), 'The API warning has no labeled Close button.');
-assert.match(settingsHtml, /id="api-key-removal-undo"[^>]*>Undo<\/button>/);
-assert.match(settingsHtml, /id="discard-confirmation-undo"[^>]*>Undo<\/button>/);
-assert(!settingsHtml.includes('id="api-key-removal-cancel"'), 'The key removal warning uses a separate Close action.');
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
-for (const id of ['reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled']) {
-  assert.match(settingsHtml, new RegExp(`id="${id}" type="checkbox" role="switch"`), `${id} must be a native switch.`);
-}
 assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
 assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
-assert(settingsHtml.indexOf('id="updates-heading"') < settingsHtml.indexOf('id="uninstall-button"'), 'Uninstall appears below Updates in Advanced Settings.');
-assert.match(settingsHtml, /<button id="uninstall-button" class="banner-image-button danger-button"[^>]*>Uninstall BlobUI<\/button>/);
-assert.match(settingsHtml, /id="uninstall-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true"/);
-assert.match(settingsHtml, /Your Anytype data, BlobUI settings, CSS backups, and installer will be kept/);
 assert.match(settingsCss, /\.danger-button\s*\{[^}]*background:\s*#b8323c/);
 assert.match(settingsCss, /\.danger-button:hover:not\(:disabled\)\s*\{[^}]*background:\s*#942630/);
 assert(!settingsCss.includes('`n'), 'The stylesheet must contain real line breaks rather than literal PowerShell escapes.');
@@ -365,6 +315,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/pick-control.js'), 'utf8'), context);
   context.window.document = context.document;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/components.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];

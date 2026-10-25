@@ -47,7 +47,7 @@
       bar.append(button); return button;
     });
     preferences.prepend(bar); bar.hidden = true;
-    preferenceTabController = UI.Tabs.attach({ container: bar, buttons: preferenceTabs, panels });
+    preferenceTabController = UI.Components.Tabs({ container: bar, buttons: preferenceTabs, panels });
     const navigation = doc.getElementById("preferences-nav").parentElement;
     // Use the Docs hierarchy and shared disclosure controller without its chevron.
     for (const page of ["preferences", "advanced"]) {
@@ -60,12 +60,14 @@
       const labels = page === "preferences" ? preferenceLabels : ["API key", "Ap Settings", "Experiments"];
       groups.forEach((target, tab) => {
         const label = labels[tab];
-        const link = make("button", "documentation-item documentation-child v21-section-link"); link.type = "button";
-        link.append(icon(label), make("span", "documentation-item-label", label));
-        link.addEventListener("click", () => navigate(page, target, tab)); inner.append(link);
+        const link = UI.Components.NavigationItem({ label, icon: icon(label),
+          attributes: { class: "documentation-item documentation-child v21-section-link" },
+          onClick: () => navigate(page, target, tab),
+        });
+        inner.append(link.element);
       });
     }
-    controller = UI.Disclosure.attach(navigation, { onToggle({ toggle, expanded }) {
+    controller = UI.Components.Disclosure({ container: navigation, onToggle({ toggle, expanded }) {
       if (!enabled) { if (expanded) controller.setExpanded(toggle, false); return; }
       if (expanded) navButtons.forEach(button => { if (button !== toggle) controller.setExpanded(button, false); });
     } });

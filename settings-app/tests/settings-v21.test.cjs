@@ -35,8 +35,8 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
         return {};
       } } };
     });
-    for (const name of ['vendor/marked.umd.js', 'visibility-field.js', 'modal.js', 'edit-session.js', 'markdown.js', 'docs-data.js', 'disclosure.js', 'docs.js', 'tabs.js', 'settings-v21.js', 'formula-page.js', 'app.js']) {
-      await page.addScriptTag({ path: path.join(source, name) });
+    for (const name of fs.readFileSync(path.join(source, 'index.html'), 'utf8').matchAll(/<script src="\.\/([^"]+)"/g)) {
+      await page.addScriptTag({ path: path.join(source, name[1]) });
     }
     await page.waitForFunction(() => window.appReady);
     await page.locator('#advanced-nav').click();
