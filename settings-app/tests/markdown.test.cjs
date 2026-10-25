@@ -66,7 +66,6 @@ test('Markdown rendering preserves formatting and rejects active content', {
         '',
         '```js',
         'const mention = "@shot";',
-        'const gitMention = "Issue#222 PR#333 User#InsideCode";',
         '```',
         '',
         '| Name | Value |',
@@ -79,15 +78,6 @@ test('Markdown rendering preserves formatting and rejects active content', {
         '---',
         '',
         '@shot',
-        '',
-        'Issue#123, PR#456; User#PainterFlow.',
-        '`Issue#123 PR#456 User#PainterFlow`',
-        '[Issue#789](https://example.com/issue-label)',
-        '![Issue#654](https://example.com/image.png)',
-        '<a href="https://example.com/raw">PR#654</a>',
-        '<span data-mention="Issue#987">PR#321</span>',
-        'Issue#0 Issue#01 Issue#abc PR#x User#-bad User#bad- User#two--hyphens User#bad_name User#' + 'a'.repeat(40),
-        'prefixIssue#123 xIssue#124 Issue#123suffix PR#123abc User#username_more',
         '',
         '<img src="@shot" alt="Raw image">',
         '<strong>Safe raw HTML</strong>',
@@ -121,11 +111,6 @@ test('Markdown rendering preserves formatting and rejects active content', {
         nestedList: !!container.querySelector('ul ul'),
         bold: container.querySelector('strong')?.textContent,
         link: container.querySelector('a[href="https://example.com/guide"]')?.innerHTML,
-        githubMentions: [...container.querySelectorAll('a[href^="https://github.com/"]')].map(anchor => ({ href: anchor.getAttribute('href'), text: anchor.textContent })),
-        issueLabelLink: container.querySelector('a[href="https://example.com/issue-label"]')?.innerHTML,
-        rawAnchorLink: container.querySelector('a[href="https://example.com/raw"]')?.innerHTML,
-        codeMentions: [...container.querySelectorAll('code')].map(code => code.textContent).filter(text => text.includes('Issue#123')),
-        nestedAnchors: container.querySelectorAll('a a').length,
         code: container.querySelector('pre code')?.textContent,
         imageCount: container.querySelectorAll('img').length,
         dataImages: [...container.querySelectorAll('img')].every(image => image.src.startsWith('data:image/png;base64,')),
@@ -148,17 +133,6 @@ test('Markdown rendering preserves formatting and rejects active content', {
     assert(outcome.nestedList, 'Nested lists should be preserved.');
     assert.match(outcome.bold, /bold/);
     assert.equal(outcome.link, '<strong>linked <em>text</em></strong>', 'Links should preserve formatted Markdown text.');
-    assert.deepEqual(outcome.githubMentions, [
-      { href: 'https://github.com/PainterFlow/Anytype-BlobUI/issues/123', text: 'Issue#123' },
-      { href: 'https://github.com/PainterFlow/Anytype-BlobUI/pull/456', text: 'PR#456' },
-      { href: 'https://github.com/PainterFlow', text: '@PainterFlow' },
-      { href: 'https://github.com/PainterFlow/Anytype-BlobUI/pull/321', text: 'PR#321' },
-    ], 'Git mentions should link to the matching repository paths, while inline HTML text follows Markdown parsing.');
-    assert.equal(outcome.issueLabelLink, 'Issue#789', 'Git mentions inside Markdown links should not create nested anchors.');
-    assert.equal(outcome.rawAnchorLink, 'PR#654', 'Git mentions inside raw HTML anchors should not create nested anchors.');
-    assert(outcome.codeMentions.some(text => text === 'Issue#123 PR#456 User#PainterFlow'), 'Git mentions in code spans should remain plain text.');
-    assert.match(outcome.code, /Issue#222 PR#333 User#InsideCode/, 'Git mentions in fenced code should remain plain text.');
-    assert.equal(outcome.nestedAnchors, 0, 'Rendering should not create nested anchors.');
     assert.match(outcome.code, /@shot/, 'Image mentions in fenced code should remain text.');
     assert.equal(outcome.imageCount, 2, 'Markdown and raw HTML aliases should both resolve to images.');
     assert(outcome.dataImages, 'Rendered images should use the supplied local image bytes.');

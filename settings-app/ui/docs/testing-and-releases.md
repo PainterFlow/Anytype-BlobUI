@@ -19,7 +19,7 @@ cargo test --manifest-path settings-app/Cargo.toml
 
 Other JavaScript suites cover UI state, hover previews, dialogs, visibility fields, and release notes. Run affected suites when changing those behaviors. Browser tests require Playwright and Chrome; set `PLAYWRIGHT_MODULE` and `CHROME_PATH` if absent from default locations. A skipped browser test is not a visual check.
 
-Native tests cover CSS generation, API behavior with a local mock server, connection replacement, and rollback. Use fake keys and workspace fixtures. Native test environments must isolate APPDATA and LOCALAPPDATA as well as BLOBUI_INSTALL_DIRECTORY. Saved folder preferences take priority over the install-directory override. Test-only guards reject profiles and credential access outside workspace .test-run directories. Settings layout tests use a mocked bridge and must never attach to a running user app or submit a real connection change. DPAPI, filesystem ACLs, startup integration, and native shortcuts require Windows validation.
+Native tests cover CSS generation, API behavior with a local mock server, connection replacement, and rollback. Use fake keys and workspace fixtures. DPAPI, filesystem ACLs, startup integration, and native shortcuts require Windows validation.
 
 ## Isolated installer tests
 
@@ -27,7 +27,7 @@ Native tests cover CSS generation, API behavior with a local mock server, connec
 2. Run installer checks.
 
 ```powershell
-.\scripts\Build-App.ps1 -s -c
+.\scripts\Build-Settings.ps1 -s -c
 powershell -NoProfile -File scripts/tests/Test-Installer.ps1
 ```
 
@@ -56,7 +56,7 @@ F8 opens onboarding and F9 simulates an update by default. A simulation does not
 4. Build Settings and the release package.
 
 ```powershell
-.\scripts\Build-App.ps1 -s -c
+.\scripts\Build-Settings.ps1 -s -c
 .\scripts\Build-Installer.ps1 -PackageRelease
 ```
 

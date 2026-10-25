@@ -1417,7 +1417,7 @@ fn unique_suffix() -> String {
 fn default_data(anytype: &Path) -> Value {
     json!({ "schemaVersion": 1, "apiVersion": "v2", "installDirectory": anytype,
         "setupMode": "defaults", "selectedSpace": {"id":"", "name":""}, "settingsObjectIds": [],
-        "settings": {"fontFamily":"Inter", "codeFontFamily":"Consolas", "accentColor":"#DE50DE"}, "calendarObjectColors": {} })
+        "settings": {"fontFamily":"Libron", "codeFontFamily":"Consolas", "accentColor":"#DE50DE"}, "calendarObjectColors": {} })
 }
 
 fn fill_compile_defaults(data: &mut Value, anytype: &Path) {
@@ -2020,7 +2020,7 @@ mod tests {
         assert_eq!(data["vendorField"], vendor);
         assert_eq!(data["settings"]["accentColor"], "#123456");
         assert_eq!(data["settings"]["futureSetting"], true);
-        assert_eq!(data["settings"]["fontFamily"], "Inter");
+        assert_eq!(data["settings"]["fontFamily"], "Libron");
     }
 
     #[test]

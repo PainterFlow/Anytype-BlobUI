@@ -20,15 +20,7 @@ Undo changes discards the unsaved draft after confirmation. Save errors appear i
 
 In Preferences, use the accent picker, hue control, or Hex or CSS color field. The native accent option follows Anytype's accent. BlobUI applies accents to controls including dates, properties, dataview hover states, toggles, publishing, and membership controls.
 
-Include selections is the first switch inside the Accent color box, above Anytype Accent Color. It starts on, including after upgrades. It applies the chosen accent to text and code selections, table ranges and handles, selected cell menus, selected blocks and records, drag selection and drop indicators, selected choices, and blue focus outlines, including inline and menu text-property editors. Selected text inside BlobUI Settings also follows the switch and current accent as you edit. Ordinary text-colored typing carets keep their current color. Turn it off to restore default selection styling while keeping other BlobUI accents. Save and reload Anytype to apply the change there.
-
 Set the interface and code fonts separately using fonts available on your computer. Saved fonts also apply to Settings. The app follows the root theme setting in Anytype's `devconfig.json` for light, dark, and system appearance.
-
-## Kanban views
-
-In Preferences, Board layout applies to inline and full-page boards. Default keeps Anytype's layout. Balanced reduces card and column spacing. Compact also narrows columns to 220px and places properties on shared rows that wrap inside the card, while keeping each title on its own row.
-
-Collapsed Categories works with every style. It shows rounded category headers until you hover over a column or move keyboard focus into it. Cards expand and collapse with a short animation, disabled by system or BlobUI Reduced Motion settings. Devices without hover keep the cards visible. The initial settings are Default with Collapsed Categories off. Save and reload Anytype to apply changes, or use Undo changes to discard a draft.
 
 ## Space banner
 
@@ -84,7 +76,3 @@ Numpad 1 works with Num Lock on or off. The listener leaves other applications' 
 Open Logs to inspect activity and errors. Copy all logs copies the log text. Help provides Documentation, Keybinds, What's New?, version information, and author and repository links. Release notes appear when Settings reopens after an update.
 
 Advanced Settings contains API configuration and App Settings for the Anytype data folder, startup, updates, and uninstall. See [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) and [Installation and removal](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/installation-and-removal.md) for procedures. Setup and update-preview diagnostic bindings are covered in Development.
-
-## Calendar colors
-
-In Preferences, Calendar Colors controls API-derived object colors in calendar views and defaults to on. Changes apply after Save and reloading Anytype with Ctrl+R. The switch is locked while the API is being checked or cannot be used. Configure the connection in Advanced Settings. An API outage preserves your saved choice and cached colors. Turning Calendar Colors off keeps the cache but removes its colors from the generated CSS.

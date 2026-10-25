@@ -59,14 +59,6 @@ a[href^="blob://"]:active {
     border-bottom-color: transparent !important;
 }
 
-/* Browser spelling highlights paint above the spoiler background and can
-   restore flagged glyphs. Hide them only while the spoiler is concealed. */
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible)::spelling-error,
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) *::spelling-error {
-    color: transparent !important;
-    text-decoration: none !important;
-}
-
 .pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
     background-color: transparent !important;
     background-image: none !important;
@@ -155,14 +147,6 @@ a[href^="blob://"]:active {
     background-clip: text;
     -webkit-background-clip: text;
     animation: blobui-neon-wave 2.5s linear infinite;
-}
-
-/* Chromium paints spelling underlines above text-clipped gradients. Hide the
-   underline on gradient effects so a misspelled word cannot break the sweep. */
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::spelling-error,
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::spelling-error {
-    color: transparent !important;
-    text-decoration: none !important;
 }
 
 /* Chromium repaints selected strikethrough glyphs with the selection color.

@@ -202,12 +202,11 @@ fn state_for(
     fallback_runtime: Option<&Path>,
 ) -> Result<UpdaterState, String> {
     let current = current_version(install_directory, fallback_runtime)?;
-    let comparison_version = update_comparison_version(install_directory, fallback_runtime)?;
     let latest = preferences
         .latest_version
         .as_deref()
         .and_then(parse_version);
-    let current_parsed = parse_version(&comparison_version);
+    let current_parsed = parse_version(&current);
     let update_available = preferences.last_check_status.as_deref() != Some("error")
         && latest
             .as_ref()
@@ -260,7 +259,7 @@ pub fn check_for_updates(
     let mut preferences = load_preferences(&path)?;
     let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     preferences.last_checked_at = Some(checked_at);
-    let current = update_comparison_version(install_directory, Some(fallback_runtime))?;
+    let current = current_version(install_directory, Some(fallback_runtime))?;
     match fetch_latest_release() {
         Ok(None) => {
             preferences.latest_version = None;
@@ -548,7 +547,7 @@ pub fn apply_update(
     let mut preferences = load_preferences(&path)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     preferences.last_checked_at = Some(now);
-    let current = update_comparison_version(install_directory, Some(fallback_runtime))?;
+    let current = current_version(install_directory, Some(fallback_runtime))?;
     let release = match fetch_latest_release() {
         Ok(Some(release)) => release,
         Ok(None) => {
@@ -655,16 +654,6 @@ fn current_version(
     version_from_metadata(RELEASE_METADATA)
         .map(|version| version.to_string())
         .ok_or_else(|| "The built-in BlobUI release metadata is invalid.".into())
-}
-
-fn update_comparison_version(
-    install_directory: &Path,
-    fallback_runtime: Option<&Path>,
-) -> Result<String, String> {
-    if fallback_runtime.is_some_and(is_development_runtime) {
-        return Ok(env!("CARGO_PKG_VERSION").to_string());
-    }
-    current_version(install_directory, fallback_runtime)
 }
 
 fn version_from_runtime(runtime: &Path) -> Option<semver::Version> {
@@ -1635,29 +1624,6 @@ mod tests {
         ] {
             assert!(version_from_metadata(invalid).is_none());
         }
-    }
-
-    #[test]
-    fn development_build_compares_updates_with_its_compiled_version() {
-        let root = fixture_root("development-version");
-        let (install, _, _, _) = install_fixture(&root);
-        let runtime = root.join("runtime");
-        fs::create_dir_all(runtime.join(".git")).unwrap();
-        let mut preferences = UpdaterPreferences {
-            latest_version: Some("1.2.0".into()),
-            last_check_status: Some("available".into()),
-            ..UpdaterPreferences::default()
-        };
-
-        let current = state_for(&install, &preferences, Some(&runtime)).unwrap();
-        assert_eq!(current.current_version, env!("BLOBUI_BUILD_VERSION"));
-        assert!(!current.update_available);
-
-        let compiled = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
-        preferences.latest_version = Some(format!("{}.0.0", compiled.major + 1));
-        let future = state_for(&install, &preferences, Some(&runtime)).unwrap();
-        assert!(future.update_available);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
