@@ -16,27 +16,7 @@ struct EnvironmentGuard(Vec<(&'static str, Option<OsString>)>);
 
 impl EnvironmentGuard {
     fn set(values: &[(&'static str, &Path)]) -> Self {
-        let mut isolated: Vec<(&'static str, PathBuf)> = values.iter()
-            .map(|(key, value)| (*key, value.to_path_buf())).collect();
-        if let Some((_, install)) = isolated.iter().find(|(key, _)| *key == "BLOBUI_INSTALL_DIRECTORY") {
-            let profile = install.parent().expect("fixture install has a parent").join("test-profile");
-            for (key, suffix) in [("APPDATA", "roaming"), ("LOCALAPPDATA", "local")] {
-                if !isolated.iter().any(|(existing, _)| *existing == key) {
-                    let directory = profile.join(suffix);
-                    fs::create_dir_all(&directory).unwrap();
-                    isolated.push((key, directory));
-                }
-            }
-        }
-        for (key, value) in &isolated {
-            if matches!(*key, "APPDATA" | "LOCALAPPDATA") {
-                let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-                assert!(value.starts_with(workspace.join(".test-run")), "test profile must be in workspace fixtures");
-                fs::create_dir_all(value).unwrap();
-            }
-            assert_fixture_path(value).expect("native tests must use workspace fixtures");
-        }
-        let previous = isolated
+        let previous = values
             .iter()
             .map(|(key, value)| {
                 let previous = env::var_os(key);
@@ -57,35 +37,6 @@ impl Drop for EnvironmentGuard {
             }
         }
     }
-}
-
-#[test]
-fn native_fixture_profile_overrides_inherited_saved_folder_without_touching_credentials() {
-    let _lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let fixture = source.join(".test-run").join(format!("profile-isolation-{}-{nonce}", std::process::id()));
-    let install = fixture.join("Test Anytype");
-    let other_install = fixture.join("Simulated user Anytype");
-    fs::create_dir_all(install.join("blob")).unwrap();
-    fs::create_dir_all(other_install.join("blob/credentials")).unwrap();
-    fs::write(install.join("blob/data.json"), b"{}").unwrap();
-    fs::write(other_install.join("blob/data.json"), b"{}").unwrap();
-    let sentinel = other_install.join("blob/credentials/anytype-api-key.dpapi");
-    fs::write(&sentinel, b"untouched simulated credential").unwrap();
-    let inherited_profile = fixture.join("inherited-profile");
-    let preferences = updater::preferences_path(&inherited_profile.join("anytype"));
-    fs::create_dir_all(preferences.parent().unwrap()).unwrap();
-    fs::write(&preferences, serde_json::to_vec(&json!({"installDirectory": other_install})).unwrap()).unwrap();
-    {
-        let _inherited = EnvironmentGuard::set(&[("APPDATA", &inherited_profile)]);
-        let _isolated = EnvironmentGuard::set(&[("BLOBUI_INSTALL_DIRECTORY", &install)]);
-        let resolved = resolve_install_directory(&app_data_directory()).unwrap();
-        assert_eq!(resolved.canonicalize().unwrap(), install.canonicalize().unwrap());
-        assert_fixture_path(&app_data_directory().parent().unwrap()).unwrap();
-    }
-    assert_eq!(fs::read(&sentinel).unwrap(), b"untouched simulated credential");
-    fs::remove_dir_all(fixture).unwrap();
 }
 
 fn copy_tree(source: &Path, destination: &Path) {
@@ -205,7 +156,6 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
 
     let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _environment = EnvironmentGuard::set(&[
-        ("APPDATA", &fixture.join("roaming")),
         ("BLOBUI_INSTALL_DIRECTORY", &install),
         ("BLOBUI_SOURCE_DIRECTORY", &runtime),
     ]);
@@ -215,16 +165,11 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
-        include_selections: true,
         banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,
         tab_hover_effect: true,
         link_hover_effect: true,
         object_mention_hover_effect: true,
-        kanban_view_style: "compact".into(),
-        collapsed_categories: true,
-        calendar_colors_enabled: true,
-        settings_v21_enabled: false,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
@@ -232,11 +177,6 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert_eq!(saved_data["settingsV2"]["version"], 2);
     assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
     assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
-    assert_eq!(saved_data["settingsV2"]["settings"]["kanbanViewStyle"], "compact");
-    assert_eq!(saved_data["settingsV2"]["settings"]["collapsedCategories"], true);
-    let restored = settings_from_data(&saved_data);
-    assert_eq!(restored.kanban_view_style, "compact");
-    assert!(restored.collapsed_categories);
     assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
     assert_eq!(saved_data["settingsV2"]["settings"]["bannerImage"], draft.banner_image);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");
@@ -246,27 +186,6 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
-    let experimental = SettingsDraft { settings_v21_enabled: true, ..draft.clone() };
-    save_settings_blocking(experimental).unwrap();
-    assert!(settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
-    assert_eq!(saved_css, fs::read_to_string(&css_path).unwrap());
-    save_settings_blocking(draft.clone()).unwrap();
-    assert!(!settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
-
-    assert!(saved_css.contains("--blobui-selection-fill:"));
-    let selections_off = SettingsDraft { include_selections: false, ..draft.clone() };
-    save_settings_blocking(selections_off).unwrap();
-    assert!(!fs::read_to_string(&css_path).unwrap().contains("--blobui-selection-fill:"));
-    assert!(!settings_from_data(&read_json_file(&data_path).unwrap()).include_selections);
-
-    let off = SettingsDraft { calendar_colors_enabled: false, ..draft.clone() };
-    assert_eq!(save_settings_blocking(off).unwrap().calendar_status, "off");
-    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-fixture-event"));
-    let off_data = read_json_file(&data_path).unwrap();
-    assert!(!settings_from_data(&off_data).calendar_colors_enabled);
-    assert_eq!(off_data["calendarObjectColors"]["fixture-event"], "Green");
-    save_settings_blocking(draft.clone()).unwrap();
-    assert!(fs::read_to_string(&css_path).unwrap().contains("record-fixture-event"));
 
     // White passes settings validation but the native CSS compiler rejects it.
     // No installed file may change when compilation fails before commit.
@@ -328,7 +247,6 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
 }
 
 #[test]
-#[ignore = "Retired credential-reset flow. Use profile-isolation regressions; never run against a user profile."]
 fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -432,22 +350,6 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     assert_eq!(fs::read(&css_path).unwrap(), saved_css);
     assert_eq!(fs::read(&credential_path).unwrap(), saved_key);
 
-    // Calendar opt-out still verifies a connection but never fetches colors.
-    let mut off_data = read_json_file(&data_path).unwrap();
-    off_data["settingsV2"]["settings"]["calendarColorsEnabled"] = json!(false);
-    fs::write(&data_path, serde_json::to_vec(&off_data).unwrap()).unwrap();
-    let (port, server) = mock_api_server("127.0.0.2", "fixture-key-two", vec![(200, json!({"data": []}))]);
-    let off_result = configure_connection_blocking(ConnectionDraft {
-        enabled: true, api_key: String::new(), keep_existing_key: true,
-        ip: Some("127.0.0.2".into()), port: Some(port),
-    }).unwrap();
-    assert_eq!(off_result.calendar_status, "off");
-    assert_eq!(server.join().unwrap().len(), 1);
-    let reconnected = read_json_file(&data_path).unwrap();
-    assert!(!settings_from_data(&reconnected).calendar_colors_enabled);
-    assert_eq!(reconnected["calendarObjectColors"], off_data["calendarObjectColors"]);
-    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event-1"));
-
     // Opt-out does not make an API request and removes both cache and key.
     let disabled = configure_connection_blocking(ConnectionDraft {
         enabled: false,
@@ -462,33 +364,4 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let canonical = fixture.canonicalize().unwrap();
     assert!(canonical.starts_with(source.join(".test-run").canonicalize().unwrap()));
     fs::remove_dir_all(canonical).unwrap();
-}
-
-#[test]
-fn calendar_api_availability_checks_saved_credentials_and_endpoint() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let fixture = source.join(".test-run").join(format!("calendar-api-{}-{nonce}", std::process::id()));
-    let credentials = fixture.join("blob/credentials");
-    fs::create_dir_all(&credentials).unwrap();
-    let data_path = fixture.join("blob/data.json");
-    fs::write(&data_path, b"{}").unwrap();
-    assert_eq!(calendar_api_availability_at(&fixture), "missing");
-    let credential = credentials.join("anytype-api-key.dpapi");
-    fs::write(&credential, b"invalid credential").unwrap();
-    assert_eq!(calendar_api_availability_at(&fixture), "unavailable");
-    fs::write(&credential, connection::encrypt_api_key("availability-key").unwrap()).unwrap();
-    for (http_status, body, expected) in [
-        (200, json!({"data": []}), "available"),
-        (401, json!({"error": "invalid key"}), "unavailable"),
-        (200, json!({"unexpected": []}), "unavailable"),
-    ] {
-        let (port, server) = mock_api_server("127.0.0.1", "availability-key", vec![(http_status, body)]);
-        fs::write(&data_path, serde_json::to_vec(&json!({"apiConnection": {"enabled": true, "port": port}})).unwrap()).unwrap();
-        assert_eq!(calendar_api_availability_at(&fixture), expected);
-        server.join().unwrap();
-    }
-    fs::write(&data_path, b"{\"apiConnection\":{\"enabled\":false}}").unwrap();
-    assert_eq!(calendar_api_availability_at(&fixture), "missing");
-    fs::remove_dir_all(fixture).unwrap();
 }

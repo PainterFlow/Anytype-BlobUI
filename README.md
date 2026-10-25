@@ -36,7 +36,7 @@ The same articles are bundled in Settings under Help > Documentation for offline
 On Windows with Rust and the Windows C++ build tools installed, run these commands from the repository root.
 
 ```powershell
-.\scripts\Build-App.ps1 -s -c
+.\scripts\Build-Settings.ps1 -s -c
 .\scripts\Build-Installer.ps1
 ```
 

@@ -3,11 +3,6 @@
     background-color: var(--color-blob-accent) !important;
 }
 
-/* Keep today's number on the configured accent, including weekend dates. */
-#menuCalendar .calendarSelect .day.today:not(.active) > .inner {
-    color: var(--color-blob-accent) !important;
-}
-
 /* Tint the Today, Tomorrow, and Clear actions only while they are interactive and hovered. */
 #menuCalendar .calendarSelect .foot .btn:hover,
 #menuCalendar .calendarSelect .foot .btn.hover {

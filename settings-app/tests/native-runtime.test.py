@@ -9,7 +9,7 @@ runtime_modules = "\n".join(
     (rust / name).read_text(encoding="utf-8")
     for name in ("api.rs", "css.rs", "storage.rs", "connection.rs")
 )
-build = (ROOT / "scripts/Build-App.ps1").read_text(encoding="utf-8")
+build = (ROOT / "scripts/Build-Settings.ps1").read_text(encoding="utf-8")
 
 assert "mod api;" in main and "mod css;" in main and "mod storage;" in main
 assert "api::verify_connection" in main and "api::calendar_colors" in main
@@ -22,7 +22,7 @@ assert "ReplaceFileW" in runtime_modules and "MoveFileExW" in runtime_modules
 assert "rollback" in runtime_modules.lower()
 
 assert {p.name for p in (ROOT / "scripts").glob("*.ps1")} == {
-    "Build-App.ps1", "Build-Installer.ps1"
+    "Build-Settings.ps1", "Build-Installer.ps1"
 }
 assert not list((ROOT / "scripts").glob("*.psm1"))
 assert "cargo build --locked --release" in build
