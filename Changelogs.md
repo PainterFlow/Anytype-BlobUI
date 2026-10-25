@@ -48,6 +48,7 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
     - `PR#id` - mention a PR from the repo
     - `User#username` - mention a git user 
 - Fixed that one test that resets API key, API key ip and API key port.
+- UI is now component based.
 
 ## Bug fixes
 - Issue#47 - The red spelling underline thing is now no longer visible through the spoiler text effect.
