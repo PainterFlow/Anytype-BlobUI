@@ -43,6 +43,11 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - the compiled version is now marked as the newest.
 - updated `AGENTS.md` to include notes about UI design + removed some older stuff.
 - renamed `Build-Settings.ps1` script to `Build-App.ps1`.
+- You can now mention objects from the Github repo in markdown files:
+    - `Issue#id` - mention a git issue
+    - `PR#id` - mention a PR from the repo
+    - `User#username` - mention a git user 
+- Fixed that one test that resets API key, API key ip and API key port.
 
 ## Bug fixes
 - Issue#47 - The red spelling underline thing is now no longer visible through the spoiler text effect.
@@ -53,4 +58,4 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - Issue#35 - The settings tab/category animation can bug out when switching to the "Advanced" settings tab for the first time after fully restarting the app.
 
 ---
-*Developers Note: All changes without explicitly denoted credits are made by [@PainterFlow11](https://github.com/PainterFlow)*
+*Developers Note: All changes without explicitly denoted credits are made by User#PainterFlow*

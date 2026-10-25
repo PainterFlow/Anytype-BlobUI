@@ -15,6 +15,7 @@
   const imageDataUrl = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
   const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const sourcePattern = /^assets\/changelogs\/[A-Za-z0-9._/-]+$/;
+  const repositoryUrl = "https://github.com/PainterFlow/Anytype-BlobUI";
 
   function unquote(value) {
     const text = value.trim();
@@ -255,6 +256,42 @@
         },
         renderer(token) {
           return renderImage(images[token.alias]);
+        },
+      }, {
+        name: "blobuiGitMention",
+        level: "inline",
+        start(source) {
+          const pattern = /(^|[^A-Za-z0-9_-])(?:Issue|PR)#[1-9][0-9]*(?![A-Za-z0-9_-])|(^|[^A-Za-z0-9_-])User#[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}(?![A-Za-z0-9_-])/g;
+          const match = pattern.exec(source);
+          if (!match) return undefined;
+          return match.index + (match[1] || match[2] || "").length;
+        },
+        tokenizer(source, tokens) {
+          if (this.lexer.state.inLink || this.lexer.state.inRawBlock) return undefined;
+          const previous = tokens?.[tokens.length - 1];
+          const previousText = previous?.type === "text" ? String(previous.text || previous.raw || "") : "";
+          if (/[A-Za-z0-9_-]$/.test(previousText)) return undefined;
+          const issue = /^(Issue|PR)#([1-9][0-9]*)(?![A-Za-z0-9_-])/.exec(source);
+          if (issue) {
+            const kind = issue[1] === "Issue" ? "issues" : "pull";
+            return {
+              type: "blobuiGitMention",
+              raw: issue[0],
+              href: `${repositoryUrl}/${kind}/${issue[2]}`,
+              text: issue[0],
+            };
+          }
+          const user = /^User#([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})(?![A-Za-z0-9_-])/.exec(source);
+          if (!user || user[1].includes("--")) return undefined;
+          return {
+            type: "blobuiGitMention",
+            raw: user[0],
+            href: `https://github.com/${user[1]}`,
+            text: `@${user[1]}`,
+          };
+        },
+        renderer(token) {
+          return `<a href="${escapeAttribute(token.href)}">${escapeAttribute(token.text)}</a>`;
         },
       }],
     });
