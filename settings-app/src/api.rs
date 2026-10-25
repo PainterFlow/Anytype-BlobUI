@@ -176,7 +176,7 @@ fn paged(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Opt
     Ok(all)
 }
 
-fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
     let address = ip.parse::<IpAddr>().map_err(|_| "API key IP must be a valid IPv4 or IPv6 address.".to_string())?;
     let socket = SocketAddr::new(address, port);
     let mut stream = TcpStream::connect_timeout(&socket, TIMEOUT).map_err(|error| network_error(&error))?;
@@ -186,6 +186,7 @@ fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: O
     let payload = body.map(serde_json::to_vec).transpose()
         .map_err(|_| "Could not encode an Anytype API request.".to_string())?;
     let mut request = SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAccept: application/json\r\nConnection: close\r\n"));
+    if path.starts_with("/v1/") { request.0.push_str("Anytype-Version: 2025-11-08\r\n"); }
     if let Some(payload) = &payload {
         request.0.push_str("Content-Type: application/json\r\n");
         request.0.push_str(&format!("Content-Length: {}\r\n", payload.len()));
@@ -245,7 +246,7 @@ fn network_error(error: &std::io::Error) -> String {
     }
 }
 
-fn encode_segment(value: &str) -> String {
+pub(crate) fn encode_segment(value: &str) -> String {
     let mut escaped = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {

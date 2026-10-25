@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>BlobUI Settings</title>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./formula-page.css" />
   </head>
   <body>
     <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
@@ -130,11 +131,15 @@
     </section>
     <div class="app-shell" id="settings-shell">
       <aside class="sidebar" aria-label="Settings navigation">
-        <nav class="sidebar-nav" aria-label="Settings">
+        <nav id="sidebar-nav" class="sidebar-nav" aria-label="Settings">
           <span class="nav-group-label">Application</span>
           <button id="preferences-nav" class="nav-item active" type="button" aria-current="page" data-settings-page="preferences">
             <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"/><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"/></svg>
             <span>Preferences</span>
+          </button>
+          <button id="formulas-nav" class="nav-item" type="button" data-settings-page="formulas">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM8 4v12m4-12v12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            <span>Kanban View Formulas</span>
           </button>
           <button id="accessibility-nav" class="nav-item" type="button" data-settings-page="accessibility">
             <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="6" r="1.2" fill="currentColor"/><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -206,6 +211,12 @@
             </div>
 
             <div class="settings-list">
+              <label class="native-accent-control settings-row" for="include-selections">
+                <span>Include selections</span>
+                <input id="include-selections" type="checkbox" role="switch" aria-describedby="include-selections-help" />
+                <span class="switch-track" aria-hidden="true"></span>
+                <span class="sr-only" id="include-selections-help">Use the accent color for text, table and block selections, selected choices, and focus indicators.</span>
+              </label>
               <label class="native-accent-control settings-row" for="native-accent">
                 <span>Anytype Accent Color</span>
                 <input id="native-accent" type="checkbox" role="switch" />
@@ -231,6 +242,65 @@
             <p class="field-error" id="accent-error" aria-live="polite"></p>
           </section>
 
+          <section class="settings-group" aria-labelledby="kanban-heading">
+            <div class="section-heading">
+              <h2 id="kanban-heading">Kanban views</h2>
+              <p>Choose how boards are displayed.</p>
+            </div>
+            <div class="settings-list kanban-settings-list">
+              <div class="kanban-setting-row kanban-style-row">
+                <div class="kanban-setting-copy">
+                  <span class="kanban-setting-title">Board layout</span>
+                  <span id="kanban-style-help" class="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span>
+                </div>
+                <div class="kanban-select" id="kanban-select">
+                  <button id="kanban-view-style" class="kanban-select-trigger" type="button" value="default" aria-haspopup="listbox" aria-expanded="false" aria-controls="kanban-style-options" aria-labelledby="kanban-style-label kanban-style-value" aria-describedby="kanban-style-help">
+                    <span id="kanban-style-label" class="sr-only">Board layout</span>
+                    <span id="kanban-style-value">Default</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+                  </button>
+                  <div id="kanban-style-options" class="kanban-select-menu" role="listbox" aria-label="Board layout" hidden>
+                    <button class="kanban-select-option" type="button" role="option" data-value="default" aria-selected="true" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Default</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <button class="kanban-select-option" type="button" role="option" data-value="balanced" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Balanced</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <button class="kanban-select-option" type="button" role="option" data-value="compact" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Compact</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                  </div>
+                </div>
+              </div>
+              <div class="kanban-setting-row formula-display-row">
+                <div class="kanban-setting-copy"><span class="kanban-setting-title">Display formulas</span><span id="formula-display-help" class="kanban-setting-description">Choose where category calculation results appear.</span></div>
+                <div class="kanban-select" id="formula-display-select">
+                  <button id="formula-display" class="kanban-select-trigger" type="button" value="balanced" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-display-options" aria-labelledby="formula-display-label formula-display-value" aria-describedby="formula-display-help"><span id="formula-display-label" class="sr-only">Display formulas</span><span id="formula-display-value" data-pick-value>Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+                  <div id="formula-display-options" class="kanban-select-menu" role="listbox" aria-label="Display formulas" hidden>
+                    <button class="kanban-select-option" type="button" role="option" data-value="balanced" aria-selected="true" tabindex="-1"><span class="kanban-option-label">Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <button class="kanban-select-option" type="button" role="option" data-value="spacious" aria-selected="false" tabindex="-1"><span class="kanban-option-label">Spacious</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                  </div>
+                </div>
+              </div>
+              <label class="native-accent-control settings-row kanban-setting-row" for="collapsed-categories">
+                <span>Collapsed Categories</span>
+                <input id="collapsed-categories" type="checkbox" role="switch" aria-describedby="kanban-collapse-help" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <p id="kanban-collapse-help" class="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
+            <button id="open-formulas" class="formula-button button-label-centered" type="button">Kanban View Formulas</button>
+          </section>
+
+          <section class="settings-group" aria-labelledby="calendar-heading">
+            <div class="section-heading">
+              <h2 id="calendar-heading">Calendar</h2>
+              <p>Use each object's Calendar Color in calendar views.</p>
+            </div>
+            <div class="settings-list">
+              <label class="native-accent-control settings-row" for="calendar-colors-enabled">
+                <span>Calendar Colors</span>
+                <input id="calendar-colors-enabled" type="checkbox" role="switch" checked disabled aria-describedby="calendar-colors-help" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <p id="calendar-colors-help" class="kanban-collapse-help" role="status" aria-live="polite">Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes.</p>
+          </section>
+
           <section class="settings-group typography-group" aria-labelledby="typography-heading">
             <div class="section-heading">
               <h2 id="typography-heading">Font</h2>
@@ -240,7 +310,7 @@
             <div class="font-fields">
               <label class="input-field">
                 <span>Interface font</span>
-                <input id="font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Libron" />
+                <input id="font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Inter" />
               </label>
               <label class="input-field">
                 <span>Code font</span>
@@ -284,6 +354,20 @@
             </div>
           </section>
           </div>
+          <div id="formulas-page" class="settings-page" hidden>
+            <div class="formula-toolbar">
+              <div id="formula-search-control" class="expandable-search" data-expanded="false">
+                <button id="formula-search-toggle" class="neutral-icon-button" type="button" aria-label="Search Kanban views" aria-controls="formula-search" aria-expanded="false"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9867 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z" fill="currentColor"></path></svg></button>
+                <label for="formula-search" class="sr-only">Search Kanban views</label><input id="formula-search" type="search" placeholder="Search Kanban views" tabindex="-1" />
+              </div>
+              <button id="formula-reload" class="neutral-icon-button" type="button" aria-label="Reload available views" title="Reload available views"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4"/></svg></button>
+              <div id="formula-filter-control" class="kanban-select"><button id="formula-filter" class="neutral-icon-button" type="button" aria-label="Filter by space" title="Filter by space" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-filter-options"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3 6C3 5.58579 3.29381 5.25 3.65625 5.25H16.3438C16.7062 5.25 17 5.58579 17 6C17 6.41421 16.7062 6.75 16.3438 6.75H3.65625C3.29381 6.75 3 6.41421 3 6ZM6 10C6 9.58579 6.26863 9.25 6.6 9.25H13.4C13.7314 9.25 14 9.58579 14 10C14 10.4142 13.7314 10.75 13.4 10.75H6.6C6.26863 10.75 6 10.4142 6 10ZM8.75 13.25C8.33579 13.25 8 13.5858 8 14C8 14.4142 8.33579 14.75 8.75 14.75H11.25C11.6642 14.75 12 14.4142 12 14C12 13.5858 11.6642 13.25 11.25 13.25H8.75Z" fill="currentColor"></path></svg></button><div id="formula-filter-options" class="kanban-select-menu" role="listbox" aria-label="Filter by space" hidden></div></div>
+            </div>
+            <p id="formula-storage-message" class="field-error" role="status" aria-live="polite"></p>
+            <fieldset id="formula-fields" aria-label="Kanban formulas">
+              <div id="formula-contents"></div>
+            </fieldset>
+          </div>
           <div id="accessibility-page" class="settings-page" hidden>
             <section class="settings-group" aria-labelledby="reduced-motion-heading">
               <div class="section-heading">
@@ -324,10 +408,17 @@
             </section>
           </div>
           <div id="advanced-page" class="settings-page" hidden>
-            <div class="advanced-tabs" role="tablist" aria-label="Advanced settings">
+            <div id="advanced-tabs" class="advanced-tabs" role="tablist" aria-label="Advanced settings">
               <button id="advanced-api-tab" type="button" role="tab" aria-selected="true" aria-controls="advanced-api-panel">API key</button>
               <button id="advanced-app-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-app-panel" tabindex="-1">App settings</button>
+              <button id="advanced-experiments-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-experiments-panel" tabindex="-1">Experiments</button>
             </div>
+            <section id="advanced-experiments-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-experiments-tab" hidden>
+              <div class="section-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
+                <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"/><path d="M10 7v4"/><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"/></svg><span>Experiments may break things. Use at your own risk.</span></p>
+              </div>
+              <div class="settings-list"><label class="native-accent-control settings-row accessibility-row" for="settings-v21-enabled"><span>Settings Future Proof UI Refresh</span><input id="settings-v21-enabled" type="checkbox" role="switch" aria-describedby="experiments-warning" /><span class="switch-track" aria-hidden="true"></span></label></div>
+            </section>
             <section id="advanced-api-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-api-tab">
               <div class="section-heading">
                 <h2 id="advanced-api-heading">API key</h2>
@@ -421,6 +512,12 @@
         </div>
       </main>
     </div>
+    <div id="formula-calculator-backdrop" class="confirm-backdrop" hidden>
+      <section id="formula-calculator-dialog" class="confirm-dialog formula-calculator-dialog" role="dialog" aria-modal="true" aria-label="Kanban calculation" tabindex="-1">
+        <button id="formula-calculator-close" class="confirm-close" type="button" aria-label="Close calculator" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
+        <div id="formula-calculator-content"></div>
+      </section>
+    </div>
     <div id="uninstall-backdrop" class="confirm-backdrop" hidden>
       <section id="uninstall-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="uninstall-title" aria-describedby="uninstall-message" tabindex="-1">
         <button id="uninstall-close" class="confirm-close" type="button" aria-label="Cancel uninstall"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
@@ -460,6 +557,12 @@
     </div>
     <div id="release-notes-backdrop" class="confirm-backdrop" hidden>
       <section id="release-notes-dialog" class="confirm-dialog release-notes-dialog" role="dialog" aria-modal="true" aria-label="Changelog" tabindex="-1">
+        <div class="release-notes-heading" aria-live="polite">
+          <h2>Changelog</h2>
+          <span id="release-notes-version" class="release-notes-version"></span>
+          <span id="release-notes-current-tag" class="release-notes-tag" hidden>Current</span>
+          <span id="release-notes-latest-tag" class="release-notes-tag latest" hidden>Latest</span>
+        </div>
         <p id="release-notes-image-warning" class="release-notes-image-warning" role="status" hidden>Some release note images could not be loaded.</p>
         <div id="release-notes-content" class="release-notes-content markdown-content" role="region" aria-label="Release notes" tabindex="0"></div>
         <div class="release-notes-navigation" aria-label="Changelog navigation">
@@ -479,7 +582,7 @@
       <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" aria-describedby="keybinds-description" tabindex="-1">
         <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keyboard shortcuts" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
         <h2 id="keybinds-title">Keyboard shortcuts</h2>
-        <div class="keybinds-content">
+        <div id="keybinds-content" class="keybinds-content">
           <p id="keybinds-description">Click a shortcut to change it. Changes are saved automatically.</p>
           <div id="keybind-list" class="keybind-list"></div>
           <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>
@@ -494,6 +597,14 @@
     <script src="./docs-data.js"></script>
     <script src="./disclosure.js"></script>
     <script src="./docs.js"></script>
+    <script src="./tabs.js"></script>
+    <script src="./settings-v21.js"></script>
+    <script src="./pick-control.js"></script>
+    <script src="./expandable-search.js"></script>
+    <script src="./calculator-math.js"></script>
+    <script src="./view-catalog.js"></script>
+    <script src="./reload-controller.js"></script>
+    <script src="./formula-page.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

@@ -308,9 +308,8 @@ fn is_reparse_point(metadata: &fs::Metadata) -> bool {
 #[cfg(not(windows))]
 fn is_reparse_point(_: &fs::Metadata) -> bool { false }
 
-#[cfg(test)]
 #[path = "../../installer/src/transaction.rs"]
-mod transaction;
+pub(crate) mod transaction;
 
 #[cfg(test)]
 mod tests {

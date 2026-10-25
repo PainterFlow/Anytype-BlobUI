@@ -12,7 +12,7 @@
   --text-secondary: #a3a3a3;
   --text-muted: #5c5c5c;
   --accent: #de50de;
-  --font-interface: "Libron", "Segoe UI", sans-serif;
+  --font-interface: "Inter", "Segoe UI", sans-serif;
   --font-code: "Consolas", "Cascadia Code", monospace;
   --color-grey: #a8a8a8;
   --color-yellow: #ecd91a;
@@ -69,6 +69,7 @@ html, body { width: 100%; min-width: 800px; height: 100%; min-height: 0; margin:
 body { overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-interface); font-size: 14px; line-height: 22px; letter-spacing: -.12px; }
 button, input { color: inherit; font: inherit; }
 button { border: 0; }
+.button-label-centered { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
 button:focus-visible, input:focus-visible { outline: none; }
 
 .window-titlebar { position: relative; display: flex; align-items: center; justify-content: space-between; height: 36px; background: var(--sidebar); color: var(--text-secondary); user-select: none; }
@@ -102,12 +103,12 @@ button:focus-visible, input:focus-visible { outline: none; }
   initial-value: transparent;
 }
 
-.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
-.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
-.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar { width: 12px; height: 12px; }
-.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner { background: transparent; }
-.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
-.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button { display: none; }
+.page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling, .sidebar-nav.has-overflow.is-scrolling, .keybinds-content.has-overflow.is-scrolling, .formula-display-slot > .is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
+.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .keybinds-content::-webkit-scrollbar, .formula-display-slot > *::-webkit-scrollbar { width: 12px; height: 12px; }
+.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .keybinds-content::-webkit-scrollbar-track, .formula-display-slot > *::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner, .sidebar-nav::-webkit-scrollbar-corner, .keybinds-content::-webkit-scrollbar-corner, .formula-display-slot > *::-webkit-scrollbar-corner { background: transparent; }
+.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .keybinds-content::-webkit-scrollbar-thumb, .formula-display-slot > *::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
+.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button, .sidebar-nav::-webkit-scrollbar-button, .keybinds-content::-webkit-scrollbar-button, .formula-display-slot > *::-webkit-scrollbar-button { display: none; }
 .settings-content { width: calc(100% - 64px); max-width: 640px; margin: 0 auto; padding: 26px 0 36px; }
 .page-heading { margin-bottom: 32px; text-align: left; }
 .page-heading h1 { margin: 0; font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -.56px; }
@@ -120,7 +121,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 .settings-row { padding: 14px 16px; font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .settings-page[hidden] { display: none; }
 .advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
-.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--advanced-tab-width, 0px); transform: translateX(var(--advanced-tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: var(--tab-width, 0px); transform: translateX(var(--tab-left, 0px)); background: var(--text); transition: transform .2s ease, width .2s ease; pointer-events: none; }
+.advanced-tabs.indicator-initializing::after { transition: none; }
 .advanced-tabs [role="tab"] { margin-bottom: -1px; padding: 0 0 12px; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); font-weight: 400; cursor: pointer; transition: color .2s ease; }
 .advanced-tabs [role="tab"]:hover { color: var(--text); }
 .advanced-tabs [aria-selected="true"] { color: var(--text); }
@@ -147,6 +149,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .native-accent-control input:checked + .switch-track { background: var(--accent); }
 .native-accent-control input:checked + .switch-track::after { transform: translateX(16px); }
 .native-accent-control input:focus-visible + .switch-track { outline: none; }
+#include-selections:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
+:root[data-include-selections="true"] ::selection { background-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+@media (forced-colors: active) {
+  :root[data-include-selections="true"] ::selection { background-color: Highlight; color: HighlightText; }
+}
 .native-accent-control input:disabled + .switch-track { opacity: .4; }
 .accessibility-row:not(:last-child) { border-bottom: 1px solid var(--line); }
 .accessibility-row:last-child { border-bottom: 0; }
@@ -170,7 +177,39 @@ button:focus-visible, input:focus-visible { outline: none; }
 .input-field > span { flex-shrink: 0; font-weight: 400; }
 .input-field > label { flex: 1 1 auto; min-width: 0; }
 .input-field input { width: 54%; }
+.input-field select { width: 54%; min-width: 0; height: 48px; padding: 0 14px; border: 0; border-radius: 18px; background: var(--input-bg); color: var(--text); font: inherit; }
+.input-field select:hover, .input-field select:focus { background: var(--active); }
+.input-field select:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .input-field input::placeholder { color: var(--text-muted); }
+
+.kanban-settings-list { overflow: visible; border-radius: 10px; }
+.kanban-setting-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 64px; padding: 10px 14px; }
+.kanban-setting-row.native-accent-control { border-bottom: 0; cursor: default; }
+.kanban-setting-row + .kanban-setting-row { border-top: 1px solid var(--line); }
+.kanban-setting-copy { display: grid; gap: 2px; min-width: 0; }
+.kanban-setting-title { font-size: 14px; line-height: 20px; }
+.kanban-setting-description, .kanban-collapse-help { color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.kanban-select { position: relative; flex: 0 0 auto; }
+.kanban-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 7px; min-width: 100px; height: 32px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 22px; cursor: pointer; transition: background .15s ease; }
+.kanban-select-trigger:hover:not(:disabled), .kanban-select-trigger[aria-expanded="true"] { background: var(--active); }
+.kanban-select-trigger:focus-visible, .kanban-select-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
+.kanban-select-trigger:disabled { color: var(--text-muted); cursor: default; }
+.kanban-select-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out; }
+.kanban-select-menu[data-state="open"] { opacity: 1; transform: translateY(0); }
+.kanban-select-menu[data-state="closing"] { opacity: 0; transform: translateY(-4px); transition-duration: 100ms; pointer-events: none; }
+.kanban-select-menu[data-state="closed"] { opacity: 0; transform: translateY(-4px); }
+.kanban-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 34px; min-height: 34px; padding: 0 9px; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.kanban-select-option:hover, .kanban-select-option:focus-visible, .kanban-select-option[aria-selected="true"] { background: var(--active); color: var(--text); }
+.kanban-option-copy { display: grid; gap: 0; }
+.kanban-option-label { font-size: 16px; line-height: 22px; }
+.kanban-select-option > svg { flex: 0 0 15px; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.kanban-select-option[aria-selected="true"] > svg { opacity: 1; }
+.kanban-collapse-help { margin: 8px 0 0; }
+:root[data-reduced-motion="true"] .kanban-select-trigger { transition: none; }
+@media (prefers-reduced-motion: reduce) { .kanban-select-trigger { transition: none; } }
+:root[data-reduced-motion="true"] .kanban-select-menu { transition: none; }
+@media (prefers-reduced-motion: reduce) { .kanban-select-menu { transition: none; } }
 
 .space-banner-controls { display: grid; justify-items: start; gap: 12px; }
 .space-banner-actions { display: flex; align-items: center; gap: 12px; min-height: 40px; }
@@ -207,9 +246,9 @@ button:focus-visible, input:focus-visible { outline: none; }
 .visibility-toggle:hover:not(:disabled)::before { opacity: 1; }
 .visibility-toggle:focus-visible { outline: none; }
 .visibility-toggle:disabled { cursor: wait; }
-.visibility-toggle svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.visibility-toggle svg, svg.visibility-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .visibility-slash { opacity: 0; }
-.visibility-toggle[aria-pressed="false"] .visibility-slash { opacity: 1; }
+.visibility-toggle[aria-pressed="false"] .visibility-slash, [aria-pressed="false"] > .visibility-icon .visibility-slash { opacity: 1; }
 .advanced-fields .advanced-row:last-child { border-bottom: 0; }
 .app-install-directory-row input { width: 100%; cursor: pointer; }
 .update-check-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 16px; }
@@ -248,7 +287,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .repository-link { color: #777; }
 .confirm-dialog.keybinds-dialog { display: flex; flex-direction: column; width: min(100%, 480px); max-height: min(82vh, 680px); padding: 20px; border-radius: 16px; }
 .keybinds-dialog > h2 { flex: 0 0 auto; }
-.keybinds-content { min-height: 0; overflow-y: auto; margin-top: 8px; padding: 0; scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+.keybinds-content { min-height: 0; overflow-y: auto; margin-top: 8px; padding: 0; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .keybinds-content > p:first-child { margin: 0 0 12px; font-size: 13px; line-height: 20px; }
 .keybind-list { display: grid; gap: 2px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; padding: 4px 0; }
@@ -301,6 +340,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .help-error-code { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--color-red) 35%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--color-red) 12%, var(--bg)); color: var(--color-red); font-size: 14px; line-height: 22px; letter-spacing: 0; }
 .help-error-dialog p { margin: 14px 0 0; padding-right: 20px; }
 .release-notes-dialog { width: min(100%, 720px); max-height: min(82vh, 760px); overflow-y: auto; padding: 28px; border-radius: 16px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.release-notes-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-right: 36px; }
+.release-notes-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
+.release-notes-version { color: var(--text-secondary); font-size: 12px; line-height: 20px; }
+.release-notes-tag { padding: 1px 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-secondary); font-size: 11px; line-height: 18px; }
+.release-notes-tag.latest { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); }
 .release-notes-image-warning { flex: 0 0 auto; margin: 12px 0 0; color: var(--text-secondary); font-size: 12px; }
 .release-notes-content { padding: 18px 0 8px; color: var(--text); }
 .release-notes-content:focus { outline: none; }
@@ -651,3 +695,17 @@ button:focus-visible, input:focus-visible { outline: none; }
   [data-disclosure-panel], .documentation-children, .documentation-children::before { transition: none; }
 }
 :root[data-reduced-motion="true"] [data-disclosure-panel], :root[data-reduced-motion="true"] .documentation-children, :root[data-reduced-motion="true"] .documentation-children::before { transition: none; }
+
+.sidebar-nav { --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+
+/* Settings V2.1 reuses the Docs hierarchy and Anytype tab controls. */
+.advanced-tabs { gap: 0; overflow-x: auto; overflow-y: hidden; flex-shrink: 0; scrollbar-width: thin; }
+.advanced-tabs [role="tab"] { flex: 1 0 112px; min-width: 112px; white-space: nowrap; text-align: center; padding-inline: 10px; }
+.advanced-tabs::-webkit-scrollbar { height: 4px; }
+.advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+.advanced-tabs::-webkit-scrollbar-button { display: none; }
+:root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.v21-section-link { font: inherit; }
+
+.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
+.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

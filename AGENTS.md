@@ -1,10 +1,11 @@
 ## Rules:
 - Never modify files outside this workspace.
 - The custom.css is located at `C:\Users\{user}}\AppData\Roaming\anytype\custom.css` and the data is located at: `C:\Users\{user}}\AppData\Roaming\anytype\blob\*`
-- Use `scripts/Build-Installer.ps1` to build the installer and `scripts/Build-Settings.ps1 -s -c` to build the app.
-- When building the Settings app, always run `scripts/Build-Settings.ps1 -s -c`.
+- Use `scripts/Build-Installer.ps1` to build the installer and `scripts/Build-App.ps1 -s -c` to build the app.
+- When building the Settings app, always run `scripts/Build-App.ps1 -s -c`.
 - Make sure to preserve existing changes!
-- Don't modify the custom.css files in the `Releases` folder unless I explicitly give you permission to do so.
+- When making UI, always check `./settings-app/UI_REFERENCE.md` and make sure to follow Anytypes UI philosophy.
+- Make sure to always test and build/compile the app after you finished implementing the feature.
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.
