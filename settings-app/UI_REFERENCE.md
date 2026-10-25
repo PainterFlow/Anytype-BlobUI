@@ -18,6 +18,35 @@ Advanced Settings uses API key and App settings tabs. App settings contains the 
 
 ## Reusable settings controls
 
+The UI uses plain JavaScript DOM components in `ui/components.js`. Screen definitions in `settings-pages.js`, `onboarding-view.js`, `dialog-views.js`, and `shell-view.js` provide their properties. Named `<template data-ui-mount="...">` slots in `index.html` hold custom content. `screens.js` mounts nested slots once, before Docs, formula tools, or application bindings run. Calling `BlobUI.Screens.mount()` again preserves existing controls, focus, and drafts.
+
+Use `BlobUI.Components.ToggleSetting({ id, label, inputAttributes, onChange })` for a native switch row and `TextField({ inputAttributes, label, onInput })` for a labeled input. A visibility field adds `visibility.buttonAttributes`; its controller is attached later through `bindVisibility(options)` so secret retrieval stays in application code. Both factories expose `input`. Text fields also expose their visibility `field` and `button` when present.
+
+Factories return `{ element, update(props), destroy() }`. `update()` changes supported values, labels, callbacks, and disabled states without replacing an input or emitting native events. Updating an unchanged input value preserves its selection. `destroy()` is idempotent, removes owned listeners and controllers, and cancels pending secret reveals. It leaves DOM removal to the caller. Structural slots and attributes are supplied at creation; build a new component when changing their structure. `Components.destroyTree(container)` tears down components before replacing dynamic content.
+
+`Section`, `Group`, `SettingsRow`, and `Heading` provide the shared settings structure. `Button`, `IconButton`, and `NavigationItem` create actions without changing their existing classes. `OnboardingChoice` renders both API choices from one feature-list implementation. Ordinary strings use `textContent`; custom content is passed as DOM nodes. Keep Markdown in the existing sanitized renderer.
+
+`Components.Tabs`, `Disclosure`, `Picker`, and `Search` attach the existing behavior controllers to supplied nodes and expose their methods plus the component lifecycle. `DialogShell` builds a dialog and backdrop; `Components.Modal(options)` attaches its modal controller. Keep the returned controller for open/close operations. `Components.Visibility(options)` attaches the matching mounted text field. Components do not invoke Tauri, save settings, or own a second draft store.
+
+`BlobUI.Scrollbar.attach(container, contentSelector)` is shared by Settings, Docs, and the calculator. It returns `update()` and `destroy()`, observes replaced content and hidden panels, removes obsolete resize targets, and cancels timers and observers on teardown.
+
+For example, add a switch definition and a matching mount slot, then bind its input through the existing draft flow.
+
+```javascript
+"example-enabled": () => C.ToggleSetting({
+  id: "example-enabled",
+  label: "Enable example",
+  inputAttributes: { "aria-describedby": "example-help" }
+})
+```
+
+```html
+<template data-ui-mount="example-enabled"></template>
+<p id="example-help" class="accessibility-note">Describe the setting.</p>
+```
+
+Load behavior controllers first, followed by `scrollbar.js`, `components.js`, the screen definitions, and `screens.js`. Load consumers such as Docs and `app.js` after mounting. Browser fixtures must use this same dependency order. The existing control IDs, CSS classes, native events, and original/refreshed layout state remain shared.
+
 Load `visibility-field.js`, `modal.js`, `edit-session.js`, `tabs.js`, `pick-control.js`, and `expandable-search.js` before `app.js`.
 
 `BlobUI.Tabs.attach({ container, buttons, panels, onSelect, scrollContainer })` owns tab selection, panel visibility, the animated underline, and keyboard navigation in both Advanced and Preferences. Use `select(index)`, `refresh()` after revealing a hidden page, `setEnabled(value)` to show all panels when tabs are disabled, and `destroy()` for cleanup. It measures the underline inside its own tab strip and scrolls only that strip when revealing a tab, including the last tab. Changing the selected tab resets its content scroll container to the top immediately. The controller defaults to the nearest `.page-content`; pass `scrollContainer` for another scroll layout. Clicking the selected tab, resizing, and font or underline refreshes preserve the current scroll position. Hidden-panel focus moves to the newly selected tab without scrolling. The settings scroll area disables browser scroll anchoring, and sidebar section links use this same selection behavior without a second scroll command. Resize, fonts, and reduced motion use the same behavior in both places.

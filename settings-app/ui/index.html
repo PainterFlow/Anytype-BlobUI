@@ -1,111 +1,66 @@
 <!doctype html>
 <html lang="en" data-theme="dark">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>BlobUI Settings</title>
-    <link rel="stylesheet" href="./styles.css" />
-    <link rel="stylesheet" href="./formula-page.css" />
+    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./formula-page.css">
   </head>
   <body>
     <header class="window-titlebar" id="title-drag-region" aria-label="Window title bar">
       <span class="window-title">BlobUI Settings</span>
       <div class="window-controls">
-        <button id="documentation-back" class="window-control" type="button" aria-label="Back to settings" title="Back to settings" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h11a7 7 0 0 1 7 7v3"/></svg></button>
-        <button id="window-minimize" class="window-control" type="button" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10"/></svg></button>
-        <button id="window-close" class="window-control window-close" type="button" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
+        <template data-ui-mount="documentation-back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h11a7 7 0 0 1 7 7v3"></path></svg></template>
+        <template data-ui-mount="window-minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10"></path></svg></template>
+        <template data-ui-mount="window-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
       </div>
     </header>
-    <section id="documentation" class="documentation" aria-label="Documentation" hidden>
+    <section id="documentation" class="documentation" aria-label="Documentation" hidden="">
       <div class="documentation-layout">
         <nav id="documentation-navigation" class="documentation-navigation" aria-label="Documentation articles"></nav>
         <main id="documentation-content" class="documentation-content" aria-label="Article" tabindex="-1">
           <div id="documentation-article" class="documentation-article markdown-content"></div>
-          <div id="documentation-load-error" class="documentation-load-error" role="alert" hidden>
+          <div id="documentation-load-error" class="documentation-load-error" role="alert" hidden="">
             <p>Documentation could not be loaded.</p>
-            <button id="documentation-retry" class="banner-image-button" type="button">Try again</button>
+            <template data-ui-mount="documentation-retry">Try again</template>
           </div>
         </main>
       </div>
     </section>
-    <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden>
-      <button id="onboarding-welcome" class="onboarding-welcome" type="button" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
+    <section id="onboarding" class="onboarding" aria-label="BlobUI onboarding" hidden="">
+      <template data-ui-mount="onboarding-welcome">
         <span class="onboarding-copy">
           <span id="onboarding-title" class="onboarding-title"><span class="onboarding-title-glitch">Welcome to BlobUI</span></span>
           <span id="onboarding-hint" class="onboarding-hint">Click anywhere to continue.</span>
         </span>
-      </button>
-      <section id="onboarding-api" class="onboarding-api" aria-labelledby="onboarding-api-title" hidden>
+      </template>
+      <section id="onboarding-api" class="onboarding-api" aria-labelledby="onboarding-api-title" hidden="">
         <div class="onboarding-scroll" id="onboarding-scroll">
           <header class="onboarding-api-heading">
             <h1 id="onboarding-api-title" tabindex="-1">Would you like to use an API key?</h1>
             <p>Choose how you want to use BlobUI.</p>
           </header>
           <div class="onboarding-options" role="group" aria-label="API key preference">
-            <button id="onboarding-no-api-option" class="onboarding-option" type="button" aria-pressed="false" data-api="false">
-              <span class="onboarding-option-title">No API Key</span>
-              <span class="onboarding-features" role="list">
-                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Read and use your data for BlobUI features</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-              </span>
-            </button>
-            <button id="onboarding-api-option" class="onboarding-option recommended-option" type="button" aria-pressed="false" data-api="true">
-              <span class="recommended-label">Recommended</span>
-              <span class="recommended-panel">
-              <span class="onboarding-option-title">Use API Key</span>
-              <span class="onboarding-features" role="list">
-                <span class="onboarding-feature" role="listitem"><span>Custom Accent Color</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Custom Font</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Custom Space Banner</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Animated Text Effects</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>UI fixes</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Calendar Colors</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Read and use your data for BlobUI features</span><svg class="feature-mark available" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span class="sr-only">Included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Corrupt/Modify your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-                <span class="onboarding-feature" role="listitem"><span>Sell/Collect your Data</span><svg class="feature-mark unavailable" viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg><span class="sr-only">Not included</span></span>
-              </span>
-              </span>
-            </button>
+            <template data-ui-mount="onboarding-no-api-option"></template>
+            <template data-ui-mount="onboarding-api-option"></template>
           </div>
           <p id="onboarding-choice-error" class="field-error" role="alert"></p>
         </div>
       </section>
-      <section id="onboarding-connection" class="onboarding-api" aria-labelledby="connection-title" hidden>
+      <section id="onboarding-connection" class="onboarding-api" aria-labelledby="connection-title" hidden="">
         <div class="onboarding-scroll" id="connection-scroll">
           <div class="connection-content">
             <header class="onboarding-api-heading">
               <h1 id="connection-title" tabindex="-1">Connect to Anytype</h1>
               <p>Add your read-only API key to enable Calendar Colors and data-powered features.</p>
             </header>
-            <form id="connection-form" class="connection-form" novalidate>
-              <div class="font-fields">
-                <div class="input-field">
-                  <label for="connection-key">API key</label>
-                  <div id="connection-key-field" class="visibility-field" data-filled="false">
-                    <input id="connection-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API v2 key" aria-describedby="connection-error" required />
-                    <button id="connection-key-visibility" class="visibility-toggle" type="button" aria-controls="connection-key" aria-pressed="false" aria-label="Show API key" title="Show API key">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <div class="input-field">
-                  <label for="connection-port">Port <span class="optional-label">(optional)</span></label>
-                  <div id="connection-port-field" class="visibility-field" data-filled="false">
-                    <input id="connection-port" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="31009" aria-describedby="connection-port-hint connection-error" />
-                    <button id="connection-port-visibility" class="visibility-toggle" type="button" aria-controls="connection-port" aria-pressed="true" aria-label="Hide port" title="Hide port">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <form id="connection-form" class="connection-form" novalidate="">
+              <template data-ui-mount="connection-form-fields">
+                <template data-ui-mount="connection-key">API key</template>
+                <template data-ui-mount="connection-port">Port <span class="optional-label">(optional)</span></template>
+              </template>
               <p id="connection-port-hint" class="input-hint">Leave the port blank to use 31009.</p>
               <section class="connection-guide" aria-labelledby="connection-guide-title">
                 <h2 id="connection-guide-title">Create an API key</h2>
@@ -121,8 +76,8 @@
               </section>
               <p id="connection-error" class="field-error" role="alert"></p>
               <div class="connection-actions">
-                <button id="connection-back" class="connection-back" type="button">Back</button>
-                <button id="connection-confirm" class="connection-confirm" type="submit">Confirm</button>
+                <template data-ui-mount="connection-back">Back</template>
+                <template data-ui-mount="connection-confirm">Confirm</template>
               </div>
             </form>
           </div>
@@ -133,63 +88,63 @@
       <aside class="sidebar" aria-label="Settings navigation">
         <nav id="sidebar-nav" class="sidebar-nav" aria-label="Settings">
           <span class="nav-group-label">Application</span>
-          <button id="preferences-nav" class="nav-item active" type="button" aria-current="page" data-settings-page="preferences">
-            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"/><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"/></svg>
+          <template data-ui-mount="preferences-nav">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor"></circle><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor"></path></svg>
             <span>Preferences</span>
-          </button>
-          <button id="formulas-nav" class="nav-item" type="button" data-settings-page="formulas">
-            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM8 4v12m4-12v12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          </template>
+          <template data-ui-mount="formulas-nav">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM8 4v12m4-12v12" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg>
             <span>Kanban View Formulas</span>
-          </button>
-          <button id="accessibility-nav" class="nav-item" type="button" data-settings-page="accessibility">
-            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="6" r="1.2" fill="currentColor"/><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </template>
+          <template data-ui-mount="accessibility-nav">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"></circle><circle cx="10" cy="6" r="1.2" fill="currentColor"></circle><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
             <span>Accessibility</span>
-          </button>
-          <button id="advanced-nav" class="nav-item" type="button" data-settings-page="advanced">
-            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"/></svg>
+          </template>
+          <template data-ui-mount="advanced-nav">
+            <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"></circle><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"></circle><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" stroke-width="1.5"></circle></svg>
             <span>Advanced Settings</span>
-          </button>
+          </template>
         </nav>
 
         <div class="sidebar-bottom">
           <div id="sidebar-actions" class="sidebar-actions">
-          <button id="save-button" class="sidebar-action save-button" type="button" title="Save changes" hidden disabled>
-            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg>
+          <template data-ui-mount="save-button">
+            <svg class="action-icon save-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"></path></svg>
             <span class="save-spinner" aria-hidden="true"></span>
             <span class="save-label sr-only">Save changes</span>
-          </button>
-          <button id="discard-button" class="sidebar-action discard-button" type="button" title="Undo changes" aria-label="Undo changes" hidden disabled>
-            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8V3m0 5h5M4.3 7.8A7 7 0 1 1 4 12"/></svg>
-          </button>
-          <button id="update-now-button" class="sidebar-action update-now-button" type="button" title="Update now" aria-label="Update now" hidden>
-            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"/></svg>
-          </button>
+          </template>
+          <template data-ui-mount="discard-button">
+            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8V3m0 5h5M4.3 7.8A7 7 0 1 1 4 12"></path></svg>
+          </template>
+          <template data-ui-mount="update-now-button">
+            <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"></path></svg>
+          </template>
           <div class="log-control" id="log-control">
-            <button id="log-button" class="sidebar-action log-button" type="button" title="Logs" aria-expanded="false" aria-controls="log-popup" hidden>
-              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg>
+            <template data-ui-mount="log-button">
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"></path></svg>
               <span id="log-label" class="sr-only">Logs</span>
-            </button>
-            <section id="log-popup" class="log-popup" aria-labelledby="log-title" hidden>
+            </template>
+            <section id="log-popup" class="log-popup" aria-labelledby="log-title" hidden="">
               <div class="log-heading">
                 <h2 id="log-title">Logs</h2>
-                <button id="copy-logs" class="copy-logs" type="button" aria-label="Copy all logs" title="Copy all logs"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 4V3H3v9h1"/></svg></button>
+                <template data-ui-mount="copy-logs"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"></rect><path d="M12 4V3H3v9h1"></path></svg></template>
               </div>
               <div id="log-entries" class="log-entries" role="log" aria-live="polite"></div>
               <span id="copy-status" class="sr-only" role="status"></span>
             </section>
           </div>
           <div class="help-control" id="help-control">
-            <button id="help-button" class="sidebar-action help-button" type="button" title="Help" aria-label="Help" aria-expanded="false" aria-controls="help-popup">
-              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25"/><circle cx="10" cy="6.4" r=".85" fill="currentColor" stroke="none"/><path d="M10 9v5"/></svg>
-            </button>
-            <section id="help-popup" class="help-popup" aria-label="Help" hidden>
-              <button id="help-whats-new" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 12 7l4.8.5-3.6 3.2 1 4.8-4.2-2.5-4.2 2.5 1-4.8-3.6-3.2L8 7z"/></svg><span>What’s New?</span></button>
-              <button id="help-documentation" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8l4 4v9H4zM12 3.5v4h4M7 11h6M7 14h6"/></svg><span>Documentation</span></button>
-              <button id="help-keybinds" class="help-item" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M5 8h.01M8 8h.01M11 8h.01M14 8h.01M5 11h.01M8 11h4M14 11h.01M6 14h8"/></svg><span>Keybinds</span></button>
+            <template data-ui-mount="help-button">
+              <svg class="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25"></circle><circle cx="10" cy="6.4" r=".85" fill="currentColor" stroke="none"></circle><path d="M10 9v5"></path></svg>
+            </template>
+            <section id="help-popup" class="help-popup" aria-label="Help" hidden="">
+              <template data-ui-mount="help-whats-new"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 12 7l4.8.5-3.6 3.2 1 4.8-4.2-2.5-4.2 2.5 1-4.8-3.6-3.2L8 7z"></path></svg><span>What’s New?</span></template>
+              <template data-ui-mount="help-documentation"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8l4 4v9H4zM12 3.5v4h4M7 11h6M7 14h6"></path></svg><span>Documentation</span></template>
+              <template data-ui-mount="help-keybinds"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"></rect><path d="M5 8h.01M8 8h.01M11 8h.01M14 8h.01M5 11h.01M8 11h4M14 11h.01M6 14h8"></path></svg><span>Keybinds</span></template>
               <div class="help-divider" aria-hidden="true"></div>
               <div class="help-meta"><span id="blobui-version">BlobUI version</span><span id="anytype-version">Anytype version</span></div>
-              <button id="open-author" class="help-credit" type="button" aria-label="Made by @PainterFlow11" title="https://github.com/PainterFlow/Anytype-BlobUI">Made by @PainterFlow11</button>
-              <button id="open-repository" class="help-credit" type="button" aria-label="Licensed under GPL V3" title="https://github.com/PainterFlow/Anytype-BlobUI">Licensed under GPL V3</button>
+              <template data-ui-mount="open-author">Made by @PainterFlow11</template>
+              <template data-ui-mount="open-repository">Licensed under GPL V3</template>
             </section>
           </div>
           </div>
@@ -204,147 +159,106 @@
           </header>
 
           <div id="preferences-page" class="settings-page">
-          <section class="settings-group accent-group" aria-labelledby="accent-heading">
-            <div class="section-heading">
-              <h2 id="accent-heading">Accent color</h2>
-              <p>Choose a color for highlights and active controls.</p>
-            </div>
+          <template data-ui-mount="accent-heading-section">
+            <template data-ui-mount="accent-heading"></template>
 
-            <div class="settings-list">
-              <label class="native-accent-control settings-row" for="include-selections">
-                <span>Include selections</span>
-                <input id="include-selections" type="checkbox" role="switch" aria-describedby="include-selections-help" />
-                <span class="switch-track" aria-hidden="true"></span>
-                <span class="sr-only" id="include-selections-help">Use the accent color for text, table and block selections, selected choices, and focus indicators.</span>
-              </label>
-              <label class="native-accent-control settings-row" for="native-accent">
-                <span>Anytype Accent Color</span>
-                <input id="native-accent" type="checkbox" role="switch" />
-                <span class="switch-track" aria-hidden="true"></span>
-              </label>
+            <template data-ui-mount="accent-heading-list">
+              <template data-ui-mount="include-selections"></template>
+              <template data-ui-mount="native-accent"></template>
               <div class="color-editor" id="color-editor">
               <div class="color-plane" id="color-plane" role="group" aria-label="Color saturation and brightness">
                 <span class="color-cursor" id="color-cursor" aria-hidden="true"></span>
-                <input class="sr-only" id="accent-saturation" type="range" min="0" max="100" value="64" aria-label="Color saturation" />
-                <input class="sr-only" id="accent-brightness" type="range" min="0" max="100" value="87" aria-label="Color brightness" />
+                <input class="sr-only" id="accent-saturation" type="range" min="0" max="100" value="64" aria-label="Color saturation">
+                <input class="sr-only" id="accent-brightness" type="range" min="0" max="100" value="87" aria-label="Color brightness">
               </div>
               <div class="color-controls">
                 <label class="hue-field" for="accent-hue">Hue</label>
-                <input id="accent-hue" class="hue-slider" type="range" min="0" max="359" value="300" aria-label="Color hue" />
+                <input id="accent-hue" class="hue-slider" type="range" min="0" max="359" value="300" aria-label="Color hue">
                 <label class="color-value-label" for="accent-value">Hex or CSS color</label>
                 <div class="color-value-row">
                   <span id="accent-swatch" class="accent-swatch" aria-hidden="true"></span>
-                  <input id="accent-value" class="color-text-input" type="text" spellcheck="false" autocomplete="off" aria-describedby="accent-error" />
+                  <input id="accent-value" class="color-text-input" type="text" spellcheck="false" autocomplete="off" aria-describedby="accent-error">
                 </div>
               </div>
               </div>
-            </div>
+            </template>
             <p class="field-error" id="accent-error" aria-live="polite"></p>
-          </section>
+          </template>
 
-          <section class="settings-group" aria-labelledby="kanban-heading">
-            <div class="section-heading">
-              <h2 id="kanban-heading">Kanban views</h2>
-              <p>Choose how boards are displayed.</p>
-            </div>
-            <div class="settings-list kanban-settings-list">
-              <div class="kanban-setting-row kanban-style-row">
-                <div class="kanban-setting-copy">
-                  <span class="kanban-setting-title">Board layout</span>
-                  <span id="kanban-style-help" class="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span>
-                </div>
+          <template data-ui-mount="kanban-heading-section">
+            <template data-ui-mount="kanban-heading"></template>
+            <template data-ui-mount="kanban-heading-list">
+              <template data-ui-mount="kanban-heading-row">
+
                 <div class="kanban-select" id="kanban-select">
-                  <button id="kanban-view-style" class="kanban-select-trigger" type="button" value="default" aria-haspopup="listbox" aria-expanded="false" aria-controls="kanban-style-options" aria-labelledby="kanban-style-label kanban-style-value" aria-describedby="kanban-style-help">
+                  <template data-ui-mount="kanban-view-style">
                     <span id="kanban-style-label" class="sr-only">Board layout</span>
                     <span id="kanban-style-value">Default</span>
-                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
-                  </button>
-                  <div id="kanban-style-options" class="kanban-select-menu" role="listbox" aria-label="Board layout" hidden>
-                    <button class="kanban-select-option" type="button" role="option" data-value="default" aria-selected="true" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Default</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
-                    <button class="kanban-select-option" type="button" role="option" data-value="balanced" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Balanced</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
-                    <button class="kanban-select-option" type="button" role="option" data-value="compact" aria-selected="false" tabindex="-1"><span class="kanban-option-copy"><span class="kanban-option-label">Compact</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg>
+                  </template>
+                  <div id="kanban-style-options" class="kanban-select-menu" role="listbox" aria-label="Board layout" hidden="">
+                    <template data-ui-mount="kanban-style-options-button"><span class="kanban-option-copy"><span class="kanban-option-label">Default</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"></path></svg></template>
+                    <template data-ui-mount="kanban-style-options-button-2"><span class="kanban-option-copy"><span class="kanban-option-label">Balanced</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"></path></svg></template>
+                    <template data-ui-mount="kanban-style-options-button-3"><span class="kanban-option-copy"><span class="kanban-option-label">Compact</span></span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"></path></svg></template>
                   </div>
                 </div>
-              </div>
-              <div class="kanban-setting-row formula-display-row">
-                <div class="kanban-setting-copy"><span class="kanban-setting-title">Display formulas</span><span id="formula-display-help" class="kanban-setting-description">Choose where category calculation results appear.</span></div>
+              </template>
+              <template data-ui-mount="kanban-heading-row-2">
+
                 <div class="kanban-select" id="formula-display-select">
-                  <button id="formula-display" class="kanban-select-trigger" type="button" value="balanced" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-display-options" aria-labelledby="formula-display-label formula-display-value" aria-describedby="formula-display-help"><span id="formula-display-label" class="sr-only">Display formulas</span><span id="formula-display-value" data-pick-value>Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
-                  <div id="formula-display-options" class="kanban-select-menu" role="listbox" aria-label="Display formulas" hidden>
-                    <button class="kanban-select-option" type="button" role="option" data-value="balanced" aria-selected="true" tabindex="-1"><span class="kanban-option-label">Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
-                    <button class="kanban-select-option" type="button" role="option" data-value="spacious" aria-selected="false" tabindex="-1"><span class="kanban-option-label">Spacious</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg></button>
+                  <template data-ui-mount="formula-display"><span id="formula-display-label" class="sr-only">Display formulas</span><span id="formula-display-value" data-pick-value="">Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></template>
+                  <div id="formula-display-options" class="kanban-select-menu" role="listbox" aria-label="Display formulas" hidden="">
+                    <template data-ui-mount="formula-display-options-button"><span class="kanban-option-label">Balanced</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"></path></svg></template>
+                    <template data-ui-mount="formula-display-options-button-2"><span class="kanban-option-label">Spacious</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6"></path></svg></template>
                   </div>
                 </div>
-              </div>
-              <label class="native-accent-control settings-row kanban-setting-row" for="collapsed-categories">
-                <span>Collapsed Categories</span>
-                <input id="collapsed-categories" type="checkbox" role="switch" aria-describedby="kanban-collapse-help" />
-                <span class="switch-track" aria-hidden="true"></span>
-              </label>
-            </div>
+              </template>
+              <template data-ui-mount="collapsed-categories"></template>
+            </template>
             <p id="kanban-collapse-help" class="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
-            <button id="open-formulas" class="formula-button button-label-centered" type="button">Kanban View Formulas</button>
-          </section>
+            <template data-ui-mount="open-formulas">Kanban View Formulas</template>
+          </template>
 
-          <section class="settings-group" aria-labelledby="calendar-heading">
-            <div class="section-heading">
-              <h2 id="calendar-heading">Calendar</h2>
-              <p>Use each object's Calendar Color in calendar views.</p>
-            </div>
-            <div class="settings-list">
-              <label class="native-accent-control settings-row" for="calendar-colors-enabled">
-                <span>Calendar Colors</span>
-                <input id="calendar-colors-enabled" type="checkbox" role="switch" checked disabled aria-describedby="calendar-colors-help" />
-                <span class="switch-track" aria-hidden="true"></span>
-              </label>
-            </div>
+          <template data-ui-mount="calendar-heading-section">
+            <template data-ui-mount="calendar-heading"></template>
+            <template data-ui-mount="calendar-heading-list">
+              <template data-ui-mount="calendar-colors-enabled"></template>
+            </template>
             <p id="calendar-colors-help" class="kanban-collapse-help" role="status" aria-live="polite">Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes.</p>
-          </section>
+          </template>
 
-          <section class="settings-group typography-group" aria-labelledby="typography-heading">
-            <div class="section-heading">
-              <h2 id="typography-heading">Font</h2>
-              <p>Use the same fonts as your Anytype workspace.</p>
-            </div>
+          <template data-ui-mount="typography-heading-section">
+            <template data-ui-mount="typography-heading"></template>
 
-            <div class="font-fields">
-              <label class="input-field">
-                <span>Interface font</span>
-                <input id="font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Inter" />
-              </label>
-              <label class="input-field">
-                <span>Code font</span>
-                <input id="code-font-family" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Consolas" />
-              </label>
-            </div>
+            <template data-ui-mount="typography-heading-fields">
+              <template data-ui-mount="font-family">Interface font</template>
+              <template data-ui-mount="code-font-family">Code font</template>
+            </template>
 
             <p class="field-error" id="font-error" aria-live="polite"></p>
-          </section>
+          </template>
 
-          <section class="settings-group space-banner-group" aria-labelledby="space-banner-heading">
-            <div class="section-heading">
-              <h2 id="space-banner-heading">Space banner</h2>
-              <p>Choose an image to show at the top of your Anytype sidebar.</p>
-            </div>
+          <template data-ui-mount="space-banner-heading-section">
+            <template data-ui-mount="space-banner-heading"></template>
             <div class="space-banner-controls">
               <div class="space-banner-actions">
-                <button id="choose-banner-image" class="banner-image-button" type="button">Choose image</button>
-                <button id="reset-banner-image" class="banner-reset-button" type="button" hidden>Use default</button>
-                <input id="banner-image-input" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" aria-label="Choose a space banner image" />
+                <template data-ui-mount="choose-banner-image">Choose image</template>
+                <template data-ui-mount="reset-banner-image">Use default</template>
+                <input id="banner-image-input" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" aria-label="Choose a space banner image">
               </div>
               <p id="banner-error" class="field-error" role="alert" aria-live="polite"></p>
-              <div class="space-sidebar-preview" inert role="img" aria-label="Static preview of the Anytype sidebar with a space banner">
+              <div class="space-sidebar-preview" inert="" role="img" aria-label="Static preview of the Anytype sidebar with a space banner">
                 <div class="space-preview-banner">
-                  <img id="space-preview-image" class="space-preview-image" alt="" />
+                  <img id="space-preview-image" class="space-preview-image" alt="">
                   <div class="space-preview-shade" aria-hidden="true"></div>
-                  <span class="space-preview-logo" aria-hidden="true"><svg viewBox="0 0 78 78"><defs><linearGradient id="space-mascot" x2="0" y2="1"><stop stop-color="#8494ed"/><stop offset="1" stop-color="#b34cdb"/></linearGradient></defs><rect width="78" height="78" rx="20" fill="url(#space-mascot)"/><g fill="#ded4ff"><circle cx="20" cy="23" r="9.5"/><circle cx="58" cy="23" r="9.5"/></g><path d="M20 46c0 24 38 24 38 0" fill="none" stroke="#ded4ff" stroke-width="15" stroke-linecap="round"/></svg></span>
+                  <span class="space-preview-logo" aria-hidden="true"><svg viewBox="0 0 78 78"><defs><linearGradient id="space-mascot" x2="0" y2="1"><stop stop-color="#8494ed"></stop><stop offset="1" stop-color="#b34cdb"></stop></linearGradient></defs><rect width="78" height="78" rx="20" fill="url(#space-mascot)"></rect><g fill="#ded4ff"><circle cx="20" cy="23" r="9.5"></circle><circle cx="58" cy="23" r="9.5"></circle></g><path d="M20 46c0 24 38 24 38 0" fill="none" stroke="#ded4ff" stroke-width="15" stroke-linecap="round"></path></svg></span>
                 </div>
                 <div class="space-preview-content">
                   <div class="space-preview-heading">
                     <span class="space-preview-name">Space</span>
                   </div>
                   <div class="space-preview-widgets" aria-hidden="true">
-                    <div class="space-preview-row"><span class="space-preview-widget-icon space-preview-home-icon"><svg viewBox="0 0 24 24"><path d="m2 11 10-8 4 3.2V3h3v5.6l3 2.4-1.8 2.2L12 6.6l-8.2 6.6zM5 12l7-5.5 7 5.5v9h-5v-6h-4v6H5z"/></svg></span><span>Homepage</span></div>
+                    <div class="space-preview-row"><span class="space-preview-widget-icon space-preview-home-icon"><svg viewBox="0 0 24 24"><path d="m2 11 10-8 4 3.2V3h3v5.6l3 2.4-1.8 2.2L12 6.6l-8.2 6.6zM5 12l7-5.5 7 5.5v9h-5v-6h-4v6H5z"></path></svg></span><span>Homepage</span></div>
                     <div class="space-preview-row"><span class="space-preview-widget-icon">🔑</span><span>Private</span></div>
                     <div class="space-preview-row"><span class="space-preview-widget-icon">💼</span><span>Work</span></div>
                   </div>
@@ -352,157 +266,90 @@
               </div>
               <p id="banner-image-status" class="space-banner-status" role="status" aria-live="polite"></p>
             </div>
-          </section>
+          </template>
           </div>
-          <div id="formulas-page" class="settings-page" hidden>
+          <div id="formulas-page" class="settings-page" hidden="">
             <div class="formula-toolbar">
               <div id="formula-search-control" class="expandable-search" data-expanded="false">
-                <button id="formula-search-toggle" class="neutral-icon-button" type="button" aria-label="Search Kanban views" aria-controls="formula-search" aria-expanded="false"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9867 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z" fill="currentColor"></path></svg></button>
-                <label for="formula-search" class="sr-only">Search Kanban views</label><input id="formula-search" type="search" placeholder="Search Kanban views" tabindex="-1" />
+                <template data-ui-mount="formula-search-toggle"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9867 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z" fill="currentColor"></path></svg></template>
+                <label for="formula-search" class="sr-only">Search Kanban views</label><input id="formula-search" type="search" placeholder="Search Kanban views" tabindex="-1">
               </div>
-              <button id="formula-reload" class="neutral-icon-button" type="button" aria-label="Reload available views" title="Reload available views"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4"/></svg></button>
-              <div id="formula-filter-control" class="kanban-select"><button id="formula-filter" class="neutral-icon-button" type="button" aria-label="Filter by space" title="Filter by space" aria-haspopup="listbox" aria-expanded="false" aria-controls="formula-filter-options"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3 6C3 5.58579 3.29381 5.25 3.65625 5.25H16.3438C16.7062 5.25 17 5.58579 17 6C17 6.41421 16.7062 6.75 16.3438 6.75H3.65625C3.29381 6.75 3 6.41421 3 6ZM6 10C6 9.58579 6.26863 9.25 6.6 9.25H13.4C13.7314 9.25 14 9.58579 14 10C14 10.4142 13.7314 10.75 13.4 10.75H6.6C6.26863 10.75 6 10.4142 6 10ZM8.75 13.25C8.33579 13.25 8 13.5858 8 14C8 14.4142 8.33579 14.75 8.75 14.75H11.25C11.6642 14.75 12 14.4142 12 14C12 13.5858 11.6642 13.25 11.25 13.25H8.75Z" fill="currentColor"></path></svg></button><div id="formula-filter-options" class="kanban-select-menu" role="listbox" aria-label="Filter by space" hidden></div></div>
+              <template data-ui-mount="formula-reload"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4"></path></svg></template>
+              <div id="formula-filter-control" class="kanban-select"><template data-ui-mount="formula-filter"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3 6C3 5.58579 3.29381 5.25 3.65625 5.25H16.3438C16.7062 5.25 17 5.58579 17 6C17 6.41421 16.7062 6.75 16.3438 6.75H3.65625C3.29381 6.75 3 6.41421 3 6ZM6 10C6 9.58579 6.26863 9.25 6.6 9.25H13.4C13.7314 9.25 14 9.58579 14 10C14 10.4142 13.7314 10.75 13.4 10.75H6.6C6.26863 10.75 6 10.4142 6 10ZM8.75 13.25C8.33579 13.25 8 13.5858 8 14C8 14.4142 8.33579 14.75 8.75 14.75H11.25C11.6642 14.75 12 14.4142 12 14C12 13.5858 11.6642 13.25 11.25 13.25H8.75Z" fill="currentColor"></path></svg></template><div id="formula-filter-options" class="kanban-select-menu" role="listbox" aria-label="Filter by space" hidden=""></div></div>
             </div>
             <p id="formula-storage-message" class="field-error" role="status" aria-live="polite"></p>
             <fieldset id="formula-fields" aria-label="Kanban formulas">
               <div id="formula-contents"></div>
             </fieldset>
           </div>
-          <div id="accessibility-page" class="settings-page" hidden>
-            <section class="settings-group" aria-labelledby="reduced-motion-heading">
-              <div class="section-heading">
-                <h2 id="reduced-motion-heading">Reduced Motion</h2>
-                <p>Stops BlobUI’s animated text effects to reduce motion.</p>
-              </div>
-              <div class="settings-list">
-                <label class="native-accent-control settings-row accessibility-row" for="reduced-motion">
-                  <span>Reduced Motion</span>
-                  <input id="reduced-motion" type="checkbox" role="switch" />
-                  <span class="switch-track" aria-hidden="true"></span>
-                </label>
-              </div>
-            </section>
-            <section class="settings-group" aria-labelledby="hover-effects-heading">
-              <div class="section-heading">
-                <h2 id="hover-effects-heading">Hover Effects</h2>
-                <p>Choose which hover previews appear in Anytype.</p>
-              </div>
-              <div class="settings-list">
-                <label class="native-accent-control settings-row accessibility-row" for="tab-hover-effect">
-                  <span>Tab hover effect</span>
-                  <input id="tab-hover-effect" type="checkbox" role="switch" />
-                  <span class="switch-track" aria-hidden="true"></span>
-                </label>
-                <label class="native-accent-control settings-row accessibility-row" for="link-hover-effect">
-                  <span>Links hover effect</span>
-                  <input id="link-hover-effect" type="checkbox" role="switch" />
-                  <span class="switch-track" aria-hidden="true"></span>
-                </label>
-                <label class="native-accent-control settings-row accessibility-row" for="object-mention-hover-effect">
-                  <span>Object mention hover effect</span>
-                  <input id="object-mention-hover-effect" type="checkbox" role="switch" />
-                  <span class="switch-track" aria-hidden="true"></span>
-                </label>
-              </div>
+          <div id="accessibility-page" class="settings-page" hidden="">
+            <template data-ui-mount="reduced-motion-heading-section">
+              <template data-ui-mount="reduced-motion-heading"></template>
+              <template data-ui-mount="reduced-motion-heading-list">
+                <template data-ui-mount="reduced-motion"></template>
+              </template>
+            </template>
+            <template data-ui-mount="hover-effects-heading-section">
+              <template data-ui-mount="hover-effects-heading"></template>
+              <template data-ui-mount="hover-effects-heading-list">
+                <template data-ui-mount="tab-hover-effect"></template>
+                <template data-ui-mount="link-hover-effect"></template>
+                <template data-ui-mount="object-mention-hover-effect"></template>
+              </template>
               <p class="accessibility-note">BlobUI’s <code>blob://</code> links never show hover previews.</p>
-            </section>
+            </template>
           </div>
-          <div id="advanced-page" class="settings-page" hidden>
+          <div id="advanced-page" class="settings-page" hidden="">
             <div id="advanced-tabs" class="advanced-tabs" role="tablist" aria-label="Advanced settings">
-              <button id="advanced-api-tab" type="button" role="tab" aria-selected="true" aria-controls="advanced-api-panel">API key</button>
-              <button id="advanced-app-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-app-panel" tabindex="-1">App settings</button>
-              <button id="advanced-experiments-tab" type="button" role="tab" aria-selected="false" aria-controls="advanced-experiments-panel" tabindex="-1">Experiments</button>
+              <template data-ui-mount="advanced-api-tab">API key</template>
+              <template data-ui-mount="advanced-app-tab">App settings</template>
+              <template data-ui-mount="advanced-experiments-tab">Experiments</template>
             </div>
-            <section id="advanced-experiments-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-experiments-tab" hidden>
-              <div class="section-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
-                <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"/><path d="M10 7v4"/><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"/></svg><span>Experiments may break things. Use at your own risk.</span></p>
-              </div>
-              <div class="settings-list"><label class="native-accent-control settings-row accessibility-row" for="settings-v21-enabled"><span>Settings Future Proof UI Refresh</span><input id="settings-v21-enabled" type="checkbox" role="switch" aria-describedby="experiments-warning" /><span class="switch-track" aria-hidden="true"></span></label></div>
-            </section>
-            <section id="advanced-api-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-api-tab">
-              <div class="section-heading">
-                <h2 id="advanced-api-heading">API key</h2>
-                <p>Configure the local API connection used by BlobUI.</p>
-              </div>
-              <div class="settings-list advanced-fields">
-                <div class="input-field advanced-row">
-                  <label for="advanced-api-key">Anytype API key</label>
-                  <div id="advanced-api-key-field" class="visibility-field" data-filled="false">
-                    <input id="advanced-api-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4096" aria-describedby="advanced-api-key-hint advanced-api-error" />
-                    <button id="advanced-api-key-visibility" class="visibility-toggle" type="button" aria-controls="advanced-api-key" aria-pressed="false" aria-label="Show Anytype API key" title="Show Anytype API key">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <div class="input-field advanced-row">
-                  <label for="advanced-api-ip">API key IP</label>
-                  <div id="advanced-api-ip-field" class="visibility-field" data-filled="false">
-                    <input id="advanced-api-ip" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="45" placeholder="127.0.0.1" aria-describedby="advanced-api-error" />
-                    <button id="advanced-api-ip-visibility" class="visibility-toggle" type="button" aria-controls="advanced-api-ip" aria-pressed="true" aria-label="Hide API key IP" title="Hide API key IP">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
-                    </button>
-                  </div>
-                </div>
-                <div class="input-field advanced-row">
-                  <label for="advanced-api-port">API key port</label>
-                  <div id="advanced-api-port-field" class="visibility-field" data-filled="false">
-                    <input id="advanced-api-port" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="5" placeholder="31009" aria-describedby="advanced-api-error" />
-                    <button id="advanced-api-port-visibility" class="visibility-toggle" type="button" aria-controls="advanced-api-port" aria-pressed="true" aria-label="Hide API key port" title="Hide API key port">
-                      <svg viewBox="0 0 20 20" aria-hidden="true"><path class="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z"/><circle class="visibility-eye" cx="10" cy="10" r="2.25"/><path class="visibility-slash" d="m3 3 14 14"/></svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <template data-ui-mount="advanced-experiments-panel">
+              <template data-ui-mount="experiments-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
+                <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"></path><path d="M10 7v4"></path><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"></circle></svg><span>Experiments may break things. Use at your own risk.</span></p>
+              </template>
+              <template data-ui-mount="advanced-experiments-tab-list"><template data-ui-mount="settings-v21-enabled"></template></template>
+            </template>
+            <template data-ui-mount="advanced-api-panel">
+              <template data-ui-mount="advanced-api-heading"></template>
+              <template data-ui-mount="advanced-api-tab-list">
+                <template data-ui-mount="advanced-api-key">Anytype API key</template>
+                <template data-ui-mount="advanced-api-ip">API key IP</template>
+                <template data-ui-mount="advanced-api-port">API key port</template>
+              </template>
               <p id="advanced-api-key-hint" class="accessibility-note">Enter a new key to replace the saved key. Clear the masked value to remove it.</p>
               <p id="advanced-api-error" class="field-error" role="alert" aria-live="polite"></p>
-            </section>
-            <section id="advanced-app-panel" class="settings-group" role="tabpanel" aria-labelledby="advanced-app-tab" hidden>
-              <section class="settings-group" aria-labelledby="anytype-installation-heading">
-                <div class="section-heading">
-                  <h2 id="anytype-installation-heading">Anytype Folder</h2>
-                  <p>Choose the Anytype data folder that contains custom.css.</p>
-                </div>
+            </template>
+            <template data-ui-mount="advanced-app-panel">
+              <template data-ui-mount="anytype-installation-heading-section">
+                <template data-ui-mount="anytype-installation-heading"></template>
                 <div class="app-install-directory-row">
-                    <input id="install-directory" class="color-text-input" type="text" readonly role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+                    <input id="install-directory" class="color-text-input" type="text" readonly="" role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error">
                 </div>
                 <p id="updater-settings-error" class="field-error" role="alert" aria-live="polite"></p>
-              </section>
-              <section class="settings-group" aria-label="Startup">
-                <div class="settings-list">
-                  <label class="native-accent-control settings-row accessibility-row" for="start-on-login">
-                    <span>Launch at startup</span>
-                    <input id="start-on-login" type="checkbox" role="switch" />
-                    <span class="switch-track" aria-hidden="true"></span>
-                  </label>
-                </div>
-              </section>
-              <section class="settings-group" aria-labelledby="updates-heading">
-                <div class="section-heading">
-                  <h2 id="updates-heading">Updates</h2>
-                  <p>Choose how BlobUI checks for and installs updates.</p>
-                </div>
-                <div class="settings-list">
-                  <label class="native-accent-control settings-row accessibility-row" for="automatic-updates-enabled">
-                    <span>Install updates automatically</span>
-                    <input id="automatic-updates-enabled" type="checkbox" role="switch" />
-                    <span class="switch-track" aria-hidden="true"></span>
-                  </label>
-                  <label class="native-accent-control settings-row accessibility-row" for="automatic-checks-enabled">
-                    <span>Check for updates automatically</span>
-                    <input id="automatic-checks-enabled" type="checkbox" role="switch" />
-                    <span class="switch-track" aria-hidden="true"></span>
-                  </label>
-                </div>
+              </template>
+              <template data-ui-mount="advanced-app-tab-section">
+                <template data-ui-mount="advanced-app-tab-list">
+                  <template data-ui-mount="start-on-login"></template>
+                </template>
+              </template>
+              <template data-ui-mount="updates-heading-section">
+                <template data-ui-mount="updates-heading"></template>
+                <template data-ui-mount="updates-heading-list">
+                  <template data-ui-mount="automatic-updates-enabled"></template>
+                  <template data-ui-mount="automatic-checks-enabled"></template>
+                </template>
                 <div class="update-check-row">
                   <div>
                     <p id="update-version" class="update-version"></p>
                     <p id="update-status" class="update-status" role="status" aria-live="polite">Loading update settings…</p>
                   </div>
-                  <button id="check-updates-button" class="banner-image-button update-check-button" type="button" disabled>Check for updates</button>
+                  <template data-ui-mount="check-updates-button">Check for updates</template>
                 </div>
-              </section>
-              <section class="settings-section"><button id="uninstall-button" class="banner-image-button danger-button" type="button">Uninstall BlobUI</button></section>
-            </section>
+              </template>
+              <section class="settings-section"><template data-ui-mount="uninstall-button">Uninstall BlobUI</template></section>
+            </template>
           </div>
           </div>
         </section>
@@ -512,83 +359,70 @@
         </div>
       </main>
     </div>
-    <div id="formula-calculator-backdrop" class="confirm-backdrop" hidden>
-      <section id="formula-calculator-dialog" class="confirm-dialog formula-calculator-dialog" role="dialog" aria-modal="true" aria-label="Kanban calculation" tabindex="-1">
-        <button id="formula-calculator-close" class="confirm-close" type="button" aria-label="Close calculator" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
+    <template data-ui-mount="formula-calculator-backdrop">
+        <template data-ui-mount="formula-calculator-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
         <div id="formula-calculator-content"></div>
-      </section>
-    </div>
-    <div id="uninstall-backdrop" class="confirm-backdrop" hidden>
-      <section id="uninstall-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="uninstall-title" aria-describedby="uninstall-message" tabindex="-1">
-        <button id="uninstall-close" class="confirm-close" type="button" aria-label="Cancel uninstall"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+      </template>
+    <template data-ui-mount="uninstall-backdrop">
+        <template data-ui-mount="uninstall-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
         <h2 id="uninstall-title">Uninstall BlobUI?</h2>
         <p id="uninstall-message">This will close Settings and remove BlobUI and its stylesheet. Your Anytype data, BlobUI settings, CSS backups, and installer will be kept. Unsaved changes will be lost.</p>
         <p id="uninstall-error" role="alert"></p>
         <div class="confirm-actions">
-          <button id="uninstall-cancel" class="confirm-cancel" type="button">Cancel</button>
-          <button id="uninstall-confirm" class="confirm-save danger-button" type="button">Uninstall</button>
+          <template data-ui-mount="uninstall-cancel">Cancel</template>
+          <template data-ui-mount="uninstall-confirm">Uninstall</template>
         </div>
-      </section>
-    </div>
-    <div id="api-key-removal-backdrop" class="confirm-backdrop" hidden>
-      <section id="api-key-removal-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="api-key-removal-title" aria-describedby="api-key-removal-message" tabindex="-1">
-        <button id="api-key-removal-close" class="confirm-close" type="button" aria-label="Undo all unsaved changes" title="Undo all changes">
-          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
-        </button>
+      </template>
+    <template data-ui-mount="api-key-removal-backdrop">
+        <template data-ui-mount="api-key-removal-close">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg>
+        </template>
         <h2 id="api-key-removal-title">Are you sure you want to do this?</h2>
         <p id="api-key-removal-message">Removing the API key will make some features unavailable.</p>
         <div class="confirm-actions">
-          <button id="api-key-removal-undo" class="confirm-undo" type="button">Undo</button>
-          <button id="api-key-removal-save" class="confirm-save" type="button">Save</button>
+          <template data-ui-mount="api-key-removal-undo">Undo</template>
+          <template data-ui-mount="api-key-removal-save">Save</template>
         </div>
-      </section>
-    </div>
-    <div id="discard-confirmation-backdrop" class="confirm-backdrop" hidden>
-      <section id="discard-confirmation-dialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="discard-confirmation-title" aria-describedby="discard-confirmation-message" tabindex="-1">
-        <button id="discard-confirmation-close" class="confirm-close" type="button" aria-label="Close without undoing" title="Close">
-          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
-        </button>
+      </template>
+    <template data-ui-mount="discard-confirmation-backdrop">
+        <template data-ui-mount="discard-confirmation-close">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg>
+        </template>
         <h2 id="discard-confirmation-title">Undo all unsaved changes?</h2>
         <p id="discard-confirmation-message">This will restore the settings from before your edits.</p>
         <div class="confirm-actions">
-          <button id="discard-confirmation-undo" class="confirm-undo" type="button">Undo</button>
+          <template data-ui-mount="discard-confirmation-undo">Undo</template>
         </div>
-      </section>
-    </div>
-    <div id="release-notes-backdrop" class="confirm-backdrop" hidden>
-      <section id="release-notes-dialog" class="confirm-dialog release-notes-dialog" role="dialog" aria-modal="true" aria-label="Changelog" tabindex="-1">
+      </template>
+    <template data-ui-mount="release-notes-backdrop">
         <div class="release-notes-heading" aria-live="polite">
           <h2>Changelog</h2>
           <span id="release-notes-version" class="release-notes-version"></span>
-          <span id="release-notes-current-tag" class="release-notes-tag" hidden>Current</span>
-          <span id="release-notes-latest-tag" class="release-notes-tag latest" hidden>Latest</span>
+          <span id="release-notes-current-tag" class="release-notes-tag" hidden="">Current</span>
+          <span id="release-notes-latest-tag" class="release-notes-tag latest" hidden="">Latest</span>
         </div>
-        <p id="release-notes-image-warning" class="release-notes-image-warning" role="status" hidden>Some release note images could not be loaded.</p>
+        <p id="release-notes-image-warning" class="release-notes-image-warning" role="status" hidden="">Some release note images could not be loaded.</p>
         <div id="release-notes-content" class="release-notes-content markdown-content" role="region" aria-label="Release notes" tabindex="0"></div>
         <div class="release-notes-navigation" aria-label="Changelog navigation">
-          <button id="release-notes-previous" class="release-notes-nav-button" type="button" disabled>Previous</button>
-          <button id="release-notes-after" class="release-notes-nav-button" type="button" hidden>After</button>
+          <template data-ui-mount="release-notes-previous">Previous</template>
+          <template data-ui-mount="release-notes-after">After</template>
         </div>
-      </section>
-    </div>
-    <div id="help-error-backdrop" class="confirm-backdrop" hidden>
-      <section id="help-error-dialog" class="confirm-dialog help-error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="help-error-title" aria-describedby="help-error-message" tabindex="-1">
-        <button id="help-error-close" class="confirm-close" type="button" aria-label="Close error"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+      </template>
+    <template data-ui-mount="help-error-backdrop">
+        <template data-ui-mount="help-error-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
         <h2 id="help-error-title"><span class="help-error-code">404</span> Error</h2>
         <p id="help-error-message">This help content could not be found.</p>
-      </section>
-    </div>
-    <div id="keybinds-backdrop" class="confirm-backdrop" hidden>
-      <section id="keybinds-dialog" class="confirm-dialog keybinds-dialog" role="dialog" aria-modal="true" aria-labelledby="keybinds-title" aria-describedby="keybinds-description" tabindex="-1">
-        <button id="keybinds-close" class="confirm-close" type="button" aria-label="Close keyboard shortcuts" title="Close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg></button>
+      </template>
+    <template data-ui-mount="keybinds-backdrop">
+        <template data-ui-mount="keybinds-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
         <h2 id="keybinds-title">Keyboard shortcuts</h2>
         <div id="keybinds-content" class="keybinds-content">
           <p id="keybinds-description">Click a shortcut to change it. Changes are saved automatically.</p>
           <div id="keybind-list" class="keybind-list"></div>
           <p id="keybind-status" class="keybind-status" role="status" aria-live="polite"></p>
         </div>
-      </section>
-    </div>
+      </template>
+
     <script src="./vendor/marked.umd.js"></script>
     <script src="./visibility-field.js"></script>
     <script src="./modal.js"></script>
@@ -596,11 +430,18 @@
     <script src="./markdown.js"></script>
     <script src="./docs-data.js"></script>
     <script src="./disclosure.js"></script>
-    <script src="./docs.js"></script>
     <script src="./tabs.js"></script>
-    <script src="./settings-v21.js"></script>
     <script src="./pick-control.js"></script>
     <script src="./expandable-search.js"></script>
+    <script src="./scrollbar.js"></script>
+    <script src="./components.js"></script>
+    <script src="./settings-pages.js"></script>
+    <script src="./onboarding-view.js"></script>
+    <script src="./dialog-views.js"></script>
+    <script src="./shell-view.js"></script>
+    <script src="./screens.js"></script>
+    <script src="./docs.js"></script>
+    <script src="./settings-v21.js"></script>
     <script src="./calculator-math.js"></script>
     <script src="./view-catalog.js"></script>
     <script src="./reload-controller.js"></script>

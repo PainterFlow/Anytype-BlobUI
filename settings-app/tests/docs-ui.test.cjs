@@ -58,6 +58,8 @@ test('documentation navigation selects articles, expands one child level, and sa
         resolveImage() { return ''; },
       };
     });
+    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/components.js') });
+    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/scrollbar.js') });
     await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/docs.js') });
     await page.evaluate(() => window.BlobUI.DocsUI.load());
 
@@ -200,7 +202,8 @@ test('all seven bundled articles render offline in light and dark themes', {
       </div>
     </section>
     <script src="/vendor/marked.umd.js"></script><script src="/markdown.js"></script>
-    <script src="/docs-data.js"></script><script src="/disclosure.js"></script><script src="/docs.js"></script>
+    <script src="/docs-data.js"></script><script src="/disclosure.js"></script>
+    <script src="/components.js"></script><script src="/scrollbar.js"></script><script src="/docs.js"></script>
     <script>window.docsReady = window.BlobUI.DocsUI.load();</script>
   </body></html>`;
 

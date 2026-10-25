@@ -28,53 +28,13 @@
 
   if (!nav || !content || !article || !errorPanel || !retryButton) return;
 
+  const scrollbars = [];
   function setupScrollbar(container, contentSelector) {
-    let hideTimer = null;
-    let resizeObserver = null;
-    function update() {
-      const canScroll = container.scrollHeight > container.clientHeight;
-      container.classList.toggle("has-overflow", canScroll);
-      if (canScroll) return;
-      container.classList.remove("is-scrolling");
-      if (hideTimer !== null) {
-        root.clearTimeout(hideTimer);
-        hideTimer = null;
-      }
-    }
-    function observeContent() {
-      if (!resizeObserver || !contentSelector) return;
-      for (const element of container.querySelectorAll(contentSelector)) resizeObserver.observe(element);
-    }
-    container.addEventListener("scroll", () => {
-      update();
-      if (!container.classList.contains("has-overflow")) return;
-      container.classList.add("is-scrolling");
-      if (hideTimer !== null) root.clearTimeout(hideTimer);
-      hideTimer = root.setTimeout(() => {
-        container.classList.remove("is-scrolling");
-        hideTimer = null;
-      }, 900);
-    }, { passive: true });
-    if (typeof root.ResizeObserver === "function") {
-      resizeObserver = new root.ResizeObserver(update);
-      resizeObserver.observe(container);
-      observeContent();
-    }
-    if (typeof root.MutationObserver === "function") {
-      const mutationObserver = new root.MutationObserver(() => {
-        observeContent();
-        update();
-      });
-      mutationObserver.observe(container, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["data-disclosure-state", "hidden"],
-      });
-    }
-    root.addEventListener("resize", update);
-    update();
+    const controller = BlobUI.Scrollbar.attach(container, contentSelector);
+    scrollbars.push(controller);
+    return controller.update;
   }
+  root.addEventListener("unload", () => scrollbars.forEach(controller => controller.destroy()));
 
   setupScrollbar(nav, ".documentation-category");
   setupScrollbar(content, "#documentation-article");
@@ -138,26 +98,25 @@
   }
 
   function makeArticleButton(articleData, hasChildren, child) {
-    const button = root.document.createElement("button");
-    button.type = "button";
-    button.className = `documentation-item${child ? " documentation-child" : ""}`;
-    button.dataset.articleId = articleData.id;
-    button.setAttribute("aria-label", articleData.name);
-    button.append(makeArticleIcon(articleData));
-    const label = root.document.createElement("span");
-    label.className = "documentation-item-label";
-    label.textContent = articleData.name;
-    button.append(label);
+    const button = BlobUI.Components.NavigationItem({
+      label: articleData.name,
+      icon: makeArticleIcon(articleData),
+      attributes: {
+        class: `documentation-item${child ? " documentation-child" : ""}`,
+        "data-article-id": articleData.id,
+        "aria-label": articleData.name,
+      },
+      onClick: hasChildren ? undefined : () => {
+        selectedId = articleData.id;
+        updateActiveNavigation();
+        renderArticle(articleData);
+      },
+    }).element;
     if (hasChildren) {
       button.dataset.disclosureToggle = "";
       button.setAttribute("aria-expanded", "false");
       button.append(svgIcon(chevronIcon, "documentation-chevron"));
     }
-    if (!hasChildren) button.addEventListener("click", () => {
-      selectedId = articleData.id;
-      updateActiveNavigation();
-      renderArticle(articleData);
-    });
     buttonsById.set(articleData.id, button);
     return button;
   }
@@ -172,6 +131,7 @@
   function renderNavigation() {
     disclosureController?.destroy();
     disclosureController = null;
+    BlobUI.Components.destroyTree(nav);
     nav.replaceChildren();
     buttonsById.clear();
     for (const categoryData of catalog.categories) {
@@ -222,7 +182,7 @@
     }
 
     updateActiveNavigation();
-    disclosureController = BlobUI.Disclosure.attach(nav, {
+    disclosureController = BlobUI.Components.Disclosure({ container: nav,
       onToggle({ toggle, expanded: isExpanded }) {
         const id = toggle.dataset.articleId;
         if (isExpanded) expanded.add(id);

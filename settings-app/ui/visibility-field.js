@@ -26,6 +26,11 @@
     let visible = Boolean(options.defaultVisible);
     let requestVersion = 0;
     let busy = false;
+    const listeners = [];
+    function listen(node, type, handler) {
+      node.addEventListener(type, handler);
+      listeners.push(() => node.removeEventListener(type, handler));
+    }
 
     function sync() {
       field.dataset.filled = String(input.value.length > 0);
@@ -54,14 +59,14 @@
       setVisible(options.defaultVisible);
     }
 
-    input.addEventListener("input", () => {
+    listen(input, "input", () => {
       invalidate();
       sync();
     });
-    button.addEventListener("mousedown", (event) => {
+    listen(button, "mousedown", (event) => {
       if (document.activeElement === input) event.preventDefault();
     });
-    button.addEventListener("click", async (event) => {
+    listen(button, "click", async (event) => {
       event.preventDefault();
       if (button.disabled || busy) return;
 
@@ -101,7 +106,9 @@
     });
 
     setVisible(visible);
-    return { input, button, field, reset, sync, invalidate };
+    return { input, button, field, reset, sync, invalidate,
+      destroy() { invalidate(); listeners.splice(0).forEach(remove => remove()); },
+    };
   }
 
   root.VisibilityField = { bind };

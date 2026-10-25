@@ -48,7 +48,7 @@
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
-  const kanbanPicker = window.BlobUI.PickControl.attach({ root: kanbanSelect });
+  const kanbanPicker = window.BlobUI.Components.Picker({ root: kanbanSelect });
   function closeKanbanStyleMenu(restoreFocus = false) { kanbanPicker.close(restoreFocus); }
   function syncKanbanStyleSelection(value) {
     const selected = ["default", "balanced", "compact"].includes(value) ? value : "default";
@@ -56,7 +56,7 @@
     return selected;
   }
   const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
-  const advancedTabController = window.BlobUI.Tabs.attach({
+  const advancedTabController = window.BlobUI.Components.Tabs({
     container: el("advanced-tabs"),
     buttons: advancedTabs,
     panels: [el("advanced-api-panel"), el("advanced-app-panel"), el("advanced-experiments-panel")],
@@ -77,14 +77,14 @@
   const apiKeyRemovalClose = el("api-key-removal-close");
   const apiKeyRemovalUndo = el("api-key-removal-undo");
   const apiKeyRemovalSave = el("api-key-removal-save");
-  const apiKeyRemovalModal = window.BlobUI.createModalController({
+  const apiKeyRemovalModal = window.BlobUI.Components.Modal({
     backdrop: apiKeyRemovalBackdrop,
     dialog: el("api-key-removal-dialog"),
     initialFocus: apiKeyRemovalClose,
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const discardConfirmationModal = window.BlobUI.createModalController({
+  const discardConfirmationModal = window.BlobUI.Components.Modal({
     backdrop: el("discard-confirmation-backdrop"),
     dialog: el("discard-confirmation-dialog"),
     initialFocus: el("discard-confirmation-close"),
@@ -107,7 +107,7 @@
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
   let releaseNotesFailed = false;
-  const releaseNotesModal = window.BlobUI.createModalController({
+  const releaseNotesModal = window.BlobUI.Components.Modal({
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
     initialFocus: el("release-notes-dialog"),
@@ -136,12 +136,12 @@
       });
     },
   });
-  const helpErrorModal = window.BlobUI.createModalController({
+  const helpErrorModal = window.BlobUI.Components.Modal({
     backdrop: el("help-error-backdrop"), dialog: el("help-error-dialog"),
     initialFocus: el("help-error-close"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const keybindModal = window.BlobUI.createModalController({
+  const keybindModal = window.BlobUI.Components.Modal({
     backdrop: el("keybinds-backdrop"), dialog: el("keybinds-dialog"),
     initialFocus: () => el("keybind-list").querySelector("button"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
@@ -182,7 +182,7 @@
   }
 
   function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible, hooks = {}) {
-    visibilityFields[inputId] = window.VisibilityField.bind({
+    visibilityFields[inputId] = window.BlobUI.Components.Visibility({
       input: el(inputId),
       button: el(buttonId),
       field: el(fieldId),
@@ -241,37 +241,14 @@
     editSession.discard();
   };
 
+  const scrollbars = [];
   function setupScrollbar(container, contentSelector) {
-    let hideTimer = null;
-    function update() {
-      const canScroll = container.scrollHeight > container.clientHeight;
-      container.classList.toggle("has-overflow", canScroll);
-      if (canScroll) return;
-      container.classList.remove("is-scrolling");
-      if (hideTimer !== null) {
-        window.clearTimeout(hideTimer);
-        hideTimer = null;
-      }
-    }
-    container.addEventListener("scroll", () => {
-      update();
-      if (!container.classList.contains("has-overflow")) return;
-      container.classList.add("is-scrolling");
-      if (hideTimer !== null) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(() => {
-        container.classList.remove("is-scrolling");
-        hideTimer = null;
-      }, 900);
-    }, { passive: true });
-    if (typeof ResizeObserver === "function") {
-      const observer = new ResizeObserver(update);
-      observer.observe(container);
-      const content = container.querySelector(contentSelector);
-      if (content) observer.observe(content);
-    }
-    update();
-    return update;
+    const controller = window.BlobUI.Scrollbar.attach(container, contentSelector);
+    scrollbars.push(controller);
+    return controller.update;
   }
+  window.addEventListener("unload", () => scrollbars.forEach(controller => controller.destroy()));
+
   setupScrollbar(el("sidebar-nav"), ".nav-item");
   setupScrollbar(el("keybinds-content"), "#keybind-list");
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
@@ -916,6 +893,7 @@
   }
   function renderShortcutBindings() {
     const list = el("keybind-list");
+    window.BlobUI.Components.destroyTree(list);
     list.replaceChildren();
     shortcutActions.forEach(([action, label]) => {
       const binding = shortcutBindings.find((item) => item.action === action);
@@ -925,7 +903,7 @@
       name.className = "keybind-label";
       name.id = `keybind-label-${action}`;
       name.textContent = label;
-      const button = document.createElement("button");
+      const button = window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
       button.className = "keybind-button";
       button.type = "button";
       button.dataset.shortcutAction = action;
@@ -946,7 +924,6 @@
           button.append(keycap);
         });
       }
-      button.addEventListener("click", () => beginShortcutCapture(action));
       row.append(name, button);
       list.append(row);
     });
@@ -1920,7 +1897,7 @@
       setStatus("Could not open the release note link. " + (error.message || String(error)), "error");
     });
   });
-  const uninstallModal = window.BlobUI.createModalController({
+  const uninstallModal = window.BlobUI.Components.Modal({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
