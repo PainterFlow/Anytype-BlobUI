@@ -44,9 +44,9 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - updated `AGENTS.md` to include notes about UI design + removed some older stuff.
 - renamed `Build-Settings.ps1` script to `Build-App.ps1`.
 - You can now mention objects from the Github repo in markdown files:
-    - `Issue#id` - mention an issue
-    - `PR#id` - mention a PR
-    - `User#username` - mention a user
+    - `Issue#id` - mention a git issue
+    - `PR#id` - mention a PR from the repo
+    - `User#username` - mention a git user 
 - Fixed that one test that resets API key, API key ip and API key port.
 
 ## Bug fixes
