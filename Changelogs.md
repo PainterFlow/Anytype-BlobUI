@@ -38,6 +38,12 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - Adds collapsible/uncollapsible setting categories.
 - Refreshes the look of setting tabs.
 
+## Docs V2
+- updated overall docs writing
+- added showcase videos
+- added showcase images
+- added new docs articles
+
 ## Developer Changelogs
 - the compiled version now no longer always shows the update button.
 - the compiled version is now marked as the newest.
@@ -49,6 +55,8 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
     - `User#username` - mention a git user 
 - Fixed that one test that resets API key, API key ip and API key port.
 - UI is now component based.
+- Markdown reader now supports embedding videos
+- Embedded images can now be expanded by clicking on them.
 
 ## Bug fixes
 - Issue#47 - The red spelling underline thing is now no longer visible through the spoiler text effect.
