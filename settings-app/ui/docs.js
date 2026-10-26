@@ -225,8 +225,19 @@
   async function renderArticle(articleData) {
     const markdown = typeof articleData.markdown === "string" ? articleData.markdown : String(articleData.source || "");
     const images = await imagesForMarkdown(markdown);
+    const videos = Object.create(null);
+    await Promise.all(Object.entries(BlobUI.DocsData.videoAliases || {}).map(async ([alias, source]) => {
+      if (!new RegExp("@" + alias + "(?![A-Za-z0-9_-])").test(markdown)) return;
+      videos[alias] = { alt: alias.replace(/-/g, " ") };
+      try {
+        const response = await fetch(source);
+        if (!response.ok || Number(response.headers.get("content-length")) > 64 * 1024 * 1024) return;
+        const blob = await response.blob();
+        if (blob.size <= 64 * 1024 * 1024) videos[alias].blob = new Blob([blob], { type: "video/mp4" });
+      } catch {}
+    }));
     if (selectedId !== articleData.id) return;
-    article.innerHTML = BlobUI.Markdown.render(markdown, { images });
+    BlobUI.Markdown.mount(article, markdown, { images, videos });
     article.setAttribute("aria-label", articleData.name);
     errorPanel.hidden = true;
     root.document.getElementById("documentation-content").scrollTop = 0;

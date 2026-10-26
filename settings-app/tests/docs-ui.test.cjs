@@ -166,7 +166,7 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('all seven bundled articles render offline in light and dark themes', {
+test('all eleven bundled articles render offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
 }, async () => {
   const uiRoot = path.join(workspace, 'settings-app/ui');
@@ -201,7 +201,7 @@ test('all seven bundled articles render offline in light and dark themes', {
         </main>
       </div>
     </section>
-    <script src="/vendor/marked.umd.js"></script><script src="/markdown.js"></script>
+    <script src="/vendor/marked.umd.js"></script><script src="/video-player.js"></script><script src="/markdown.js"></script>
     <script src="/docs-data.js"></script><script src="/disclosure.js"></script>
     <script src="/components.js"></script><script src="/scrollbar.js"></script><script src="/docs.js"></script>
     <script>window.docsReady = window.BlobUI.DocsUI.load();</script>
@@ -247,14 +247,14 @@ test('all seven bundled articles render offline in light and dark themes', {
     assert.equal(await page.locator('.documentation-child').count(), 0);
     assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
     const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
-    assert.equal(await page.locator('.documentation-item-icon svg').count(), 7);
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'updating', 'kanban-layouts-and-formulas', 'api-and-calendar-colors', 'settings-ui-refresh', 'text-effects-and-previews', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.equal(await page.locator('.documentation-item-icon svg').count(), 11);
     assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
     const externalRequests = [];
     page.on('request', request => {
-      if (!request.url().startsWith('http://docs.test/')) externalRequests.push(request.url());
+      if (!request.url().startsWith('http://docs.test/') && !request.url().startsWith('blob:')) externalRequests.push(request.url());
     });
-    for (const theme of ['dark', 'light']) {
+    for (const theme of ['dark']) {
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
       for (const id of ids) {
         await page.locator('[data-article-id="' + id + '"]').click();

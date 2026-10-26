@@ -85,6 +85,11 @@ Open Logs to inspect activity and errors. Copy all logs copies the log text. Hel
 
 Advanced Settings contains API configuration and App Settings for the Anytype data folder, startup, updates, and uninstall. See [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) and [Installation and removal](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/installation-and-removal.md) for procedures. Setup and update-preview diagnostic bindings are covered in Development.
 
-## Calendar colors
+## Detailed v1.3.0 guides
 
-In Preferences, Calendar Colors controls API-derived object colors in calendar views and defaults to on. Changes apply after Save and reloading Anytype with Ctrl+R. The switch is locked while the API is being checked or cannot be used. Configure the connection in Advanced Settings. An API outage preserves your saved choice and cached colors. Turning Calendar Colors off keeps the cache but removes its colors from the generated CSS.
+- [Kanban layouts and formulas](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/kanban-layouts-and-formulas.md)
+- [API connection and calendar colors](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/api-and-calendar-colors.md)
+- [Experimental Settings layout](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/settings-ui-refresh.md)
+- [Text effects and hover previews](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/text-effects-and-previews.md)
+
+Autoplay videos in Advanced Settings > App settings starts on. It controls muted playback of visible videos throughout Documentation and release notes. Save keeps the choice; Undo restores it.

@@ -10,9 +10,9 @@ const context = { fetch: global.fetch };
 vm.runInNewContext(source, context, { filename: 'docs-data.js' });
 const DocsData = context.BlobUI.DocsData;
 
-test('production catalog loads exactly seven complete root articles and README links resolve', async () => {
+test('production catalog loads all eleven complete root articles and README links resolve', async () => {
   const docsRoot = path.join(workspace, 'settings-app/ui/docs');
-  const expected = ['features', 'installation-and-removal', 'introduction', 'setup-and-architecture', 'testing-and-releases', 'theme-and-documentation-development', 'updating'];
+  const expected = ['api-and-calendar-colors', 'features', 'installation-and-removal', 'introduction', 'kanban-layouts-and-formulas', 'settings-ui-refresh', 'setup-and-architecture', 'testing-and-releases', 'text-effects-and-previews', 'theme-and-documentation-development', 'updating'];
   const requested = [];
   context.fetch = async url => {
     requested.push(url);
@@ -22,7 +22,7 @@ test('production catalog loads exactly seven complete root articles and README l
   assert.deepEqual(Array.from(catalog.categories, item => [item.id, item.name]), [['getting-started', 'User guide'], ['development', 'Development']]);
   assert.deepEqual(Array.from(catalog.articles, item => item.id).sort(), expected);
   assert.deepEqual(fs.readdirSync(docsRoot).filter(name => name.endsWith('.md')).sort(), expected.map(id => id + '.md'));
-  assert.equal(requested.length, 7);
+  assert.equal(requested.length, 11);
   for (const category of catalog.categories) {
     const group = catalog.articles.filter(article => article.category === category.id);
     assert.deepEqual(Array.from(group, article => article.index), Array.from(group, (_, index) => index + 1));

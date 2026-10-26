@@ -25,6 +25,11 @@ The same articles are bundled in Settings under Help > Documentation for offline
 - [Installation and removal](settings-app/ui/docs/installation-and-removal.md)
 - [Updating](settings-app/ui/docs/updating.md)
 
+- [Kanban layouts and formulas](settings-app/ui/docs/kanban-layouts-and-formulas.md)
+- [API connection and calendar colors](settings-app/ui/docs/api-and-calendar-colors.md)
+- [Experimental Settings layout](settings-app/ui/docs/settings-ui-refresh.md)
+- [Text effects and hover previews](settings-app/ui/docs/text-effects-and-previews.md)
+
 ### Development
 
 - [Setup and architecture](settings-app/ui/docs/setup-and-architecture.md)

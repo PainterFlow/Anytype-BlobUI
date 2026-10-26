@@ -528,7 +528,12 @@
       label: "Launch at startup",
       className: "native-accent-control settings-row accessibility-row"
     }),
-    "updates-heading-section": content => C.Section({
+    "autoplay-videos": () => C.ToggleSetting({
+        id: "autoplay-videos",
+        label: "Autoplay videos",
+        className: "native-accent-control settings-row accessibility-row"
+      }),
+      "updates-heading-section": content => C.Section({
       attributes: {
         "aria-labelledby": "updates-heading"
       },

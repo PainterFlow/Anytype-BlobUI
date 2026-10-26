@@ -18,6 +18,7 @@ mod calculator;
 mod kanban;
 mod kanban_api;
 mod kanban_css;
+mod kanban_snapshot;
 mod hotkey;
 mod storage;
 mod updater;
@@ -360,6 +361,22 @@ async fn get_release_note_image(source: String) -> Result<String, String> {
     })
     .await
     .map_err(|_| "The release note image task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_video(source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::release_note_video(&runtime, &source)
+    }).await.map_err(|_| "The release note video task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_history_video(tag: String, source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || updater::release_note_history_video(&tag, &source))
+        .await.map_err(|_| "The historical video task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1575,6 +1592,8 @@ fn main() {
             get_release_note_history_image,
             get_anytype_version,
             get_release_note_image,
+            get_release_note_video,
+            get_release_note_history_video,
             acknowledge_release_notes,
             open_release_note_link,
             save_updater_settings,

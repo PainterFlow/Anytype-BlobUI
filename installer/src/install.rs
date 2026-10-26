@@ -796,6 +796,7 @@ struct ChangelogImage {
     id: String,
     src: Option<String>,
     alt_seen: bool,
+    video: bool,
 }
 
 fn validate_changelog_payload(package: &Path) -> Result<(), String> {
@@ -835,6 +836,8 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
     let mut entries = Vec::new();
     let mut current = None;
     let mut section_seen = false;
+    let mut seen_sections = BTreeSet::new();
+    let mut video_section = false;
     let mut empty_list = false;
     let mut ids = BTreeSet::new();
 
@@ -846,6 +849,7 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
         let Some(image) = current.take() else { return Ok(()); };
         let source = image.src.as_deref().ok_or("Each Changelogs.yaml image needs an id and src.")?;
         validate_changelog_source(source)?;
+        if source.to_ascii_lowercase().ends_with(".mp4") != image.video { return Err("Changelogs.yaml media format does not match its section.".into()); }
         if !ids.insert(image.id.clone()) {
             return Err("Changelogs.yaml contains a duplicate image id.".into());
         }
@@ -858,15 +862,13 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
         if line.trim().is_empty() || line.trim_start().starts_with('#') { continue; }
         if line.contains('\t') { return Err("Changelogs.yaml must use spaces for indentation.".into()); }
         let section = line.split_once(" #").map_or(line, |(value, _)| value).trim();
-        if section == "images:" {
-            if section_seen { return Err("Changelogs.yaml contains more than one images section.".into()); }
+        if let Some(captures) = Regex::new(r"^(images|videos):\s*(\[\s*\])?$").unwrap().captures(section) {
+            save(&mut current, &mut entries, &mut ids)?;
+            let name = captures.get(1).unwrap().as_str();
+            if !seen_sections.insert(name.to_string()) { return Err("Changelogs.yaml contains a duplicate media section.".into()); }
             section_seen = true;
-            continue;
-        }
-        if Regex::new(r"^images:\s*\[\s*\]$").unwrap().is_match(section) {
-            if section_seen { return Err("Changelogs.yaml contains more than one images section.".into()); }
-            section_seen = true;
-            empty_list = true;
+            video_section = name == "videos";
+            empty_list = captures.get(2).is_some();
             continue;
         }
         if !section_seen { return Err("Changelogs.yaml must begin with an images section.".into()); }
@@ -877,7 +879,7 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
             if !valid_changelog_id(&id) {
                 return Err("Changelogs.yaml image ids may use letters, numbers, hyphens, and underscores.".into());
             }
-            current = Some(ChangelogImage { id, ..ChangelogImage::default() });
+            current = Some(ChangelogImage { id, video: video_section, ..ChangelogImage::default() });
             continue;
         }
         if let Some(field) = line.strip_prefix("    ") {
@@ -937,8 +939,8 @@ fn validate_changelog_source(source: &str) -> Result<(), String> {
     }) {
         return Err("Changelogs.yaml contains an unsafe image path.".into());
     }
-    if !matches!(Path::new(source).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp")) {
-        return Err("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images.".into());
+    if !matches!(Path::new(source).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "mp4")) {
+        return Err("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images, plus MP4 videos.".into());
     }
     Ok(())
 }
@@ -948,12 +950,13 @@ fn validate_changelog_image_file(package: &Path, source: &str) -> Result<(), Str
     let path = package.join(source);
     reject_links(&path)?;
     let metadata = fs::metadata(&path).map_err(|_| format!("The release note image is missing: {source}"))?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_CHANGELOG_IMAGE_BYTES {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > if source.to_ascii_lowercase().ends_with(".mp4") { 64 * 1024 * 1024 } else { MAX_CHANGELOG_IMAGE_BYTES } {
         return Err(format!("The release note image has an unsupported size or type: {source}"));
     }
     let bytes = fs::read(&path).map_err(|_| format!("The release note image could not be read: {source}"))?;
     let extension = path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase();
     let valid = match extension.as_str() {
+        "mp4" => bytes.len() >= 12 && &bytes[4..8] == b"ftyp",
         "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "jpg" | "jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
         "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
@@ -1760,6 +1763,27 @@ mod tests {
         .unwrap();
         assert!(validate_package(&package, "1.2.0").unwrap_err().contains("PNG, JPEG, GIF, and WebP"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn release_videos_validate_sections_paths_and_payloads() {
+        let root = fixture_root("release-videos");
+        let package = write_package(&root, "1.3.0", b"settings executable");
+        fs::create_dir_all(package.join("assets/changelogs")).unwrap();
+        let video = package.join("assets/changelogs/demo.mp4");
+        fs::write(&video, b"\x00\x00\x00\x18ftypmp42").unwrap();
+        let manifest = "images: []\nvideos:\n  - id: demo\n    src: assets/changelogs/demo.mp4\n    alt: Board demo\n";
+        fs::write(package.join("Changelogs.yaml"), manifest).unwrap();
+        fs::write(package.join("Changelogs.md"), "# Demo\n\n![Board demo](@demo)\n").unwrap();
+        validate_package(&package, "1.3.0").unwrap();
+        assert!(parse_changelog_image_manifest(&manifest.replace("videos:", "images:")).is_err());
+        assert!(parse_changelog_image_manifest(&manifest.replace("demo.mp4", "../demo.mp4")).is_err());
+        assert!(parse_changelog_image_manifest(&(manifest.to_string() + "videos: []\n")).is_err());
+        fs::write(&video, b"invalid video").unwrap();
+        assert!(validate_package(&package, "1.3.0").is_err());
+        fs::OpenOptions::new().write(true).open(&video).unwrap().set_len(64 * 1024 * 1024 + 1).unwrap();
+        assert!(validate_package(&package, "1.3.0").is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

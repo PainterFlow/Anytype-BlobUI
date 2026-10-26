@@ -65,6 +65,11 @@
   function selectAdvancedTab(index) { advancedTabController.select(index); }
   const installDirectory = el("install-directory");
   const startOnLogin = el("start-on-login");
+  const autoplayVideos = el("autoplay-videos");
+  function applyAutoplay(value) {
+    if (autoplayVideos) autoplayVideos.checked = value !== false;
+    window.BlobUI.VideoPlayer?.setAutoplay(value !== false);
+  }
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
   const automaticChecksEnabled = el("automatic-checks-enabled");
   const checkUpdatesButton = el("check-updates-button");
@@ -114,6 +119,7 @@
     fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
+      window.BlobUI.VideoPlayer?.destroyTree(releaseNotesContent);
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
       releaseNotesCurrentVersion = null;
@@ -457,6 +463,7 @@
     return !!left && !!right
       && left.installDirectory === right.installDirectory
       && left.startOnLogin === right.startOnLogin
+      && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled;
   }
@@ -469,6 +476,7 @@
     return {
       installDirectory: displayDirectory,
       startOnLogin: !!(settings && settings.startOnLogin),
+      autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
     };
@@ -479,6 +487,7 @@
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
     startOnLogin.checked = updaterDraft.startOnLogin;
+    applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     updaterSettingsLoaded = true;
@@ -589,7 +598,10 @@
   async function renderReleaseNotes(notes, historical = false) {
     historical = historical || !notes.version.startsWith("Dev+");
     updateReleaseNotesHeading(notes.version);
-    const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
+    const mediaManifest = window.BlobUI.Markdown.parseMediaManifest
+      ? window.BlobUI.Markdown.parseMediaManifest(notes.imageManifest)
+      : { images: window.BlobUI.Markdown.parseImageManifest(notes.imageManifest), videos: {} };
+    const manifest = mediaManifest.images;
     const entries = Object.entries(manifest);
     const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
       const args = { source: image.src };
@@ -600,8 +612,17 @@
     }));
     const images = Object.create(null);
     for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
-    releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
-    el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
+    const videos = Object.create(null);
+    const videoResults = await Promise.allSettled(Object.entries(mediaManifest.videos).map(async ([alias, video]) => {
+      videos[alias] = { alt: video.alt };
+      const args = { source: video.src };
+      videos[alias].src = historical
+        ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })
+        : await invoke("get_release_note_video", args);
+    }));
+    if (window.BlobUI.Markdown.mount) window.BlobUI.Markdown.mount(releaseNotesContent, notes.markdown, { images, videos });
+    else releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
+    el("release-notes-image-warning").hidden = [...results, ...videoResults].every((result) => result.status === "fulfilled");
     el("release-notes-dialog").scrollTop = 0;
     updateReleaseNotesScrollbar();
   }
@@ -1063,6 +1084,7 @@
       updaterDraft = { ...snapshot.updaterSettings };
       installDirectory.value = updaterDraft.installDirectory;
       startOnLogin.checked = updaterDraft.startOnLogin;
+      applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     }
@@ -1132,7 +1154,7 @@
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, startOnLogin, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, startOnLogin, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
@@ -1530,6 +1552,7 @@
     if (updaterDraft) {
       updaterDraft.installDirectory = installDirectory.value;
       updaterDraft.startOnLogin = startOnLogin.checked;
+      updaterDraft.autoplayVideos = autoplayVideos.checked;
       updaterDraft.automaticUpdatesEnabled = automaticUpdatesEnabled.checked;
       updaterDraft.automaticChecksEnabled = automaticChecksEnabled.checked;
     }
@@ -1873,12 +1896,14 @@
   });
   for (const [control, property] of [
     [startOnLogin, "startOnLogin"],
+    [autoplayVideos, "autoplayVideos"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
-    control.addEventListener("change", () => {
+    control?.addEventListener("change", () => {
       if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
       updaterDraft[property] = control.checked;
+      if (property === "autoplayVideos") applyAutoplay(control.checked);
       markDirty();
     });
   }

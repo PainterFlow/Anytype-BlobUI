@@ -9,7 +9,16 @@
   const imagePaths = Object.freeze(Object.assign(Object.create(null), {
     "blobui-mark": "./cdn/blobui-mark.svg",
     "theme-swatches": "./cdn/theme-swatches.png",
+    "settings-ui-refresh": "./cdn/settings-ui-refresh.png",
+    "api-connection-settings": "./cdn/api-connection-settings.png",
+    "kanban-formula-calculator": "./cdn/kanban-formula-calculator.png",
+    "calendar-event-colors": "./cdn/calendar-event-colors.png",
+    "kanban-balanced-expanded": "./cdn/kanban-balanced-expanded.png",
   }));
+  const videoPaths = Object.freeze({
+    "kanban-compact-collapsing": "./cdn/kanban-compact-collapsing.mp4",
+    "text-effects-and-hover-settings": "./cdn/text-effects-and-hover-settings.mp4",
+  });
   const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   const articleFields = new Set(["category", "parent", "icon", "name", "index"]);
   const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
@@ -148,7 +157,7 @@
   }
 
   async function load() {
-    const ids = ["introduction", "features", "installation-and-removal", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
+    const ids = ["introduction", "features", "installation-and-removal", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases", "kanban-layouts-and-formulas", "api-and-calendar-colors", "settings-ui-refresh", "text-effects-and-previews"];
     const entries = await Promise.all(ids.map(async (id) => {
       const response = await root.fetch(`./docs/${id}.md`);
       if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);
@@ -162,5 +171,5 @@
     return Object.prototype.hasOwnProperty.call(imagePaths, key) ? imagePaths[key] : "";
   }
 
-  BlobUI.DocsData = Object.freeze({ load, parseArticle, buildCatalog, resolveImage, imageAliases: imagePaths });
+  BlobUI.DocsData = Object.freeze({ load, parseArticle, buildCatalog, resolveImage, imageAliases: imagePaths, videoAliases: videoPaths });
 })(typeof window !== "undefined" ? window : globalThis);
