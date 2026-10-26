@@ -87,3 +87,8 @@
 .sync .icon.syncing {
     color: var(--color-blob-accent) !important;
 }
+
+/* Use the configured accent for the API key access label on hover. */
+.apiKeyAccess:hover > span:first-child {
+    color: var(--color-blob-accent) !important;
+}
