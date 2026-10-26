@@ -63,6 +63,7 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - Embedded images can now be expanded by clicking on them.
 
 ## Bug fixes
+- Issue#60 - The "Read Only" text is not affected by the accent color on hover (User#jay23606)
 - Issue#47 - The red spelling underline thing is now no longer visible through the spoiler text effect.
 - Issue#46 - The red spelling underline now no longer interrupts the neon & rgb wave text effects.
 - Issue#44 - The today text in the date modal picker is not affected by the accent color.
