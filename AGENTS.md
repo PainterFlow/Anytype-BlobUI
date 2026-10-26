@@ -13,11 +13,6 @@
 - If a fix lands directly on main, merge main into dev before continuing development, then merge dev into active feature branches.
 - Before handoff, verify that origin/main is an ancestor of dev and dev is an ancestor of the active feature branch. Preserve both branches' features when resolving conflicts.
 
-## Temporary v1.3.0 branch exception
-- Until v1.3.0 is released, do not merge main into dev or require origin/main to be an ancestor of dev. Main currently contains a problematic PR and its revert; dev intentionally retains the development features.
-- Create feat/docsV2 from dev and keep dev as its ancestor.
-- Once v1.3.0 is released, repair main/dev synchronization while preserving all intended features, before continuing development. Then restore the normal branch synchronization checks above.
-
 ## App safety and validation
 - Never terminate, restart, or automate the user's running Anytype instance. Do not run live app smoke tests without explicit permission. Use isolated workspace fixtures for validation.
 - Keep previews and validation in dark mode. Never switch the user's apps or system to light mode.
