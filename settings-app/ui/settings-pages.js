@@ -565,6 +565,31 @@
       },
       content
     }),
+    "backup-heading-section": content => C.Section({
+      attributes: { "aria-labelledby": "backup-heading" },
+      content
+    }),
+    "backup-heading": () => C.Heading({
+      id: "backup-heading",
+      title: "Backup and import",
+      description: "Create a dated copy of the full BlobUI folder, including settings and calculations. Import replaces the current folder."
+    }),
+    "create-blob-backup-button": content => C.Button({
+      attributes: {
+        id: "create-blob-backup-button",
+        class: "banner-image-button blob-backup-button",
+        disabled: ""
+      },
+      content
+    }),
+    "import-blob-backup-button": content => C.Button({
+      attributes: {
+        id: "import-blob-backup-button",
+        class: "banner-image-button blob-backup-button",
+        disabled: ""
+      },
+      content
+    }),
     "uninstall-button": content => C.Button({
       attributes: {
         id: "uninstall-button",

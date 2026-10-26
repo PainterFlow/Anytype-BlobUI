@@ -57,6 +57,38 @@
       },
       content
     }),
+    "blob-import-backdrop": content => C.DialogShell({
+      attributes: { id: "blob-import-backdrop" },
+      dialogAttributes: {
+        id: "blob-import-dialog",
+        role: "alertdialog",
+        "aria-labelledby": "blob-import-title",
+        "aria-describedby": "blob-import-message"
+      },
+      content
+    }),
+    "blob-import-close": content => C.Button({
+      attributes: {
+        id: "blob-import-close",
+        class: "confirm-close",
+        "aria-label": "Cancel backup import"
+      },
+      content
+    }),
+    "blob-import-cancel": content => C.Button({
+      attributes: {
+        id: "blob-import-cancel",
+        class: "confirm-cancel"
+      },
+      content
+    }),
+    "blob-import-confirm": content => C.Button({
+      attributes: {
+        id: "blob-import-confirm",
+        class: "confirm-save"
+      },
+      content
+    }),
     "api-key-removal-backdrop": content => C.DialogShell({
       attributes: {
         id: "api-key-removal-backdrop"

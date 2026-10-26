@@ -1102,6 +1102,14 @@ fn make_install_changes(
         path: manifest_path,
         contents: Some(serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?),
     });
+    let blob_metadata = json!({
+        "formatVersion": 1,
+        "blobuiVersion": env!("BLOBUI_BUILD_VERSION"),
+    });
+    changes.push(FileChange {
+        path: blob.join("blob.meta.json"),
+        contents: Some(serde_json::to_vec_pretty(&blob_metadata).map_err(|e| e.to_string())?),
+    });
     changes.push(FileChange {
         path: anytype.join("custom.css"),
         contents: Some(css.as_bytes().to_vec()),
@@ -1957,6 +1965,8 @@ mod tests {
             fs::read(blob.join("runtime/Dev/local.css")).unwrap(),
             b".local-theme { color: teal; }"
         );
+        let blob_metadata: Value = serde_json::from_slice(&fs::read(blob.join("blob.meta.json")).unwrap()).unwrap();
+        assert_eq!(blob_metadata["blobuiVersion"], env!("BLOBUI_BUILD_VERSION"));
         assert!(!blob.join("runtime/Dev/obsolete.css").exists());
         let css = fs::read_to_string(anytype.join("custom.css")).unwrap();
         assert!(css.contains(".release-theme"));

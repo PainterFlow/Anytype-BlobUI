@@ -11,6 +11,7 @@ use tauri::{Emitter, Manager};
 
 mod api;
 mod autostart;
+mod backup;
 mod css;
 mod connection;
 mod folder_dialog;
@@ -536,6 +537,73 @@ async fn select_anytype_folder(
     })
     .await
     .map_err(|_| "The folder selection dialog stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn select_blob_backup_destination(
+    app: tauri::AppHandle,
+    current_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    select_blob_folder(app, current_directory, "Export BlobUI Backup", "Export").await
+}
+
+#[tauri::command]
+async fn select_blob_backup_folder(
+    app: tauri::AppHandle,
+    current_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    select_blob_folder(app, current_directory, "Import BlobUI Backup", "Import").await
+}
+
+async fn select_blob_folder(
+    app: tauri::AppHandle,
+    current_directory: Option<String>,
+    title: &'static str,
+    button: &'static str,
+) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    let owner = app
+        .get_webview_window("main")
+        .and_then(|window| window.hwnd().ok())
+        .map(|handle| handle.0 as isize);
+    #[cfg(not(windows))]
+    let owner = {
+        let _ = app;
+        None
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        folder_dialog::select_folder(current_directory, title.into(), button.into(), owner)
+    })
+    .await
+    .map_err(|_| "The folder selection dialog stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn create_blob_backup(destination_directory: String) -> Result<String, String> {
+    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _save_guard = save_guard;
+        let _updater_guard = updater_guard;
+        let install = resolve_install_directory(&app_data_directory())?;
+        kanban::prepare_backup(&install)?;
+        backup::create_backup(&install.join("blob"), Path::new(&destination_directory))
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|_| "The BlobUI backup task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn import_blob_backup(backup_directory: String) -> Result<(), String> {
+    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _save_guard = save_guard;
+        let _updater_guard = updater_guard;
+        let install = resolve_install_directory(&app_data_directory())?;
+        backup::import_backup(&install, Path::new(&backup_directory))
+    })
+    .await
+    .map_err(|_| "The BlobUI restore task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1647,6 +1715,10 @@ fn main() {
             save_updater_settings,
             recover_install_directory,
             select_anytype_folder,
+            select_blob_backup_destination,
+            select_blob_backup_folder,
+            create_blob_backup,
+            import_blob_backup,
             check_for_updates,
             apply_update,
             simulate_update,

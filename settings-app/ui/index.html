@@ -350,6 +350,14 @@
                   <template data-ui-mount="check-updates-button">Check for updates</template>
                 </div>
               </template>
+              <template data-ui-mount="backup-heading-section">
+                <template data-ui-mount="backup-heading"></template>
+                <div class="blob-backup-actions">
+                  <template data-ui-mount="import-blob-backup-button">Import</template>
+                  <template data-ui-mount="create-blob-backup-button">Export</template>
+                </div>
+                <p id="blob-backup-status" class="update-status blob-backup-status" role="status" aria-live="polite"></p>
+              </template>
               <section class="settings-section"><template data-ui-mount="uninstall-button">Uninstall BlobUI</template></section>
             </template>
           </div>
@@ -375,6 +383,17 @@
           <template data-ui-mount="uninstall-confirm">Uninstall</template>
         </div>
       </template>
+    <template data-ui-mount="blob-import-backdrop">
+      <template data-ui-mount="blob-import-close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg></template>
+      <h2 id="blob-import-title">Import this BlobUI backup?</h2>
+      <p id="blob-import-message">This replaces the complete BlobUI folder for the selected Anytype installation. The current folder is kept if the restore fails.</p>
+      <p id="blob-import-path" class="blob-import-path"></p>
+      <p id="blob-import-error" role="alert"></p>
+      <div class="confirm-actions">
+        <template data-ui-mount="blob-import-cancel">Cancel</template>
+        <template data-ui-mount="blob-import-confirm">Import backup</template>
+      </div>
+    </template>
     <template data-ui-mount="api-key-removal-backdrop">
         <template data-ui-mount="api-key-removal-close">
           <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"></path></svg>

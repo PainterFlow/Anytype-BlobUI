@@ -18,6 +18,7 @@
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
   let selectedSpace = "", searchControl, filterControl, displayControl, reloadController, unregisterReload;
   let discoveryRequested = false;
+  let discoveryGeneration = 0;
   const localDrafts = new Map();
   let draftGeneration=0;
   const math = UI.CalculatorMath;
@@ -787,6 +788,7 @@
     if (!invoke) return;
     if (loading || locked) { discoveryRequested = true; return; }
     if (discovering) return;
+    const generation = ++discoveryGeneration;
     discoveryRequested = false;
     discovering = true;
     if (message) message.textContent = loadError;
@@ -794,14 +796,17 @@
     try {
       const result = await invoke("discover_kanban_views");
       if (!result || !Array.isArray(result.views)) throw Error("Anytype did not return a view list.");
+      if (generation !== discoveryGeneration) return;
       catalog = result.views;
       discovered = true;
       if (message) message.textContent = [loadError, result.warning].filter(Boolean).join(" ");
     } catch (error) {
-      if (message) message.textContent = String(error.message || error);
+      if (generation === discoveryGeneration && message) message.textContent = String(error.message || error);
     } finally {
-      discovering = false;
-      render();
+      if (generation === discoveryGeneration) {
+        discovering = false;
+        render();
+      }
     }
   }
   function configureModal() {
@@ -874,8 +879,18 @@
       if (calculatorModal && calculatorModal.isOpen()) calculatorModal.close({ restoreFocus: false });
       render();
     },
-    async load(bridge) {
+    async load(bridge, options = {}) {
       invoke = bridge;
+      loadError = "";
+      discoveryRequested = options.discover !== false;
+      discovered = false;
+      discoveryGeneration++;
+      discovering = false;
+      catalog = [];
+      selectedSpace = "";
+      draftGeneration++;
+      if (calculatorModal?.isOpen()) calculatorModal.close({ restoreFocus: false });
+      localDrafts.clear();
       try {
         const result = await invoke("load_kanban_formulas");
         if (result) {
@@ -894,8 +909,11 @@
       }
       loading = false;
       render();
-      if (reloadController) void reloadController.run();
-      else void discover();
+      if (options.discover !== false) {
+        if (reloadController) void reloadController.run();
+        else void discover();
+      }
+      return !loadError;
     },
     async save(bridge, submitted) {
       try {

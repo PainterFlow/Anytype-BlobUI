@@ -74,6 +74,9 @@
   const automaticChecksEnabled = el("automatic-checks-enabled");
   const checkUpdatesButton = el("check-updates-button");
   const updateNowButton = el("update-now-button");
+  const createBlobBackupButton = el("create-blob-backup-button");
+  const importBlobBackupButton = el("import-blob-backup-button");
+  const blobBackupStatus = el("blob-backup-status");
   const sidebarActions = el("sidebar-actions");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
@@ -227,6 +230,10 @@
   let updaterState = null;
   let updaterSettingsLoaded = false;
   let updaterBusyOperation = "";
+  let blobFolderBusy = false;
+  let blobRestoreReloadFailed = false;
+  let uninstallBusy = false;
+  let selectedBlobBackupDirectory = null;
   let pendingAutomaticUpdate = false;
   let connectionBusy = false;
   let simulationActive = false;
@@ -519,20 +526,32 @@
       : updateAvailable ? "Update now"
       : state.status === "current" || state.status === "updated" ? "You're up to date"
       : "Check for updates";
-    checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy;
+    checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
     updateNowButton.hidden = !updateAvailable;
     sidebarActions.classList.toggle("has-update", updateAvailable);
-    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || editSession.isDirty();
+    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || editSession.isDirty();
     updateNowButton.title = simulated ? "Preview update only" : "Update now";
     updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
+    renderBlobBackupControls();
   }
 
   function isInstallingUpdate() {
     return updaterBusyOperation === "updating";
   }
 
+  function renderBlobBackupControls() {
+    const settingsDirty = !!draft && editSession.isDirty();
+    const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
+      && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
+    const disabled = !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
+      || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
+    createBlobBackupButton.disabled = disabled;
+    importBlobBackupButton.disabled = disabled;
+    el("uninstall-button").disabled = !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy;
+  }
+
   function maybeApplyPendingAutomaticUpdate() {
-    if (!pendingAutomaticUpdate || saveBusy || updaterBusyOperation) return;
+    if (!pendingAutomaticUpdate || saveBusy || updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed) return;
     if (!initialUpdaterSettings || !initialUpdaterSettings.automaticUpdatesEnabled) {
       pendingAutomaticUpdate = false;
       return;
@@ -801,6 +820,7 @@
   }
 
   async function applyUpdate(fromAutomaticCheck = false) {
+    if (blobFolderBusy || blobRestoreReloadFailed) return;
     if (!updaterState || updaterState.updateAvailable !== true) return;
     if (updaterState.status === "simulated") {
       simulationActive = false;
@@ -1137,7 +1157,7 @@
   function updateSaveButton() {
     const dirty = editSession.isDirty();
     const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
-    const settingsLocked = saveBusy || isInstallingUpdate();
+    const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
     if (settingsLocked || !draft) closeKanbanStyleMenu();
     saveButton.hidden = !draft || !dirty;
     saveButton.disabled = settingsLocked || bannerReadPending || !draft || (!window.appReady && !prototypeDirty) || !dirty;
@@ -1171,6 +1191,7 @@
     apiKeyRemovalUndo.disabled = settingsLocked;
     apiKeyRemovalClose.disabled = settingsLocked;
     renderUpdaterState();
+    renderBlobBackupControls();
     maybeApplyPendingAutomaticUpdate();
   }
 
@@ -1292,7 +1313,7 @@
     if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
-  async function reloadTargetAppState() {
+  async function reloadTargetAppState({ reloadFormulas = false } = {}) {
     let state;
     try {
       state = await invoke("get_app_state");
@@ -1310,6 +1331,15 @@
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
     await loadUpdaterState();
+    if (reloadFormulas) {
+      const loaded = await window.BlobUI.FormulaPage.load(invoke, { discover: false });
+      if (!loaded) {
+        blobRestoreReloadFailed = true;
+        updateSaveButton();
+        throw new Error("The imported calculations could not be reloaded. Settings are locked to protect the restored folder.");
+      }
+    }
+    blobRestoreReloadFailed = false;
     clearValidationErrors();
     editSession.commit();
     updateSaveButton();
@@ -1522,7 +1552,7 @@
   }
 
   async function save(options = {}) {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!draft || saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
     // Let the formula page report missing connection/setup requirements inline.
     if (!window.appReady) {
       const formulas = window.BlobUI.FormulaPage.read();
@@ -1918,21 +1948,27 @@
     },
   });
   window.addEventListener("unload", () => externalLinkController.destroy(), { once: true });
+  const blobImportModal = window.BlobUI.Components.Modal({
+    backdrop: el("blob-import-backdrop"), dialog: el("blob-import-dialog"),
+    initialFocus: el("blob-import-cancel"), fallbackFocus: el("import-blob-backup-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+    onClose: () => { selectedBlobBackupDirectory = null; },
+  });
   const uninstallModal = window.BlobUI.Components.Modal({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  let uninstallBusy = false;
   el("uninstall-button").addEventListener("click", () => {
-    if (saveBusy || updaterBusyOperation || uninstallBusy || !window.appReady) return;
+    if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy || !window.appReady) return;
     el("uninstall-error").textContent = "";
     uninstallModal.open();
   });
   ["uninstall-close", "uninstall-cancel"].forEach((id) => el(id).addEventListener("click", () => uninstallModal.close()));
   el("uninstall-confirm").addEventListener("click", async () => {
-    if (saveBusy || updaterBusyOperation || uninstallBusy) return;
+    if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy) return;
     uninstallBusy = true;
+    renderBlobBackupControls();
     const button = el("uninstall-confirm");
     button.disabled = true;
     ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = true; });
@@ -1940,8 +1976,85 @@
     catch (error) { el("uninstall-error").textContent = String(error); }
     finally {
       uninstallBusy = false;
+      renderBlobBackupControls();
       button.disabled = false;
       ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = false; });
+    }
+  });
+  function setBlobBackupStatus(message, isError = false) {
+    blobBackupStatus.textContent = message;
+    blobBackupStatus.classList.toggle("error", isError);
+  }
+  createBlobBackupButton.addEventListener("click", async () => {
+    if (createBlobBackupButton.disabled) return;
+    blobFolderBusy = true;
+    updateSaveButton();
+    try {
+      const destination = await invoke("select_blob_backup_destination", {
+        currentDirectory: installDirectory.value || null,
+      });
+      if (!destination) return;
+      const backup = await invoke("create_blob_backup", { destinationDirectory: destination });
+      setBlobBackupStatus("Backup exported: " + backup);
+    } catch (error) {
+      setBlobBackupStatus(error.message || String(error), true);
+    } finally {
+      blobFolderBusy = false;
+      updateSaveButton();
+    }
+  });
+  importBlobBackupButton.addEventListener("click", async () => {
+    if (importBlobBackupButton.disabled) return;
+    blobFolderBusy = true;
+    updateSaveButton();
+    try {
+      const backup = await invoke("select_blob_backup_folder", {
+        currentDirectory: installDirectory.value || null,
+      });
+      if (!backup) return;
+      selectedBlobBackupDirectory = backup;
+      el("blob-import-path").textContent = backup;
+      el("blob-import-error").textContent = "";
+      blobImportModal.open();
+    } catch (error) {
+      setBlobBackupStatus(error.message || String(error), true);
+    } finally {
+      blobFolderBusy = false;
+      updateSaveButton();
+    }
+  });
+  ["blob-import-close", "blob-import-cancel"].forEach((id) => {
+    el(id).addEventListener("click", () => blobImportModal.close());
+  });
+  el("blob-import-confirm").addEventListener("click", async () => {
+    if (!selectedBlobBackupDirectory || blobFolderBusy || saveBusy || updaterBusyOperation || uninstallBusy) return;
+    const backup = selectedBlobBackupDirectory;
+    blobFolderBusy = true;
+    el("blob-import-confirm").disabled = true;
+    ["blob-import-close", "blob-import-cancel"].forEach((id) => { el(id).disabled = true; });
+    el("blob-import-error").textContent = "";
+    updateSaveButton();
+    let restored = false;
+    try {
+      await invoke("import_blob_backup", { backupDirectory: backup });
+      restored = true;
+      await reloadTargetAppState({ reloadFormulas: true });
+      blobImportModal.close({ restoreFocus: false });
+      setBlobBackupStatus("Backup imported: " + backup);
+    } catch (error) {
+      const message = error.message || String(error);
+      if (restored) {
+        blobRestoreReloadFailed = true;
+        updateSaveButton();
+        el("blob-import-error").textContent = "The backup was restored, but Settings could not reload it. Restart Settings before editing. " + message;
+      } else {
+        el("blob-import-error").textContent = message;
+      }
+    } finally {
+      blobFolderBusy = false;
+      el("blob-import-confirm").disabled = false;
+      ["blob-import-close", "blob-import-cancel"].forEach((id) => { el(id).disabled = false; });
+      updateSaveButton();
     }
   });
   saveButton.addEventListener("click", save);
@@ -2173,7 +2286,7 @@
   }
 
   async function applyConnection(enabled, apiKey = "", port = null) {
-    if (isInstallingUpdate()) return;
+    if (isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
     const advancedWasDirty = connectionHasChanges();
     const appliedPort = port || 31009;
     setConnectionBusy(true);
@@ -2267,7 +2380,8 @@
       closeKanbanStyleMenu(true);
       return;
     }
-    if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
+    if (blobFolderBusy || blobRestoreReloadFailed || blobImportModal.isOpen()
+      || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     const matches = (action) => {
       const binding = shortcutBindings.find((item) => item.action === action);
       return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
