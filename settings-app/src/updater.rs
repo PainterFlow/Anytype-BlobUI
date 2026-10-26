@@ -21,11 +21,13 @@ const MAX_RELEASE_JSON_BYTES: usize = 2 * 1024 * 1024;
 const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
 const MAX_RELEASE_NOTES_BYTES: u64 = 512 * 1024;
 const MAX_RELEASE_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_RELEASE_VIDEO_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UpdaterPreferences {
     pub install_directory: Option<String>,
+    pub autoplay_videos: bool,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
     pub last_checked_at: Option<String>,
@@ -40,6 +42,7 @@ impl Default for UpdaterPreferences {
     fn default() -> Self {
         Self {
             install_directory: None,
+            autoplay_videos: true,
             automatic_updates_enabled: false,
             automatic_checks_enabled: true,
             last_checked_at: None,
@@ -56,6 +59,8 @@ impl Default for UpdaterPreferences {
 #[serde(rename_all = "camelCase")]
 pub struct UpdaterSettingsDraft {
     pub install_directory: String,
+    #[serde(default = "default_autoplay_videos")]
+    pub autoplay_videos: bool,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
     pub start_on_login: bool,
@@ -65,6 +70,7 @@ pub struct UpdaterSettingsDraft {
 #[serde(rename_all = "camelCase")]
 pub struct UpdaterState {
     pub install_directory: String,
+    pub autoplay_videos: bool,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
     pub start_on_login: bool,
@@ -99,6 +105,8 @@ struct ReleaseInfo {
 struct PreviousManifest {
     release_version: Option<String>,
 }
+
+fn default_autoplay_videos() -> bool { true }
 
 pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
     app_data_directory
@@ -176,6 +184,7 @@ pub fn save_settings(
                 .into_owned(),
         )
     };
+    preferences.autoplay_videos = draft.autoplay_videos;
     preferences.automatic_updates_enabled = draft.automatic_updates_enabled;
     preferences.automatic_checks_enabled = draft.automatic_checks_enabled;
     save_preferences(&path, &preferences)?;
@@ -202,11 +211,12 @@ fn state_for(
     fallback_runtime: Option<&Path>,
 ) -> Result<UpdaterState, String> {
     let current = current_version(install_directory, fallback_runtime)?;
+    let comparison_version = update_comparison_version(install_directory, fallback_runtime)?;
     let latest = preferences
         .latest_version
         .as_deref()
         .and_then(parse_version);
-    let current_parsed = parse_version(&current);
+    let current_parsed = parse_version(&comparison_version);
     let update_available = preferences.last_check_status.as_deref() != Some("error")
         && latest
             .as_ref()
@@ -235,6 +245,7 @@ fn state_for(
     };
     Ok(UpdaterState {
         install_directory: install_directory.to_string_lossy().into_owned(),
+        autoplay_videos: preferences.autoplay_videos,
         automatic_updates_enabled: preferences.automatic_updates_enabled,
         automatic_checks_enabled: preferences.automatic_checks_enabled,
         start_on_login: false,
@@ -259,7 +270,7 @@ pub fn check_for_updates(
     let mut preferences = load_preferences(&path)?;
     let checked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     preferences.last_checked_at = Some(checked_at);
-    let current = current_version(install_directory, Some(fallback_runtime))?;
+    let current = update_comparison_version(install_directory, Some(fallback_runtime))?;
     match fetch_latest_release() {
         Ok(None) => {
             preferences.latest_version = None;
@@ -432,6 +443,38 @@ pub fn release_note_history_image(tag: &str, source: &str) -> Result<String, Str
     encode_release_image(&response.body, &relative)
 }
 
+fn encode_release_video(bytes: &[u8], source: &str) -> Result<String, String> {
+    if !source.to_ascii_lowercase().ends_with(".mp4") || bytes.len() < 12
+        || bytes.len() as u64 > MAX_RELEASE_VIDEO_BYTES || &bytes[4..8] != b"ftyp" {
+        return Err("The release note video must be a valid MP4 no larger than 64 MiB.".into());
+    }
+    Ok(format!("data:video/mp4;base64,{}", BASE64.encode(bytes)))
+}
+
+pub fn release_note_video(runtime_directory: &Path, source: &str) -> Result<String, String> {
+    let relative = release_image_relative_path(source)?;
+    let path = runtime_directory.join("assets/changelogs").join(relative);
+    storage::reject_reparse_path(&path)?;
+    let metadata = fs::metadata(&path).map_err(|_| "The release note video could not be read.".to_string())?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_RELEASE_VIDEO_BYTES {
+        return Err("The release note video exceeds the supported size or is not a file.".into());
+    }
+    let bytes = fs::read(path).map_err(|_| "The release note video could not be read.".to_string())?;
+    encode_release_video(&bytes, relative)
+}
+
+pub fn release_note_history_video(tag: &str, source: &str) -> Result<String, String> {
+    if tag.is_empty() || tag.len() > 64 || parse_version(tag).is_none()
+        || !tag.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'v')) {
+        return Err("The release notes version is invalid.".into());
+    }
+    let relative = release_image_relative_path(source)?;
+    if !relative.to_ascii_lowercase().ends_with(".mp4") { return Err("Only MP4 videos are supported.".into()); }
+    let response = http_get("raw.githubusercontent.com", &format!("/{OWNER}/{REPOSITORY}/{tag}/assets/changelogs/{relative}"), "video/mp4", MAX_RELEASE_VIDEO_BYTES as usize)?;
+    if response.status != 200 { return Err("The release note video could not be read from GitHub.".into()); }
+    encode_release_video(&response.body, relative)
+}
+
 fn fetch_release_notes_for_tag(tag: &str, release: Option<&Value>) -> Result<ReleaseNotes, String> {
     if tag.is_empty() || tag.len() > 64
         || parse_version(tag).is_none()
@@ -547,7 +590,7 @@ pub fn apply_update(
     let mut preferences = load_preferences(&path)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     preferences.last_checked_at = Some(now);
-    let current = current_version(install_directory, Some(fallback_runtime))?;
+    let current = update_comparison_version(install_directory, Some(fallback_runtime))?;
     let release = match fetch_latest_release() {
         Ok(Some(release)) => release,
         Ok(None) => {
@@ -654,6 +697,16 @@ fn current_version(
     version_from_metadata(RELEASE_METADATA)
         .map(|version| version.to_string())
         .ok_or_else(|| "The built-in BlobUI release metadata is invalid.".into())
+}
+
+fn update_comparison_version(
+    install_directory: &Path,
+    fallback_runtime: Option<&Path>,
+) -> Result<String, String> {
+    if fallback_runtime.is_some_and(is_development_runtime) {
+        return Ok(env!("CARGO_PKG_VERSION").to_string());
+    }
+    current_version(install_directory, fallback_runtime)
 }
 
 fn version_from_runtime(runtime: &Path) -> Option<semver::Version> {
@@ -1400,6 +1453,36 @@ mod tests {
     }
 
     #[test]
+    fn autoplay_defaults_on_and_preserves_explicit_false() {
+        assert!(UpdaterPreferences::default().autoplay_videos);
+        assert!(serde_json::from_str::<UpdaterPreferences>("{}").unwrap().autoplay_videos);
+        let preferences: UpdaterPreferences = serde_json::from_str(r#"{"autoplayVideos":false}"#).unwrap();
+        assert!(!preferences.autoplay_videos);
+        let roundtrip: UpdaterPreferences = serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
+        assert!(!roundtrip.autoplay_videos);
+        let draft: UpdaterSettingsDraft = serde_json::from_value(json!({ "installDirectory": "", "startOnLogin": false, "automaticUpdatesEnabled": false, "automaticChecksEnabled": true })).unwrap();
+        assert!(draft.autoplay_videos);
+    }
+
+    #[test]
+    fn release_videos_validate_local_paths_signatures_and_limits() {
+        let root = fixture_root("video");
+        fs::create_dir_all(root.join("assets/changelogs")).unwrap();
+        let file = root.join("assets/changelogs/demo.mp4");
+        fs::write(&file, b"\x00\x00\x00\x18ftypmp42").unwrap();
+        assert!(release_note_video(&root, "assets/changelogs/demo.mp4").unwrap().starts_with("data:video/mp4;base64,"));
+        for path in ["assets/changelogs/../demo.mp4", "C:/demo.mp4", "assets/changelogs/missing.mp4", "assets/changelogs/demo.png"] {
+            assert!(release_note_video(&root, path).is_err());
+        }
+        fs::write(&file, b"not an MP4").unwrap();
+        assert!(release_note_video(&root, "assets/changelogs/demo.mp4").is_err());
+        fs::OpenOptions::new().write(true).open(&file).unwrap().set_len(MAX_RELEASE_VIDEO_BYTES + 1).unwrap();
+        assert!(release_note_video(&root, "assets/changelogs/demo.mp4").is_err());
+        assert!(release_note_history_video("../main", "assets/changelogs/demo.mp4").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn release_record_accepts_only_the_pinned_official_installer_asset() {
         let record = json!({
             "tag_name": "v1.2.0",
@@ -1532,7 +1615,7 @@ mod tests {
         let repaired = load_preferences(&path).unwrap();
         assert_eq!(
             repaired.install_directory.as_deref(),
-            Some(first_install.to_string_lossy().as_ref())
+            Some(first_install.canonicalize().unwrap().to_string_lossy().as_ref())
         );
         assert!(!repaired.automatic_updates_enabled);
         assert!(repaired.automatic_checks_enabled);
@@ -1545,7 +1628,7 @@ mod tests {
         let preserved = load_preferences(&path).unwrap();
         assert_eq!(
             preserved.install_directory.as_deref(),
-            Some(second_install.to_string_lossy().as_ref())
+            Some(second_install.canonicalize().unwrap().to_string_lossy().as_ref())
         );
         assert!(preserved.automatic_updates_enabled);
         assert!(!preserved.automatic_checks_enabled);
@@ -1624,6 +1707,29 @@ mod tests {
         ] {
             assert!(version_from_metadata(invalid).is_none());
         }
+    }
+
+    #[test]
+    fn development_build_compares_updates_with_its_compiled_version() {
+        let root = fixture_root("development-version");
+        let (install, _, _, _) = install_fixture(&root);
+        let runtime = root.join("runtime");
+        fs::create_dir_all(runtime.join(".git")).unwrap();
+        let mut preferences = UpdaterPreferences {
+            latest_version: Some("1.2.0".into()),
+            last_check_status: Some("available".into()),
+            ..UpdaterPreferences::default()
+        };
+
+        let current = state_for(&install, &preferences, Some(&runtime)).unwrap();
+        assert_eq!(current.current_version, env!("BLOBUI_BUILD_VERSION"));
+        assert!(!current.update_available);
+
+        let compiled = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        preferences.latest_version = Some(format!("{}.0.0", compiled.major + 1));
+        let future = state_for(&install, &preferences, Some(&runtime)).unwrap();
+        assert!(future.update_available);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

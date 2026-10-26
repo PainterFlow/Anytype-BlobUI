@@ -1,0 +1,16 @@
+.markdown-content img.markdown-image-view-trigger { cursor: zoom-in; }
+.markdown-content img.markdown-image-view-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.markdown-image-viewer-backdrop { z-index: 80; padding: clamp(10px, 2vw, 28px); }
+.confirm-dialog.markdown-image-viewer-dialog { display: flex; width: 100%; height: 100%; max-width: none; max-height: none; padding: 0; border: 0; border-radius: 0; outline: none; background: transparent; box-shadow: none; }
+.markdown-image-viewer-stage { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; min-width: 0; min-height: 0; overflow: auto; padding: 0; background: transparent; overscroll-behavior: contain; scrollbar-width: none; outline: none; }
+.markdown-image-viewer-stage::-webkit-scrollbar { display: none; }
+.markdown-image-viewer-stage.is-actual-size { align-items: flex-start; justify-content: flex-start; }
+.markdown-image-viewer-image { display: block; flex: 0 0 auto; width: auto; height: auto; max-width: 100%; max-height: 100%; border: 0; outline: none; box-shadow: none; object-fit: contain; cursor: zoom-in; }
+.markdown-image-viewer-stage.is-actual-size .markdown-image-viewer-image { max-width: none; max-height: none; cursor: zoom-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-image-viewer-backdrop, .markdown-image-viewer-dialog { animation: none; }
+}
+:root[data-reduced-motion="true"] .markdown-image-viewer-backdrop,
+:root[data-reduced-motion="true"] .markdown-image-viewer-dialog { animation: none; }

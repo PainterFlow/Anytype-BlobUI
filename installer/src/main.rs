@@ -3,6 +3,14 @@ mod archive;
 #[allow(dead_code)]
 #[path = "../../settings-app/src/css.rs"]
 mod css;
+#[allow(dead_code)]
+#[path = "../../settings-app/src/calculator.rs"]
+mod calculator;
+#[allow(dead_code)]
+#[path = "../../settings-app/src/kanban_snapshot.rs"]
+mod kanban_snapshot;
+#[path = "../../settings-app/src/kanban_css.rs"]
+mod kanban_css;
 mod install;
 mod transaction;
 mod network;

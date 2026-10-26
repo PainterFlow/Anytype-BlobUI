@@ -21,8 +21,15 @@ The same articles are bundled in Settings under Help > Documentation for offline
 ### User guide
 
 - [Introduction](settings-app/ui/docs/introduction.md)
-- [Features](settings-app/ui/docs/features.md)
 - [Installation and removal](settings-app/ui/docs/installation-and-removal.md)
+- [Features](settings-app/ui/docs/features.md)
+  - [Appearance](settings-app/ui/docs/appearance.md)
+  - [Kanban](settings-app/ui/docs/kanban-layouts-and-formulas.md)
+  - [Calendar Colors](settings-app/ui/docs/calendar-colors.md)
+  - [QoL Features](settings-app/ui/docs/text-effects-and-previews.md)
+- [API Guide](settings-app/ui/docs/api-guide.md)
+- [Experiment](settings-app/ui/docs/experiment.md)
+  - [Settings UI](settings-app/ui/docs/settings-ui-refresh.md)
 - [Updating](settings-app/ui/docs/updating.md)
 
 ### Development
@@ -36,7 +43,7 @@ The same articles are bundled in Settings under Help > Documentation for offline
 On Windows with Rust and the Windows C++ build tools installed, run these commands from the repository root.
 
 ```powershell
-.\scripts\Build-Settings.ps1 -s -c
+.\scripts\Build-App.ps1 -s -c
 .\scripts\Build-Installer.ps1
 ```
 

@@ -14,6 +14,11 @@ mod autostart;
 mod css;
 mod connection;
 mod folder_dialog;
+mod calculator;
+mod kanban;
+mod kanban_api;
+mod kanban_css;
+mod kanban_snapshot;
 mod hotkey;
 mod storage;
 mod updater;
@@ -61,7 +66,7 @@ fn acquire_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String
     }
 }
 
-const DEFAULT_FONT: &str = "Libron";
+const DEFAULT_FONT: &str = "Inter";
 const DEFAULT_CODE_FONT: &str = "Consolas";
 const DEFAULT_ACCENT: &str = "#DE50DE";
 const DEFAULT_API_IP: &str = "127.0.0.1";
@@ -92,12 +97,34 @@ struct SettingsDraft {
     accent_color: String,
     accent_mode: String,
     accent_preset: String,
+    #[serde(default = "default_include_selections")]
+    include_selections: bool,
     #[serde(default)]
     banner_image: String,
     reduced_motion: bool,
     tab_hover_effect: bool,
     link_hover_effect: bool,
     object_mention_hover_effect: bool,
+    #[serde(default = "default_kanban_style")]
+    kanban_view_style: String,
+    #[serde(default)]
+    collapsed_categories: bool,
+    #[serde(default = "default_calendar_colors_enabled")]
+    calendar_colors_enabled: bool,
+    #[serde(default)]
+    settings_v21_enabled: bool,
+}
+
+fn default_include_selections() -> bool {
+    true
+}
+
+fn default_calendar_colors_enabled() -> bool {
+    true
+}
+
+fn default_kanban_style() -> String {
+    "default".into()
 }
 
 #[derive(Debug, Serialize)]
@@ -337,6 +364,22 @@ async fn get_release_note_image(source: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_release_note_video(source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::release_note_video(&runtime, &source)
+    }).await.map_err(|_| "The release note video task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_history_video(tag: String, source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || updater::release_note_history_video(&tag, &source))
+        .await.map_err(|_| "The historical video task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
 async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
     let guard = acquire_updater_guard()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -351,38 +394,86 @@ async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn open_release_note_link(url: String) -> Result<(), String> {
+async fn open_external_link(url: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let parsed = validate_release_note_link(&url)?;
-        #[cfg(windows)]
-        {
-            std::process::Command::new("explorer.exe")
-                .arg(parsed.as_str())
-                .spawn()
-                .map(|_| ())
-                .map_err(|error| format!("Could not open the release note link: {error}"))
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = parsed;
-            Err("Opening release note links is supported on Windows only.".into())
-        }
+        open_external_link_in_default_browser(&url)
     })
     .await
-    .map_err(|_| "The release note link task stopped unexpectedly.".to_string())?
+    .map_err(|_| "The external link task stopped unexpectedly.".to_string())?
 }
 
-fn validate_release_note_link(value: &str) -> Result<url::Url, String> {
+fn open_external_link_in_default_browser(value: &str) -> Result<(), String> {
+    let parsed = validate_external_link(value)?;
+    #[cfg(windows)]
+    {
+        let operation: Vec<u16> = "open\0".encode_utf16().collect();
+        let url: Vec<u16> = format!("{}\0", parsed.as_str()).encode_utf16().collect();
+        let result = unsafe {
+            windows_sys::Win32::UI::Shell::ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                url.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            )
+        } as usize;
+        if result <= 32 {
+            return Err(format!(
+                "Could not open the link in your default browser, Windows error {result}."
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = parsed;
+        Err("Opening external links is supported on Windows only.".into())
+    }
+}
+
+fn validate_external_link(value: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(value.trim())
-        .map_err(|_| "The release note link is invalid.".to_string())?;
+        .map_err(|_| "The external link is invalid.".to_string())?;
     if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
+        || uses_local_app_host(&parsed)
     {
-        return Err("Only ordinary HTTP and HTTPS release note links can be opened.".into());
+        return Err("Only ordinary HTTP and HTTPS links can be opened.".into());
     }
     Ok(parsed)
+}
+
+fn uses_local_app_host(url: &url::Url) -> bool {
+    (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+        || (matches!(url.scheme(), "http" | "https")
+            && url.host_str() == Some("tauri.localhost"))
+}
+
+fn is_local_app_url(url: &url::Url) -> bool {
+    uses_local_app_host(url)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && matches!(url.path(), "/" | "/index.html")
+}
+
+fn handle_webview_navigation(url: &url::Url) -> bool {
+    if is_local_app_url(url) {
+        return true;
+    }
+    if !uses_local_app_host(url) && matches!(url.scheme(), "http" | "https") {
+        let _ = open_external_link_in_default_browser(url.as_str());
+    }
+    false
+}
+
+fn handle_webview_new_window(url: &url::Url) {
+    if !uses_local_app_host(url) && matches!(url.scheme(), "http" | "https") {
+        let _ = open_external_link_in_default_browser(url.as_str());
+    }
 }
 
 #[tauri::command]
@@ -561,6 +652,30 @@ fn with_startup_state(mut state: updater::UpdaterState) -> Result<updater::Updat
     Ok(state)
 }
 
+#[tauri::command]
+async fn get_calendar_api_availability() -> String {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Ok(install) = resolve_install_directory(&app_data_directory()) else { return "unavailable"; };
+        calendar_api_availability_at(&install)
+    }).await.unwrap_or("unavailable").to_string()
+}
+
+fn calendar_api_availability_at(install: &Path) -> &'static str {
+    let Ok(data) = read_json_file(&install.join("blob/data.json")) else { return "unavailable"; };
+    if data.pointer("/apiConnection/enabled").and_then(Value::as_bool) == Some(false)
+        || !install.join("blob/credentials/anytype-api-key.dpapi").is_file() {
+        return "missing";
+    }
+    let result = (|| {
+        let key = SecretString::new(read_saved_api_key_at(install)?);
+        let ip = normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
+        let port = data.pointer("/apiConnection/port").and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok()).filter(|port| *port > 0).unwrap_or(31009);
+        api::verify_connection(&key, &ip, port)
+    })();
+    if result.is_ok() { "available" } else { "unavailable" }
+}
+
 fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResult, String> {
     let mut connection = normalize_connection(connection)?;
     let mut api_key = SecretString::new(std::mem::take(&mut connection.api_key));
@@ -587,18 +702,25 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
             if !connection.keep_existing_key {
                 protected_key = Some(connection::encrypt_api_key(&api_key)?);
             }
-            Ok::<_, String>(api::calendar_colors(&api_key, ip, port))
+            Ok::<_, String>(if current_settings.calendar_colors_enabled {
+                api::calendar_colors(&api_key, ip, port).map(Some)
+            } else { Ok(None) })
         })();
         let colors_result = connection_result?;
         match colors_result {
-            Ok(colors) => {
+            Ok(Some(colors)) => {
                 data["calendarObjectColors"] = colors;
                 calendar_status = "refreshed";
             }
+            Ok(None) => { calendar_status = "off"; }
             Err(_) => {
                 // A connection change must not carry calendar data forward
                 // from a different API identity or an earlier permission set.
-                data["calendarObjectColors"] = json!({});
+                let same_endpoint = data.pointer("/apiConnection/ip").and_then(Value::as_str).unwrap_or(DEFAULT_API_IP) == ip
+                    && data.pointer("/apiConnection/port").and_then(Value::as_u64).unwrap_or(31009) == u64::from(port);
+                if !connection.keep_existing_key || !same_endpoint {
+                    data["calendarObjectColors"] = json!({});
+                }
                 calendar_status = "cached";
             }
         }
@@ -809,6 +931,8 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     if !api_enabled {
         data["calendarObjectColors"] = json!({});
         calendar_status = "disabled";
+    } else if !settings.calendar_colors_enabled {
+        calendar_status = "off";
     } else if credential_path.is_file() {
         let ip = api_connection
             .and_then(|value| read_string(Some(value), "ip"))
@@ -842,7 +966,21 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     Ok(SaveResult { calendar_status: calendar_status.into() })
 }
 
+#[cfg(test)]
+fn assert_fixture_path(path: &Path) -> Result<(), String> {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixtures = workspace.join(".test-run").canonicalize().map_err(|e| e.to_string())?;
+    let resolved = path.canonicalize().map_err(|e| e.to_string())?;
+    if !resolved.starts_with(&fixtures) {
+        return Err("Native tests refuse to access profiles or credentials outside workspace .test-run fixtures.".into());
+    }
+    reject_reparse_component(path)?;
+    Ok(())
+}
+
 fn save_paths(install: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+    #[cfg(test)]
+    assert_fixture_path(install)?;
     ensure_not_release_path(install)?;
     let blob = install.join("blob");
     let data = blob.join("data.json");
@@ -874,11 +1012,16 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "fontFamily": settings.font_family,
         "codeFontFamily": settings.code_font_family,
         "accentColor": accent,
+        "includeSelections": settings.include_selections,
         "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
         "tabHoverEffect": settings.tab_hover_effect,
         "linkHoverEffect": settings.link_hover_effect,
         "objectMentionHoverEffect": settings.object_mention_hover_effect,
+        "kanbanViewStyle": settings.kanban_view_style,
+        "collapsedCategories": settings.collapsed_categories,
+        "calendarColorsEnabled": settings.calendar_colors_enabled,
+        "settingsV21Enabled": settings.settings_v21_enabled,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -894,6 +1037,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "fontFamily": settings.font_family,
             "codeFontFamily": settings.code_font_family,
             "accentColor": accent,
+            "includeSelections": settings.include_selections,
             "accentMode": settings.accent_mode,
             "accentPreset": settings.accent_preset,
             "bannerImage": settings.banner_image,
@@ -901,6 +1045,10 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "tabHoverEffect": settings.tab_hover_effect,
             "linkHoverEffect": settings.link_hover_effect,
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
+            "kanbanViewStyle": settings.kanban_view_style,
+            "collapsedCategories": settings.collapsed_categories,
+            "calendarColorsEnabled": settings.calendar_colors_enabled,
+        "settingsV21Enabled": settings.settings_v21_enabled,
         }
     });
 }
@@ -913,6 +1061,8 @@ fn serialize_data(data: &Value) -> Result<Vec<u8>, String> {
 }
 
 fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
+    #[cfg(test)]
+    assert_fixture_path(install)?;
     let credential = install.join("blob/credentials/anytype-api-key.dpapi");
     reject_reparse_component(&credential)?;
     let encrypted = fs::read_to_string(&credential)
@@ -921,6 +1071,9 @@ fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
 }
 
 fn validate_settings(mut settings: SettingsDraft) -> Result<SettingsDraft, String> {
+    if !matches!(settings.kanban_view_style.as_str(), "default" | "balanced" | "compact") {
+        return Err("Kanban view style must be Default, Balanced, or Compact.".into());
+    }
     settings.font_family = validate_font_family(&settings.font_family, "Interface font")?;
     settings.code_font_family = validate_font_family(&settings.code_font_family, "Code font")?;
     settings.accent_color = settings.accent_color.trim().to_string();
@@ -1014,6 +1167,14 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         .filter(|value| css::validate_banner_image(value).is_ok())
         .unwrap_or_default();
 
+    let kanban_view_style = read_string(local, "kanbanViewStyle")
+        .or_else(|| read_string(Some(normalized), "kanbanViewStyle"))
+        .filter(|value| matches!(value.as_str(), "default" | "balanced" | "compact"))
+        .unwrap_or_else(default_kanban_style);
+    let collapsed_categories = read_bool(local, "collapsedCategories")
+        .or_else(|| read_bool(Some(normalized), "collapsedCategories"))
+        .unwrap_or(false);
+
     let local_mode = read_string(local, "accentMode");
     let local_preset = read_string(local, "accentPreset");
     let (accent_mode, accent_preset, accent_color) = match local_mode.as_deref() {
@@ -1033,11 +1194,22 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         accent_color,
         accent_mode,
         accent_preset,
+        include_selections: read_bool(local, "includeSelections")
+            .or_else(|| read_bool(Some(normalized), "includeSelections"))
+            .unwrap_or(true),
         banner_image,
         reduced_motion,
         tab_hover_effect,
         link_hover_effect,
         object_mention_hover_effect,
+        kanban_view_style,
+        collapsed_categories,
+        settings_v21_enabled: read_bool(local, "settingsV21Enabled")
+            .or_else(|| read_bool(Some(normalized), "settingsV21Enabled"))
+            .unwrap_or(false),
+        calendar_colors_enabled: read_bool(local, "calendarColorsEnabled")
+            .or_else(|| read_bool(Some(normalized), "calendarColorsEnabled"))
+            .unwrap_or(true),
     }
 }
 
@@ -1182,6 +1354,8 @@ fn non_empty_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 fn resolve_install_directory(app_data: &Path) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    assert_fixture_path(app_data.parent().unwrap_or(app_data))?;
     let saved = updater::saved_install_directory(&updater::preferences_path(app_data))?;
     resolve_install_directory_with_saved(
         app_data,
@@ -1449,7 +1623,13 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            kanban::load_kanban_formulas,
+            kanban::discover_kanban_views,
+            kanban::evaluate_kanban_formula,
+            kanban::save_kanban_formulas,
+            kanban::refresh_kanban_results,
             reveal_api_key,
+            get_calendar_api_availability,
             configure_connection,
             get_app_state,
             save_settings,
@@ -1460,8 +1640,10 @@ fn main() {
             get_release_note_history_image,
             get_anytype_version,
             get_release_note_image,
+            get_release_note_video,
+            get_release_note_history_video,
             acknowledge_release_notes,
-            open_release_note_link,
+            open_external_link,
             save_updater_settings,
             recover_install_directory,
             select_anytype_folder,
@@ -1486,10 +1668,27 @@ fn main() {
             }
         })
         .setup(|app| {
+            let main_window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == "main")
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "The main Settings window is not configured.",
+                    )
+                })?;
+            let main_window = tauri::WebviewWindowBuilder::from_config(app, main_window_config)?
+                .on_navigation(handle_webview_navigation)
+                .on_new_window(|url, _features| {
+                    handle_webview_new_window(&url);
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
             let theme = read_anytype_theme(&app_data_directory().join("devconfig.json"));
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_theme(native_theme(&theme))?;
-            }
+            main_window.set_theme(native_theme(&theme))?;
             if consume_pending_onboarding_request() {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
@@ -1518,11 +1717,16 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
+            include_selections: true,
             banner_image: String::new(),
             reduced_motion: false,
             tab_hover_effect: false,
             link_hover_effect: false,
             object_mention_hover_effect: false,
+            kanban_view_style: default_kanban_style(),
+            collapsed_categories: false,
+            calendar_colors_enabled: true,
+            settings_v21_enabled: false,
         }
     }
 }
@@ -1533,6 +1737,108 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_tests_reject_real_profile_paths_before_credential_access() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        assert!(assert_fixture_path(workspace).is_err());
+        assert!(assert_fixture_path(&workspace.join(".test-run")).is_ok());
+        assert!(save_paths(workspace).unwrap_err().contains("outside workspace"));
+        assert!(read_saved_api_key_at(workspace).unwrap_err().contains("outside workspace"));
+    }
+
+    #[test]
+    fn settings_v21_defaults_and_round_trip() {
+        assert!(!SettingsDraft::default().settings_v21_enabled);
+        assert!(!settings_from_data(&json!({"settings": {}})).settings_v21_enabled);
+        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("settingsV21Enabled");
+        assert!(!serde_json::from_value::<SettingsDraft>(legacy).unwrap().settings_v21_enabled);
+        for enabled in [false, true] {
+            let settings = SettingsDraft { settings_v21_enabled: enabled, ..SettingsDraft::default() };
+            let mut data = json!({"unrelated": "keep"});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            assert_eq!(settings_from_data(&data).settings_v21_enabled, enabled);
+            assert_eq!(data["settings"]["settingsV21Enabled"], enabled);
+            assert_eq!(data["settingsV2"]["settings"]["settingsV21Enabled"], enabled);
+            assert_eq!(data["unrelated"], "keep");
+        }
+        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":"invalid"}})).settings_v21_enabled);
+        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":true},"settingsV2":{"settings":{"settingsV21Enabled":false}}})).settings_v21_enabled);
+    }
+
+    #[test]
+    fn calendar_settings_default_and_round_trip() {
+        assert!(SettingsDraft::default().calendar_colors_enabled);
+        assert!(settings_from_data(&json!({"settings": {}})).calendar_colors_enabled);
+        let mut old = serde_json::to_value(SettingsDraft::default()).unwrap();
+        old.as_object_mut().unwrap().remove("calendarColorsEnabled");
+        assert!(serde_json::from_value::<SettingsDraft>(old).unwrap().calendar_colors_enabled);
+        for enabled in [false, true] {
+            let settings = SettingsDraft { calendar_colors_enabled: enabled, ..SettingsDraft::default() };
+            let mut data = json!({"unrelated": "keep"});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            assert_eq!(settings_from_data(&data).calendar_colors_enabled, enabled);
+            assert_eq!(data["settings"]["calendarColorsEnabled"], enabled);
+            assert_eq!(data["unrelated"], "keep");
+        }
+    }
+
+    #[test]
+    fn selection_settings_migrate_and_preserve_explicit_values() {
+        assert!(SettingsDraft::default().include_selections);
+        assert!(settings_from_data(&json!({"settings": {}})).include_selections);
+        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("includeSelections");
+        assert!(serde_json::from_value::<SettingsDraft>(legacy).unwrap().include_selections);
+        for enabled in [false, true] {
+            let draft = SettingsDraft { include_selections: enabled, ..SettingsDraft::default() };
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &draft);
+            assert_eq!(data["settings"]["includeSelections"], enabled);
+            assert_eq!(data["settingsV2"]["settings"]["includeSelections"], enabled);
+            assert_eq!(settings_from_data(&data).include_selections, enabled);
+            assert_eq!(serde_json::from_value::<SettingsDraft>(serde_json::to_value(draft).unwrap()).unwrap().include_selections, enabled);
+        }
+        assert!(!settings_from_data(&json!({"settings": {"includeSelections": false}})).include_selections);
+        assert!(!settings_from_data(&json!({"settings": {"includeSelections": true}, "settingsV2": {"settings": {"includeSelections": false}}})).include_selections);
+    }
+
+    #[test]
+    fn kanban_settings_default_validate_and_restore() {
+        let defaults = SettingsDraft::default();
+        assert_eq!(defaults.kanban_view_style, "default");
+        assert!(!defaults.collapsed_categories);
+        for style in ["default", "balanced", "compact"] {
+            let settings = SettingsDraft {
+                accent_mode: "custom".into(),
+                accent_preset: String::new(),
+                kanban_view_style: style.into(),
+                collapsed_categories: true,
+                ..SettingsDraft::default()
+            };
+            assert!(validate_settings(settings.clone()).is_ok());
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            let restored = settings_from_data(&data);
+            assert_eq!(restored.kanban_view_style, style);
+            assert!(restored.collapsed_categories);
+        }
+        let legacy = settings_from_data(&json!({"settings": {"kanbanViewStyle": "balanced", "collapsedCategories": true}}));
+        assert_eq!(legacy.kanban_view_style, "balanced");
+        assert!(legacy.collapsed_categories);
+        let invalid = settings_from_data(&json!({"settingsV2": {"settings": {"kanbanViewStyle": "bad", "collapsedCategories": "true"}}}));
+        assert_eq!(invalid.kanban_view_style, "default");
+        assert!(!invalid.collapsed_categories);
+        assert!(validate_settings(SettingsDraft { kanban_view_style: "bad".into(), ..SettingsDraft::default() }).is_err());
+        let old_draft = serde_json::to_value(SettingsDraft::default()).unwrap();
+        let mut old_draft = old_draft.as_object().unwrap().clone();
+        old_draft.remove("kanbanViewStyle");
+        old_draft.remove("collapsedCategories");
+        let restored: SettingsDraft = serde_json::from_value(Value::Object(old_draft)).unwrap();
+        assert_eq!(restored.kanban_view_style, "default");
+        assert!(!restored.collapsed_categories);
+    }
 
     #[test]
     fn reads_bom_prefixed_legacy_settings_json() {
@@ -1886,12 +2192,42 @@ mod tests {
     }
 
     #[test]
-    fn release_note_links_are_limited_to_plain_http_and_https_urls() {
-        assert_eq!(validate_release_note_link("https://example.com/a?b=c").unwrap().scheme(), "https");
-        assert!(validate_release_note_link("javascript:alert(1)").is_err());
-        assert!(validate_release_note_link("file:///C:/secret.txt").is_err());
-        assert!(validate_release_note_link("https://user@example.com/").is_err());
-        assert!(validate_release_note_link("https://").is_err());
+    fn external_links_are_limited_to_plain_http_and_https_urls() {
+        assert_eq!(
+            validate_external_link("https://example.com/a?b=c")
+                .unwrap()
+                .scheme(),
+            "https"
+        );
+        assert!(validate_external_link("javascript:alert(1)").is_err());
+        assert!(validate_external_link("file:///C:/secret.txt").is_err());
+        assert!(validate_external_link("https://user@example.com/").is_err());
+        assert!(validate_external_link("https://").is_err());
+        assert!(validate_external_link("https://tauri.localhost/").is_err());
+    }
+
+    #[test]
+    fn local_navigation_only_allows_the_settings_document() {
+        for value in [
+            "tauri://localhost/",
+            "tauri://localhost/index.html#release-notes",
+            "http://tauri.localhost/index.html?tab=docs#intro",
+            "https://tauri.localhost/",
+        ] {
+            assert!(is_local_app_url(&url::Url::parse(value).unwrap()), "{value}");
+        }
+
+        for value in [
+            "https://user@tauri.localhost/",
+            "http://tauri.localhost:8080/",
+            "https://tauri.localhost/docs.md",
+            "https://tauri.localhost.evil.example/",
+            "http://ipc.localhost/",
+            "https://localhost/",
+            "tauri://localhost/docs.md",
+        ] {
+            assert!(!is_local_app_url(&url::Url::parse(value).unwrap()), "{value}");
+        }
     }
 
     #[test]

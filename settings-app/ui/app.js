@@ -22,6 +22,7 @@
   const hueInput = el("accent-hue");
   const saturationInput = el("accent-saturation");
   const brightnessInput = el("accent-brightness");
+  const includeSelections = el("include-selections");
   const nativeAccent = el("native-accent");
   const swatch = el("accent-swatch");
   const accentValue = el("accent-value");
@@ -35,45 +36,40 @@
   const tabHoverEffect = el("tab-hover-effect");
   const linkHoverEffect = el("link-hover-effect");
   const objectMentionHoverEffect = el("object-mention-hover-effect");
+  const kanbanViewStyle = el("kanban-view-style");
+  const kanbanSelect = el("kanban-select");
+  const calendarColorsEnabled = el("calendar-colors-enabled");
+  let calendarApiAvailability = "checking";
+  let calendarApiRequest = 0;
+  const collapsedCategories = el("collapsed-categories");
   const preferencesNav = el("preferences-nav");
   const accessibilityNav = el("accessibility-nav");
   const advancedNav = el("advanced-nav");
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
-  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab")];
-  function updateAdvancedTabIndicator() {
-    if (advancedPage.hidden) return;
-    const tab = advancedTabs.find((item) => item.getAttribute("aria-selected") === "true");
-    if (!tab || !tab.offsetWidth) return;
-    advancedPage.style.setProperty("--advanced-tab-left", `${tab.offsetLeft}px`);
-    advancedPage.style.setProperty("--advanced-tab-width", `${tab.offsetWidth}px`);
-    tab.parentElement.classList.add("indicator-ready");
+  const kanbanPicker = window.BlobUI.Components.Picker({ root: kanbanSelect });
+  function closeKanbanStyleMenu(restoreFocus = false) { kanbanPicker.close(restoreFocus); }
+  function syncKanbanStyleSelection(value) {
+    const selected = ["default", "balanced", "compact"].includes(value) ? value : "default";
+    kanbanPicker.setValue(selected);
+    return selected;
   }
-  window.addEventListener("resize", updateAdvancedTabIndicator);
-  if (document.fonts) document.fonts.ready.then(updateAdvancedTabIndicator);
-  function selectAdvancedTab(index) {
-    advancedTabs.forEach((tab, position) => {
-      const selected = position === index;
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-      el(tab.getAttribute("aria-controls")).hidden = !selected;
-    });
-    if (index !== 0) resetAdvancedVisibility();
-    updateAdvancedTabIndicator();
-  }
-  advancedTabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => selectAdvancedTab(index));
-    tab.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const next = event.key === "Home" ? 0 : event.key === "End" ? advancedTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + advancedTabs.length) % advancedTabs.length;
-      selectAdvancedTab(next);
-      advancedTabs[next].focus();
-    });
+  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
+  const advancedTabController = window.BlobUI.Components.Tabs({
+    container: el("advanced-tabs"),
+    buttons: advancedTabs,
+    panels: [el("advanced-api-panel"), el("advanced-app-panel"), el("advanced-experiments-panel")],
+    onSelect(index) { if (index !== 0) resetAdvancedVisibility(); },
   });
+  function selectAdvancedTab(index) { advancedTabController.select(index); }
   const installDirectory = el("install-directory");
   const startOnLogin = el("start-on-login");
+  const autoplayVideos = el("autoplay-videos");
+  function applyAutoplay(value) {
+    if (autoplayVideos) autoplayVideos.checked = value !== false;
+    window.BlobUI.VideoPlayer?.setAutoplay(value !== false);
+  }
   const automaticUpdatesEnabled = el("automatic-updates-enabled");
   const automaticChecksEnabled = el("automatic-checks-enabled");
   const checkUpdatesButton = el("check-updates-button");
@@ -86,14 +82,14 @@
   const apiKeyRemovalClose = el("api-key-removal-close");
   const apiKeyRemovalUndo = el("api-key-removal-undo");
   const apiKeyRemovalSave = el("api-key-removal-save");
-  const apiKeyRemovalModal = window.BlobUI.createModalController({
+  const apiKeyRemovalModal = window.BlobUI.Components.Modal({
     backdrop: apiKeyRemovalBackdrop,
     dialog: el("api-key-removal-dialog"),
     initialFocus: apiKeyRemovalClose,
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const discardConfirmationModal = window.BlobUI.createModalController({
+  const discardConfirmationModal = window.BlobUI.Components.Modal({
     backdrop: el("discard-confirmation-backdrop"),
     dialog: el("discard-confirmation-dialog"),
     initialFocus: el("discard-confirmation-close"),
@@ -104,6 +100,9 @@
   const releaseNotesPrevious = el("release-notes-previous");
   const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
+  let releaseNotesCurrentVersion = null;
+  let releaseNotesLatestVersion = null;
+  let releaseNotesLatestVersionRequest = 0;
   let displayedReleaseNotes = null;
   let previousReleaseNotes = null;
   let newerReleaseNotes = [];
@@ -113,15 +112,20 @@
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
   let releaseNotesFailed = false;
-  const releaseNotesModal = window.BlobUI.createModalController({
+  const releaseNotesModal = window.BlobUI.Components.Modal({
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
     initialFocus: el("release-notes-dialog"),
     fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
+      window.BlobUI.VideoPlayer?.destroyTree(releaseNotesContent);
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
+      releaseNotesCurrentVersion = null;
+      releaseNotesLatestVersion = null;
+      releaseNotesLatestVersionRequest += 1;
+      updateReleaseNotesHeading("");
       if (!version || !acknowledgeReleaseNotesOnClose) {
         acknowledgeReleaseNotesOnClose = true;
         return;
@@ -138,12 +142,12 @@
       });
     },
   });
-  const helpErrorModal = window.BlobUI.createModalController({
+  const helpErrorModal = window.BlobUI.Components.Modal({
     backdrop: el("help-error-backdrop"), dialog: el("help-error-dialog"),
     initialFocus: el("help-error-close"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const keybindModal = window.BlobUI.createModalController({
+  const keybindModal = window.BlobUI.Components.Modal({
     backdrop: el("keybinds-backdrop"), dialog: el("keybinds-dialog"),
     initialFocus: () => el("keybind-list").querySelector("button"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
@@ -184,7 +188,7 @@
   }
 
   function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible, hooks = {}) {
-    visibilityFields[inputId] = window.VisibilityField.bind({
+    visibilityFields[inputId] = window.BlobUI.Components.Visibility({
       input: el(inputId),
       button: el(buttonId),
       field: el(fieldId),
@@ -243,37 +247,16 @@
     editSession.discard();
   };
 
+  const scrollbars = [];
   function setupScrollbar(container, contentSelector) {
-    let hideTimer = null;
-    function update() {
-      const canScroll = container.scrollHeight > container.clientHeight;
-      container.classList.toggle("has-overflow", canScroll);
-      if (canScroll) return;
-      container.classList.remove("is-scrolling");
-      if (hideTimer !== null) {
-        window.clearTimeout(hideTimer);
-        hideTimer = null;
-      }
-    }
-    container.addEventListener("scroll", () => {
-      update();
-      if (!container.classList.contains("has-overflow")) return;
-      container.classList.add("is-scrolling");
-      if (hideTimer !== null) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(() => {
-        container.classList.remove("is-scrolling");
-        hideTimer = null;
-      }, 900);
-    }, { passive: true });
-    if (typeof ResizeObserver === "function") {
-      const observer = new ResizeObserver(update);
-      observer.observe(container);
-      const content = container.querySelector(contentSelector);
-      if (content) observer.observe(content);
-    }
-    update();
-    return update;
+    const controller = window.BlobUI.Scrollbar.attach(container, contentSelector);
+    scrollbars.push(controller);
+    return controller.update;
   }
+  window.addEventListener("unload", () => scrollbars.forEach(controller => controller.destroy()));
+
+  setupScrollbar(el("sidebar-nav"), ".nav-item");
+  setupScrollbar(el("keybinds-content"), "#keybind-list");
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
   const updateReleaseNotesScrollbar = setupScrollbar(el("release-notes-dialog"), "#release-notes-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
@@ -473,13 +456,14 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled;
   }
 
   function updaterSettingsEqual(left, right) {
     return !!left && !!right
       && left.installDirectory === right.installDirectory
       && left.startOnLogin === right.startOnLogin
+      && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled;
   }
@@ -492,6 +476,7 @@
     return {
       installDirectory: displayDirectory,
       startOnLogin: !!(settings && settings.startOnLogin),
+      autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
     };
@@ -502,6 +487,7 @@
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
     startOnLogin.checked = updaterDraft.startOnLogin;
+    applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     updaterSettingsLoaded = true;
@@ -590,9 +576,32 @@
     checkForUpdates(true);
   }
 
+  function updateReleaseNotesHeading(version) {
+    const currentTag = el("release-notes-current-tag");
+    const latestTag = el("release-notes-latest-tag");
+    el("release-notes-version").textContent = version ? "Version " + version : "";
+    currentTag.hidden = !version || version !== releaseNotesCurrentVersion;
+    latestTag.hidden = !version || version !== releaseNotesLatestVersion;
+  }
+
+  function loadLatestReleaseNotesVersion() {
+    const request = ++releaseNotesLatestVersionRequest;
+    releaseNotesLatestVersion = null;
+    updateReleaseNotesHeading(displayedReleaseNotes && displayedReleaseNotes.version);
+    invoke("get_latest_release_notes").then((notes) => {
+      if (request !== releaseNotesLatestVersionRequest || !notes || typeof notes.version !== "string") return;
+      releaseNotesLatestVersion = notes.version;
+      updateReleaseNotesHeading(displayedReleaseNotes && displayedReleaseNotes.version);
+    }).catch(() => {});
+  }
+
   async function renderReleaseNotes(notes, historical = false) {
     historical = historical || !notes.version.startsWith("Dev+");
-    const manifest = window.BlobUI.Markdown.parseImageManifest(notes.imageManifest);
+    updateReleaseNotesHeading(notes.version);
+    const mediaManifest = window.BlobUI.Markdown.parseMediaManifest
+      ? window.BlobUI.Markdown.parseMediaManifest(notes.imageManifest)
+      : { images: window.BlobUI.Markdown.parseImageManifest(notes.imageManifest), videos: {} };
+    const manifest = mediaManifest.images;
     const entries = Object.entries(manifest);
     const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
       const args = { source: image.src };
@@ -603,8 +612,17 @@
     }));
     const images = Object.create(null);
     for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
-    releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
-    el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
+    const videos = Object.create(null);
+    const videoResults = await Promise.allSettled(Object.entries(mediaManifest.videos).map(async ([alias, video]) => {
+      videos[alias] = { alt: video.alt };
+      const args = { source: video.src };
+      videos[alias].src = historical
+        ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })
+        : await invoke("get_release_note_video", args);
+    }));
+    if (window.BlobUI.Markdown.mount) window.BlobUI.Markdown.mount(releaseNotesContent, notes.markdown, { images, videos });
+    else releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
+    el("release-notes-image-warning").hidden = [...results, ...videoResults].every((result) => result.status === "fulfilled");
     el("release-notes-dialog").scrollTop = 0;
     updateReleaseNotesScrollbar();
   }
@@ -709,14 +727,19 @@
         throw new TypeError("The release notes payload is incomplete.");
       }
       releaseNotesVersion = String(notes.version || "");
+      releaseNotesCurrentVersion = releaseNotesVersion;
+      releaseNotesLatestVersion = null;
       newerReleaseNotes = [];
       await displayReleaseNotes(notes);
       releaseNotesFailed = false;
       releaseNotesModal.open();
       if (!releaseNotesModal.isOpen()) throw new Error("The release notes dialog could not be opened.");
+      loadLatestReleaseNotesVersion();
       return true;
     } catch (error) {
       releaseNotesVersion = null;
+      releaseNotesCurrentVersion = null;
+      releaseNotesLatestVersion = null;
       releaseNotesLoaded = false;
       releaseNotesFailed = true;
       setStatus("Could not display the release notes. " + (error.message || String(error)), "error");
@@ -735,6 +758,8 @@
         throw new TypeError("The latest changelog is incomplete.");
       }
       releaseNotesVersion = notes.version;
+      releaseNotesCurrentVersion = String((updaterState && updaterState.currentVersion) || "");
+      releaseNotesLatestVersion = notes.version;
       newerReleaseNotes = [];
       await displayReleaseNotes(notes);
       acknowledgeReleaseNotesOnClose = false;
@@ -889,6 +914,7 @@
   }
   function renderShortcutBindings() {
     const list = el("keybind-list");
+    window.BlobUI.Components.destroyTree(list);
     list.replaceChildren();
     shortcutActions.forEach(([action, label]) => {
       const binding = shortcutBindings.find((item) => item.action === action);
@@ -898,7 +924,7 @@
       name.className = "keybind-label";
       name.id = `keybind-label-${action}`;
       name.textContent = label;
-      const button = document.createElement("button");
+      const button = window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
       button.className = "keybind-button";
       button.type = "button";
       button.dataset.shortcutAction = action;
@@ -919,7 +945,6 @@
           button.append(keycap);
         });
       }
-      button.addEventListener("click", () => beginShortcutCapture(action));
       row.append(name, button);
       list.append(row);
     });
@@ -999,6 +1024,7 @@
 
   function readEditSnapshot() {
     return {
+      formulas: window.BlobUI.FormulaPage.read(),
       settings: draft ? { ...draft } : null,
       updaterSettings: updaterDraft ? { ...updaterDraft } : null,
       connection: {
@@ -1025,6 +1051,7 @@
 
   function editSnapshotsEqual(left, right) {
     if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    if (JSON.stringify(left.formulas) !== JSON.stringify(right.formulas)) return false;
     if (left.updaterSettings || right.updaterSettings) {
       if (!updaterSettingsEqual(left.updaterSettings, right.updaterSettings)) return false;
     }
@@ -1049,6 +1076,7 @@
 
   function restoreEditSnapshot(snapshot) {
     if (!snapshot || !snapshot.settings || !snapshot.connection) return;
+    window.BlobUI.FormulaPage.restore(snapshot.formulas);
 
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
@@ -1056,6 +1084,7 @@
       updaterDraft = { ...snapshot.updaterSettings };
       installDirectory.value = updaterDraft.installDirectory;
       startOnLogin.checked = updaterDraft.startOnLogin;
+      applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     }
@@ -1107,18 +1136,25 @@
 
   function updateSaveButton() {
     const dirty = editSession.isDirty();
+    const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate();
+    if (settingsLocked || !draft) closeKanbanStyleMenu();
     saveButton.hidden = !draft || !dirty;
-    saveButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
+    saveButton.disabled = settingsLocked || bannerReadPending || !draft || (!window.appReady && !prototypeDirty) || !dirty;
     discardButton.hidden = !draft || !dirty;
-    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady || !dirty;
+    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !dirty;
     document.querySelectorAll("input").forEach((control) => {
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
+    window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
+    el("settings-v21-enabled").disabled = settingsLocked || !draft;
+    calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
+    kanbanViewStyle.disabled = settingsLocked || !draft;
+    if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, startOnLogin, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, startOnLogin, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
@@ -1142,7 +1178,7 @@
     const font = fontFamily.value.trim();
     const codeFont = codeFontFamily.value.trim();
     const validFamily = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
-    const interfaceFamily = validFamily.test(font) ? font : "Libron";
+    const interfaceFamily = validFamily.test(font) ? font : "Inter";
     const codeFamily = validFamily.test(codeFont) ? codeFont : "Consolas";
     root.style.setProperty("--font-interface", '"' + interfaceFamily + '", "Segoe UI", sans-serif');
     root.style.setProperty("--font-code", '"' + codeFamily + '", "Cascadia Code", monospace');
@@ -1151,29 +1187,64 @@
   function assignDraftToForm(settings) {
     const accent = normalizeForUi(settings);
     draft = {
-      fontFamily: String(settings.fontFamily || "Libron"),
+      fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      includeSelections: settings.includeSelections !== false,
       bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,
       tabHoverEffect: settings.tabHoverEffect === true,
       linkHoverEffect: settings.linkHoverEffect === true,
       objectMentionHoverEffect: settings.objectMentionHoverEffect === true,
+      kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
+      collapsedCategories: settings.collapsedCategories === true,
+      calendarColorsEnabled: settings.calendarColorsEnabled !== false,
+      settingsV21Enabled: settings.settingsV21Enabled === true,
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
     accentValue.value = draft.accentColor;
     reducedMotion.checked = draft.reducedMotion;
     root.dataset.reducedMotion = String(draft.reducedMotion);
+    includeSelections.checked = draft.includeSelections;
+    root.dataset.includeSelections = String(draft.includeSelections);
     tabHoverEffect.checked = draft.tabHoverEffect;
     linkHoverEffect.checked = draft.linkHoverEffect;
     objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
+    closeKanbanStyleMenu();
+    syncKanbanStyleSelection(draft.kanbanViewStyle);
+    collapsedCategories.checked = draft.collapsedCategories;
+    calendarColorsEnabled.checked = draft.calendarColorsEnabled;
+    el("settings-v21-enabled").checked = draft.settingsV21Enabled;
+    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
     initialDraft = { ...draft };
+    updateSaveButton();
+  }
+
+  async function refreshCalendarApiAvailability() {
+    const request = ++calendarApiRequest;
+    calendarApiAvailability = "checking";
+    const help = el("calendar-colors-help");
+    help.textContent = "Checking the Anytype API connection...";
+    updateSaveButton();
+    try {
+      const status = await invoke("get_calendar_api_availability");
+      if (request !== calendarApiRequest) return;
+      calendarApiAvailability = ["available", "missing"].includes(status) ? status : "unavailable";
+    } catch (_) {
+      if (request !== calendarApiRequest) return;
+      calendarApiAvailability = "unavailable";
+    }
+    help.textContent = calendarApiAvailability === "available"
+      ? "Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes."
+      : calendarApiAvailability === "missing"
+        ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
+        : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
     updateSaveButton();
   }
 
@@ -1186,6 +1257,7 @@
       applyTheme(state.theme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       assignAdvancedConnection(state);
+      void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
       if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
       resetVisibilityField("connection-port");
@@ -1195,6 +1267,7 @@
     }
 
     await loadUpdaterState();
+    await window.BlobUI.FormulaPage.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
       setStatus(stateError.message || String(stateError), "error");
@@ -1232,6 +1305,7 @@
     applyTheme(state.theme);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
     assignAdvancedConnection(state);
+    void refreshCalendarApiAvailability();
     assignDraftToForm(state.settings || {});
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
@@ -1344,25 +1418,33 @@
   }
 
   function showSettingsPage(page) {
+    closeKanbanStyleMenu();
+    const isFormulas = page === "formulas";
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    preferencesPage.hidden = isAccessibility || isAdvanced;
+    if (!isAccessibility && !isAdvanced && !isFormulas && draft) void refreshCalendarApiAvailability();
+    preferencesPage.hidden = isAccessibility || isAdvanced || isFormulas;
+    el("formulas-page").hidden = !isFormulas;
+    el("formulas-nav").classList.toggle("active", isFormulas);
+    el("formulas-nav").setAttribute("aria-current", isFormulas ? "page" : "false");
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
-    if (isAdvanced) updateAdvancedTabIndicator();
-    pageTitle.textContent = isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
-    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced);
+    if (isAdvanced) advancedTabController.refresh();
+    else if (!isAccessibility && !isFormulas) window.BlobUI.SettingsV21?.refreshTabs();
+    pageTitle.textContent = isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isFormulas);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
-    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced ? "page" : "false");
+    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced && !isFormulas ? "page" : "false");
     accessibilityNav.setAttribute("aria-current", isAccessibility ? "page" : "false");
     advancedNav.setAttribute("aria-current", isAdvanced ? "page" : "false");
     pageContent.scrollTop = 0;
     updatePageScrollbar();
+    if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
   preferencesNav.addEventListener("click", () => showSettingsPage("preferences"));
@@ -1406,6 +1488,10 @@
   }
 
   function saveStatus(result, connectionOnly) {
+    if (result.calendarStatus === "off") {
+      setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar Colors are off.");
+      return;
+    }
     if (result.calendarStatus === "disabled") {
       setStatus(connectionOnly
         ? "Connection saved. Press Ctrl+R in Anytype to apply. API features are disabled."
@@ -1436,7 +1522,25 @@
   }
 
   async function save(options = {}) {
-    if (!draft || saveBusy || isInstallingUpdate() || !window.appReady) return;
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    // Let the formula page report missing connection/setup requirements inline.
+    if (!window.appReady) {
+      const formulas = window.BlobUI.FormulaPage.read();
+      if (JSON.stringify(formulas) === JSON.stringify(editSession.getBaseline().formulas)) return;
+      saveBusy = true;
+      updateSaveButton();
+      try {
+        await window.BlobUI.FormulaPage.save(invoke, formulas);
+        editSession.commit({ formulas });
+        setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
+      } catch (_) {
+        setStatus("Kanban formulas could not be saved. Your edits are kept. Review the formula page.", "error", false);
+      } finally {
+        saveBusy = false;
+        updateSaveButton();
+      }
+      return;
+    }
     if (bannerReadPending) {
       setStatus("Wait for the selected banner image to finish loading before saving.", "warning");
       return;
@@ -1448,6 +1552,7 @@
     if (updaterDraft) {
       updaterDraft.installDirectory = installDirectory.value;
       updaterDraft.startOnLogin = startOnLogin.checked;
+      updaterDraft.autoplayVideos = autoplayVideos.checked;
       updaterDraft.automaticUpdatesEnabled = automaticUpdatesEnabled.checked;
       updaterDraft.automaticChecksEnabled = automaticChecksEnabled.checked;
     }
@@ -1473,6 +1578,8 @@
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
     const settingsChanged = !settingsEqual(draft, initialDraft);
+    const submittedFormulas = window.BlobUI.FormulaPage.read();
+    const formulasChanged = JSON.stringify(submittedFormulas) !== JSON.stringify(editSession.getBaseline().formulas);
     const updaterSettingsChanged = !!updaterDraft && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
     if (updaterSettingsChanged) {
       const directory = installDirectory.value.trim();
@@ -1516,19 +1623,19 @@
       return;
     }
 
-    if (updaterPathChanged && (settingsChanged || connectionChanged)) {
+    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged)) {
       setStatus("Save or undo your appearance and Anytype API changes before changing the Anytype data folder.", "warning", false);
       return;
     }
 
-    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && el("advanced-experiments-panel").hidden && settingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
       openKeyRemovalConfirmation();
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -1548,6 +1655,7 @@
       : "Saving your settings and rebuilding custom.css…", "working");
     let connectionSaved = false;
     let generalSettingsSaved = false;
+    let formulasSaved = false;
     let updaterSettingsSaved = false;
     try {
       let result = null;
@@ -1556,6 +1664,12 @@
         connectionSaved = true;
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
+        window.BlobUI.FormulaPage.reload();
+      }
+      if (formulasChanged) {
+        await window.BlobUI.FormulaPage.save(invoke, submittedFormulas);
+        editSession.commit({ formulas: submittedFormulas });
+        formulasSaved = true;
       }
       if (settingsChanged || options.forceRebuild) {
         result = await invoke("save_settings", { settings: submittedSettings });
@@ -1583,6 +1697,8 @@
         setStatus(updaterPathChanged
           ? "App Settings saved. Loaded settings from the selected Anytype data folder."
           : "App Settings saved.", "info");
+      } else if (formulasChanged && !connectionChanged) {
+        setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else {
         saveStatus(result || { calendarStatus: "disabled" }, true);
       }
@@ -1590,11 +1706,12 @@
       const message = error.message || String(error);
       setStatus(connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
-        : connectionSaved || generalSettingsSaved || updaterSettingsSaved
+        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
           : message, "error");
     } finally {
       saveBusy = false;
+      void refreshCalendarApiAvailability();
       updateSaveButton();
     }
   }
@@ -1710,19 +1827,34 @@
     markDirty();
   });
   for (const [control, property] of [
+    [includeSelections, "includeSelections"],
     [reducedMotion, "reducedMotion"],
     [tabHoverEffect, "tabHoverEffect"],
     [linkHoverEffect, "linkHoverEffect"],
     [objectMentionHoverEffect, "objectMentionHoverEffect"],
+    [collapsedCategories, "collapsedCategories"],
+    [calendarColorsEnabled, "calendarColorsEnabled"],
   ]) {
     control.addEventListener("change", () => {
       if (!draft || saveBusy || isInstallingUpdate()) return;
+      if (property === "calendarColorsEnabled" && calendarColorsEnabled.disabled) {
+        control.checked = draft[property];
+        return;
+      }
       draft[property] = control.checked;
       if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
+      if (property === "includeSelections") root.dataset.includeSelections = String(draft.includeSelections);
       markDirty();
     });
   }
   let folderPickerBusy = false;
+  kanbanViewStyle.addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!["default", "balanced", "compact"].includes(kanbanViewStyle.value)) return;
+    syncKanbanStyleSelection(kanbanViewStyle.value);
+    draft.kanbanViewStyle = kanbanViewStyle.value;
+    markDirty();
+  });
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
@@ -1764,12 +1896,14 @@
   });
   for (const [control, property] of [
     [startOnLogin, "startOnLogin"],
+    [autoplayVideos, "autoplayVideos"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
-    control.addEventListener("change", () => {
+    control?.addEventListener("change", () => {
       if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
       updaterDraft[property] = control.checked;
+      if (property === "autoplayVideos") applyAutoplay(control.checked);
       markDirty();
     });
   }
@@ -1778,17 +1912,13 @@
     else checkForUpdates(false);
   });
   updateNowButton.addEventListener("click", () => applyUpdate());
-  releaseNotesContent.addEventListener("click", (event) => {
-    const link = event.target && typeof event.target.closest === "function" ? event.target.closest("a") : null;
-    if (!link || !releaseNotesContent.contains(link)) return;
-    event.preventDefault();
-    const href = link.getAttribute("href") || "";
-    if (!/^https?:\/\//i.test(href)) return;
-    invoke("open_release_note_link", { url: href }).catch((error) => {
-      setStatus("Could not open the release note link. " + (error.message || String(error)), "error");
-    });
+  const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
+    onError(error) {
+      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error");
+    },
   });
-  const uninstallModal = window.BlobUI.createModalController({
+  window.addEventListener("unload", () => externalLinkController.destroy(), { once: true });
+  const uninstallModal = window.BlobUI.Components.Modal({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
@@ -2093,6 +2223,7 @@
       }
     } finally {
       setConnectionBusy(false);
+      void refreshCalendarApiAvailability();
     }
   }
 
@@ -2130,6 +2261,12 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) return;
+    if (event.key === "Escape" && kanbanViewStyle.getAttribute("aria-expanded") === "true") {
+      event.preventDefault();
+      closeKanbanStyleMenu(true);
+      return;
+    }
     if (apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     const matches = (action) => {
       const binding = shortcutBindings.find((item) => item.action === action);
@@ -2191,6 +2328,15 @@
     });
   }
 
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
+  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+  window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
+  el("settings-v21-enabled").addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    draft.settingsV21Enabled = el("settings-v21-enabled").checked;
+    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
+    markDirty();
+  });
   window.appReady = false;
   loadState();
   window.setInterval(refreshTheme, 2000);

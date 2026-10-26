@@ -1,6 +1,24 @@
 (function (root) {
   "use strict";
 
+  function createIcon() {
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("class", "visibility-icon");
+    [
+      ["path", { class: "visibility-eye", d: "M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" }],
+      ["circle", { class: "visibility-eye", cx: "10", cy: "10", r: "2.25" }],
+      ["path", { class: "visibility-slash", d: "m3 3 14 14" }],
+    ].forEach(([tag, attributes]) => {
+      const element = document.createElementNS(namespace, tag);
+      Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+      svg.append(element);
+    });
+    return svg;
+  }
+
   function bind(options) {
     const input = options.input;
     const button = options.button;
@@ -8,6 +26,11 @@
     let visible = Boolean(options.defaultVisible);
     let requestVersion = 0;
     let busy = false;
+    const listeners = [];
+    function listen(node, type, handler) {
+      node.addEventListener(type, handler);
+      listeners.push(() => node.removeEventListener(type, handler));
+    }
 
     function sync() {
       field.dataset.filled = String(input.value.length > 0);
@@ -36,14 +59,14 @@
       setVisible(options.defaultVisible);
     }
 
-    input.addEventListener("input", () => {
+    listen(input, "input", () => {
       invalidate();
       sync();
     });
-    button.addEventListener("mousedown", (event) => {
+    listen(button, "mousedown", (event) => {
       if (document.activeElement === input) event.preventDefault();
     });
-    button.addEventListener("click", async (event) => {
+    listen(button, "click", async (event) => {
       event.preventDefault();
       if (button.disabled || busy) return;
 
@@ -83,8 +106,11 @@
     });
 
     setVisible(visible);
-    return { input, button, field, reset, sync, invalidate };
+    return { input, button, field, reset, sync, invalidate,
+      destroy() { invalidate(); listeners.splice(0).forEach(remove => remove()); },
+    };
   }
 
   root.VisibilityField = { bind };
+  root.VisibilityIcon = { create: createIcon };
 })(window);

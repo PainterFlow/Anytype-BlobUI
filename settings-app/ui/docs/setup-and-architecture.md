@@ -16,7 +16,7 @@ Use Windows with Rust and the Windows C++ build tools installed. Settings uses T
 Run commands from the repository root.
 
 ```powershell
-.\scripts\Build-Settings.ps1 -s -c
+.\scripts\Build-App.ps1 -s -c
 ```
 
 Always use both switches when building Settings. The script closes verified instances from this workspace, builds the app, places it at `settings-app/dist/blobui-settings.exe`, and starts it. It can use the workspace Rust toolchain under `.test-run/toolchain` when Cargo is not on PATH.
