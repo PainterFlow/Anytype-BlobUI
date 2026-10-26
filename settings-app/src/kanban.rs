@@ -97,20 +97,25 @@ fn workspace() -> &'static Path {
         .parent()
         .expect("workspace parent")
 }
-fn path() -> PathBuf {
-    workspace().join(".blobui-kanban-formulas.json")
+fn path_for_install(install: &Path) -> PathBuf {
+    install.join("blob/.blobui-kanban-formulas.json")
 }
-fn load_at(path: &Path, legacy: &Path) -> Result<Configuration, String> {
+pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {
     crate::storage::reject_reparse_path(path)?;
     match fs::metadata(path) {
         Ok(metadata) => {
             if !metadata.is_file() || metadata.len() > 1024 * 1024 {
                 return Err("The Kanban formula file is unsupported or too large. It has been left unchanged.".into());
             }
-            let mut configuration: Configuration = serde_json::from_slice(
-                &fs::read(path).map_err(|_| "Could not read the Kanban formula file.")?,
-            )
-            .map_err(|_| "The Kanban formula file is malformed. It has been left unchanged.")?;
+            let bytes = fs::read(path).map_err(|_| "Could not read the Kanban formula file.")?;
+            let mut configuration = match serde_json::from_slice::<Configuration>(&bytes) {
+                Ok(configuration) => configuration,
+                Err(_) => {
+                    let configuration = migrate_legacy_configuration(&bytes)?;
+                    persist_migrated_configuration(path, &configuration)?;
+                    return Ok(configuration);
+                }
+            };
             if configuration.display == "compact" {
                 configuration.display = "balanced".into();
             }
@@ -118,22 +123,37 @@ fn load_at(path: &Path, legacy: &Path) -> Result<Configuration, String> {
             Ok(configuration)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let mut configuration = Configuration::default();
             crate::storage::reject_reparse_path(legacy)?;
-            if fs::metadata(legacy).is_ok_and(|m| m.is_file() && m.len() <= 65536) {
-                if let Ok(bytes) = fs::read(legacy) {
-                    if let Ok(old) = serde_json::from_slice::<Value>(&bytes) {
-                        if old["version"] == 1 {
-                            match old["display"].as_str() {
-                                Some("compact" | "balanced") => {
-                                    configuration.display = "balanced".into()
+            match fs::symlink_metadata(legacy) {
+                Ok(metadata) if metadata.is_file() && metadata.len() <= 1024 * 1024 => {
+                    let bytes = fs::read(legacy).map_err(|_| "Could not read the legacy Kanban formula file. It has been left unchanged.".to_string())?;
+                    let configuration = migrate_legacy_configuration(&bytes)?;
+                    persist_migrated_configuration(path, &configuration)?;
+                    return Ok(configuration);
+                }
+                Ok(_) => return Err("The legacy Kanban formula file is unsupported or too large. It has been left unchanged.".into()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err("Could not inspect the legacy Kanban formula file. It has been left unchanged.".into()),
+            }
+            let mut configuration = Configuration::default();
+            crate::storage::reject_reparse_path(prototype)?;
+            if let Ok(metadata) = fs::symlink_metadata(prototype) {
+                if metadata.is_file() && metadata.len() <= 65536 {
+                    if let Ok(bytes) = fs::read(prototype) {
+                        if let Ok(old) = serde_json::from_slice::<Value>(&bytes) {
+                            if old["version"] == 1 {
+                                match old["display"].as_str() {
+                                    Some("compact" | "balanced") => configuration.display = "balanced".into(),
+                                    Some("spacious") => configuration.display = "spacious".into(),
+                                    _ => {}
                                 }
-                                Some("spacious") => configuration.display = "spacious".into(),
-                                _ => {}
                             }
                         }
                     }
                 }
+            }
+            if configuration.display != "balanced" {
+                persist_migrated_configuration(path, &configuration)?;
             }
             Ok(configuration)
         }
@@ -143,7 +163,75 @@ fn load_at(path: &Path, legacy: &Path) -> Result<Configuration, String> {
     }
 }
 fn load() -> Result<Configuration, String> {
-    load_at(&path(), &workspace().join(".blobui-formula-prototype.json"))
+    let install = crate::resolve_install_directory(&crate::app_data_directory())?;
+    load_at(
+        &path_for_install(&install),
+        &workspace().join(".blobui-kanban-formulas.json"),
+        &workspace().join(".blobui-formula-prototype.json"),
+    )
+}
+
+pub(crate) fn prepare_backup(install: &Path) -> Result<(), String> {
+    let _ = load_at(
+        &path_for_install(install),
+        &workspace().join(".blobui-kanban-formulas.json"),
+        &workspace().join(".blobui-formula-prototype.json"),
+    )?;
+    Ok(())
+}
+
+fn migrate_legacy_configuration(bytes: &[u8]) -> Result<Configuration, String> {
+    let value: Value = serde_json::from_slice(bytes)
+        .map_err(|_| "The legacy Kanban formula file is malformed. It has been left unchanged.".to_string())?;
+    if value.get("version").and_then(Value::as_u64) == Some(1) {
+        let mut configuration = Configuration::default();
+        match value.get("display").and_then(Value::as_str) {
+            Some("compact" | "balanced") => configuration.display = "balanced".into(),
+            Some("spacious") => configuration.display = "spacious".into(),
+            _ => {}
+        }
+        return Ok(configuration);
+    }
+    let mut configuration: Configuration = serde_json::from_value(value)
+        .map_err(|_| "The legacy Kanban formula file is unsupported. It has been left unchanged.".to_string())?;
+    if configuration.display == "compact" {
+        configuration.display = "balanced".into();
+    }
+    configuration.validate()?;
+    Ok(configuration)
+}
+
+fn persist_migrated_configuration(path: &Path, configuration: &Configuration) -> Result<(), String> {
+    use crate::storage::transaction::{commit_update, FileChange};
+    let bytes = serde_json::to_vec_pretty(configuration)
+        .map_err(|_| "Could not prepare the migrated Kanban formula file.".to_string())?;
+    let metadata_path = path.parent().ok_or_else(|| "The formula file has no parent folder.".to_string())?.join("blob.meta.json");
+    commit_update(vec![
+        FileChange { path: path.into(), contents: Some(bytes) },
+        FileChange { path: metadata_path, contents: Some(crate::backup::metadata_bytes()?) },
+    ])
+}
+
+pub(crate) fn validate_saved_configuration(path: &Path) -> Result<(), String> {
+    crate::storage::reject_reparse_path(path)?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "The saved Kanban formula file is missing.".to_string())?;
+    if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+        return Err("The saved Kanban formula file is unsupported or too large.".into());
+    }
+    let bytes = fs::read(path).map_err(|_| "Could not read the saved Kanban formula file.".to_string())?;
+    migrate_legacy_configuration(&bytes).map(|_| ())
+}
+
+pub(crate) fn initialize_imported_configuration(path: &Path) -> Result<(), String> {
+    crate::storage::reject_reparse_path(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(_) => validate_saved_configuration(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            persist_migrated_configuration(path, &Configuration::default())
+        }
+        Err(error) => Err(format!("Could not inspect the imported Kanban formula file: {error}")),
+    }
 }
 
 fn publish_at(
@@ -186,6 +274,10 @@ fn publish_at(
             contents: Some(config_bytes),
         },
         FileChange {
+            path: install.join("blob/blob.meta.json"),
+            contents: Some(crate::backup::metadata_bytes()?),
+        },
+        FileChange {
             path: data_path,
             contents: Some(crate::serialize_data(&data)?),
         },
@@ -201,12 +293,13 @@ fn publish_at(
 }
 fn publish(configuration: Configuration) -> Result<Published, String> {
     let install = crate::resolve_install_directory(&crate::app_data_directory())?;
+    let config_path = path_for_install(&install);
     let client = if configuration.definitions.is_empty() {
         None
     } else {
         Some(Client::connect()?)
     };
-    publish_at(configuration, &install, &path(), |definition| {
+    publish_at(configuration, &install, &config_path, |definition| {
         client
             .as_ref()
             .ok_or("The Anytype connection is unavailable.")?
@@ -352,17 +445,44 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let legacy = root.join("legacy.json");
         let current = root.join("config.json");
+        let prototype = root.join("prototype.json");
         let old=br#"{"version":1,"display":"compact","formulas":{"work/tasks":{"expression":"sum(estimate)"}}}"#;
         fs::write(&legacy, old).unwrap();
-        let configuration = load_at(&current, &legacy).unwrap();
+        let configuration = load_at(&current, &legacy, &prototype).unwrap();
         assert_eq!(configuration.display, "balanced");
         assert!(configuration.definitions.is_empty());
         assert_eq!(fs::read(&legacy).unwrap(), old);
         fs::write(&current, br#"{"version":2,"display":"compact","definitions":[]}"#).unwrap();
-        let configuration = load_at(&current, &legacy).unwrap();
+        let configuration = load_at(&current, &legacy, &prototype).unwrap();
         assert_eq!(configuration.display, "balanced");
         fs::write(&current, b"broken").unwrap();
-        assert!(load_at(&current, &legacy).is_err());
+        assert!(load_at(&current, &legacy, &prototype).is_err());
         assert_eq!(fs::read(&current).unwrap(), b"broken");
+    }
+
+    #[test]
+    fn legacy_formula_definitions_migrate_atomically_into_the_configured_blob() {
+        let root = workspace().join(".test-run").join(format!(
+            "kanban-legacy-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let blob = root.join("blob");
+        fs::create_dir_all(&blob).unwrap();
+        let legacy = root.join(".blobui-kanban-formulas.json");
+        let current = blob.join(".blobui-kanban-formulas.json");
+        let prototype = root.join(".blobui-formula-prototype.json");
+        let saved = br#"{"version":2,"display":"spacious","definitions":[]}"#;
+        fs::write(&legacy, saved).unwrap();
+
+        let configuration = load_at(&current, &legacy, &prototype).unwrap();
+        assert_eq!(configuration.display, "spacious");
+        assert_eq!(fs::read(&current).unwrap(), serde_json::to_vec_pretty(&configuration).unwrap());
+        assert_eq!(fs::read(&legacy).unwrap(), saved);
+        let metadata: Value = serde_json::from_slice(&fs::read(blob.join("blob.meta.json")).unwrap()).unwrap();
+        assert_eq!(metadata["blobuiVersion"], env!("BLOBUI_BUILD_VERSION"));
+        fs::remove_dir_all(root).unwrap();
     }
 }

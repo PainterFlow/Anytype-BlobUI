@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde_json::json;
 
 #[cfg(test)]
 thread_local! {
@@ -12,6 +13,16 @@ pub enum CredentialChange<'a> {
     Keep,
     Replace(&'a str),
     Remove,
+}
+
+pub fn blob_metadata_bytes() -> Result<Vec<u8>, String> {
+    let mut bytes = serde_json::to_vec_pretty(&json!({
+        "formatVersion": 1,
+        "blobuiVersion": env!("BLOBUI_BUILD_VERSION"),
+    }))
+    .map_err(|_| "Could not prepare BlobUI folder metadata.".to_string())?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
 pub(crate) struct Snapshot {
@@ -33,7 +44,16 @@ pub fn commit_settings(
         reject_reparse_path(parent)?;
         fs::create_dir_all(parent).map_err(|error| format!("Could not prepare the API credential folder: {error}"))?;
     }
-    let mut targets = vec![(css_path.to_path_buf(), false), (data_path.to_path_buf(), false)];
+    let blob_directory = data_path
+        .parent()
+        .ok_or_else(|| "The BlobUI settings file has no parent folder.".to_string())?;
+    let metadata_path = blob_directory.join("blob.meta.json");
+    let metadata = blob_metadata_bytes()?;
+    let mut targets = vec![
+        (css_path.to_path_buf(), false),
+        (data_path.to_path_buf(), false),
+        (metadata_path.clone(), false),
+    ];
     if !matches!(credential, CredentialChange::Keep) { targets.push((credential_path.to_path_buf(), true)); }
     let mut snapshots = Vec::new();
     for (path, private) in &targets {
@@ -47,6 +67,10 @@ pub fn commit_settings(
         Ok(path) => path,
         Err(error) => { remove_if_exists(&css_temp); return Err(error); }
     };
+    let metadata_temp = match prepare_temp(&metadata_path, &metadata, snapshots.iter().find(|snapshot| snapshot.path == metadata_path).and_then(|snapshot| snapshot.permissions.as_ref()), false) {
+        Ok(path) => path,
+        Err(error) => { remove_if_exists(&css_temp); remove_if_exists(&data_temp); return Err(error); }
+    };
     let credential_temp = match credential {
         CredentialChange::Replace(protected_text) => {
             let mut contents = protected_text.as_bytes().to_vec();
@@ -55,7 +79,7 @@ pub fn commit_settings(
             contents.fill(0);
             match prepared {
                 Ok(path) => Some(path),
-                Err(error) => { remove_if_exists(&css_temp); remove_if_exists(&data_temp); return Err(error); }
+                Err(error) => { remove_if_exists(&css_temp); remove_if_exists(&data_temp); remove_if_exists(&metadata_temp); return Err(error); }
             }
         }
         _ => None,
@@ -64,6 +88,7 @@ pub fn commit_settings(
     let commit_result = (|| {
         replace_file(&css_temp, css_path).map_err(|error| format!("Could not replace custom.css: {error}"))?;
         replace_file(&data_temp, data_path).map_err(|error| format!("Could not replace blob/data.json: {error}"))?;
+        replace_file(&metadata_temp, &metadata_path).map_err(|error| format!("Could not replace blob/blob.meta.json: {error}"))?;
         match credential {
             CredentialChange::Keep => {}
             CredentialChange::Replace(_) => {
@@ -83,6 +108,7 @@ pub fn commit_settings(
     if let Some(candidate) = &credential_temp { remove_if_exists(candidate); }
     remove_if_exists(&css_temp);
     remove_if_exists(&data_temp);
+    remove_if_exists(&metadata_temp);
     if let Err(error) = commit_result {
         let mut rollback_errors = Vec::new();
         // A failed Windows replacement can report failure after it has altered
@@ -344,6 +370,7 @@ mod tests {
         assert!(error.contains("Could not replace the encrypted Anytype API key"));
         assert_eq!(fs::read(&css_path).unwrap(), b"old css");
         assert_eq!(fs::read(&data_path).unwrap(), b"old data");
+        assert!(!blob.join("blob.meta.json").exists());
         assert_eq!(fs::read(&credential_path).unwrap(), b"old protected key");
         fs::remove_dir_all(root).unwrap();
     }

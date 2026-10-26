@@ -259,6 +259,13 @@ button:focus-visible, input:focus-visible { outline: none; }
 .update-check-button { flex: 0 0 168px; width: 168px; height: 40px; min-height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; line-height: 20px; white-space: nowrap; }
 .update-check-button:disabled { opacity: .48; cursor: default; }
 .update-check-button:disabled:hover { background: var(--active); }
+.blob-backup-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.blob-backup-button { min-height: 40px; height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; line-height: 20px; }
+.blob-backup-actions .blob-backup-button:disabled { opacity: .48; cursor: default; }
+.blob-backup-status { margin-top: 8px; overflow-wrap: anywhere; }
+.blob-import-path { margin-top: -12px !important; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-code); font-size: 12px !important; }
+#blob-import-error { color: var(--color-red); }
+#blob-import-error:empty { display: none; }
 .sidebar-actions { flex: 0 0 28px; display: grid; grid-template-rows: repeat(4, 28px); gap: 4px; }
 .sidebar-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .sidebar-action::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
