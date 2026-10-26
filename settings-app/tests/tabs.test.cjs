@@ -171,7 +171,7 @@ test('real settings tabs keep their width and open panels at the top across heig
     assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0);
     // Sidebar navigation shares the policy and must not scroll past the tab strip.
     await page.locator('#advanced-nav').click();
-    await page.locator('#advanced-section-links').getByRole('button', { name: 'Ap Settings', exact: true }).click();
+    await page.locator('#advanced-section-links').getByRole('button', { name: 'App Settings', exact: true }).click();
     assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0);
   } finally { await browser.close(); }
 });

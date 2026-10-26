@@ -12,7 +12,7 @@
     Typography: '<path d="M3 4h14M10 4v13m-4 0h8M3 4v3m14-3v3"/>',
     "Space banner": '<rect x="2" y="4" width="16" height="12" rx="2"/><circle cx="7" cy="8" r="1"/><path d="m3 15 5-5 3 3 3-4 4 6"/>',
     "API key": '<circle cx="7" cy="7" r="4"/><path d="m10 10 7 7m-3-3 2-2m-4 0 2-2"/>',
-    "Ap Settings": '<path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2" fill="var(--sidebar)"/><circle cx="13" cy="10" r="2" fill="var(--sidebar)"/><circle cx="8" cy="15" r="2" fill="var(--sidebar)"/>',
+    "App Settings": '<path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2" fill="var(--sidebar)"/><circle cx="13" cy="10" r="2" fill="var(--sidebar)"/><circle cx="8" cy="15" r="2" fill="var(--sidebar)"/>',
     Experiments: '<path d="M7 2h6M8 2v6l-5 8a1 1 0 0 0 1 2h12a1 1 0 0 0 1-2l-5-8V2M6 12h8"/>',
   };
   function make(tag, className, text) {
@@ -57,7 +57,7 @@
       const inner = make("div", "documentation-children-inner"); inner.dataset.disclosureContent = ""; links.append(inner);
       button.dataset.disclosureToggle = ""; button.setAttribute("aria-controls", links.id); button.setAttribute("aria-expanded", "false");
       const groups = page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
-      const labels = page === "preferences" ? preferenceLabels : ["API key", "Ap Settings", "Experiments"];
+      const labels = page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
       groups.forEach((target, tab) => {
         const label = labels[tab];
         const link = UI.Components.NavigationItem({ label, icon: icon(label),
