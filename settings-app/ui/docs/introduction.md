@@ -27,8 +27,14 @@ Settings live locally in the selected Anytype data folder. The API key is encryp
 2. Open Preferences, choose your appearance, and press Save.
 3. Reload Anytype with Ctrl+R and check the result.
 
-Read [Features](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/features.md) for controls and text-effect URLs, or [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) to maintain an existing installation.
+Read [Features](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/features.md) for an overview, [QoL Features](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/text-effects-and-previews.md) for text effects, hover previews, and shortcuts, or [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) to maintain an existing installation.
+
+## Documentation videos
+
+Documentation and What's New use the same borderless video player. Move your pointer over a video, focus its controls, or touch it to show them. The large center button plays or pauses. Use the timeline to seek and the mute and volume controls to adjust sound. The colored part of each slider shows the playback position or volume. Fullscreen expands the original recording for a closer look. Autoplay videos is in Advanced Settings > App settings. When enabled, visible videos start muted. Save to keep the setting. A manual pause stays in effect when you scroll away and return.
+
+Click an image to expand it over a darker background. Click the image again to toggle its actual size, and scroll around larger images. Click outside the image or press Escape to return to the article.
 
 ## Read offline
 
-Open Help > Documentation in Settings to read all seven articles without an internet connection. Use the sidebar to change articles and the back button to return to Settings. GitHub and other website links open in your browser and require internet access. The same article files are readable in the repository.
+Open Help > Documentation in Settings to read the guides without an internet connection. Use the sidebar to change articles and the back button to return to Settings. GitHub and other website links open in your browser and require internet access. The same article files are readable in the repository.

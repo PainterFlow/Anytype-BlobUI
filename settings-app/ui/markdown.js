@@ -34,18 +34,18 @@
     return text;
   }
 
-  function validateImageSource(source) {
+  function validateImageSource(source, video = false) {
     if (!sourcePattern.test(source) || source.includes("\\")
       || source.split("/").some((part) => !part || part === "." || part === "..")) {
       throw new TypeError("Changelogs.yaml image paths must stay inside assets/changelogs/.");
     }
-    if (!/\.(png|jpe?g|gif|webp)$/i.test(source)) {
+    if (!(video ? /\.mp4$/i : /\.(png|jpe?g|gif|webp)$/i).test(source)) {
       throw new TypeError("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images.");
     }
     return source;
   }
 
-  function parseImageManifest(yaml) {
+  function parseManifestSection(yaml, video = false) {
     const entries = Object.create(null);
     let sectionSeen = false;
     let emptyList = false;
@@ -57,7 +57,7 @@
       if (!current.id || !current.src) throw new TypeError("Each Changelogs.yaml image needs an id and src.");
       if (Object.prototype.hasOwnProperty.call(entries, current.id)) throw new TypeError("Changelogs.yaml contains a duplicate image id.");
       entries[current.id] = {
-        src: validateImageSource(current.src),
+        src: validateImageSource(current.src, video),
         alt: current.alt || current.id.replace(/[-_]+/g, " "),
       };
       current = null;
@@ -99,6 +99,30 @@
     return entries;
   }
 
+  function parseMediaManifest(yaml) {
+    const sections = Object.create(null);
+    let kind = "";
+    for (const line of String(yaml || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n")) {
+      const match = /^(images|videos):\s*(?:\[\s*\])?\s*(?:#.*)?$/.exec(line);
+      if (match) {
+        kind = match[1];
+        if (sections[kind]) throw new TypeError("Changelogs.yaml contains more than one " + kind + " section.");
+        sections[kind] = [line.replace(/^(images|videos):/, "images:")];
+      } else if (kind) sections[kind].push(line);
+      else if (line.trim() && !/^\s*#/.test(line)) throw new TypeError("Changelogs.yaml must begin with an images or videos section.");
+    }
+    if (!sections.images && !sections.videos) throw new TypeError("Changelogs.yaml must contain an images section.");
+    const images = parseManifestSection((sections.images || ["images: []"]).join("\n"));
+    const videos = parseManifestSection((sections.videos || ["images: []"]).join("\n"), true);
+    if (Object.keys(videos).some(id => Object.hasOwn(images, id))) throw new TypeError("Changelogs.yaml contains a duplicate media id.");
+    return { images, videos };
+  }
+
+  function parseImageManifest(yaml) { return parseMediaManifest(yaml).images; }
+  function videoPlaceholder(alias, alt) {
+    return '<span data-blobui-video="' + escapeAttribute(alias) + '" aria-label="' + escapeAttribute(alt || alias) + '"></span>';
+  }
+
   function normalizedImages(images) {
     const result = Object.create(null);
     for (const [alias, image] of Object.entries(images || {})) {
@@ -127,7 +151,9 @@
     return `<img src="${image.src}" alt="${escapeAttribute(image.alt)}"${safeTitle}>`;
   }
 
-  function allowAttribute(element, name, value, images) {
+  function allowAttribute(element, name, value, images, videos) {
+    if (element.localName === "span" && name === "data-blobui-video") return Object.hasOwn(videos, value);
+    if (element.localName === "span" && name === "aria-label") return true;
     const tag = element.localName;
     if (name.startsWith("on") || name === "style" || name === "srcdoc") return false;
     if (tag === "a" && name === "href") {
@@ -154,7 +180,7 @@
     return false;
   }
 
-  function sanitizeHtml(html, images, documentImpl) {
+  function sanitizeHtml(html, images, documentImpl, videos = {}) {
     const doc = documentImpl || root.document;
     if (!doc || typeof doc.createElement !== "function") throw new TypeError("Markdown rendering needs a document.");
     const template = doc.createElement("template");
@@ -187,7 +213,7 @@
         }
         for (const attribute of Array.from(child.attributes)) {
           const name = attribute.name.toLowerCase();
-          if (!allowAttribute(child, name, attribute.value, images)) child.removeAttribute(name);
+          if (!allowAttribute(child, name, attribute.value, images, videos)) child.removeAttribute(name);
         }
         if (tag === "img" && !imageDataUrl.test(child.getAttribute("src") || "")) {
           const replacement = doc.createTextNode(child.getAttribute("alt") || "");
@@ -200,11 +226,12 @@
     return template.innerHTML;
   }
 
-  function createParser(images) {
+  function createParser(images, videos) {
     const renderer = new root.marked.Renderer();
     renderer.image = (token) => {
       let alias = String(token.href || "");
       if (alias.startsWith("@")) alias = alias.slice(1);
+      if (Object.hasOwn(videos, alias)) return videoPlaceholder(alias, token.text || videos[alias].alt);
       const image = images[alias];
       if (!image) return escapeAttribute(token.text || "");
       const safeTitle = token.title ? ` title="${escapeAttribute(token.title)}"` : "";
@@ -251,11 +278,11 @@
         },
         tokenizer(source) {
           const match = /^@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/.exec(source);
-          if (!match || !images[match[1]]) return undefined;
+          if (!match || !images[match[1]] && !Object.hasOwn(videos, match[1])) return undefined;
           return { type: "blobuiImageMention", raw: match[0], alias: match[1] };
         },
         renderer(token) {
-          return renderImage(images[token.alias]);
+          return Object.hasOwn(videos, token.alias) ? videoPlaceholder(token.alias, videos[token.alias].alt) : renderImage(images[token.alias]);
         },
       }, {
         name: "blobuiGitMention",
@@ -300,11 +327,23 @@
 
   BlobUI.Markdown = Object.freeze({
     parseImageManifest,
+    parseMediaManifest,
+    mount(container, markdown, options = {}) {
+      BlobUI.VideoPlayer?.destroyTree(container);
+      BlobUI.MarkdownImageViewer?.destroyTree(container);
+      container.innerHTML = this.render(markdown, options);
+      for (const slot of container.querySelectorAll("[data-blobui-video]")) {
+        const media = options.videos?.[slot.getAttribute("data-blobui-video")];
+        if (media && BlobUI.VideoPlayer) BlobUI.VideoPlayer.attach(slot, media);
+      }
+      BlobUI.MarkdownImageViewer?.mount(container);
+    },
     render(markdown, options = {}) {
       const images = normalizedImages(options.images);
-      const parser = createParser(images);
+      const videos = Object.fromEntries(Object.entries(options.videos || {}).filter(([alias, media]) => aliasPattern.test(alias) && media && typeof media === "object"));
+      const parser = createParser(images, videos);
       const html = parser.parse(String(markdown || ""));
-      return sanitizeHtml(html, images, options.document);
+      return sanitizeHtml(html, images, options.document, videos);
     },
   });
 })(typeof window !== "undefined" ? window : globalThis);

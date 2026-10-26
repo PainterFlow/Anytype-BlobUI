@@ -318,6 +318,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/components.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
@@ -443,6 +444,11 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('uninstall-cancel').handlers.click();
   finishRemovalTransition();
   assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel remains available after a native failure.');
+  assert.equal(element('autoplay-videos').checked, true, 'Missing autoplay preference defaults on.');
+  await changeToggle('autoplay-videos', false);
+  assert.equal(element('save-button').hidden, false);
+  context.window.BlobUI.discardChanges();
+  assert.equal(element('autoplay-videos').checked, true, 'Undo restores autoplay.');
   const initialFolder = element('install-directory').value;
   await element('install-directory').handlers.click();
   assert.equal(element('install-directory').value, initialFolder, 'Canceling the folder picker preserves the selected folder.');
@@ -457,13 +463,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const generalSavesBeforeUpdaterSave = savedSettings.length;
   await input('install-directory', 'C:\\BlobUI\\AnytypeData');
   await changeToggle('start-on-login', true);
+  await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
   assert.equal(element('save-button').hidden, false, 'App Settings edits use the shared Save action.');
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startOnLogin: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startOnLogin: true, autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);

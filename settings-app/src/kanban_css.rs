@@ -1,4 +1,4 @@
-use crate::{calculator, kanban::Snapshot};
+use crate::{calculator, kanban_snapshot::Snapshot};
 use serde_json::Value;
 
 fn quote(value: &str) -> String {
@@ -29,7 +29,7 @@ pub fn render(value: Option<&Value>) -> Result<String, String> {
     let mut seen = std::collections::BTreeSet::new();
     for result in snapshot.results {
         result.target.validate()?;
-        crate::kanban::validate_id(&result.category_id)?;
+        crate::kanban_snapshot::validate_id(&result.category_id)?;
         if snapshot.version == 1
             && matches!(result.value, Some(calculator::CalculationValue::Boolean(_)))
         {

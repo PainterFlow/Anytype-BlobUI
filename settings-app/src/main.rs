@@ -18,6 +18,7 @@ mod calculator;
 mod kanban;
 mod kanban_api;
 mod kanban_css;
+mod kanban_snapshot;
 mod hotkey;
 mod storage;
 mod updater;
@@ -363,6 +364,22 @@ async fn get_release_note_image(source: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_release_note_video(source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        updater::release_note_video(&runtime, &source)
+    }).await.map_err(|_| "The release note video task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn get_release_note_history_video(tag: String, source: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || updater::release_note_history_video(&tag, &source))
+        .await.map_err(|_| "The historical video task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
 async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
     let guard = acquire_updater_guard()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -377,38 +394,86 @@ async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn open_release_note_link(url: String) -> Result<(), String> {
+async fn open_external_link(url: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let parsed = validate_release_note_link(&url)?;
-        #[cfg(windows)]
-        {
-            std::process::Command::new("explorer.exe")
-                .arg(parsed.as_str())
-                .spawn()
-                .map(|_| ())
-                .map_err(|error| format!("Could not open the release note link: {error}"))
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = parsed;
-            Err("Opening release note links is supported on Windows only.".into())
-        }
+        open_external_link_in_default_browser(&url)
     })
     .await
-    .map_err(|_| "The release note link task stopped unexpectedly.".to_string())?
+    .map_err(|_| "The external link task stopped unexpectedly.".to_string())?
 }
 
-fn validate_release_note_link(value: &str) -> Result<url::Url, String> {
+fn open_external_link_in_default_browser(value: &str) -> Result<(), String> {
+    let parsed = validate_external_link(value)?;
+    #[cfg(windows)]
+    {
+        let operation: Vec<u16> = "open\0".encode_utf16().collect();
+        let url: Vec<u16> = format!("{}\0", parsed.as_str()).encode_utf16().collect();
+        let result = unsafe {
+            windows_sys::Win32::UI::Shell::ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                url.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            )
+        } as usize;
+        if result <= 32 {
+            return Err(format!(
+                "Could not open the link in your default browser, Windows error {result}."
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = parsed;
+        Err("Opening external links is supported on Windows only.".into())
+    }
+}
+
+fn validate_external_link(value: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(value.trim())
-        .map_err(|_| "The release note link is invalid.".to_string())?;
+        .map_err(|_| "The external link is invalid.".to_string())?;
     if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
+        || uses_local_app_host(&parsed)
     {
-        return Err("Only ordinary HTTP and HTTPS release note links can be opened.".into());
+        return Err("Only ordinary HTTP and HTTPS links can be opened.".into());
     }
     Ok(parsed)
+}
+
+fn uses_local_app_host(url: &url::Url) -> bool {
+    (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+        || (matches!(url.scheme(), "http" | "https")
+            && url.host_str() == Some("tauri.localhost"))
+}
+
+fn is_local_app_url(url: &url::Url) -> bool {
+    uses_local_app_host(url)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && matches!(url.path(), "/" | "/index.html")
+}
+
+fn handle_webview_navigation(url: &url::Url) -> bool {
+    if is_local_app_url(url) {
+        return true;
+    }
+    if !uses_local_app_host(url) && matches!(url.scheme(), "http" | "https") {
+        let _ = open_external_link_in_default_browser(url.as_str());
+    }
+    false
+}
+
+fn handle_webview_new_window(url: &url::Url) {
+    if !uses_local_app_host(url) && matches!(url.scheme(), "http" | "https") {
+        let _ = open_external_link_in_default_browser(url.as_str());
+    }
 }
 
 #[tauri::command]
@@ -1575,8 +1640,10 @@ fn main() {
             get_release_note_history_image,
             get_anytype_version,
             get_release_note_image,
+            get_release_note_video,
+            get_release_note_history_video,
             acknowledge_release_notes,
-            open_release_note_link,
+            open_external_link,
             save_updater_settings,
             recover_install_directory,
             select_anytype_folder,
@@ -1601,10 +1668,27 @@ fn main() {
             }
         })
         .setup(|app| {
+            let main_window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|config| config.label == "main")
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "The main Settings window is not configured.",
+                    )
+                })?;
+            let main_window = tauri::WebviewWindowBuilder::from_config(app, main_window_config)?
+                .on_navigation(handle_webview_navigation)
+                .on_new_window(|url, _features| {
+                    handle_webview_new_window(&url);
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
             let theme = read_anytype_theme(&app_data_directory().join("devconfig.json"));
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_theme(native_theme(&theme))?;
-            }
+            main_window.set_theme(native_theme(&theme))?;
             if consume_pending_onboarding_request() {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
@@ -2108,12 +2192,42 @@ mod tests {
     }
 
     #[test]
-    fn release_note_links_are_limited_to_plain_http_and_https_urls() {
-        assert_eq!(validate_release_note_link("https://example.com/a?b=c").unwrap().scheme(), "https");
-        assert!(validate_release_note_link("javascript:alert(1)").is_err());
-        assert!(validate_release_note_link("file:///C:/secret.txt").is_err());
-        assert!(validate_release_note_link("https://user@example.com/").is_err());
-        assert!(validate_release_note_link("https://").is_err());
+    fn external_links_are_limited_to_plain_http_and_https_urls() {
+        assert_eq!(
+            validate_external_link("https://example.com/a?b=c")
+                .unwrap()
+                .scheme(),
+            "https"
+        );
+        assert!(validate_external_link("javascript:alert(1)").is_err());
+        assert!(validate_external_link("file:///C:/secret.txt").is_err());
+        assert!(validate_external_link("https://user@example.com/").is_err());
+        assert!(validate_external_link("https://").is_err());
+        assert!(validate_external_link("https://tauri.localhost/").is_err());
+    }
+
+    #[test]
+    fn local_navigation_only_allows_the_settings_document() {
+        for value in [
+            "tauri://localhost/",
+            "tauri://localhost/index.html#release-notes",
+            "http://tauri.localhost/index.html?tab=docs#intro",
+            "https://tauri.localhost/",
+        ] {
+            assert!(is_local_app_url(&url::Url::parse(value).unwrap()), "{value}");
+        }
+
+        for value in [
+            "https://user@tauri.localhost/",
+            "http://tauri.localhost:8080/",
+            "https://tauri.localhost/docs.md",
+            "https://tauri.localhost.evil.example/",
+            "http://ipc.localhost/",
+            "https://localhost/",
+            "tauri://localhost/docs.md",
+        ] {
+            assert!(!is_local_app_url(&url::Url::parse(value).unwrap()), "{value}");
+        }
     }
 
     #[test]

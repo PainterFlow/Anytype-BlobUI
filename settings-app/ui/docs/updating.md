@@ -1,6 +1,6 @@
 ---
 category: getting-started
-index: 4
+index: 11
 icon: updating
 name: Updating
 ---

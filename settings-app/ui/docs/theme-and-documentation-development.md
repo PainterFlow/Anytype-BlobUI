@@ -70,3 +70,7 @@ The catalog API remains `BlobUI.DocsData.load()`, returning `{ categories, artic
 ## Onboarding
 
 Onboarding steps use `onboardingSteps` in `app.js`. Conditional steps use `when`, and `advanceOnboarding()` falls back to Settings when finished. Check Escape behavior, authentication failures, independent calendar failures, and reduced-motion transitions after changing the flow.
+
+## Video documentation
+
+Register bundled MP4 assets in DocsData.videoAliases and embed them with an @alias in normal Markdown. Use descriptive lowercase filenames and provide a description in the surrounding instructions. Markdown.mount renders both images and videos through the same sanitized reader used by release notes. The global player provides hover controls, keyboard access, muted autoplay, and cleanup. Read the [documentation data reference](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/docs/DOCUMENTATION.md) and [release notes authoring guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/docs/RELEASE-NOTES.md) for manifest shapes and limits.
