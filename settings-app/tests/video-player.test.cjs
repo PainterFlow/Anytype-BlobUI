@@ -52,6 +52,21 @@ test('shared videos play, reveal controls, seek, respect autoplay, and clean up'
     assert.deepEqual(outcome.code.map(value => value.trim()), ['@demo', '@demo']);
     const first = page.locator('#docs .markdown-video').first();
     await page.waitForFunction(() => document.querySelector('#docs video')?.currentTime > 0.05);
+    const smooth = await page.evaluate(() => new Promise(resolve => {
+      const host = document.querySelector('#docs .markdown-video'), video = host.querySelector('video'), input = host.querySelector('.markdown-video-seek');
+      const glyph = host.querySelector('.markdown-video-overlay svg');
+      const values = new Set(); let timeEvents = 0;
+      const count = () => timeEvents++; video.addEventListener('timeupdate', count);
+      const start = performance.now();
+      function sample() {
+        values.add(input.value);
+        if (performance.now() - start < 450) requestAnimationFrame(sample);
+        else { video.removeEventListener('timeupdate', count); resolve({ values: values.size, timeEvents, stableGlyph: glyph === host.querySelector('.markdown-video-overlay svg') }); }
+      }
+      requestAnimationFrame(sample);
+    }));
+    assert.ok(smooth.values > smooth.timeEvents + 4, 'Timeline advances between coarse timeupdate events');
+    assert.equal(smooth.stableGlyph, true, 'Progress frames retain the same glyph DOM');
     assert.equal(await first.locator('video').evaluate(video => video.muted), true);
     assert.equal(await first.locator('.markdown-video-controls').evaluate(node => getComputedStyle(node).opacity), '0');
     await first.hover();
@@ -64,11 +79,42 @@ test('shared videos play, reveal controls, seek, respect autoplay, and clean up'
     await page.evaluate(() => scrollTo(0, 0));
     await page.waitForTimeout(150);
     assert.equal(await first.locator('video').evaluate(video => video.paused), true, 'Manual pause persists after visibility changes');
-    const pausedTime = await first.locator('video').evaluate(video => video.currentTime);
-    await first.getByRole('button', { name: 'Forward 10 seconds', exact: true }).click();
-    assert.ok(await first.locator('video').evaluate(video => video.currentTime >= 10));
-    await first.getByRole('button', { name: 'Back 10 seconds', exact: true }).click();
-    assert.ok(await first.locator('video').evaluate((video, expected) => Math.abs(video.currentTime - expected) < 0.1, pausedTime));
+    assert.equal(await first.getByRole('button', { name: /10 seconds/i }).count(), 0);
+    assert.equal(await first.locator('.markdown-video-controls button[aria-label="Play"], .markdown-video-controls button[aria-label="Pause"]').count(), 0);
+    const overlay = first.locator('.markdown-video-overlay');
+    assert.equal(await overlay.count(), 1);
+    const centered = await overlay.evaluate(button => {
+      const bounds = button.getBoundingClientRect(), host = button.parentElement.getBoundingClientRect();
+      return bounds.width >= 64 && Math.abs(bounds.x + bounds.width / 2 - host.x - host.width / 2) < 1
+        && Math.abs(bounds.y + bounds.height / 2 - host.y - host.height / 2) < 1;
+    });
+    assert.equal(centered, true);
+    assert.equal(await overlay.locator('svg').evaluate(svg => getComputedStyle(svg).width), '40px');
+    assert.ok(await overlay.locator('svg').evaluate(svg => parseFloat(getComputedStyle(svg).strokeWidth) >= 2.6));
+    assert.equal(await first.locator('video').evaluate(video => !video.controls && video.getAttribute('controlslist') === 'nofullscreen'), true);
+    assert.equal(await first.locator('video').evaluate(video => !video.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))), true);
+    const jumpStart = await first.locator('video').evaluate(video => video.currentTime);
+    await first.focus(); await page.keyboard.press('ArrowRight');
+    assert.ok(await first.locator('video').evaluate((video, start) => Math.abs(video.currentTime - start) < 0.1, jumpStart), 'Host arrow keys no longer jump ten seconds');
+    await first.getByRole('slider', { name: 'Seek video' }).evaluate(input => { input.value = '10'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.ok(await first.locator('video').evaluate(video => Math.abs(video.currentTime - 10) < 0.15));
+    await first.getByRole('slider', { name: 'Seek video' }).focus(); await page.keyboard.press('ArrowRight');
+    assert.ok(await first.locator('video').evaluate(video => video.currentTime > 10), 'Timeline retains native keyboard seeking');
+    const fills = await first.evaluate(async host => {
+      const video = host.querySelector('video'), seek = host.querySelector('.markdown-video-seek'), volume = host.querySelector('.markdown-video-volume');
+      volume.value = '0.35'; volume.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const matches = input => {
+        const ratio = (Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min));
+        return Math.abs(parseFloat(input.style.getPropertyValue('--range-fill-end')) - (6 + (input.getBoundingClientRect().width - 12) * ratio)) < 0.2;
+      };
+      const result = { seek: matches(seek), volume: matches(volume), adjusted: Math.abs(video.volume - 0.35) < 0.001 };
+      video.volume = 1; video.muted = true;
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      result.muted = volume.value === '0' && matches(volume);
+      return result;
+    });
+    assert.deepEqual(fills, { seek: true, volume: true, adjusted: true, muted: true });
     await page.evaluate(() => BlobUI.VideoPlayer.setAutoplay(false));
     await first.getByRole('button', { name: 'Play', exact: true }).click();
     await page.waitForFunction(() => !document.querySelector('#docs video').paused);
@@ -98,18 +144,31 @@ test('shared videos play, reveal controls, seek, respect autoplay, and clean up'
     await notes.focus();
     await page.waitForFunction(() => getComputedStyle(document.querySelector('#notes .markdown-video-controls')).opacity === '1');
     await notes.screenshot({ path: path.join(root, 'shared-video-controls.png') });
+    assert.equal(await notes.getByRole('button', { name: /10 seconds/i }).count(), 0);
     await notes.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
     await page.waitForFunction(() => document.fullscreenElement !== null);
+    assert.equal(await notes.getByRole('button', { name: 'Exit fullscreen', exact: true }).getAttribute('aria-pressed'), 'true');
     await notes.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
     await page.waitForFunction(() => document.fullscreenElement === null);
+    await notes.locator('video').dblclick({ position: { x: 5, y: 60 } });
+    assert.equal(await page.evaluate(() => document.fullscreenElement), null);
+    const borderless = await notes.evaluate(host => [host, ...host.querySelectorAll('*')].every(node => {
+      const style = getComputedStyle(node);
+      return ['Top', 'Right', 'Bottom', 'Left'].every(side => parseFloat(style['border' + side + 'Width']) === 0)
+        && style.outlineStyle === 'none' && style.boxShadow === 'none';
+    }));
+    assert.equal(borderless, true);
     await notes.locator('video').evaluate(video => { video.currentTime = video.duration - 0.05; });
     await page.waitForFunction(() => document.querySelector('#notes video').ended);
     await page.evaluate(() => { BlobUI.VideoPlayer.setAutoplay(false); BlobUI.VideoPlayer.setAutoplay(true); });
     assert.equal(await notes.locator('video').evaluate(video => video.paused), true, 'Completed videos do not loop or restart automatically');
+    await notes.getByRole('button', { name: 'Enter fullscreen', exact: true }).click();
+    await page.waitForFunction(() => document.fullscreenElement !== null);
     await page.evaluate(() => {
       BlobUI.Markdown.mount(document.querySelector('#notes'), '@bad', { videos: { bad: { src: 'https://bad/video.mp4' } } });
     });
     await page.waitForFunction(() => document.querySelector('#notes .markdown-video-status').textContent.includes('unsupported'));
+    await page.waitForFunction(() => document.fullscreenElement === null);
     assert.deepEqual(errors, []);
   } finally {
     if (context) await context.close();

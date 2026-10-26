@@ -318,6 +318,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/components.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];

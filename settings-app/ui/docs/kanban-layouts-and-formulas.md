@@ -1,11 +1,12 @@
 ---
 category: getting-started
+parent: features
 index: 5
 icon: features
-name: Kanban layouts and formulas
+name: Kanban
 ---
 
-# Kanban layouts and formulas
+# Kanban
 
 v1.3.0 adds Board layout, Collapsed Categories, and custom calculations for Kanban views. Layout changes work without API access. Calculations require the optional Anytype API connection.
 

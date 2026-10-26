@@ -1,11 +1,12 @@
 ---
 category: getting-started
-index: 8
+parent: features
+index: 7
 icon: features
-name: Text effects and hover previews
+name: QoL Features
 ---
 
-# Text effects and hover previews
+# QoL Features
 
 BlobUI provides visual text effects through marker links and lets you choose which Anytype hover previews appear. These controls work without API access.
 
@@ -39,6 +40,21 @@ Enable only the previews you want, press Save in BlobUI, and reload Anytype with
 
 Reduced Motion in Accessibility suppresses BlobUI's animated text effects. Settings transitions and category animations also respect reduced motion. The option starts off; the app also respects the system motion preference for its interface transitions.
 
-## Video playback
+## Background operation and shortcuts
 
-Embedded videos use the same player in Documentation and What's New. Move your pointer over a video or focus its controls to pause, seek, skip ten seconds, change sound, or enter fullscreen. Autoplay starts muted and stops at the end. Change Autoplay videos in Advanced Settings > App settings, then Save. A manual pause remains in effect when you leave and return to that video.
+Closing the window keeps Settings running in the background. Launching it again brings back the existing window. Under Advanced Settings > App Settings, enable Launch at startup and press Save to start it when you sign in. Ctrl+Q in Settings exits completely.
+
+| Default shortcut | Action |
+| --- | --- |
+| Numpad 1 in Anytype | Opens Settings while its background listener runs. |
+| Alt+R in Anytype | Rebuilds CSS through the running Settings app. |
+| Ctrl+Q in Settings | Quits Settings and its listener. |
+| Ctrl+R in Anytype | Reloads Anytype to apply generated CSS. |
+
+Numpad 1 works with Num Lock on or off. The listener leaves other applications' keys unchanged. Open Help > Keybinds, click a binding, and press a replacement combination. Valid changes save automatically; duplicate or unsupported bindings show an error. Ctrl+R belongs to Anytype and is not a BlobUI binding.
+
+## Logs and Help
+
+Open Logs to inspect activity and errors. Copy all logs copies the log text. Help provides Documentation, Keybinds, What's New?, version information, and author and repository links. Release notes appear when Settings reopens after an update.
+
+Advanced Settings contains API configuration and App Settings for the Anytype data folder, startup, updates, and uninstall. See [Updating](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/updating.md) and [Installation and removal](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/installation-and-removal.md) for procedures. Setup and update-preview diagnostic bindings are covered in Development.

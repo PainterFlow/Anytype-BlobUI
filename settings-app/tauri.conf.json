@@ -11,6 +11,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "BlobUI Settings",
         "width": 960,
         "height": 740,

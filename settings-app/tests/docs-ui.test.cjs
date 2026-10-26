@@ -166,7 +166,7 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('all eleven bundled articles render offline in dark mode', {
+test('all bundled articles and feature children render offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
 }, async () => {
   const uiRoot = path.join(workspace, 'settings-app/ui');
@@ -244,11 +244,15 @@ test('all eleven bundled articles render offline in dark mode', {
 
     assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
     assert.equal(await page.locator('#documentation-article h1').textContent(), 'Introduction');
-    assert.equal(await page.locator('.documentation-child').count(), 0);
+    assert.equal(await page.locator('.documentation-child').count(), 5);
+    assert.equal(await page.locator('[data-article-id="features"]').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('[data-article-id="experiment"]').getAttribute('aria-expanded'), 'false');
     assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
     const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'updating', 'kanban-layouts-and-formulas', 'api-and-calendar-colors', 'settings-ui-refresh', 'text-effects-and-previews', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
-    assert.equal(await page.locator('.documentation-item-icon svg').count(), 11);
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'experiment', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.equal(await page.locator('.documentation-item-icon svg').count(), ids.length);
+    const iconPath = async id => page.locator('[data-article-id="' + id + '"] .documentation-item-icon svg').innerHTML();
+    assert.notEqual(await iconPath('experiment'), await iconPath('settings-ui-refresh'));
     assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
     const externalRequests = [];
     page.on('request', request => {
@@ -261,12 +265,13 @@ test('all eleven bundled articles render offline in dark mode', {
         await page.waitForFunction(expected => document.getElementById('documentation-article').getAttribute('aria-label') === expected,
           await page.locator('[data-article-id="' + id + '"]').getAttribute('aria-label'));
         assert.equal(await page.locator('#documentation-article h1').count(), 1);
-        assert.ok((await page.locator('#documentation-article').textContent()).length > 700);
+        assert.ok((await page.locator('#documentation-article').textContent()).length > 150);
         assert.equal(await page.locator('#documentation-load-error').evaluate(node => node.hidden), true);
         assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true, id + ' should not overflow horizontally');
         await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: node.scrollHeight, behavior: 'instant' }));
-        assert.ok(await page.locator('#documentation-content').evaluate(node => node.scrollTop > 0), id + ' should scroll');
-        if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 2);
+        const geometry = await page.locator('#documentation-content').evaluate(node => ({ top: node.scrollTop, overflow: node.scrollHeight > node.clientHeight }));
+        if (geometry.overflow) assert.ok(geometry.top > 0, id + ' should scroll when it overflows');
+        if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 0);
         if (id === 'testing-and-releases') {
           assert.ok(await page.locator('#documentation-article pre code').count() >= 3);
           const code = page.locator('#documentation-article pre').first();

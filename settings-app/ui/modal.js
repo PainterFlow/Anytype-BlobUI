@@ -84,9 +84,10 @@
     }
 
     function handleKeydown(event) {
-      if (backdrop.hidden || backdrop.classList.contains("is-closing") || event.defaultPrevented) return;
+      if (backdrop.hidden || backdrop.classList.contains("is-closing") || backdrop.closest("[inert]") || event.defaultPrevented) return;
       if (event.metaKey || event.altKey || event.ctrlKey) return;
       if (event.key === "Escape") {
+        if (document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement) return;
         event.preventDefault();
         close();
         return;

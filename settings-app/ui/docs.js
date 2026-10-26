@@ -23,6 +23,8 @@
     setup: '<rect x="2" y="3" width="16" height="14" rx="2"/><path d="m5 7 3 3-3 3M11 13h4"/>',
     code: '<path d="m6 5-4 5 4 5m8-10 4 5-4 5M11.5 3l-3 14"/>',
     testing: '<path d="M7 2.5h6M8 2.5v5l-4.7 8a1.3 1.3 0 0 0 1.1 2h11.2a1.3 1.3 0 0 0 1.1-2l-4.7-8v-5M6 12h8"/>',
+    experiment: '<path d="M7 2.5h6M8 2.5v5.2l-4.3 7.1A2 2 0 0 0 5.4 18h9.2a2 2 0 0 0 1.7-3.2L12 7.7V2.5M6 13h8"/>',
+    "settings-ui": '<rect x="2.5" y="3" width="15" height="14" rx="2"/><path d="M7.5 3v14M10.5 7h4M10.5 10h4M10.5 13h4"/>',
   };
   const chevronIcon = '<path d="m7 4 6 6-6 6"/>';
 

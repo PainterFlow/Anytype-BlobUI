@@ -1912,16 +1912,12 @@
     else checkForUpdates(false);
   });
   updateNowButton.addEventListener("click", () => applyUpdate());
-  releaseNotesContent.addEventListener("click", (event) => {
-    const link = event.target && typeof event.target.closest === "function" ? event.target.closest("a") : null;
-    if (!link || !releaseNotesContent.contains(link)) return;
-    event.preventDefault();
-    const href = link.getAttribute("href") || "";
-    if (!/^https?:\/\//i.test(href)) return;
-    invoke("open_release_note_link", { url: href }).catch((error) => {
-      setStatus("Could not open the release note link. " + (error.message || String(error)), "error");
-    });
+  const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
+    onError(error) {
+      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error");
+    },
   });
+  window.addEventListener("unload", () => externalLinkController.destroy(), { once: true });
   const uninstallModal = window.BlobUI.Components.Modal({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),

@@ -157,7 +157,7 @@
   }
 
   async function load() {
-    const ids = ["introduction", "features", "installation-and-removal", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases", "kanban-layouts-and-formulas", "api-and-calendar-colors", "settings-ui-refresh", "text-effects-and-previews"];
+    const ids = ["introduction", "installation-and-removal", "features", "appearance", "kanban-layouts-and-formulas", "calendar-colors", "text-effects-and-previews", "api-guide", "experiment", "settings-ui-refresh", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
     const entries = await Promise.all(ids.map(async (id) => {
       const response = await root.fetch(`./docs/${id}.md`);
       if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);

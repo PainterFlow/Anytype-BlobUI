@@ -330,11 +330,13 @@
     parseMediaManifest,
     mount(container, markdown, options = {}) {
       BlobUI.VideoPlayer?.destroyTree(container);
+      BlobUI.MarkdownImageViewer?.destroyTree(container);
       container.innerHTML = this.render(markdown, options);
       for (const slot of container.querySelectorAll("[data-blobui-video]")) {
         const media = options.videos?.[slot.getAttribute("data-blobui-video")];
         if (media && BlobUI.VideoPlayer) BlobUI.VideoPlayer.attach(slot, media);
       }
+      BlobUI.MarkdownImageViewer?.mount(container);
     },
     render(markdown, options = {}) {
       const images = normalizedImages(options.images);
