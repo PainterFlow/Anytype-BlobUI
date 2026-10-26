@@ -33,6 +33,10 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 ## Calendar Event Colors
 - Added new "Calendar Colors" option, which toggles whether calendar event colors render. (*on by default, the option is locked when the API key is unavailable*)
 
+## Other
+- Added ability to export & import settings
+*Developers Note: This was kinda an emergency feature as I had to investigate a older version of BlobUI and I thought like: "well I may es well js implement settings backups rn". The UI will be improved in v1.4.0.*
+
 ## Experimental: Settings Future Proof UI Refresh
 - Adds tabs for settings.
 - Adds collapsible/uncollapsible setting categories.
