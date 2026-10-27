@@ -12,6 +12,11 @@
   const displayPickerRoot = el("formula-display-select");
   const modalBackdrop = el("formula-calculator-backdrop"), modalDialog = el("formula-calculator-dialog");
   const modalClose = el("formula-calculator-close"), modalContent = el("formula-calculator-content");
+  function setMessage(text, success = false) {
+    if (!message) return;
+    message.textContent = text;
+    message.dataset.status = success ? "success" : "error";
+  }
   const operations = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum", median: "Median" };
   let state = defaults(), persistedState = defaults(), catalog = [], api, invoke, calculatorModal;
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
@@ -742,8 +747,12 @@
     contents.replaceChildren();
     records = [];
     syncDisplayPicker();
-    const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(catalog).views : catalog.slice();
+    const supported = catalog.filter(view => !view.unsupported);
+    const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(supported).views : supported.slice();
     for (const saved of state.definitions) {
+      // Keep hidden unsupported definitions in the draft without recreating
+      // them as unavailable rows. Missing views still offer manual removal.
+      if (catalog.some(view => view.unsupported && identity(view.target) === identity(saved.target))) continue;
       if (!views.some(view => identity(view.target) === identity(saved.target)) && !UI.ViewCatalog?.findViewForTarget(views,saved.target)) {
         views.push({
           target: saved.target, name: "Unavailable view", space: "Saved calculation",
@@ -791,17 +800,26 @@
     const generation = ++discoveryGeneration;
     discoveryRequested = false;
     discovering = true;
-    if (message) message.textContent = loadError;
+    setMessage(loadError);
     syncLocks();
     try {
       const result = await invoke("discover_kanban_views");
       if (!result || !Array.isArray(result.views)) throw Error("Anytype did not return a view list.");
       if (generation !== discoveryGeneration) return;
       catalog = result.views;
+      (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+      const logged = new Set();
+      catalog.forEach(view => {
+        if (!view.unsupported) return;
+        const key = identity(view.target);
+        if (logged.has(key)) return;
+        logged.add(key);
+        api?.onInfo?.("Skipped Kanban view \"" + view.name + "\" in " + view.space + " · " + view.source + " · " + view.kind + ". " + view.unsupported);
+      });
       discovered = true;
-      if (message) message.textContent = [loadError, result.warning].filter(Boolean).join(" ");
+      setMessage([loadError, result.warning].filter(Boolean).join(" "));
     } catch (error) {
-      if (generation === discoveryGeneration && message) message.textContent = String(error.message || error);
+      if (generation === discoveryGeneration) setMessage(String(error.message || error));
     } finally {
       if (generation === discoveryGeneration) {
         discovering = false;
@@ -900,12 +918,12 @@
           persistedState = copy(state);
           calculatedAt = result.calculatedAt || "";
         }
-        if (message) message.textContent = "";
+        setMessage("");
       } catch (_) {
         state = defaults();
         persistedState = copy(state);
         loadError = "Could not load saved formulas. The original file is unchanged. Make changes and Save to replace it, or restart to retry.";
-        if (message) message.textContent = loadError;
+        setMessage(loadError);
       }
       loading = false;
       render();
@@ -918,14 +936,15 @@
     async save(bridge, submitted) {
       try {
         const result = await bridge("save_kanban_formulas", { configuration: submitted });
+        (result?.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
         persistedState = copy(submitted);
         calculatedAt = result && result.calculatedAt || calculatedAt;
         loadError = "";
         updateTimestamp();
-        if (message) message.textContent = "Formulas saved. Press Ctrl+R in Anytype to apply.";
+        setMessage("Formulas saved. Press Ctrl+R in Anytype to apply.", true);
         return result;
       } catch (error) {
-        if (message) message.textContent = String(error.message || error) + " Your pending edits and previous published results are kept.";
+        setMessage(String(error.message || error) + " Your pending edits and previous published results are kept.");
         throw Error("Kanban formulas could not be saved. Review the message on the Kanban View Formulas page and retry.");
       }
     },

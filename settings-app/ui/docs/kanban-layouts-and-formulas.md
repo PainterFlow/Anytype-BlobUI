@@ -39,7 +39,9 @@ The recording shows Compact spacing with Collapsed Categories enabled.
 3. Use the magnifier to search, the filter to choose a space, or Reload to discover available views.
 4. Select a view. Its space, source name, and source kind help distinguish duplicate names.
 
-A listed view can still be unavailable for calculations. BlobUI explains when the API cannot expose exact view membership, properties, or category identities. It does not estimate results from incomplete data.
+Unsupported views are hidden from the list. Each exclusion is recorded as an info entry in Logs with the view's name, source, and reason. Saved calculations for hidden views are preserved. BlobUI does not estimate results from incomplete data.
+
+Views opened from a Type are included alongside query and collection views. Calculations support single-select and checkbox grouping. Multi-select grouping is unavailable. Duplicate option names or unresolved identities on options used by cards prevent publication.
 
 ## Use the calculator
 

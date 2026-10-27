@@ -3,6 +3,7 @@
 #open-formulas { display: none; margin-top: 16px; }
 :root[data-settings-v21="true"] #open-formulas { display: inline-flex; }
 #formulas-page { max-width: 640px; }
+#formula-storage-message[data-status="success"] { color: var(--color-teal); }
 #formulas-page, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 #formula-fields, .formula-calculator { border: 0; padding: 0; margin: 0; min-width: 0; }
 .formula-button, .formula-variable-button, .formula-insert-property, .formula-remove-calculation, .formula-property-insert { min-height: 32px; border: 0; border-radius: 16px; padding: 4px 10px; background: var(--input-bg); color: var(--text); font-size: 13px; line-height: 20px; cursor: pointer; }

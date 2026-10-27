@@ -38,9 +38,30 @@ Display formulas under Preferences > Kanban shares the grouped settings list and
 
 This uses the official Anytype app and its local API. It does not patch Anytype, inject JavaScript, enable debugging access, or poll in the background. The sample-data prototype is removed.
 
-Results require an exact object, block, active-view, and category identity. Select grouping uses option IDs. Checkbox grouping uses true and false. Multi-select grouping follows Anytype's hash of sorted option IDs, including combination categories rather than counting each option separately.
+Results require an exact object, block, active-view, and category identity. Single-select grouping uses option IDs resolved from the view's stored groups. Checkbox grouping uses true and false. Multi-select grouping is unavailable until API v2 exposes enough information to match its columns reliably. Duplicate option names prevent publication.
 
-Some API versions or grants expose option names without stable IDs. Some inline or type views lack a filtered membership endpoint. These views remain listed with an explanation, and BlobUI refuses to publish guessed results. A missing saved view or property retains its calculation until you remove or replace it and save. API loading warnings or incomplete pagination prevent publication.
+Views opened from a Type are discovered through API v2's type documents. Their cards are read through type-scoped search with the stored view's filters and sorts. Query and collection views use their view membership endpoints. Inline boards follow their referenced query, collection, or Type for membership and category identities while keeping their host page and block IDs for CSS targeting. Unreadable or unsupported sources remain unavailable.
+
+Unused single-select options without known IDs do not block publication. A card using an unresolved option still prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save. Incomplete pagination prevents publication independently of API notices.
+
+### API warning handling
+
+Warnings are classified for both paginated results and document metadata reads. Discovery first checks whether a document contains a Kanban view. Warnings on documents without boards do not affect Kanban discovery. On board documents, warnings confined to text, mentions, icons, or covers are also excluded because that content is not a calculation input. Membership, source, filter, property, and identity checks remain in place. Informational notices are deduplicated per discovery or publication and passed to Logs at info level. Blocking messages include the API's explanation and identify the affected part of the calculation.
+
+| API finding | Handling |
+| --- | --- |
+| Date comparisons include undated objects | Info. Preserve the stored filter's existing semantics. |
+| The first stored view was selected because no view was requested | Info. Block if BlobUI explicitly requested a view instead. |
+| Transparent document containers are lifted without losing children | Info. This changes document structure, not card membership or option identity. |
+| Deleted-reference notices or unreadable optional remote-file metadata | Info when identified by the corresponding semantic code. Calculations do not fetch remote file bytes. |
+| Skipped spaces, loading stores, or omitted live targets | Block because the result set may be incomplete. |
+| Omitted requested fields or dropped property values | Block because calculation inputs are missing. |
+| Ignored placeholders, dropped filters, or normalized filter operands | Block because the requested filter was not applied exactly. |
+| Unresolved target/type identities or mismatched type identities | Block because exact identity cannot be established. |
+| Other dropped or clamped board metadata | Block because the board cannot be reconstructed completely. |
+| Malformed or unrecognized warnings | Block with a distinct explanation of the uncertainty. Do not label them as incomplete results. |
+
+The classifier follows Anytype's [v2 warning producers](https://github.com/anyproto/anytype-heart/tree/go-7383-apiv2-phase0/core/api/v2/service) and [AnyBlock issue codes](https://github.com/anyproto/any-block/blob/main/codec/anyblockjson/validate.go). Supplied semantic codes take precedence over message wording. Current v2 responses omit those codes, so known legacy warning families are matched by message and path. New warnings require classification before they can be treated as informational.
 
 Result snapshots use version 2 with number, boolean, or null values. Version 1 numeric snapshots remain readable. Older app versions cannot read new boolean formulas or snapshots.
 

@@ -186,7 +186,6 @@ pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &s
     let payload = body.map(serde_json::to_vec).transpose()
         .map_err(|_| "Could not encode an Anytype API request.".to_string())?;
     let mut request = SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAccept: application/json\r\nConnection: close\r\n"));
-    if path.starts_with("/v1/") { request.0.push_str("Anytype-Version: 2025-11-08\r\n"); }
     if let Some(payload) = &payload {
         request.0.push_str("Content-Type: application/json\r\n");
         request.0.push_str(&format!("Content-Length: {}\r\n", payload.len()));

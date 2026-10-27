@@ -73,6 +73,7 @@ pub struct View {
 #[derive(Serialize)]
 pub struct Catalog {
     pub views: Vec<View>,
+    pub info: Vec<String>,
     pub warning: Option<String>,
 }
 #[derive(Serialize)]
@@ -86,6 +87,7 @@ pub struct Loaded {
 pub struct Published {
     calculated_at: String,
     categories: usize,
+    info: Vec<String>,
 }
 #[derive(Serialize)]
 pub struct Evaluation {
@@ -289,6 +291,7 @@ fn publish_at(
     Ok(Published {
         calculated_at,
         categories,
+        info: Vec::new(),
     })
 }
 fn publish(configuration: Configuration) -> Result<Published, String> {
@@ -299,12 +302,14 @@ fn publish(configuration: Configuration) -> Result<Published, String> {
     } else {
         Some(Client::connect()?)
     };
-    publish_at(configuration, &install, &config_path, |definition| {
+    let mut published = publish_at(configuration, &install, &config_path, |definition| {
         client
             .as_ref()
             .ok_or("The Anytype connection is unavailable.")?
             .calculate(&definition.target, &Calculator::parse(&definition.tokens)?)
-    })
+    })?;
+    if let Some(client) = client { published.info = client.take_info(); }
+    Ok(published)
 }
 
 #[tauri::command]

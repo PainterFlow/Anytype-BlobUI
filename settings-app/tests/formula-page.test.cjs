@@ -33,7 +33,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
               { key: 'estimate', name: 'Estimate', format: 'number' },
               { key: 'notes', name: 'Notes', format: 'text' },
               { key: 'due-date', name: 'Due date', format: 'date' },
-            ], unsupported: null,
+            ], unsupported: window.__unsupportedView && viewId === 'view-a' ? 'Multi-select grouping is not supported.' : null,
         })).flatMap(view=>view.target.viewId === "view-a" ? [view,{...view,target:{...view.target,blockId:"inline-copy"},kind:"Inline / type view"}] : [view]), warning: null };
       }
       if (command === 'evaluate_kanban_formula') throw Error('Calculator edits must not evaluate on every key.');
@@ -41,7 +41,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
         if (window.__failSave) throw Error('The board is unavailable.');
         window.__saves.push(args.configuration); sessionStorage.setItem('kanban-config', JSON.stringify(args.configuration));
         sessionStorage.setItem('calculated-at', '2026-10-23T12:00:00Z');
-        return { calculatedAt: '2026-10-23T12:00:00Z', categories: 4 };
+        return { calculatedAt: '2026-10-23T12:00:00Z', categories: 4, info: ['Date comparison also matches objects without a due date.', 'The default stored view was applied.', 'A transparent container was lifted.'] };
       }
       if (command === 'get_calendar_api_availability') return 'available';
       if (command === 'save_settings') return { calendarStatus: 'disabled' };
@@ -234,9 +234,25 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await page.evaluate(()=>window.__saves.length),savedCount);
     await page.evaluate(()=>window.__failSave=false);await page.locator('#save-button').click();
     await page.waitForFunction(count=>window.__saves.length===count+1,savedCount);
+    assert.equal(await page.locator('#log-entries .log-entry.info').filter({hasText:'Anytype API. Date comparison'}).count() > 0, true, 'Nonblocking API notices are logged at info level after successful publication.');
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'Date comparison'}).count(), 0);
+    for (const notice of ['The default stored view was applied.', 'A transparent container was lifted.']) {
+      assert.equal(await page.locator('#log-entries .log-entry.info').filter({hasText:notice}).count() > 0, true);
+      assert.equal(await page.locator('#log-entries .log-entry.warning, #log-entries .log-entry.error').filter({hasText:notice}).count(), 0);
+    }
     assert.equal(await page.evaluate(()=>window.__saves.at(-1).definitions[0].tokens[0].value),true);
     await open();assert.equal(await source.inputValue(),'true ? 1 < 2 : false');await close();
     const baseline = await read();
+    await page.evaluate(() => { window.__unsupportedView = true; });
+    await page.locator('#formula-reload').click();
+    await page.waitForFunction(() => [...document.querySelectorAll('#log-entries .log-entry.info')].some(row => row.textContent.includes('Skipped Kanban view') && row.textContent.includes('Multi-select grouping')));
+    await page.waitForFunction(() => !document.getElementById('formula-reload').disabled);
+    assert.equal(await page.locator('.formula-view-row').filter({hasText:'Launch plan'}).count(), 0);
+    assert.equal(await page.locator('.formula-view-warning').count(), 0);
+    assert.equal(await page.locator('.formula-view-row').filter({hasText:'Unavailable view'}).count(), 0, 'Hidden saved views must not reappear as unavailable rows.');
+    assert.deepEqual(await read(), baseline, 'Filtering unsupported views preserves saved calculations.');
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'Skipped Kanban view'}).count(), 0);
+    await page.evaluate(() => { window.__unsupportedView = false; });
     await page.evaluate(() => { window.__hideView = true; });
     await page.locator('#formula-reload').click();
     const unavailable = page.locator('.formula-view-row').filter({ hasText: 'Unavailable view' });
