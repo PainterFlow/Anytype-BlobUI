@@ -114,6 +114,26 @@ struct SettingsDraft {
     calendar_colors_enabled: bool,
     #[serde(default)]
     settings_v21_enabled: bool,
+    #[serde(default, deserialize_with = "deserialize_sidebar_resize_mode")]
+    sidebar_resize_mode: SidebarResizeMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum SidebarResizeMode {
+    #[default]
+    Off,
+    Standard,
+    Pro,
+}
+
+fn deserialize_sidebar_resize_mode<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<SidebarResizeMode, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    Ok(match value.as_str() {
+        Some("standard") => SidebarResizeMode::Standard,
+        Some("pro") => SidebarResizeMode::Pro,
+        _ => SidebarResizeMode::Off,
+    })
 }
 
 fn default_include_selections() -> bool {
@@ -1090,6 +1110,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "collapsedCategories": settings.collapsed_categories,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
+        "sidebarResizeMode": settings.sidebar_resize_mode,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -1117,6 +1138,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "collapsedCategories": settings.collapsed_categories,
             "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
+        "sidebarResizeMode": settings.sidebar_resize_mode,
         }
     });
 }
@@ -1272,6 +1294,11 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         object_mention_hover_effect,
         kanban_view_style,
         collapsed_categories,
+        sidebar_resize_mode: match read_string(local, "sidebarResizeMode").or_else(|| read_string(Some(normalized), "sidebarResizeMode")).as_deref() {
+            Some("standard") => SidebarResizeMode::Standard,
+            Some("pro") => SidebarResizeMode::Pro,
+            _ => SidebarResizeMode::Off,
+        },
         settings_v21_enabled: read_bool(local, "settingsV21Enabled")
             .or_else(|| read_bool(Some(normalized), "settingsV21Enabled"))
             .unwrap_or(false),
@@ -1799,6 +1826,7 @@ impl Default for SettingsDraft {
             collapsed_categories: false,
             calendar_colors_enabled: true,
             settings_v21_enabled: false,
+            sidebar_resize_mode: SidebarResizeMode::Off,
         }
     }
 }
@@ -1817,6 +1845,26 @@ mod tests {
         assert!(assert_fixture_path(&workspace.join(".test-run")).is_ok());
         assert!(save_paths(workspace).unwrap_err().contains("outside workspace"));
         assert!(read_saved_api_key_at(workspace).unwrap_err().contains("outside workspace"));
+    }
+
+    #[test]
+    fn sidebar_resize_mode_defaults_and_round_trip() {
+        assert_eq!(SettingsDraft::default().sidebar_resize_mode, SidebarResizeMode::Off);
+        for (name, mode) in [("off", SidebarResizeMode::Off), ("standard", SidebarResizeMode::Standard), ("pro", SidebarResizeMode::Pro)] {
+            let settings = SettingsDraft { sidebar_resize_mode: mode, ..SettingsDraft::default() };
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &settings);
+            assert_eq!(settings_from_data(&data).sidebar_resize_mode, mode);
+            assert_eq!(data["settings"]["sidebarResizeMode"], name);
+            assert_eq!(data["settingsV2"]["settings"]["sidebarResizeMode"], name);
+        }
+        for invalid in [json!("invalid"), json!(42), Value::Null, json!({})] {
+            let mut draft = serde_json::to_value(SettingsDraft::default()).unwrap();
+            draft["sidebarResizeMode"] = invalid.clone();
+            assert_eq!(serde_json::from_value::<SettingsDraft>(draft).unwrap().sidebar_resize_mode, SidebarResizeMode::Off);
+            assert_eq!(settings_from_data(&json!({"settings": {"sidebarResizeMode": invalid}})).sidebar_resize_mode, SidebarResizeMode::Off);
+        }
+        assert_eq!(settings_from_data(&json!({"settings": {}})).sidebar_resize_mode, SidebarResizeMode::Off);
     }
 
     #[test]

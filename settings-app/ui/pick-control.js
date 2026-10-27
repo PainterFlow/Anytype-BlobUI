@@ -64,6 +64,10 @@
           copy.append(description);
           option.append(copy);
         } else option.append(label);
+        const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        check.setAttribute("viewBox", "0 0 16 16"); check.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "m3.5 8 3 3 6-6"); check.append(path); option.append(check);
         menu.append(option);
       });
       setValue(trigger.value);

@@ -310,7 +310,7 @@
               <template data-ui-mount="experiments-heading"><h2 id="experiments-heading">Experiments</h2><p>Experimental features may change while they are in development.</p>
                 <p id="experiments-warning" class="experiments-warning"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z"></path><path d="M10 7v4"></path><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none"></circle></svg><span>Experiments may break things. Use at your own risk.</span></p>
               </template>
-              <template data-ui-mount="advanced-experiments-tab-list"><template data-ui-mount="settings-v21-enabled"></template></template>
+              <template data-ui-mount="advanced-experiments-tab-list"><template data-ui-mount="settings-v21-enabled"></template><div class="settings-row sidebar-experiment-row"><span id="sidebar-resize-label">Resizable Sidebar</span><div id="sidebar-resize-picker" class="kanban-select"><template data-ui-mount="sidebar-resize-mode"><span data-pick-value>Off</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></template><div class="kanban-select-menu" role="listbox" id="sidebar-resize-options" aria-label="Resizable Sidebar" hidden></div></div></div></template>
             </template>
             <template data-ui-mount="advanced-api-panel">
               <template data-ui-mount="advanced-api-heading"></template>
@@ -471,6 +471,7 @@
     <script src="./external-links.js"></script>
     <script src="./docs.js"></script>
     <script src="./settings-v21.js"></script>
+    <script src="./sidebar-resize.js"></script>
     <script src="./calculator-math.js"></script>
     <script src="./view-catalog.js"></script>
     <script src="./reload-controller.js"></script>

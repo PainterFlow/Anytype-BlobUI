@@ -103,3 +103,9 @@ Unlinked Markdown images in documentation and release notes open directly over a
 Documentation groups Appearance, Kanban, Calendar Colors, and QoL Features under Features. API Guide is a separate guide. Experiment contains Settings UI as its child, with distinct experiment and layout icons. Features is a short overview that points to detailed guides. Reader playback instructions belong in Introduction, separate from Anytype's QoL settings.
 
 Website links always open in the system's default browser. Documentation article selection and local heading anchors stay in the reader. Never navigate the Settings webview to a website or create an embedded browser window.
+
+## Resizable sidebar experiment
+
+Advanced > Experiments contains an independent single-select Resizable Sidebar control, defaulting to Off. Standard and pro share width between Settings and Docs in both layouts. Separators support pointer dragging and keyboard resizing in 8px steps. Expanded width ranges from 160px to 320px, capped at 40% of the window with a 160px minimum. Pro snaps below 160px to a 56px icon rail. Child navigation retains disclosure behavior and tooltips. Mode previews use Save and Undo; geometry is remembered automatically across restarts and does not mark settings dirty. Off restores the original responsive width.
+
+The experiment uses the shared Picker with Off, Variant 1, and Variant 2; variant names appear as gray second lines. Navigation labels use ellipsis and full-name tooltips. Pro uses circular navigation targets and darker child icons. The title moves right of the mini rail. Resizing never brightens the divider or covers Logs and Help popovers. Tab geometry updates without underline animation during resizing, and horizontal tab scrollbars remain hidden while keyboard selection still reveals the selected tab.

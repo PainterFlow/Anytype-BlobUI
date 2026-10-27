@@ -117,6 +117,7 @@ const context = {
     getElementById: element,
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
+    createElementNS: () => element('svg-' + elements.size),
     querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },

@@ -48,6 +48,11 @@
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
+  const sidebarResizePicker = window.BlobUI.Components.Picker({ root: el("sidebar-resize-picker"), value: "off", options: [
+    { value: "off", label: "Off" },
+    { value: "standard", label: "Variant 1", description: "Resizable Sidebar" },
+    { value: "pro", label: "Variant 2", description: "Resizable Sidebar pro" }
+  ] });
   const kanbanPicker = window.BlobUI.Components.Picker({ root: kanbanSelect });
   function closeKanbanStyleMenu(restoreFocus = false) { kanbanPicker.close(restoreFocus); }
   function syncKanbanStyleSelection(value) {
@@ -463,7 +468,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1227,6 +1232,7 @@
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       settingsV21Enabled: settings.settingsV21Enabled === true,
+      sidebarResizeMode: ["standard", "pro"].includes(settings.sidebarResizeMode) ? settings.sidebarResizeMode : "off",
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1243,6 +1249,8 @@
     collapsedCategories.checked = draft.collapsedCategories;
     calendarColorsEnabled.checked = draft.calendarColorsEnabled;
     el("settings-v21-enabled").checked = draft.settingsV21Enabled;
+    sidebarResizePicker.setValue(draft.sidebarResizeMode);
+    window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
     applyFontFamilies();
@@ -2455,7 +2463,13 @@
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     markDirty();
   });
-  window.appReady = false;
+  el("sidebar-resize-mode").addEventListener("change", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    draft.sidebarResizeMode = el("sidebar-resize-mode").value;
+    window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
+    markDirty();
+  });
+    window.appReady = false;
   loadState();
   window.setInterval(refreshTheme, 2000);
   window.setInterval(() => {

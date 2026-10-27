@@ -8,16 +8,19 @@
     let destroyed = false;
     const listeners = [];
 
-    function refresh() {
+    function refresh({ animate = false } = {}) {
       if (destroyed || !enabled) return;
       const button = buttons[selected];
       if (!button?.offsetWidth) return;
       const initializing = !container.classList.contains("indicator-ready");
-      if (initializing) container.classList.add("indicator-initializing");
+      if (initializing || !animate) {
+        container.classList.add("indicator-initializing");
+        void container.offsetWidth;
+      }
       container.style.setProperty("--tab-left", `${button.offsetLeft}px`);
       container.style.setProperty("--tab-width", `${button.offsetWidth}px`);
       container.classList.add("indicator-ready");
-      if (initializing) {
+      if (initializing || !animate) {
         void container.offsetWidth;
         container.classList.remove("indicator-initializing");
       }
@@ -48,7 +51,7 @@
       const focusWasInPanel = panels[selected].contains(root.document?.activeElement);
       selected = index;
       syncPanels();
-      refresh();
+      refresh({ animate: changed });
       if (enabled) {
         // Move only the tab strip. Scrolling ancestors makes the last tab jump.
         if (focus || focusWasInPanel) buttons[index].focus({ preventScroll: true });

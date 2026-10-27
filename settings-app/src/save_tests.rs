@@ -225,6 +225,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         collapsed_categories: true,
         calendar_colors_enabled: true,
         settings_v21_enabled: false,
+        sidebar_resize_mode: SidebarResizeMode::Off,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
@@ -246,9 +247,10 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
-    let experimental = SettingsDraft { settings_v21_enabled: true, ..draft.clone() };
+    let experimental = SettingsDraft { settings_v21_enabled: true, sidebar_resize_mode: SidebarResizeMode::Pro, ..draft.clone() };
     save_settings_blocking(experimental).unwrap();
     assert!(settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
+    assert_eq!(settings_from_data(&read_json_file(&data_path).unwrap()).sidebar_resize_mode, SidebarResizeMode::Pro);
     assert_eq!(saved_css, fs::read_to_string(&css_path).unwrap());
     save_settings_blocking(draft.clone()).unwrap();
     assert!(!settings_from_data(&read_json_file(&data_path).unwrap()).settings_v21_enabled);
