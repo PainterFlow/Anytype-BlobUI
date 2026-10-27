@@ -1,4 +1,4 @@
-# BlobUI 1.4.0 - What's new?
+# BlobUI v1.4.0 - What's new?
 
 *Insert random ah text.*
 
