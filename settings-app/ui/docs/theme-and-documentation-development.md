@@ -13,7 +13,7 @@ CSS sources under `Dev` compile in relative-path order. Numeric prefixes group s
 
 1. Find the existing module and Anytype selector for the behavior.
 2. Make the smallest source change. Do not edit generated CSS or release copies.
-3. Build Settings with `scripts/Build-Settings.ps1 -s -c`, generate CSS against an intended test data folder, and inspect Anytype.
+3. Build Settings with `scripts/Build-App.ps1 -s -c`, generate CSS against an intended test data folder, and inspect Anytype.
 4. Check both themes, wrapping, keyboard use, and reduced motion where relevant.
 
 The compiler recognizes annotated placeholders such as `accentColor` and `bannerUrl`. Extend Rust validation and compilation when adding generated values rather than inserting unvalidated CSS from the UI.
@@ -21,6 +21,8 @@ The compiler recognizes annotated placeholders such as `accentColor` and `banner
 ## Add an appearance control
 
 Follow the existing Preferences and Accessibility layout. Update the frontend draft, dirty comparison, validation, preview, Save, and Undo together. Add the corresponding persisted Rust settings and CSS generation. Test older local settings and rollback when saving fails.
+
+Use the shared DOM components in `ui/components.js` for settings rows, fields, buttons, and groups. Add properties to the relevant screen definition and a named template slot in `index.html`. `screens.js` mounts these before application bindings run. Keep component updates separate from saving and native commands. Read `settings-app/UI_REFERENCE.md` for the lifecycle and controller contracts.
 
 Appearance changes remain drafts until Save. App preferences and shortcuts have separate persistence paths; follow their existing behavior. Use accessible labels, keyboard focus, status messages, and reduced-motion handling.
 
@@ -68,3 +70,7 @@ The catalog API remains `BlobUI.DocsData.load()`, returning `{ categories, artic
 ## Onboarding
 
 Onboarding steps use `onboardingSteps` in `app.js`. Conditional steps use `when`, and `advanceOnboarding()` falls back to Settings when finished. Check Escape behavior, authentication failures, independent calendar failures, and reduced-motion transitions after changing the flow.
+
+## Video documentation
+
+Register bundled MP4 assets in DocsData.videoAliases and embed them with an @alias in normal Markdown. Use descriptive lowercase filenames and provide a description in the surrounding instructions. Markdown.mount renders both images and videos through the same sanitized reader used by release notes. The global player provides hover controls, keyboard access, muted autoplay, and cleanup. Read the [documentation data reference](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/docs/DOCUMENTATION.md) and [release notes authoring guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/docs/RELEASE-NOTES.md) for manifest shapes and limits.

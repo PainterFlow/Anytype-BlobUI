@@ -2,6 +2,8 @@
 
 The Windows release package carries `Changelogs.md`, `Changelogs.yaml`, and any referenced image files. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
 
+The dialog shows the changelog's version and marks entries that match the running app's current version or the latest available changelog. These markers follow the selected entry when browsing release history.
+
 ## Markdown source
 
 Write release notes in the repository-root `Changelogs.md`. The renderer uses Marked with GitHub Flavored Markdown, including headings, paragraphs, emphasis, strikethrough, blockquotes, nested ordered and unordered lists, task lists, fenced code blocks, tables, and inline code.
@@ -61,4 +63,22 @@ container.innerHTML = safeHtml;
 
 `parseImageManifest(yamlText)` validates the supported manifest subset and returns an object keyed by image id. Each value has `src` and `alt`. The caller supplies `render` an `images` object keyed by id, where each `src` is a base64 `data:image/png`, `image/jpeg`, `image/gif`, or `image/webp` URL. `render(markdownText, { images, document })` returns sanitized HTML; `document` is optional and defaults to the current window document. The renderer is intended for inert, local Markdown content and does not grant arbitrary HTML execution.
 
-For production packaging, build Settings with `scripts/Build-Settings.ps1 -s -c`, then run `scripts/Build-Installer.ps1 -PackageRelease`. Packaging fails if either changelog source file is missing. The native installer places them in BlobUI's managed runtime, and update installation replaces them with the rest of the managed release files.
+For production packaging, build Settings with `scripts/Build-App.ps1 -s -c`, then run `scripts/Build-Installer.ps1 -PackageRelease`. Packaging fails if either changelog source file is missing. The native installer places them in BlobUI's managed runtime, and update installation replaces them with the rest of the managed release files.
+
+## MP4 videos
+
+Add a videos section beside images in Changelogs.yaml. IDs must be unique across both sections. Existing image-only manifests remain supported.
+
+```yaml
+images: []
+videos:
+  - id: board-demo
+    src: assets/changelogs/board-demo.mp4
+    alt: Compact Kanban with collapsing categories
+```
+
+Embed it with @board-demo or ![Compact Kanban](@board-demo). MP4 files must stay under assets/changelogs/, have an ftyp signature, and be no larger than 64 MiB each. Native retrieval and installer validation check paths, signatures, and limits. Release history loads videos from the selected version tag. Failed downloads leave an inline error while the rest of the notes remain readable.
+
+parseMediaManifest(yaml) returns { images, videos }; parseImageManifest remains compatible and returns only images. Use Markdown.mount(container, text, { images, videos }) for interactive readers. Each video entry accepts alt and a validated data:video/mp4;base64 source, or a local MP4 Blob. The shared player owns its temporary object URL and disposes it when replaced or closed. Remote video URLs and raw HTML video tags are rejected.
+
+Autoplay videos in Advanced Settings > App settings defaults to on for existing and new installations. Videos start muted when at least half visible, pause when hidden, and stop at the end. A manual pause is preserved. Turning autoplay off requires manual playback. Move the pointer or focus the player to reveal its shared controls.

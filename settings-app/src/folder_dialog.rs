@@ -3,12 +3,27 @@ pub fn select_anytype_folder(
     current_directory: Option<String>,
     owner_handle: Option<isize>,
 ) -> Result<Option<String>, String> {
+    select_folder(
+        current_directory,
+        "Select Anytype Folder".into(),
+        "Select folder".into(),
+        owner_handle,
+    )
+}
+
+#[cfg(windows)]
+pub fn select_folder(
+    current_directory: Option<String>,
+    title: String,
+    button_label: String,
+    owner_handle: Option<isize>,
+) -> Result<Option<String>, String> {
     std::thread::Builder::new()
         .name("blobui-folder-dialog".into())
-        .spawn(move || select_anytype_folder_sta(current_directory, owner_handle))
-        .map_err(|_| "Windows could not start the Anytype folder chooser.".to_string())?
+        .spawn(move || select_folder_sta(current_directory, &title, &button_label, owner_handle))
+        .map_err(|_| "Windows could not start the folder chooser.".to_string())?
         .join()
-        .map_err(|_| "The Anytype folder chooser stopped unexpectedly.".to_string())?
+        .map_err(|_| "The folder chooser stopped unexpectedly.".to_string())?
 }
 
 #[cfg(not(windows))]
@@ -19,21 +34,63 @@ pub fn select_anytype_folder(
     Err("The Anytype folder chooser is supported on Windows.".into())
 }
 
+#[cfg(not(windows))]
+pub fn select_folder(
+    _current_directory: Option<String>,
+    _title: String,
+    _button_label: String,
+    _owner_handle: Option<isize>,
+) -> Result<Option<String>, String> {
+    Err("The folder chooser is supported on Windows.".into())
+}
+
 #[cfg(windows)]
-fn select_anytype_folder_sta(
+fn shell_parsing_path(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(&path).to_string()
+    }
+}
+
+#[cfg(windows)]
+fn set_initial_folder(
+    dialog: &windows::Win32::UI::Shell::IFileOpenDialog,
+    current_directory: Option<&str>,
+) -> windows::core::Result<()> {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::Shell::{IShellItem, SHCreateItemFromParsingName};
+
+    let Some(path) = current_directory
+        .filter(|value| !value.trim().is_empty() && !value.contains('\0'))
+        .and_then(|value| std::path::Path::new(value).canonicalize().ok())
+        .filter(|path| path.is_dir())
+    else {
+        return Ok(());
+    };
+    // The Shell parser rejects the verbatim prefixes returned by canonicalize.
+    let parsing_name = HSTRING::from(shell_parsing_path(&path));
+    let item: IShellItem = unsafe { SHCreateItemFromParsingName(&parsing_name, None) }?;
+    unsafe { dialog.SetFolder(&item) }
+}
+
+#[cfg(windows)]
+fn select_folder_sta(
     current_directory: Option<String>,
+    title: &str,
+    button_label: &str,
     owner_handle: Option<isize>,
 ) -> Result<Option<String>, String> {
-    use std::os::windows::ffi::OsStrExt;
     use std::path::PathBuf;
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::core::HSTRING;
     use windows::Win32::Foundation::{HWND, RPC_E_CHANGED_MODE};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{
-        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        FileOpenDialog, IFileOpenDialog,
         FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS,
         SIGDN_FILESYSPATH,
     };
@@ -75,31 +132,15 @@ fn select_anytype_folder_sta(
     unsafe { dialog.SetOptions(windows::Win32::UI::Shell::FILEOPENDIALOGOPTIONS(options)) }
         .map_err(|error| format!("Windows could not configure the folder chooser: {error}"))?;
 
-    let title = HSTRING::from("Select Anytype Folder");
-    let button = HSTRING::from("Select folder");
+    let title = HSTRING::from(title);
+    let button = HSTRING::from(button_label);
     unsafe { dialog.SetTitle(&title) }
         .map_err(|error| format!("Windows could not title the folder chooser: {error}"))?;
     unsafe { dialog.SetOkButtonLabel(&button) }
         .map_err(|error| format!("Windows could not configure the folder chooser: {error}"))?;
 
-    let initial_directory = current_directory
-        .filter(|value| !value.trim().is_empty() && !value.contains('\0'))
-        .and_then(|value| PathBuf::from(value).canonicalize().ok())
-        .filter(|path| path.is_dir());
-    if let Some(path) = initial_directory {
-        let wide = path
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect::<Vec<_>>();
-        let item: IShellItem = unsafe { SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None) }
-            .map_err(|error| {
-                format!("Windows could not open the current Anytype folder: {error}")
-            })?;
-        unsafe { dialog.SetFolder(&item) }.map_err(|error| {
-            format!("Windows could not open the current Anytype folder: {error}")
-        })?;
-    }
+    // An unavailable starting location must not prevent choosing another folder.
+    let _ = set_initial_folder(&dialog, current_directory.as_deref());
 
     let owner = owner_handle.map(|handle| HWND(handle as *mut _));
     if let Err(error) = unsafe { dialog.Show(owner) } {
@@ -126,4 +167,50 @@ fn select_anytype_folder_sta(
         return Err("The selected Anytype path is not a folder.".into());
     }
     Ok(Some(selected))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
+
+    #[test]
+    fn shell_paths_preserve_drive_and_unc_locations() {
+        assert_eq!(shell_parsing_path(Path::new(r"\\?\C:\Anytype folder")), r"C:\Anytype folder");
+        assert_eq!(shell_parsing_path(Path::new(r"\\?\UNC\server\share\Anytype")), r"\\server\share\Anytype");
+        assert_eq!(shell_parsing_path(Path::new(r"C:\Anytype")), r"C:\Anytype");
+    }
+
+    #[test]
+    fn native_shell_accepts_canonical_fixture_folder_without_showing_a_dialog() {
+        std::thread::spawn(|| {
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok().unwrap();
+            struct Apartment;
+            impl Drop for Apartment {
+                fn drop(&mut self) { unsafe { CoUninitialize() }; }
+            }
+            let _apartment = Apartment;
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap().join(".test-run")
+                .join(format!("folder-picker-{}-Anytype ü", std::process::id()));
+            std::fs::create_dir_all(&fixture).unwrap();
+            let dialog: IFileOpenDialog = unsafe {
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
+            }.unwrap();
+            let canonical = fixture.canonicalize().unwrap();
+            set_initial_folder(&dialog, canonical.to_str()).unwrap();
+            let selected = unsafe { dialog.GetFolder() }.unwrap();
+            let name = unsafe { selected.GetDisplayName(SIGDN_FILESYSPATH) }.unwrap();
+            let actual = unsafe { name.to_string() }.unwrap();
+            unsafe { windows::Win32::System::Com::CoTaskMemFree(Some(name.0.cast())) };
+            assert_eq!(PathBuf::from(actual).canonicalize().unwrap(), canonical);
+            set_initial_folder(&dialog, Some("missing folder\0")).unwrap();
+            std::fs::remove_dir_all(fixture).unwrap();
+        }).join().unwrap();
+    }
 }

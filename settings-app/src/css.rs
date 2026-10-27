@@ -87,10 +87,15 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
 
     let settings = data.get("settings").and_then(Value::as_object)
         .ok_or_else(|| "The settings data has no normalized settings object.".to_string())?;
-    let bool_settings = ["reducedMotion", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect"]
+    let mut bool_settings = ["reducedMotion", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect", "collapsedCategories"]
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
+    bool_settings.insert("includeSelections", settings.get("includeSelections").and_then(Value::as_bool).unwrap_or(true));
+    let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
+    bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
+    bool_settings.insert("kanbanCompact", kanban_style == "compact");
+    bool_settings.insert("kanbanStyled", matches!(kanban_style, "balanced" | "compact"));
 
     let condition = Regex::new(r"(?s)/\*\s*@blobui-if(?<negation>-not)?\s+(?<name>[A-Za-z][A-Za-z0-9]*)\s*\*/(?<content>.*?)/\*\s*@blobui-endif(?<endNegation>-not)?\s+(?<endName>[A-Za-z][A-Za-z0-9]*)\s*\*/").unwrap();
     let mut condition_error = None;
@@ -172,7 +177,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     let declaration = Regex::new(r"/\*\s*@blobui-placeholder\s+[A-Za-z][A-Za-z0-9]*\s+(?:font|color|url|number|boolean)\s*\*/").unwrap();
     css_text = declaration.replace_all(&css_text, "").into_owned();
     let api_disabled = data.pointer("/apiConnection/enabled").and_then(Value::as_bool) == Some(false);
-    if !api_disabled {
+    if !api_disabled && settings.get("calendarColorsEnabled").and_then(Value::as_bool).unwrap_or(true) {
         if let Some(calendar_css) = calendar_color_css(data.get("calendarObjectColors"))? {
             if !css_text.trim_end().is_empty() {
                 css_text = format!("{}{newline}{newline}{calendar_css}{newline}", css_text.trim_end());
@@ -181,6 +186,9 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     }
     if Regex::new(r"\{\{[^}]+\}\}").unwrap().is_match(&css_text) {
         return Err("Compiled CSS still contains an unresolved placeholder.".into());
+    }
+    if !api_disabled {
+        css_text.push_str(&crate::kanban_css::render(data.get("kanbanFormulaResults"))?);
     }
     Ok(css_text)
 }
@@ -461,6 +469,35 @@ mod tests {
     }
 
     #[test]
+    fn compiles_all_kanban_combinations_and_defaults_without_overrides() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let root = fixture();
+        fs::create_dir_all(root.join("Dev")).unwrap();
+        fs::create_dir_all(root.join("assets/spacebanner")).unwrap();
+        fs::write(root.join("assets/spacebanner/banner.png"), b"fixture").unwrap();
+        fs::copy(workspace.join("Dev/41-kanban.css"), root.join("Dev/41-kanban.css")).unwrap();
+        for style in ["default", "balanced", "compact", "invalid"] {
+            for collapsed in [false, true] {
+                let data = json!({"installDirectory": root.join("anytype"), "settings": {
+                    "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": "Default",
+                    "kanbanViewStyle": style, "collapsedCategories": collapsed
+                }});
+                let compiled = compile(&root, &root.join("anytype"), &data).unwrap();
+                assert!(!compiled.contains("@blobui-if"));
+                assert_eq!(compiled.contains("column-gap: 8px"), matches!(style, "balanced" | "compact"));
+                assert_eq!(compiled.contains("flex-wrap: wrap"), style == "compact");
+                assert_eq!(compiled.contains(":focus-within"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: 0;"), collapsed);
+                assert_eq!(compiled.contains("--blobui-kanban-result-opacity: .7;"), collapsed);
+                if matches!(style, "default" | "invalid") && !collapsed {
+                    assert!(!compiled.contains("#columns"));
+                }
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn compiles_local_settings_placeholders_and_calendar_colors() {
         let root = fixture();
         fs::create_dir_all(root.join("Dev/nested")).unwrap();
@@ -469,7 +506,7 @@ mod tests {
         fs::write(root.join("Dev/10-test.css"), "/* @blobui-placeholder fontFamily font */\n/* @blobui-placeholder bannerUrl url */\nbody { font-family: \"{{fontFamily}}\"; --header-image: url(\"{{bannerUrl}}\"); }\n/* @blobui-if tabHoverEffect */\n.tab {}\n/* @blobui-endif tabHoverEffect */").unwrap();
         fs::write(root.join("Dev/nested/00-accent.css"), "/* @blobui-placeholder accentColor color */\n:root { color: {{accentColor}}; }").unwrap();
         let install = root.join("anytype");
-        let data = json!({"installDirectory": install, "settings": {
+        let mut data = json!({"installDirectory": install, "settings": {
             "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": "#27A879", "tabHoverEffect": true
         }, "calendarObjectColors": {"event-1": "Green"}});
         let css = compile(&root, &install, &data).unwrap();
@@ -477,6 +514,11 @@ mod tests {
         assert!(css.contains("color: #27A879"));
         assert!(css.contains(".tab {}"));
         assert!(css.contains("record-event-1"));
+        data["settings"]["calendarColorsEnabled"] = json!(false);
+        assert!(!compile(&root, &install, &data).unwrap().contains("record-event-1"));
+        assert_eq!(data["calendarObjectColors"]["event-1"], "Green");
+        data["settings"]["calendarColorsEnabled"] = json!(true);
+        assert!(compile(&root, &install, &data).unwrap().contains("record-event-1"));
         assert!(!css.contains("@blobui-placeholder"));
         fs::remove_dir_all(root).unwrap();
     }
@@ -509,6 +551,29 @@ mod tests {
         assert!(color_css("#FFFFFF", "Accent Color", false, true).is_err());
         let invalid = json!({"event/unsafe": "Green"});
         assert!(calendar_color_css(invalid.as_object().map(|_| &invalid)).is_err());
+    }
+
+    #[test]
+    fn selection_css_defaults_on_and_compiles_independently_of_accent_mode() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = root.join(".test-run/selections-compiled");
+        fs::create_dir_all(&fixture).unwrap();
+        let install = fixture.join("Anytype");
+        for (name, accent) in [("native", "Default"), ("preset", "Blob Pink"), ("custom", "#27A879"), ("alpha", "rgba(12, 34, 56, 0.5)")] {
+            for enabled in [None, Some(false), Some(true)] {
+                let mut data = serde_json::json!({"installDirectory": install, "settings": {
+                    "fontFamily": "Inter", "codeFontFamily": "Consolas", "accentColor": accent
+                }});
+                if let Some(value) = enabled { data["settings"]["includeSelections"] = serde_json::json!(value); }
+                let css = compile(root, &install, &data).unwrap();
+                assert_eq!(css.contains("--blobui-selection-fill:"), enabled.unwrap_or(true));
+                assert!(!css.contains("@blobui-"));
+                assert!(!css.contains("{{"));
+                if let Some(value) = enabled {
+                    fs::write(fixture.join(format!("{name}-{value}.css")), css).unwrap();
+                }
+            }
+        }
     }
 
     #[test]

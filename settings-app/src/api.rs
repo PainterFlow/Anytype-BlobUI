@@ -176,7 +176,7 @@ fn paged(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Opt
     Ok(all)
 }
 
-fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
     let address = ip.parse::<IpAddr>().map_err(|_| "API key IP must be a valid IPv4 or IPv6 address.".to_string())?;
     let socket = SocketAddr::new(address, port);
     let mut stream = TcpStream::connect_timeout(&socket, TIMEOUT).map_err(|error| network_error(&error))?;
@@ -245,7 +245,7 @@ fn network_error(error: &std::io::Error) -> String {
     }
 }
 
-fn encode_segment(value: &str) -> String {
+pub(crate) fn encode_segment(value: &str) -> String {
     let mut escaped = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
