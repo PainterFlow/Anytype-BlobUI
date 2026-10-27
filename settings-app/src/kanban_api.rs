@@ -100,7 +100,7 @@ impl Client {
                 continue;
             };
             if document.get("id").and_then(Value::as_str) == Some(object)
-                && document.get("kind").and_then(Value::as_str) == Some("objectType")
+                && document.get("kind").and_then(Value::as_str) == Some("object_type")
             {
                 return Ok(document);
             }
@@ -273,7 +273,7 @@ impl Client {
     ) -> Result<ObjectDiscovery, String> {
         let key = required(row, "key")?;
         let document = self.type_document(space_id, &key)?;
-        if document.get("kind").and_then(Value::as_str) != Some("objectType") {
+        if document.get("kind").and_then(Value::as_str) != Some("object_type") {
             return Err("Anytype returned an invalid Object Type document.".into());
         }
         let object_id = required(&document, "id")?;
@@ -1087,7 +1087,7 @@ fn insert_option_id(
 }
 
 fn list_kind(document: &Value) -> Option<&'static str> {
-    if document.get("kind").and_then(Value::as_str) == Some("objectType") {
+    if document.get("kind").and_then(Value::as_str) == Some("object_type") {
         return Some("objectTypes");
     }
     match document["type"].as_str() {
@@ -1652,7 +1652,7 @@ mod tests {
                     v2_page(json!([]))
                 } else if path.starts_with("/v2/spaces/space/types/task?") {
                     json!({
-                        "kind":"objectType",
+                        "kind":"object_type",
                         "id":"type-id",
                         "blocks":[{
                             "id":"dataview",
