@@ -40,7 +40,7 @@ This uses the official Anytype app and its local API. It does not patch Anytype,
 
 Results require an exact object, block, active-view, and category identity. Select grouping uses option IDs. Checkbox grouping uses true and false. Multi-select grouping follows Anytype's hash of sorted option IDs, including combination categories rather than counting each option separately.
 
-Some API versions or grants expose option names without stable IDs. Some inline or type views lack a filtered membership endpoint. These views remain listed with an explanation, and BlobUI refuses to publish guessed results. A missing saved view or property retains its calculation until you remove or replace it and save. API loading warnings or incomplete pagination prevent publication.
+Some API versions or grants expose option names without stable IDs; multi-select grouping requires stable option IDs and will stop rather than guess. Inline views without a filtered membership endpoint remain listed with an explanation. Object Type views use v2 search with their saved filters; unsupported conditions and current-user placeholders are reported, and current-user placeholders must be replaced with fixed values in Anytype. Incomplete pagination prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save.
 
 Result snapshots use version 2 with number, boolean, or null values. Version 1 numeric snapshots remain readable. Older app versions cannot read new boolean formulas or snapshots.
 

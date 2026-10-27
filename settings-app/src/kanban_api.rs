@@ -86,26 +86,39 @@ impl Client {
             None,
         )
     }
-    fn type_document_by_id(&self, space: &str, object: &str) -> Result<Value, String> {
+    fn type_document_by_id(&self, space: &str, object: &str) -> Result<(String, Value), String> {
         let rows = self.pages(
             "GET",
-            &format!("/v2/spaces/{}/types", enc(space)),
+            &format!("/v2/spaces/{}/types?ids=full", enc(space)),
             None,
         )?;
+        let mut document_error = None;
         for row in rows {
             let Ok(key) = required(&row, "key") else {
                 continue;
             };
-            let Ok(document) = self.type_document(space, &key) else {
-                continue;
+            let document = match self.type_document(space, &key) {
+                Ok(document) => document,
+                Err(error) => {
+                    document_error.get_or_insert(error);
+                    continue;
+                }
             };
             if document.get("id").and_then(Value::as_str) == Some(object)
                 && document.get("kind").and_then(Value::as_str) == Some("object_type")
             {
-                return Ok(document);
+                let search_key = document
+                    .get("internal_key")
+                    .and_then(Value::as_str)
+                    .filter(|key| !key.is_empty())
+                    .unwrap_or(&key)
+                    .to_string();
+                return Ok((search_key, document));
             }
         }
-        Err("This Object Type is unavailable. Reload the view list.".into())
+        Err(document_error.unwrap_or_else(|| {
+            "This Object Type is unavailable. Reload the view list.".into()
+        }))
     }
     fn exposed_views(
         &self,
@@ -113,34 +126,45 @@ impl Client {
         object: &str,
         kind: &str,
     ) -> Result<Vec<Value>, String> {
-        let path = if kind == "objectTypes" {
-            // Anytype's v1 lists route explicitly supports objectType layouts.
-            format!(
-                "/v1/spaces/{}/lists/{}/views",
-                enc(space),
-                enc(object)
-            )
-        } else {
-            format!(
-                "/v2/spaces/{}/{}/{}/views?ids=full",
-                enc(space),
-                kind,
-                enc(object)
-            )
-        };
+        let path = format!(
+            "/v2/spaces/{}/{}/{}/views?ids=full",
+            enc(space),
+            kind,
+            enc(object)
+        );
         self.pages("GET", &path, None)
     }
-    fn document_for_target(&self, target: &Target) -> Result<(Value, Option<&'static str>), String> {
+    fn document_for_target(
+        &self,
+        target: &Target,
+    ) -> Result<(Value, Option<&'static str>, Option<String>), String> {
         let object_document = self.document_blocks(&target.space_id, &target.object_id);
         if let Ok(document) = &object_document {
             if let Some(kind) = list_kind(document) {
-                return Ok((document.clone(), Some(kind)));
+                if kind == "objectTypes" {
+                    if let Some(key) = document
+                        .get("internal_key")
+                        .and_then(Value::as_str)
+                        .filter(|key| !key.is_empty())
+                    {
+                        return Ok((document.clone(), Some(kind), Some(key.to_string())));
+                    }
+                    let (key, canonical) =
+                        self.type_document_by_id(&target.space_id, &target.object_id)?;
+                    return Ok((canonical, Some(kind), Some(key)));
+                }
+                return Ok((document.clone(), Some(kind), None));
             }
         }
-        if let Ok(document) = self.type_document_by_id(&target.space_id, &target.object_id) {
-            return Ok((document, Some("objectTypes")));
+        match self.type_document_by_id(&target.space_id, &target.object_id) {
+            Ok((key, document)) => Ok((document, Some("objectTypes"), Some(key))),
+            Err(type_error) => match object_document {
+                Ok(document) => Ok((document, None, None)),
+                Err(object_error) => Err(format!(
+                    "The API could not read this target document ({object_error}) or resolve its Object Type key ({type_error})."
+                )),
+            },
         }
-        object_document.map(|document| (document, None))
     }
     fn document_properties(&self, space: &str, object: &str) -> Result<Value, String> {
         self.request(
@@ -342,6 +366,11 @@ impl Client {
                     Ok(keys) => (keys, None),
                     Err(error) => (None, Some(error)),
                 };
+                let source_error = if kind == Some("objectTypes") {
+                    validate_object_type_dataview_source(block, &object_id).err()
+                } else {
+                    None
+                };
                 let mut candidate = DiscoveredView {
                     target,
                     name: raw
@@ -364,7 +393,7 @@ impl Client {
                     raw: raw.clone(),
                     source_signature: view_source_signature,
                     available_keys,
-                    unsupported: metadata_error,
+                    unsupported: metadata_error.or(source_error),
                 };
                 if kind.is_none() && candidate.unsupported.is_none() {
                     candidate.unsupported = Some(
@@ -377,6 +406,26 @@ impl Client {
         }
 
         if candidates.is_empty() {
+            return Ok(ObjectDiscovery {
+                views: candidates,
+                unreadable,
+            });
+        }
+
+        // Object Type documents are the canonical source for their view IDs,
+        // layouts, columns, and saved filters. The old v1 list-view endpoint
+        // does not validate those documents and is not needed for discovery.
+        if kind == Some("objectTypes") {
+            for candidate in &mut candidates {
+                if candidate.unsupported.is_none() {
+                    if let Err(error) = prepare_object_type_filters(
+                        &candidate.raw,
+                        &candidate.target.object_id,
+                    ) {
+                        candidate.unsupported = Some(error);
+                    }
+                }
+            }
             return Ok(ObjectDiscovery {
                 views: candidates,
                 unreadable,
@@ -408,19 +457,6 @@ impl Client {
                 continue;
             };
             match exposed_view(&candidate.target, exposed) {
-                // The v1 Object Type list route exposes view IDs and layout,
-                // while the full type document supplies its property schema.
-                Ok(api_view) if kind == Some("objectTypes") => {
-                    if api_view
-                        .get("layout")
-                        .or_else(|| api_view.get("type"))
-                        .and_then(Value::as_str)
-                        != Some("kanban")
-                    {
-                        candidate.unsupported =
-                            Some("This view is no longer a Kanban view.".into());
-                    }
-                }
                 Ok(api_view) => match configured_view_keys(api_view, None) {
                     Ok(Some(api_keys)) => match &candidate.available_keys {
                         Some(document_keys)
@@ -449,6 +485,7 @@ impl Client {
     pub fn discover(&self) -> Result<crate::kanban::Catalog, String> {
         let mut views = Vec::new();
         let mut unreadable = 0usize;
+        let mut type_discovery_errors = Vec::new();
         for space in self.pages("GET", "/v2/spaces?ids=full", None)? {
             let sid = required(&space, "id")?;
             let name = space.get("name").and_then(Value::as_str).unwrap_or("Space");
@@ -460,8 +497,7 @@ impl Client {
             let mut discovered = self.discover_rows(&sid, name, &rows)?;
             unreadable += discovered.unreadable;
             // Type documents do not appear in the space search results. The
-            // v2 types list supplies their keys; full documents carry board
-            // views and the IDs used by Anytype's v1 filtered list route.
+            // v2 types list supplies their keys and full documents carry views.
             match self.pages(
                 "GET",
                 &format!("/v2/spaces/{}/types", enc(&sid)),
@@ -474,11 +510,22 @@ impl Client {
                                 unreadable += object.unreadable;
                                 discovered.views.extend(object.views);
                             }
-                            Err(_) => unreadable += 1,
+                            Err(error) => {
+                                unreadable += 1;
+                                type_discovery_errors.push(format!(
+                                    "Could not read Object Type '{}': {error}",
+                                    row.get("name").and_then(Value::as_str).unwrap_or("Untitled")
+                                ));
+                            }
                         }
                     }
                 }
-                Err(_) => unreadable += 1,
+                Err(error) => {
+                    unreadable += 1;
+                    type_discovery_errors.push(format!(
+                        "Could not list Object Types in space '{name}': {error}"
+                    ));
+                }
             }
             if discovered.views.is_empty() {
                 continue;
@@ -508,7 +555,10 @@ impl Client {
         Ok(crate::kanban::Catalog {
             views,
             warning: if unreadable > 0 {
-                Some("Some documents or view endpoints could not be read. The view list may be incomplete. Check the key's space access and reload the list.".into())
+                Some(type_discovery_errors.first().map_or_else(
+                    || "Some documents or view endpoints could not be read. The view list may be incomplete. Check the key's space access and reload the list.".into(),
+                    |detail| format!("The view list may be incomplete. {detail}. Check the key's space access and reload the list."),
+                ))
             } else {
                 None
             },
@@ -521,9 +571,10 @@ impl Client {
         calculator: &Calculator,
     ) -> Result<Vec<CategoryResult>, String> {
         target.validate()?;
-        let (document, kind) = self.document_for_target(target)?;
+        let (document, kind, object_type_key) = self.document_for_target(target)?;
         let kind = kind
             .ok_or("This view has no supported filtered membership endpoint.")?;
+        let is_object_type = kind == "objectTypes";
         let block = document["blocks"]
             .as_array()
             .and_then(|b| b.iter().find(|b| b["id"] == target.block_id))
@@ -535,19 +586,20 @@ impl Client {
         if raw["type"] != "kanban" && raw["layout"] != "kanban" {
             return Err("This view is no longer a Kanban view.".into());
         }
-        let exposed = self.exposed_views(&target.space_id, &target.object_id, kind)?;
-        let api_view = exposed_view(target, &exposed)?;
-        if kind == "objectTypes"
-            && api_view
-                .get("layout")
-                .or_else(|| api_view.get("type"))
-                .and_then(Value::as_str)
-                != Some("kanban")
-        {
-            return Err("This view is no longer a Kanban view.".into());
+        if is_object_type {
+            validate_object_type_dataview_source(block, &target.object_id)?;
         }
+        let exposed = if is_object_type {
+            None
+        } else {
+            Some(self.exposed_views(&target.space_id, &target.object_id, kind)?)
+        };
+        let api_view = match exposed.as_deref() {
+            Some(views) => exposed_view(target, views)?,
+            None => raw,
+        };
         let document_keys = configured_view_keys(raw, Some(block))?;
-        let endpoint_keys = if kind == "objectTypes" {
+        let endpoint_keys = if is_object_type {
             None
         } else {
             configured_view_keys(api_view, None)?
@@ -583,25 +635,28 @@ impl Client {
         }) {
             return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
-        let mut grouping = self.grouping(target, raw, &properties)?;
+        let mut grouping = self.grouping(target, raw, &properties, !is_object_type)?;
         let mut fields = keys;
         fields.push(grouping.property.clone());
         fields.sort();
         fields.dedup();
-        let rows = if kind == "objectTypes" {
-            let rows = self.pages(
-                "GET",
-                &format!(
-                    "/v1/spaces/{}/lists/{}/views/{}/objects",
-                    enc(&target.space_id),
-                    enc(&target.object_id),
-                    enc(&target.view_id)
-                ),
-                None,
-            )?;
-            rows.iter()
-                .map(|row| normalize_v1_list_object(row, &fields, &properties))
-                .collect::<Result<Vec<_>, _>>()?
+        let rows = if is_object_type {
+            let type_key = object_type_key
+                .as_deref()
+                .ok_or("The API did not return this Object Type's search key. Reload the view list.")?;
+            let filters = prepare_object_type_filters(raw, &target.object_id)?;
+            self.pages(
+                "POST",
+                &format!("/v2/spaces/{}/search", enc(&target.space_id)),
+                Some(&json!({
+                    "type": type_key,
+                    "fields": fields,
+                    "filters": filters,
+                })),
+            )
+            .map_err(|error| {
+                format!("The API could not apply this Object Type view's saved filters: {error}")
+            })?
         } else {
             self.pages(
                 "GET",
@@ -659,6 +714,7 @@ impl Client {
         target: &Target,
         view: &Value,
         properties: &[Property],
+        allow_legacy_option_lookup: bool,
     ) -> Result<Grouping, String> {
         let (property, format) = grouping_property(view, properties)?;
         let mut grouping = Grouping {
@@ -718,7 +774,7 @@ impl Client {
         // A single legacy tags read can resolve the whole option set. This
         // avoids one document request per select group on API versions that
         // omit IDs from v2 option rows.
-        if options_need_ids || group_needs_ids {
+        if allow_legacy_option_lookup && (options_need_ids || group_needs_ids) {
             if let Ok(tags) = self.pages(
                 "GET",
                 &format!(
@@ -956,6 +1012,226 @@ fn configured_view_keys(
     Ok(found.then_some(configured))
 }
 
+fn validate_object_type_dataview_source(block: &Value, type_object_id: &str) -> Result<(), String> {
+    if let Some(target) = block.get("object_id") {
+        let target = target.as_str().ok_or_else(|| {
+            "This Object Type board has malformed source metadata and cannot be calculated safely.".to_string()
+        })?;
+        if !target.is_empty() && target != type_object_id {
+            return Err(
+                "This Object Type board references a different object source. Use a board stored on the Object Type to calculate its cards.".into(),
+            );
+        }
+    }
+    if block
+        .get("is_collection")
+        .is_some_and(|value| value.as_bool() != Some(false))
+    {
+        return Err(
+            "This Object Type board uses a collection source. Use a board stored on the Object Type to calculate its cards.".into(),
+        );
+    }
+    if let Some(source) = block.get("source").filter(|source| !source.is_null()) {
+        let is_empty = match source {
+            Value::Array(values) => values.is_empty(),
+            Value::String(value) => value.is_empty(),
+            _ => false,
+        };
+        if !is_empty {
+            return Err(
+                "This Object Type board has an external source. Use a board stored on the Object Type to calculate its cards.".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn prepare_object_type_filters(view: &Value, host_object_id: &str) -> Result<Vec<Value>, String> {
+    let Some(raw_filters) = view.get("filters").filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let filters = raw_filters.as_array().ok_or_else(|| {
+        "This Object Type view has malformed saved filters. Fix them in Anytype before calculating.".to_string()
+    })?;
+    filters
+        .iter()
+        .map(|filter| prepare_object_type_filter(filter, host_object_id))
+        .collect()
+}
+
+fn prepare_object_type_filter(filter: &Value, host_object_id: &str) -> Result<Value, String> {
+    const GROUP_FIELDS: &[&str] = &["operator", "filters", "id"];
+    const LEAF_FIELDS: &[&str] = &[
+        "property",
+        "condition",
+        "value",
+        "date_preset",
+        "include_time",
+        "nested_property",
+        "id",
+    ];
+    const CONDITIONS: &[&str] = &[
+        "equal",
+        "not_equal",
+        "greater",
+        "less",
+        "greater_or_equal",
+        "less_or_equal",
+        "contains",
+        "not_contains",
+        "in",
+        "not_in",
+        "empty",
+        "not_empty",
+        "all_in",
+        "not_all_in",
+        "exact_in",
+        "not_exact_in",
+        "exists",
+    ];
+    const DATE_PRESETS: &[&str] = &[
+        "yesterday",
+        "today",
+        "tomorrow",
+        "last_week",
+        "current_week",
+        "next_week",
+        "last_month",
+        "current_month",
+        "next_month",
+        "number_of_days_ago",
+        "number_of_days_now",
+        "last_year",
+        "current_year",
+        "next_year",
+    ];
+
+    let fields = filter.as_object().ok_or_else(|| {
+        "This Object Type view has a malformed saved filter. Fix it in Anytype before calculating.".to_string()
+    })?;
+    let is_group = fields.contains_key("operator") || fields.contains_key("filters");
+    if is_group {
+        if fields.keys().any(|field| !GROUP_FIELDS.contains(&field.as_str())) {
+            return Err(
+                "This Object Type view has an unsupported filter group. Simplify the filter in Anytype before calculating.".into(),
+            );
+        }
+        let operator = fields
+            .get("operator")
+            .and_then(Value::as_str)
+            .filter(|operator| matches!(*operator, "and" | "or"))
+            .ok_or_else(|| {
+                "This Object Type view has an unsupported filter group operator. Use AND or OR in Anytype before calculating.".to_string()
+            })?;
+        let children = fields
+            .get("filters")
+            .and_then(Value::as_array)
+            .filter(|children| !children.is_empty())
+            .ok_or_else(|| {
+                "This Object Type view has an empty or malformed nested filter group. Add a filter or remove the group in Anytype.".to_string()
+            })?;
+        if fields.get("id").is_some_and(|id| !id.is_string()) {
+            return Err("This Object Type view has malformed saved filter metadata.".into());
+        }
+        let prepared = children
+            .iter()
+            .map(|child| prepare_object_type_filter(child, host_object_id))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut result = fields.clone();
+        result.insert("operator".into(), Value::String(operator.into()));
+        result.insert("filters".into(), Value::Array(prepared));
+        return Ok(Value::Object(result));
+    }
+
+    if fields.keys().any(|field| !LEAF_FIELDS.contains(&field.as_str())) {
+        return Err(
+            "This Object Type view contains filter metadata the search API cannot preserve. Update the filter in Anytype before calculating.".into(),
+        );
+    }
+    let property = fields
+        .get("property")
+        .and_then(Value::as_str)
+        .filter(|property| !property.is_empty())
+        .ok_or_else(|| {
+            "This Object Type view has a saved filter without a property. Fix it in Anytype before calculating.".to_string()
+        })?;
+    if property.contains("_filter_template_")
+        || fields
+            .get("nested_property")
+            .and_then(Value::as_str)
+            .is_some_and(|nested| nested.contains("_filter_template_"))
+    {
+        return Err(
+            "This Object Type view uses an unsupported dynamic filter placeholder. Replace it with a fixed value in Anytype before calculating.".into(),
+        );
+    }
+    let condition = fields.get("condition").and_then(Value::as_str).ok_or_else(|| {
+        "This Object Type view has a saved filter without a condition. Update the filter in Anytype before calculating.".to_string()
+    })?;
+    if !CONDITIONS.contains(&condition) {
+        return Err(format!(
+            "This Object Type view uses the unsupported filter condition '{condition}'. Update the filter in Anytype before calculating."
+        ));
+    }
+    if let Some(preset) = fields.get("date_preset") {
+        if !preset.is_null()
+            && preset
+                .as_str()
+                .is_none_or(|preset| !DATE_PRESETS.contains(&preset))
+        {
+            return Err(
+                "This Object Type view uses an unsupported date preset. Update the date filter in Anytype before calculating.".into(),
+            );
+        }
+    }
+    if fields
+        .get("include_time")
+        .is_some_and(|include_time| !include_time.is_boolean())
+        || fields
+            .get("nested_property")
+            .is_some_and(|nested| !nested.is_string())
+        || fields.get("id").is_some_and(|id| !id.is_string())
+    {
+        return Err("This Object Type view has malformed saved filter metadata.".into());
+    }
+
+    let mut result = fields.clone();
+    if let Some(value) = result.get_mut("value") {
+        *value = prepare_object_type_filter_value(value, host_object_id)?;
+    }
+    Ok(Value::Object(result))
+}
+
+fn prepare_object_type_filter_value(value: &Value, host_object_id: &str) -> Result<Value, String> {
+    match value {
+        Value::String(value) if value == "_filter_template_1_" => {
+            Ok(Value::String(host_object_id.into()))
+        }
+        Value::String(value) if value == "_filter_template_2_" => Err(
+            "This Object Type view uses a current-user filter that v2 search cannot resolve. Replace it with a fixed value in Anytype before calculating.".into(),
+        ),
+        Value::String(value) if value.contains("_filter_template_") => Err(
+            "This Object Type view uses an unsupported dynamic filter placeholder. Replace it with a fixed value in Anytype before calculating.".into(),
+        ),
+        Value::Array(values) => values
+            .iter()
+            .map(|value| prepare_object_type_filter_value(value, host_object_id))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(key, value)| {
+                Ok((
+                    key.clone(),
+                    prepare_object_type_filter_value(value, host_object_id)?,
+                ))
+            })
+            .collect::<Result<serde_json::Map<_, _>, String>>()
+            .map(Value::Object),
+        value => Ok(value.clone()),
+    }
+}
+
 fn source_signature(
     target: &Target,
     kind: Option<&str>,
@@ -1095,71 +1371,6 @@ fn list_kind(document: &Value) -> Option<&'static str> {
         Some("query" | "set") => Some("queries"),
         _ => None,
     }
-}
-
-fn normalize_v1_list_object(
-    row: &Value,
-    fields: &[String],
-    definitions: &[Property],
-) -> Result<Value, String> {
-    let id = required(row, "id")?;
-    let raw_properties = row
-        .get("properties")
-        .and_then(Value::as_array)
-        .ok_or("Anytype returned malformed Object Type membership properties.")?;
-    let requested = fields.iter().cloned().collect::<BTreeSet<_>>();
-    let mut normalized = serde_json::Map::new();
-    for raw in raw_properties {
-        let key = required(raw, "key")?;
-        if !requested.contains(&key) {
-            continue;
-        }
-        if normalized.contains_key(&key) {
-            return Err("Anytype returned duplicate Object Type membership properties.".into());
-        }
-        let format = required(raw, "format")?;
-        let expected = definitions
-            .iter()
-            .find(|property| property.key == key)
-            .map(|property| property.format.as_str())
-            .ok_or("An Object Type membership property is unavailable.")?;
-        if expected != format && !(is_boolean_format(expected) && is_boolean_format(&format)) {
-            return Err("Anytype returned an incompatible Object Type membership property.".into());
-        }
-        let value = match format.as_str() {
-            "number" => raw
-                .get("number")
-                .filter(|value| value.as_f64().is_some())
-                .cloned()
-                .ok_or("Anytype returned an invalid numeric Object Type property.")?,
-            "checkbox" | "boolean" => raw
-                .get("checkbox")
-                .filter(|value| value.is_boolean())
-                .cloned()
-                .ok_or("Anytype returned an invalid checkbox Object Type property.")?,
-            "select" => match raw.get("select") {
-                Some(Value::Null) => Value::Null,
-                Some(value) => Value::String(required(value, "name")?),
-                None => return Err("Anytype omitted a select Object Type property value.".into()),
-            },
-            "multi_select" => match raw.get("multi_select") {
-                Some(Value::Null) => Value::Array(Vec::new()),
-                Some(Value::Array(values)) => Value::Array(
-                    values
-                        .iter()
-                        .map(|value| required(value, "name").map(Value::String))
-                        .collect::<Result<Vec<_>, _>>()?,
-                ),
-                _ => return Err("Anytype returned an invalid multi-select Object Type property.".into()),
-            },
-            _ => return Err("Anytype returned an unsupported Object Type property format.".into()),
-        };
-        normalized.insert(key, value);
-    }
-    for field in fields {
-        normalized.entry(field.clone()).or_insert(Value::Null);
-    }
-    Ok(json!({"id": id, "properties": normalized}))
 }
 
 fn enc(s: &str) -> String {
@@ -1547,7 +1758,7 @@ mod tests {
     }
 
     #[test]
-    fn object_type_views_use_filtered_v1_membership_and_typed_properties() {
+    fn object_type_views_use_v2_search_filters_and_typed_properties() {
         use std::{
             io::{Read, Write},
             net::TcpListener,
@@ -1562,8 +1773,14 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let done = stop.clone();
+        let object_route_missing = Arc::new(AtomicBool::new(false));
+        let fixture_object_route_missing = object_route_missing.clone();
+        let unsupported_filter = Arc::new(AtomicBool::new(false));
+        let fixture_has_unsupported_filter = unsupported_filter.clone();
         let paths = Arc::new(Mutex::new(Vec::<String>::new()));
         let seen_paths = paths.clone();
+        let search_bodies = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let seen_search_bodies = search_bodies.clone();
         let worker = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(30);
             while !done.load(Ordering::Relaxed) && Instant::now() < deadline {
@@ -1596,6 +1813,12 @@ mod tests {
                 }
                 let request = String::from_utf8(bytes).unwrap();
                 assert!(request.contains("Authorization: Bearer fixture-key"));
+                let (_, request_body) = request.split_once("\r\n\r\n").unwrap();
+                let request_body = if request_body.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_str::<Value>(request_body).unwrap()
+                };
                 let path = request
                     .lines()
                     .next()
@@ -1606,81 +1829,88 @@ mod tests {
                 seen_paths.lock().unwrap().push(path.to_string());
                 let is_missing_object_route =
                     path.starts_with("/v2/spaces/space/objects/type-id?");
-                let is_v1 = path.starts_with("/v1/");
-                if is_v1 {
-                    assert!(request.contains("Anytype-Version: 2025-11-08"));
-                }
                 let v2_page = |data: Value| {
                     let total = data.as_array().map_or(0, |rows| rows.len());
                     json!({"data":data,"has_more":false,"total":total})
-                };
-                let v1_page = |data: Value, has_more: bool, total: usize| {
-                    json!({"data":data,"pagination":{"has_more":has_more,"total":total}})
                 };
                 let view = json!({
                     "id":"type-view",
                     "type":"kanban",
                     "name":"Tasks by status",
                     "group_by":"status",
-                    "filters":[{"property_key":"estimate","condition":"gt","value":0}],
-                    "sorts":[{"property_key":"estimate","sort_type":"desc"}],
+                    "filters":[
+                        {"operator":"or","filters":[
+                            {"property":"estimate","condition":"greater","value":0},
+                            {"property":"done","condition":"equal","value":false}
+                        ]},
+                        {"operator":"and","filters":[
+                            {"property":"createdInContext","condition":"equal","value":"_filter_template_1_"}
+                        ]},
+                        {"property":"due","condition":"equal","value":0,"date_preset":"today"}
+                    ],
+                    "sorts":[{"property":"estimate","direction":"desc"}],
                     "groups":[{"id":"option-a"},{"id":"empty"}],
                     "columns":[{"property":"estimate"},{"property":"done"},{"property":"status"}]
                 });
                 let rows_first = json!([
-                    {"id":"card-a","properties":[
-                        {"key":"estimate","format":"number","number":3},
-                        {"key":"done","format":"checkbox","checkbox":true},
-                        {"key":"status","format":"select","select":{"id":"option-a","name":"A"}}
-                    ]},
-                    {"id":"card-b","properties":[
-                        {"key":"status","format":"select","select":null}
-                    ]}
+                    {"id":"card-a","properties":{"estimate":3,"done":true,"status":"A"}},
+                    {"id":"card-b","properties":{"status":null}}
                 ]);
                 let rows_last = json!([
-                    {"id":"card-c","properties":[
-                        {"key":"estimate","format":"number","number":7},
-                        {"key":"done","format":"checkbox","checkbox":false},
-                        {"key":"status","format":"select","select":{"id":"option-a","name":"A"}}
-                    ]}
+                    {"id":"card-c","properties":{"estimate":7,"done":false,"status":"A"}}
                 ]);
-                let response = if is_missing_object_route {
+                let returned_view = if fixture_has_unsupported_filter.load(Ordering::Relaxed) {
+                    let mut invalid = view.clone();
+                    invalid["filters"][0]["condition"] = json!("unknown_condition");
+                    invalid
+                } else {
+                    view.clone()
+                };
+                let type_document = json!({
+                    "kind":"object_type",
+                    "id":"type-id",
+                    "internal_key":"task",
+                    "blocks":[{
+                        "id":"dataview",
+                        "properties":[
+                            {"property":"estimate","format":"number"},
+                            {"property":"done","format":"checkbox"},
+                            {"property":"status","format":"select"}
+                        ],
+                        "views":[returned_view]
+                    }]
+                });
+                let unavailable_object_route =
+                    is_missing_object_route && fixture_object_route_missing.load(Ordering::Relaxed);
+                let response = if unavailable_object_route {
                     json!({"error":"Object Type documents use the types route"})
                 } else if path.starts_with("/v2/spaces?") {
                     v2_page(json!([{"id":"space","name":"Work"}]))
+                } else if is_missing_object_route {
+                    type_document
                 } else if path.starts_with("/v2/spaces/space/search") {
-                    v2_page(json!([]))
-                } else if path.starts_with("/v2/spaces/space/types/task?") {
-                    json!({
-                        "kind":"object_type",
-                        "id":"type-id",
-                        "blocks":[{
-                            "id":"dataview",
-                            "properties":[
-                                {"property":"estimate","format":"number"},
-                                {"property":"done","format":"checkbox"},
-                                {"property":"status","format":"select"}
-                            ],
-                            "views":[view]
-                        }]
-                    })
-                } else if path.starts_with("/v2/spaces/space/types?") {
-                    v2_page(json!([{"key":"task","name":"Task"}]))
-                } else if path.starts_with("/v1/spaces/space/lists/type-id/views/type-view/objects") {
-                    if path.contains("offset=0") {
-                        v1_page(rows_first, true, 3)
+                    if request_body["type"] == "task" {
+                        seen_search_bodies
+                            .lock()
+                            .unwrap()
+                            .push(request_body.clone());
+                        if path.contains("offset=0") {
+                            json!({"data":rows_first,"has_more":true,"total":3})
+                        } else {
+                            assert!(path.contains("offset=2"));
+                            json!({"data":rows_last,"has_more":false,"total":3})
+                        }
                     } else {
-                        assert!(path.contains("offset=2"));
-                        v1_page(rows_last, false, 3)
+                        v2_page(json!([]))
                     }
-                } else if path.starts_with("/v1/spaces/space/lists/type-id/views") {
-                    v1_page(
-                        json!([{"id":"type-view","name":"Tasks by status","layout":"kanban"}]),
-                        false,
-                        1,
-                    )
+                } else if path.starts_with("/v2/spaces/space/types/task?") {
+                    type_document
+                } else if path.starts_with("/v2/spaces/space/types?") {
+                    v2_page(json!([{"id":"type-id","key":"task","name":"Task"}]))
                 } else if path.starts_with("/v2/spaces/space/properties/status/options") {
-                    v2_page(json!([{"id":"option-a","name":"A"}]))
+                    v2_page(json!([{"name":"A"}]))
+                } else if path.starts_with("/v2/spaces/space/objects/option-a") {
+                    json!({"id":"option-a","kind":"relation_option","properties":{"name":"A"}})
                 } else if path.starts_with("/v2/spaces/space/properties") {
                     v2_page(json!([
                         {"key":"estimate","name":"Estimate","format":"number"},
@@ -1691,7 +1921,7 @@ mod tests {
                     panic!("Unexpected Object Type fixture route {path}")
                 };
                 let body = serde_json::to_vec(&response).unwrap();
-                let status = if is_missing_object_route {
+                let status = if unavailable_object_route {
                     "404 Not Found"
                 } else {
                     "200 OK"
@@ -1718,6 +1948,7 @@ mod tests {
         assert!(view.unsupported.is_none());
         assert!(view.source_signature.is_some());
 
+        let paths_before_direct_document = paths.lock().unwrap().len();
         let total = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "estimate".into(),
             operation: "total".into(),
@@ -1743,7 +1974,14 @@ mod tests {
             "a missing numeric property stays null and is skipped like v2 nulls"
         );
         assert!(results.iter().all(|result| result.target == view.target));
+        let paths_after_direct_document = paths.lock().unwrap().clone();
+        assert!(paths_after_direct_document[paths_before_direct_document..]
+            .iter()
+            .all(|path| !path.contains("/types?ids=full")),
+            "a Type document's internal_key avoids the full Type-document scan");
 
+        let paths_before_type_fallback = paths.lock().unwrap().len();
+        object_route_missing.store(true, Ordering::Relaxed);
         let done = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "done".into(),
             operation: "total".into(),
@@ -1767,13 +2005,138 @@ mod tests {
                 .value,
             Some((0.0).into())
         );
+        let paths_after_type_fallback = paths.lock().unwrap().clone();
+        assert!(paths_after_type_fallback[paths_before_type_fallback..]
+            .iter()
+            .any(|path| path.contains("/types?ids=full")),
+            "a missing object route resolves the Type key through the dedicated types route");
+        unsupported_filter.store(true, Ordering::Relaxed);
+        let unsupported = client.calculate(&view.target, &total).unwrap_err();
+        assert!(unsupported.contains("unsupported filter condition"));
+        assert_eq!(
+            search_bodies.lock().unwrap().len(),
+            4,
+            "an unsupported saved filter must be rejected before any search request"
+        );
         let paths = paths.lock().unwrap();
         assert!(paths.iter().any(|path| path.contains("/types/task?ids=full")));
-        assert!(paths.iter().any(|path| path.contains("/lists/type-id/views/type-view/objects?limit=100&offset=0")));
-        assert!(paths.iter().any(|path| path.contains("/lists/type-id/views/type-view/objects?limit=100&offset=2")));
+        assert!(paths.iter().any(|path| path.contains("/objects/option-a?ids=full&include=properties")));
+        assert!(paths.iter().any(|path| path.contains("/search?limit=100&offset=0")));
+        assert!(paths.iter().any(|path| path.contains("/search?limit=100&offset=2")));
+        assert!(paths.iter().all(|path| !path.starts_with("/v1/")));
+        assert!(paths.iter().all(|path| !path.contains("/objects/card-")));
+        let bodies = search_bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 4, "each calculation uses v2 search pagination");
+        assert!(bodies.iter().all(|body| body["type"] == "task"));
+        assert!(bodies.iter().any(|body| body["fields"] == json!(["estimate", "status"])));
+        assert!(bodies.iter().any(|body| body["fields"] == json!(["done", "status"])));
+        assert!(bodies.iter().all(|body| {
+            body["filters"] == json!([
+                {"operator":"or","filters":[
+                    {"property":"estimate","condition":"greater","value":0},
+                    {"property":"done","condition":"equal","value":false}
+                ]},
+                {"operator":"and","filters":[
+                    {"property":"createdInContext","condition":"equal","value":"type-id"}
+                ]},
+                {"property":"due","condition":"equal","value":0,"date_preset":"today"}
+            ])
+        }));
+        drop(bodies);
         stop.store(true, Ordering::Relaxed);
         drop(paths);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn object_type_filter_preflight_preserves_v2_dataview_semantics() {
+        let absent_filters = json!({});
+        let empty_filters = json!({"filters":[]});
+        assert_eq!(
+            prepare_object_type_filters(&absent_filters, "type-id").unwrap(),
+            Vec::<Value>::new()
+        );
+        assert_eq!(
+            prepare_object_type_filters(&empty_filters, "type-id").unwrap(),
+            Vec::<Value>::new()
+        );
+
+        let saved_filters = json!({
+            "filters":[
+                {"property":"estimate","condition":"greater","value":0},
+                {"property":"done","condition":"equal","value":false},
+                {"operator":"or","filters":[
+                    {"property":"createdInContext","condition":"equal","value":"_filter_template_1_"},
+                    {"operator":"and","filters":[
+                        {"property":"due","condition":"equal","date_preset":"today"}
+                    ]}
+                ]}
+            ]
+        });
+        assert_eq!(
+            prepare_object_type_filters(&saved_filters, "type-id").unwrap(),
+            json!([
+                {"property":"estimate","condition":"greater","value":0},
+                {"property":"done","condition":"equal","value":false},
+                {"operator":"or","filters":[
+                    {"property":"createdInContext","condition":"equal","value":"type-id"},
+                    {"operator":"and","filters":[
+                        {"property":"due","condition":"equal","date_preset":"today"}
+                    ]}
+                ]}
+            ])
+        );
+
+        let current_user = json!({
+            "filters":[{"property":"createdBy","condition":"equal","value":"_filter_template_2_"}]
+        });
+        assert!(prepare_object_type_filters(&current_user, "type-id")
+            .unwrap_err()
+            .contains("current-user filter"));
+
+        let unknown_preset = json!({
+            "filters":[{"property":"due","condition":"equal","date_preset":"future_someday"}]
+        });
+        assert!(prepare_object_type_filters(&unknown_preset, "type-id")
+            .unwrap_err()
+            .contains("unsupported date preset"));
+
+        let unknown_condition = json!({
+            "filters":[{"property":"estimate","condition":"gt","value":1}]
+        });
+        assert!(prepare_object_type_filters(&unknown_condition, "type-id")
+            .unwrap_err()
+            .contains("unsupported filter condition 'gt'"));
+
+        let empty_group = json!({
+            "filters":[{"operator":"and","filters":[]}]
+        });
+        assert!(prepare_object_type_filters(&empty_group, "type-id")
+            .unwrap_err()
+            .contains("empty or malformed nested filter group"));
+    }
+
+    #[test]
+    fn object_type_dataview_source_must_be_the_owning_type() {
+        assert!(validate_object_type_dataview_source(
+            &json!({"id":"dataview","object_id":"type-id"}),
+            "type-id"
+        )
+        .is_ok());
+        assert!(validate_object_type_dataview_source(&json!({"id":"dataview"}), "type-id")
+            .is_ok());
+        assert!(validate_object_type_dataview_source(
+            &json!({"id":"dataview","object_id":"other-id"}),
+            "type-id"
+        )
+        .unwrap_err()
+        .contains("different object source"));
+        assert!(validate_object_type_dataview_source(
+            &json!({"id":"dataview","is_collection":true}),
+            "type-id"
+        )
+        .unwrap_err()
+        .contains("collection source"));
     }
 
     #[test]
@@ -1837,58 +2200,6 @@ mod tests {
         assert!(configured_view_keys(&json!({"group_by":"estimate"}), None)
             .unwrap()
             .is_none());
-    }
-
-    #[test]
-    fn v1_object_type_property_rows_normalize_null_and_typed_values() {
-        let definitions = vec![
-            Property {
-                key: "estimate".into(),
-                name: "Estimate".into(),
-                format: "number".into(),
-            },
-            Property {
-                key: "done".into(),
-                name: "Done".into(),
-                format: "checkbox".into(),
-            },
-            Property {
-                key: "status".into(),
-                name: "Status".into(),
-                format: "select".into(),
-            },
-            Property {
-                key: "tags".into(),
-                name: "Tags".into(),
-                format: "multi_select".into(),
-            },
-        ];
-        let fields = vec![
-            "estimate".into(),
-            "done".into(),
-            "status".into(),
-            "tags".into(),
-        ];
-        let row = json!({
-            "id":"card-a",
-            "properties":[
-                {"key":"status","format":"select","select":null},
-                {"key":"tags","format":"multi_select","multi_select":[{"name":"A"},{"name":"B"}]}
-            ]
-        });
-        let normalized = normalize_v1_list_object(&row, &fields, &definitions).unwrap();
-        assert!(normalized.pointer("/properties/estimate").unwrap().is_null());
-        assert!(normalized.pointer("/properties/done").unwrap().is_null());
-        assert!(normalized.pointer("/properties/status").unwrap().is_null());
-        assert_eq!(normalized["properties"]["tags"], json!(["A", "B"]));
-
-        // v1's typed NumberPropertyValue always carries a number (unset values
-        // are omitted before marshaling), so a present null number is malformed.
-        let malformed = json!({
-            "id":"card-b",
-            "properties":[{"key":"estimate","format":"number","number":null}]
-        });
-        assert!(normalize_v1_list_object(&malformed, &fields, &definitions).is_err());
     }
 
     #[test]
