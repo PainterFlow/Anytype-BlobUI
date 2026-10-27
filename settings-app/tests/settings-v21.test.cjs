@@ -84,6 +84,9 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     const advancedWidths = await page.locator('#advanced-page [role="tab"]').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().width));
     assert.ok(Math.max(...advancedWidths) - Math.min(...advancedWidths) < 1, 'Advanced tabs divide the width equally');
     assert.equal(await page.locator('#advanced-app-panel > section').nth(1).evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
+    assert.equal(await page.locator('.app-general-settings .settings-list').count(), 0);
+    assert.equal(await page.locator('.app-backup-box #import-blob-backup-button').count(), 1);
+    assert.equal(await page.locator('.app-backup-box #create-blob-backup-button').count(), 1);
     await page.locator('#advanced-api-tab').click();
     await page.locator('#advanced-api-key').fill('fixture-pending-key');
     await page.locator('#advanced-experiments-tab').click(); await page.locator('#settings-v21-enabled').uncheck();

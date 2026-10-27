@@ -92,7 +92,7 @@ The calculator Math/Logic switch sits above its five-column keypad and defaults 
 
 ## Shared Markdown video player
 
-App settings places Autoplay videos directly below Launch at startup and above Updates in both layouts. Use the shared ToggleSetting factory and existing Save/Undo flow. Missing saved preferences default to enabled.
+App settings has General, Anytype Folder, Updates, Backup and import, and Uninstall sections with no dividers between sections in both layouts. General places Launch at startup and Autoplay videos in compact standalone rows without a shared box. Backup and import uses a rounded group with separate Export settings and Import settings rows. Each row has gray helper text below its label and a right-aligned action button. Operation status appears below the group. Use the shared ToggleSetting factory and existing Save/Undo flow. Missing saved preferences default to enabled.
 
 All Markdown readers use Markdown.mount and the same VideoPlayer controller. Use one 64px circular play/pause button centered over the video. The bottom gradient contains the seek timeline, time, mute, volume, and a custom full-screen toggle. The player and its controls have no borders, outlines, or shadows; keyboard focus uses filled control states. Controls appear on pointer movement, keyboard focus, or touch and fade after two seconds without activity. They stay visible while focused. Ten-second jump controls and shortcuts are unavailable. Native video controls and the browser context menu remain disabled. Autoplay starts muted at 50% visibility, pauses when hidden, and stops at the end. Respect manual pauses and reduced motion.
 

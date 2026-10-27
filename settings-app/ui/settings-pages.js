@@ -516,11 +516,13 @@
     }),
     "advanced-app-tab-section": content => C.Section({
       attributes: {
-        "aria-label": "Startup"
+        "aria-labelledby": "app-general-heading"
       },
       content
     }),
-    "advanced-app-tab-list": content => C.Group({
+    "app-general-heading": () => C.Heading({ id: "app-general-heading", title: "General" }),
+    "advanced-app-tab-list": content => C.Section({
+      attributes: { class: "app-general-settings" },
       content
     }),
     "start-on-login": () => C.ToggleSetting({
@@ -571,8 +573,7 @@
     }),
     "backup-heading": () => C.Heading({
       id: "backup-heading",
-      title: "Backup and import",
-      description: "Create a dated copy of the full BlobUI folder, including settings and calculations. Import replaces the current folder."
+      title: "Backup and import"
     }),
     "create-blob-backup-button": content => C.Button({
       attributes: {
@@ -590,6 +591,22 @@
       },
       content
     }),
+    "app-backup-box": content => C.Group({
+      attributes: { class: "settings-list app-backup-box" }, content
+    }),
+    "app-export-row": content => C.SettingsRow({
+      attributes: { class: "settings-row app-backup-row" },
+      label: "Export settings",
+      description: { text: "Create a dated copy of the complete BlobUI folder, including settings and calculations.", attributes: { class: "app-backup-description" } },
+      content
+    }),
+    "app-import-row": content => C.SettingsRow({
+      attributes: { class: "settings-row app-backup-row" },
+      label: "Import settings",
+      description: { text: "Replace the current BlobUI folder with an exported backup.", attributes: { class: "app-backup-description" } },
+      content
+    }),
+    "app-uninstall-heading": () => C.Heading({ id: "app-uninstall-heading", title: "Uninstall" }),
     "uninstall-button": content => C.Button({
       attributes: {
         id: "uninstall-button",

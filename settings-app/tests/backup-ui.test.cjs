@@ -50,6 +50,21 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#advanced-nav').click();
     await page.locator('#advanced-app-tab').click();
 
+    assert.equal(await page.locator('#advanced-app-panel > section').count(), 5);
+    assert.equal(await page.locator('#advanced-app-panel > section').first().getAttribute('aria-labelledby'), 'app-general-heading');
+    assert.equal(await page.locator('.app-backup-row').count(), 2);
+    assert.equal(await page.locator('.app-backup-row .app-backup-description').count(), 2);
+    assert.equal(await page.locator('.app-general-settings .settings-list').count(), 0);
+    assert.equal(await page.locator('#blob-backup-status').count(), 1);
+    await page.setViewportSize({ width: 700, height: 850 });
+    await page.locator('#blob-backup-status').evaluate(node => { node.textContent = 'C:/fixture/' + 'long-path/'.repeat(40); });
+    assert.equal(await page.locator('.app-backup-box').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.locator('#blob-backup-status').evaluate(node => { node.textContent = ''; });
+    await page.locator('#create-blob-backup-button').focus();
+    assert.equal(await page.locator('#create-blob-backup-button').evaluate(node => node === document.activeElement), true);
+    await page.setViewportSize({ width: 1000, height: 850 });
+    await page.locator('.app-backup-box').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.resolve(__dirname, '../../.test-run/app-settings-dark.png'), fullPage: true });
     const ordering = await page.evaluate(() => {
       const before = (left, right) => Boolean(document.getElementById(left).compareDocumentPosition(document.getElementById(right)) & Node.DOCUMENT_POSITION_FOLLOWING);
       return before('updates-heading', 'backup-heading') && before('backup-heading', 'uninstall-button');

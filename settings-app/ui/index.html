@@ -323,18 +323,19 @@
               <p id="advanced-api-error" class="field-error" role="alert" aria-live="polite"></p>
             </template>
             <template data-ui-mount="advanced-app-panel">
+              <template data-ui-mount="advanced-app-tab-section">
+                <template data-ui-mount="app-general-heading"></template>
+                <template data-ui-mount="advanced-app-tab-list">
+                  <template data-ui-mount="start-on-login"></template>
+                  <template data-ui-mount="autoplay-videos"></template>
+                </template>
+              </template>
               <template data-ui-mount="anytype-installation-heading-section">
                 <template data-ui-mount="anytype-installation-heading"></template>
                 <div class="app-install-directory-row">
                     <input id="install-directory" class="color-text-input" type="text" readonly="" role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error">
                 </div>
                 <p id="updater-settings-error" class="field-error" role="alert" aria-live="polite"></p>
-              </template>
-              <template data-ui-mount="advanced-app-tab-section">
-                <template data-ui-mount="advanced-app-tab-list">
-                  <template data-ui-mount="start-on-login"></template>
-                  <template data-ui-mount="autoplay-videos"></template>
-                </template>
               </template>
               <template data-ui-mount="updates-heading-section">
                 <template data-ui-mount="updates-heading"></template>
@@ -352,13 +353,17 @@
               </template>
               <template data-ui-mount="backup-heading-section">
                 <template data-ui-mount="backup-heading"></template>
-                <div class="blob-backup-actions">
-                  <template data-ui-mount="import-blob-backup-button">Import</template>
-                  <template data-ui-mount="create-blob-backup-button">Export</template>
-                </div>
+                <template data-ui-mount="app-backup-box">
+                  <template data-ui-mount="app-export-row">
+                    <template data-ui-mount="create-blob-backup-button">Export</template>
+                  </template>
+                  <template data-ui-mount="app-import-row">
+                    <template data-ui-mount="import-blob-backup-button">Import</template>
+                  </template>
+                </template>
                 <p id="blob-backup-status" class="update-status blob-backup-status" role="status" aria-live="polite"></p>
               </template>
-              <section class="settings-section"><template data-ui-mount="uninstall-button">Uninstall BlobUI</template></section>
+              <section class="settings-group" aria-labelledby="app-uninstall-heading"><template data-ui-mount="app-uninstall-heading"></template><template data-ui-mount="uninstall-button">Uninstall BlobUI</template></section>
             </template>
           </div>
           </div>
