@@ -61,6 +61,8 @@ In addition to that, v1.3.0 also ships a few minor improvements & fixes and a fe
 - UI is now component based.
 - Markdown reader now supports embedding videos
 - Embedded images can now be expanded by clicking on them.
+- Removed all mentions of API v1
+*Developers Note: Since we want to stick with our values to not even be able to modify the users data or be able to see more then the user wants us to see, we've decided to remove all API v1 fallbacks and completely ban it from the project, as v1 API requires full read-write access to all spaces.*
 
 ## Bug fixes
 - Issue#60 - The "Read Only" text is not affected by the accent color on hover (User#jay23606)

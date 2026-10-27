@@ -6,6 +6,7 @@
 - Make sure to preserve existing changes!
 - When making UI, always check `./settings-app/UI_REFERENCE.md` and make sure to follow Anytypes UI philosophy.
 - Make sure to always test and build/compile the app after you finished implementing the feature.
+- Anytypes v1 API is completely banned.
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.

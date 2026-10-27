@@ -4,6 +4,9 @@ use crate::{
     calculator::Calculator,
     kanban::{CategoryResult, Property, Target, View},
 };
+#[path = "kanban_warnings.rs"]
+mod warnings;
+
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +21,7 @@ pub struct Client {
     key: crate::SecretString,
     ip: String,
     port: u16,
+    info: Mutex<BTreeSet<String>>,
 }
 impl Client {
     pub fn connect() -> Result<Self, String> {
@@ -36,6 +40,7 @@ impl Client {
             );
         }
         Ok(Self {
+            info: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new(crate::read_saved_api_key_at(&install)?),
             ip: crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?,
             port: data
@@ -47,7 +52,13 @@ impl Client {
         })
     }
     fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
-        api::request(&self.key, &self.ip, self.port, method, path, body)
+        let response = api::request(&self.key, &self.ip, self.port, method, path, body)?;
+        let explicit_view = path.split_once('?').is_some_and(|(_, query)|
+            query.split('&').any(|parameter| parameter.starts_with("view=")));
+        warnings::check(&response, explicit_view, |message| {
+            if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+        })?;
+        Ok(response)
     }
     pub fn pages(
         &self,
@@ -55,24 +66,35 @@ impl Client {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Vec<Value>, String> {
-        complete_pages(|offset| {
+        complete_pages_with_info(|offset| {
             let separator = if path.contains('?') { '&' } else { '?' };
             self.request(
                 method,
                 &format!("{path}{separator}limit=100&offset={offset}"),
                 body,
             )
+        }, |message| {
+            if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
         })
     }
+    pub fn take_info(&self) -> Vec<String> {
+        self.info.lock().map(|mut info| std::mem::take(&mut *info).into_iter().collect())
+            .unwrap_or_default()
+    }
+    fn board_document(&self, path: &str) -> Result<Value, String> {
+        let document = api::request(&self.key, &self.ip, self.port, "GET", path, None)?;
+        warnings::check_board_document(&document, |message| {
+            if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+        })?;
+        Ok(document)
+    }
     fn document_blocks(&self, space: &str, object: &str) -> Result<Value, String> {
-        self.request(
-            "GET",
+        self.board_document(
             &format!(
                 "/v2/spaces/{}/objects/{}?ids=full&include=blocks",
                 enc(space),
                 enc(object)
             ),
-            None,
         )
     }
     fn document_properties(&self, space: &str, object: &str) -> Result<Value, String> {
@@ -85,6 +107,31 @@ impl Client {
             ),
             None,
         )
+    }
+
+    fn membership_source(&self, space: &str, host: &Value, block: &Value) -> Result<MembershipSource, String> {
+        let host_id = required(host, "id")?;
+        let source_id = block.get("object_id").and_then(Value::as_str)
+            .filter(|id| !id.is_empty()).unwrap_or(&host_id);
+        let document = if source_id == host_id {
+            host.clone()
+        } else {
+            self.document_blocks(space, source_id)
+                .map_err(|_| "The inline board's referenced source could not be read.".to_string())?
+        };
+        let kind = list_kind(&document)
+            .ok_or("This board's source has no supported filtered membership endpoint.")?;
+        Ok(MembershipSource { object_id: source_id.to_string(), kind, document })
+    }
+
+    fn source_views(&self, space: &str, source: &MembershipSource) -> Result<Vec<Value>, String> {
+        if source.kind == "types" {
+            return Ok(source.document["blocks"].as_array().into_iter().flatten()
+                .flat_map(|block| block["views"].as_array().into_iter().flatten().cloned())
+                .collect());
+        }
+        self.pages("GET", &format!("/v2/spaces/{}/{}/{}/views?ids=full",
+            enc(space), source.kind, enc(&source.object_id)), None)
     }
     fn properties(&self, space: &str) -> Result<Vec<Property>, String> {
         self.pages(
@@ -184,7 +231,21 @@ impl Client {
                 });
             }
         };
-        let kind = list_kind(&document).or_else(|| list_kind(row));
+        self.discover_document(space_id, space_name, row, &document)
+    }
+
+    fn discover_document(
+        &self,
+        space_id: &str,
+        space_name: &str,
+        row: &Value,
+        document: &Value,
+    ) -> Result<ObjectDiscovery, String> {
+        if !warnings::contains_kanban(document) {
+            return Ok(ObjectDiscovery::default());
+        }
+        let object_id = required(row, "id")?;
+        let kind = list_kind(document).or_else(|| list_kind(row));
         let source = row
             .get("name")
             .and_then(Value::as_str)
@@ -192,6 +253,7 @@ impl Client {
             .to_string();
         let mut candidates = Vec::new();
         let mut unreadable = 0;
+        let mut exposed_by_block = BTreeMap::new();
 
         for block in document
             .get("blocks")
@@ -199,6 +261,15 @@ impl Client {
             .into_iter()
             .flatten()
         {
+            if !block["views"].as_array().is_some_and(|views| views.iter().any(|view|
+                view["type"] == "kanban" || view["layout"] == "kanban")) {
+                continue;
+            }
+            let exposed = self.membership_source(space_id, document, block)
+                .and_then(|source| self.source_views(space_id, &source));
+            if let Some(block_id) = block["id"].as_str() {
+                exposed_by_block.insert(block_id.to_string(), exposed);
+            }
             for raw in block
                 .get("views")
                 .and_then(Value::as_array)
@@ -242,6 +313,8 @@ impl Client {
                     source: source.clone(),
                     kind: if kind == Some("collections") {
                         "Collection"
+                    } else if kind == Some("types") {
+                        "Type"
                     } else if kind.is_some() {
                         "Query"
                     } else {
@@ -253,11 +326,10 @@ impl Client {
                     available_keys,
                     unsupported: metadata_error,
                 };
-                if kind.is_none() && candidate.unsupported.is_none() {
-                    candidate.unsupported = Some(
-                        "The API does not expose a filtered membership endpoint for this view."
-                            .into(),
-                    );
+                if candidate.unsupported.is_none() {
+                    if let Some(Err(error)) = exposed_by_block.get(&candidate.target.block_id) {
+                        candidate.unsupported = Some(error.clone());
+                    }
                 }
                 candidates.push(candidate);
             }
@@ -270,34 +342,11 @@ impl Client {
             });
         }
 
-        let exposed = if let Some(kind) = kind.filter(|_| {
-            candidates.iter().any(|candidate| candidate.unsupported.is_none())
-        }) {
-            match self.pages(
-                "GET",
-                &format!(
-                    "/v2/spaces/{}/{}/{}/views?ids=full",
-                    enc(space_id),
-                    kind,
-                    enc(&object_id)
-                ),
-                None,
-            ) {
-                Ok(value) => Some(value),
-                Err(_) => {
-                    unreadable += 1;
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
         for candidate in &mut candidates {
             if candidate.unsupported.is_some() {
                 continue;
             }
-            let Some(exposed) = exposed.as_deref() else {
+            let Some(Ok(exposed)) = exposed_by_block.get(&candidate.target.block_id) else {
                 candidate.unsupported = Some(
                     "The API does not expose a filtered membership endpoint for this view.".into(),
                 );
@@ -341,6 +390,23 @@ impl Client {
                 Some(&json!({})),
             )?;
             let mut discovered = self.discover_rows(&sid, name, &rows)?;
+            // Types are excluded from ordinary object search results.
+            for type_row in self.pages(
+                "GET", &format!("/v2/spaces/{}/types", enc(&sid)), None,
+            )? {
+                let type_key = required(&type_row, "key")?;
+                let document = match self.board_document(
+                    &format!("/v2/spaces/{}/types/{}?ids=full", enc(&sid), enc(&type_key)),
+                ) {
+                    Ok(document) => document,
+                    Err(_) => { discovered.unreadable += 1; continue; }
+                };
+                let mut row = type_row;
+                row["id"] = Value::String(required(&document, "id")?);
+                let found = self.discover_document(&sid, name, &row, &document)?;
+                discovered.unreadable += found.unreadable;
+                discovered.views.extend(found.views);
+            }
             unreadable += discovered.unreadable;
             if discovered.views.is_empty() {
                 continue;
@@ -369,6 +435,7 @@ impl Client {
         }
         Ok(crate::kanban::Catalog {
             views,
+            info: self.take_info(),
             warning: if unreadable > 0 {
                 Some("Some documents or view endpoints could not be read. The view list may be incomplete. Check the key's space access and reload the list.".into())
             } else {
@@ -384,8 +451,6 @@ impl Client {
     ) -> Result<Vec<CategoryResult>, String> {
         target.validate()?;
         let document = self.document_blocks(&target.space_id, &target.object_id)?;
-        let kind = list_kind(&document)
-            .ok_or("This view has no supported filtered membership endpoint.")?;
         let block = document["blocks"]
             .as_array()
             .and_then(|b| b.iter().find(|b| b["id"] == target.block_id))
@@ -397,17 +462,13 @@ impl Client {
         if raw["type"] != "kanban" && raw["layout"] != "kanban" {
             return Err("This view is no longer a Kanban view.".into());
         }
-        let exposed = self.pages(
-            "GET",
-            &format!(
-                "/v2/spaces/{}/{}/{}/views?ids=full",
-                enc(&target.space_id),
-                kind,
-                enc(&target.object_id)
-            ),
-            None,
-        )?;
+        let source = self.membership_source(&target.space_id, &document, block)?;
+        let kind = source.kind;
+        let exposed = self.source_views(&target.space_id, &source)?;
         let api_view = exposed_view(target, &exposed)?;
+        if api_view["type"] != "kanban" && api_view["layout"] != "kanban" {
+            return Err("The source view is no longer a Kanban view.".into());
+        }
         let document_keys = configured_view_keys(raw, Some(block))?;
         let endpoint_keys = configured_view_keys(api_view, None)?;
         let available_keys = match (document_keys, endpoint_keys) {
@@ -441,23 +502,31 @@ impl Client {
         }) {
             return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
-        let mut grouping = self.grouping(target, raw, &properties)?;
+        let mut grouping = self.grouping(target, api_view, &properties)?;
         let mut fields = keys;
         fields.push(grouping.property.clone());
         fields.sort();
         fields.dedup();
-        let rows = self.pages(
-            "GET",
-            &format!(
-                "/v2/spaces/{}/{}/{}/objects?view={}&fields={}",
-                enc(&target.space_id),
-                kind,
-                enc(&target.object_id),
-                enc(&target.view_id),
-                enc(&fields.join(","))
-            ),
-            None,
-        )?;
+        let rows = if kind == "types" {
+            self.pages(
+                "POST",
+                &format!("/v2/spaces/{}/search", enc(&target.space_id)),
+                Some(&type_view_search(&source.document, api_view, &fields)?),
+            )?
+        } else {
+            self.pages(
+                "GET",
+                &format!(
+                    "/v2/spaces/{}/{}/{}/objects?view={}&fields={}",
+                    enc(&target.space_id),
+                    kind,
+                    enc(&source.object_id),
+                    enc(&required(api_view, "id")?),
+                    enc(&fields.join(","))
+                ),
+                None,
+            )?
+        };
         let mut grouped: BTreeMap<String, Vec<Value>> = grouping
             .categories
             .keys()
@@ -514,7 +583,7 @@ impl Client {
             grouping.categories.insert("false".into(), String::new());
             return Ok(grouping);
         }
-        if !matches!(format.as_str(), "select" | "multi_select") {
+        if format != "select" {
             return Err("This grouping format cannot be matched to Anytype headers safely.".into());
         }
         let options = self.pages(
@@ -526,10 +595,14 @@ impl Client {
             ),
             None,
         )?;
-        // v2 usually exposes option names only. Select group IDs are the option
-        // object IDs; reading those objects resolves names without API v1.
+        // v2 may omit option IDs. Select group IDs are the option object IDs,
+        // so reading those objects resolves their names.
         let mut resolved = BTreeMap::new();
+        let mut option_names = BTreeSet::new();
         for option in &options {
+            if !option_names.insert(required(option, "name")?) {
+                return Err("Duplicate option names prevent an exact category match.".into());
+            }
             if let (Some(id), Some(name)) = (
                 option.get("id").and_then(Value::as_str),
                 option.get("name").and_then(Value::as_str),
@@ -538,48 +611,16 @@ impl Client {
             }
         }
 
-        let options_need_ids = options.iter().any(|option| {
-            option["name"]
-                .as_str()
-                .is_none_or(|name| !resolved.contains_key(name))
-        });
-        let select_group_ids = if format == "select" {
+        let select_group_ids = {
             view.get("groups")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
                 .map(|group| required(group, "id"))
                 .collect::<Result<Vec<_>, _>>()?
-        } else {
-            Vec::new()
         };
-        let group_needs_ids = select_group_ids.iter().any(|id| {
-            id.as_str() != "empty" && !resolved.values().any(|known| known == id)
-        });
-
-        // A single legacy tags read can resolve the whole option set. This
-        // avoids one document request per select group on API versions that
-        // omit IDs from v2 option rows.
-        if options_need_ids || group_needs_ids {
-            if let Ok(tags) = self.pages(
-                "GET",
-                &format!(
-                    "/v1/spaces/{}/properties/{}/tags",
-                    enc(&target.space_id),
-                    enc(&grouping.property)
-                ),
-                None,
-            ) {
-                for tag in tags {
-                    if let (Some(id), Some(name)) = (tag["id"].as_str(), tag["name"].as_str()) {
-                        insert_option_id(&mut resolved, name, id)?;
-                    }
-                }
-            }
-        }
-
-        // When neither v2 nor the legacy endpoint exposes stable IDs, resolve
-        // only groups whose exact IDs are absent from the option map.
+        // When v2 option rows omit stable IDs, resolve only groups whose
+        // exact IDs are absent from the option map.
         let unresolved_group_ids = select_group_ids
             .iter()
             .filter(|id| {
@@ -598,27 +639,16 @@ impl Client {
             insert_option_id(&mut resolved, name, id)?;
         }
 
-        if options.iter().any(|option| {
-            option["name"]
-                .as_str()
-                .is_none_or(|name| !resolved.contains_key(name))
-        }) {
-            return Err("The API does not expose every option's stable ID. This view cannot publish results safely.".into());
-        }
         for option in options {
             let name = required(&option, "name")?;
-            let id = resolved
-                .get(&name)
-                .ok_or("The API does not expose every option's stable ID. This view cannot publish results safely.")?;
+            // Unused options need no published result. Any card whose option
+            // remains unresolved is rejected by category() before publishing.
+            let Some(id) = resolved.get(&name) else { continue; };
             crate::kanban::validate_id(id)?;
             if grouping.options.insert(name.clone(), id.clone()).is_some() {
                 return Err("Duplicate option names prevent an exact category match.".into());
             }
-            let category_id = if format == "multi_select" {
-                md5(id)
-            } else {
-                id.clone()
-            };
+            let category_id = id.clone();
             if category_id == "empty"
                 || grouping
                     .categories
@@ -631,6 +661,12 @@ impl Client {
         grouping.categories.insert("empty".into(), String::new());
         Ok(grouping)
     }
+}
+
+struct MembershipSource {
+    object_id: String,
+    kind: &'static str,
+    document: Value,
 }
 
 #[derive(Default)]
@@ -804,10 +840,9 @@ fn source_signature(
     block: &Value,
     view: &Value,
 ) -> Option<String> {
-    let source_id = match kind {
-        Some("queries" | "collections") => target.object_id.as_str(),
-        _ => block.get("object_id").and_then(Value::as_str)?,
-    };
+    let source_id = block.get("object_id").and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .or_else(|| kind.map(|_| target.object_id.as_str()))?;
     let view_id = view.get("id").and_then(Value::as_str)?;
     let layout = view
         .get("type")
@@ -898,7 +933,10 @@ fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, S
         .ok_or("The grouping property is unavailable.")?
         .format
         .clone();
-    if !(is_boolean_format(&format) || matches!(format.as_str(), "select" | "multi_select")) {
+    if format == "multi_select" {
+        return Err("Multi-select grouping is not supported because API v2 does not expose the option identities needed to match its columns.".into());
+    }
+    if !(is_boolean_format(&format) || format == "select") {
         return Err("This grouping format cannot be matched to Anytype headers safely.".into());
     }
     Ok((property, format))
@@ -929,11 +967,29 @@ fn insert_option_id(
 }
 
 fn list_kind(document: &Value) -> Option<&'static str> {
+    if document["kind"] == "object_type" { return Some("types"); }
     match document["type"].as_str() {
         Some("collection") => Some("collections"),
         Some("query" | "set") => Some("queries"),
         _ => None,
     }
+}
+
+fn type_view_search(document: &Value, view: &Value, fields: &[String]) -> Result<Value, String> {
+    let type_key = document.pointer("/type_settings/api_key")
+        .and_then(Value::as_str).filter(|key| !key.is_empty())
+        .or_else(|| document.get("internal_key").and_then(Value::as_str).filter(|key| !key.is_empty()))
+        .ok_or("The API did not return this type's identity.")?;
+    let mut body = json!({"type": type_key, "fields": fields});
+    for key in ["filters", "sorts"] {
+        let values = match view.get(key) {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(values)) => values.clone(),
+            _ => return Err("The API returned invalid type-view filters or sorts.".into()),
+        };
+        body[key] = Value::Array(values);
+    }
+    Ok(body)
 }
 fn enc(s: &str) -> String {
     api::encode_segment(s)
@@ -947,19 +1003,22 @@ fn required(value: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| "Anytype did not return the required view metadata.".into())
 }
 
+#[cfg(test)]
 pub(crate) fn complete_pages(
+    fetch: impl FnMut(usize) -> Result<Value, String>,
+) -> Result<Vec<Value>, String> {
+    complete_pages_with_info(fetch, |_| {})
+}
+
+fn complete_pages_with_info(
     mut fetch: impl FnMut(usize) -> Result<Value, String>,
+    mut on_info: impl FnMut(&str),
 ) -> Result<Vec<Value>, String> {
     let mut all = Vec::new();
     let mut total = None;
     loop {
         let response = fetch(all.len())?;
-        if response
-            .get("warnings")
-            .is_some_and(|v| v.as_array().is_none_or(|a| !a.is_empty()) && !v.is_null())
-        {
-            return Err("Anytype reported incomplete or unresolved data. Refresh results when the space is fully loaded.".into());
-        }
+        warnings::check(&response, false, &mut on_info)?;
         let data = response["data"]
             .as_array()
             .ok_or("Anytype returned a page without data.")?;
@@ -1011,6 +1070,9 @@ impl Grouping {
                 _ => Err("A checkbox category contains an incompatible value.".into()),
             };
         }
+        if self.format != "select" {
+            return Err("This grouping format is not supported.".into());
+        }
         let names: Vec<&str> = match value {
             Value::Null => Vec::new(),
             Value::String(name) if self.format == "select" => vec![name],
@@ -1035,65 +1097,13 @@ impl Grouping {
                 self.options
                     .get(*name)
                     .cloned()
-                    .ok_or("A category option changed. Reload views and refresh results.")
+                    .ok_or("The API did not expose an exact column identity for an option used by this view. Reload views and refresh results.")
             })
             .collect::<Result<Vec<_>, _>>()?;
         ids.sort();
         ids.dedup();
-        Ok(if self.format == "multi_select" {
-            md5(&ids.join(""))
-        } else {
-            ids[0].clone()
-        })
+        Ok(ids[0].clone())
     }
-}
-
-// Anytype core/kanban/group_tag.go uses MD5 solely as a category identifier,
-// not as a security primitive. Match its sorted, concatenated option IDs.
-fn md5(input: &str) -> String {
-    let mut bytes = input.as_bytes().to_vec();
-    let bits = (bytes.len() as u64) * 8;
-    bytes.push(0x80);
-    while bytes.len() % 64 != 56 {
-        bytes.push(0)
-    }
-    bytes.extend_from_slice(&bits.to_le_bytes());
-    let mut state = [0x67452301u32, 0xefcdab89, 0x98badcfe, 0x10325476];
-    let shifts = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
-    for chunk in bytes.chunks_exact(64) {
-        let mut words = [0u32; 16];
-        for (i, part) in chunk.chunks_exact(4).enumerate() {
-            words[i] = u32::from_le_bytes(part.try_into().unwrap());
-        }
-        let [mut a, mut b, mut c, mut d] = state;
-        for i in 0..64 {
-            let (f, g) = match i {
-                0..=15 => ((b & c) | (!b & d), i),
-                16..=31 => ((d & b) | (!d & c), (5 * i + 1) % 16),
-                32..=47 => (b ^ c ^ d, (3 * i + 5) % 16),
-                _ => (c ^ (b | !d), (7 * i) % 16),
-            };
-            let k = (((i + 1) as f64).sin().abs() * 4294967296.0).floor() as u32;
-            let next = b.wrapping_add(
-                a.wrapping_add(f)
-                    .wrapping_add(k)
-                    .wrapping_add(words[g])
-                    .rotate_left(shifts[(i / 16) * 4 + i % 4]),
-            );
-            a = d;
-            d = c;
-            c = b;
-            b = next;
-        }
-        for (i, value) in [a, b, c, d].iter().enumerate() {
-            state[i] = state[i].wrapping_add(*value);
-        }
-    }
-    state
-        .iter()
-        .flat_map(|n| n.to_le_bytes())
-        .map(|b| format!("{b:02x}"))
-        .collect()
 }
 
 #[cfg(test)]
@@ -1158,20 +1168,40 @@ mod tests {
                 let view = json!({"id":"view-a","type":"kanban","name":"Board","group_by":"status","filters":[],"sorts":[],"groups":[{"id":"option-a"},{"id":"empty"}],"columns":[{"property":"title","width":180},{"property":"status","width":140}]});
                 let response = if path.starts_with("/v2/spaces?") {
                     page(json!([{"id":"space","name":"Work"}]))
+                } else if path.starts_with("/v2/spaces/space/types?") {
+                    page(json!([{"key":"task","name":"Tasks type"}]))
+                } else if path.starts_with("/v2/spaces/space/types/task?")
+                    || path.starts_with("/v2/spaces/space/objects/type-task?") {
+                    json!({"id":"type-task","kind":"object_type","type":"object_type","internal_key":"task","blocks":[{"id":"board","properties":[{"property":"estimate","format":"number"},{"property":"status","format":"select"}],"views":[view]}]})
                 } else if path.starts_with("/v2/spaces/space/properties/status/options") {
-                    page(json!([{"name":"A"}]))
-                } else if path.starts_with("/v1/spaces/space/properties/status/tags") {
-                    page(json!([{"id":"option-a","name":"A"}]))
+                    // An unused option with no stored group must not prevent
+                    // publishing the categories whose identities are known.
+                    page(json!([{"name":"A"},{"name":"Unused"}]))
                 } else if path.starts_with("/v2/spaces/space/properties") {
                     page(
                         json!([{"key":"estimate","name":"Estimate","format":"number"},{"key":"hidden-metric","name":"Hidden metric","format":"number"},{"key":"unused-metric","name":"Unused metric","format":"number"},{"key":"done","name":"Done","format":"checkbox"},{"key":"off-view-bool","name":"Off view boolean","format":"checkbox"},{"key":"status","name":"Status","format":"select"}]),
                     )
                 } else if path.starts_with("/v2/spaces/space/search") {
-                    page(json!([{"id":"object-a","name":"Tasks","type":"query"}]))
+                    let body: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+                    if body.get("type").is_some() {
+                        assert_eq!(body["type"], "task");
+                        assert_eq!(body["fields"], json!(["estimate", "status"]));
+                        assert_eq!(body["filters"], json!([]));
+                        assert_eq!(body["sorts"], json!([]));
+                        page(json!([{"id":"type-card","properties":{"estimate":11,"status":"A"}}]))
+                    } else {
+                        page(json!([{"id":"object-a","name":"Tasks","type":"query"},{"id":"page-home","name":"Homepage","type":"page"},{"id":"old-page","name":"Old page","type":"weekly_planner"},{"id":"mention-page","name":"Notes","type":"page"}]))
+                    }
+                } else if path.starts_with("/v2/spaces/space/objects/old-page?") {
+                    json!({"id":"old-page","type":"weekly_planner","blocks":[],"warnings":[{"path":"/type","message":"the type weekly_planner of this object was removed from the space"}]})
+                } else if path.starts_with("/v2/spaces/space/objects/mention-page?") {
+                    json!({"id":"mention-page","type":"page","blocks":[{"id":"text-id","type":"text"}],"warnings":[{"path":"/blocks/text-id/text/marks/0/param","code":"unresolved_target","message":"mention target names no object in this space"}]})
+                } else if path.starts_with("/v2/spaces/space/objects/page-home?") {
+                    json!({"id":"page-home","type":"page","blocks":[{"id":"embed","object_id":"object-a","properties":[{"property":"estimate","format":"number"},{"property":"hidden-metric","format":"number"},{"property":"done","format":"checkbox"},{"property":"status","format":"select"}],"views":[view]}]})
                 } else if path.starts_with("/v2/spaces/space/objects/object-a") {
                     json!({"id":"object-a","type":"query","blocks":[{"id":"board","object_id":"object-a","properties":[{"property":"estimate","format":"number"},{"property":"hidden-metric","format":"number"},{"property":"done","format":"checkbox"},{"property":"status","format":"select"}],"views":[view]}]})
                 } else if path.starts_with("/v2/spaces/space/objects/option-a") {
-                    json!({"id":"option-a","kind":"relation_option","properties":{"name":"A"}})
+                    json!({"id":"option-a","kind":"relation_option","properties":{"name":"A"},"warnings":[{"path":"/blocks","message":"block abc is a transparent container: it is lifted, and the attributes on it are dropped"}]})
                 } else if path.starts_with("/v2/spaces/space/queries/object-a/views") {
                     page(json!([view]))
                 } else if path.starts_with("/v2/spaces/space/queries/object-a/objects") {
@@ -1196,22 +1226,25 @@ mod tests {
             }
         });
         let client = Client {
+            info: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new("fixture-key".into()),
             ip: "127.0.0.1".into(),
             port,
         };
         let catalog = client.discover().unwrap();
-        assert_eq!(catalog.views.len(), 1);
-        assert!(catalog.views[0].unsupported.is_none());
+        assert_eq!(catalog.views.len(), 3);
+        assert!(catalog.warning.is_none(), "Unrelated document warnings must not mark Kanban discovery incomplete.");
+        let query_view = catalog.views.iter().find(|view| view.kind == "Query").unwrap();
+        assert!(query_view.unsupported.is_none());
         assert_eq!(
-            catalog.views[0]
+            query_view
                 .properties
                 .iter()
                 .map(|property| property.key.as_str())
                 .collect::<Vec<_>>(),
             vec!["estimate", "hidden-metric", "done"]
         );
-        assert!(catalog.views[0].source_signature.is_some());
+        assert!(query_view.source_signature.is_some());
         let calculator = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "estimate".into(),
             operation: "total".into(),
@@ -1219,8 +1252,28 @@ mod tests {
         }])
         .unwrap();
         let results = client
-            .calculate(&catalog.views[0].target, &calculator)
+            .calculate(&query_view.target, &calculator)
             .unwrap();
+        let inline_view = catalog.views.iter().find(|view| view.target.object_id == "page-home").unwrap();
+        assert!(inline_view.unsupported.is_none());
+        assert_eq!(inline_view.source_signature, query_view.source_signature);
+        let inline_results = client.calculate(&inline_view.target, &calculator).unwrap();
+        let notices = client.take_info();
+        assert_eq!(notices.len(), 1, "Repeated metadata notices are logged only once per client operation.");
+        assert!(notices[0].contains("transparent container"));
+        assert_eq!(inline_results.len(), results.len());
+        for (inline, canonical) in inline_results.iter().zip(&results) {
+            assert_eq!(inline.target.object_id, "page-home");
+            assert_eq!(inline.target.block_id, "embed");
+            assert_eq!(inline.category_id, canonical.category_id);
+            assert_eq!(inline.value, canonical.value);
+        }
+        let type_view = catalog.views.iter().find(|view| view.kind == "Type").unwrap();
+        assert!(type_view.unsupported.is_none());
+        assert_eq!(type_view.target.object_id, "type-task");
+        assert!(type_view.source_signature.is_some());
+        let type_results = client.calculate(&type_view.target, &calculator).unwrap();
+        assert_eq!(type_results.iter().find(|result| result.category_id == "option-a").unwrap().value, Some(11.0.into()));
         assert_eq!(
             results
                 .iter()
@@ -1244,7 +1297,7 @@ mod tests {
         }])
         .unwrap();
         let boolean_results = client
-            .calculate(&catalog.views[0].target, &boolean_calculator)
+            .calculate(&query_view.target, &boolean_calculator)
             .unwrap();
         assert_eq!(
             boolean_results
@@ -1267,7 +1320,7 @@ mod tests {
             crate::calculator::Token::Operator { value: ">".into() },
             crate::calculator::Token::Number { value: "0".into() },
         ]).unwrap();
-        assert!(client.calculate(&catalog.views[0].target, &comparison).unwrap().iter().all(|result| matches!(result.value, Some(crate::calculator::CalculationValue::Boolean(_)))));
+        assert!(client.calculate(&query_view.target, &comparison).unwrap().iter().all(|result| matches!(result.value, Some(crate::calculator::CalculationValue::Boolean(_)))));
         let skipped_deleted = Calculator::parse(&[
             crate::calculator::Token::Boolean { value: true },
             crate::calculator::Token::Operator { value: "?".into() },
@@ -1275,7 +1328,7 @@ mod tests {
             crate::calculator::Token::Operator { value: ":".into() },
             crate::calculator::Token::Aggregate { property: "deleted".into(), operation: "sum".into(), calculation: None },
         ]).unwrap();
-        assert!(client.calculate(&catalog.views[0].target, &skipped_deleted).is_err());
+        assert!(client.calculate(&query_view.target, &skipped_deleted).is_err());
         let deleted = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "deleted".into(),
             operation: "total".into(),
@@ -1283,7 +1336,7 @@ mod tests {
         }])
         .unwrap();
         assert!(client
-            .calculate(&catalog.views[0].target, &deleted)
+            .calculate(&query_view.target, &deleted)
             .is_err());
         let unavailable = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "unused-metric".into(),
@@ -1292,7 +1345,7 @@ mod tests {
         }])
         .unwrap();
         assert!(client
-            .calculate(&catalog.views[0].target, &unavailable)
+            .calculate(&query_view.target, &unavailable)
             .is_err());
         let unavailable_boolean = Calculator::parse(&[crate::calculator::Token::Aggregate {
             property: "off-view-bool".into(),
@@ -1301,7 +1354,7 @@ mod tests {
         }])
         .unwrap();
         assert!(client
-            .calculate(&catalog.views[0].target, &unavailable_boolean)
+            .calculate(&query_view.target, &unavailable_boolean)
             .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
@@ -1329,6 +1382,29 @@ mod tests {
             assert!(complete_pages(|_| Ok(response.clone())).is_err());
         }
     }
+    #[test]
+    fn date_filter_notices_allow_complete_results_but_accuracy_warnings_block() {
+        let notice = json!({"path":"/filters/0","message":"\"less_or_equal\" on date \"dueDate\" also matches objects with no dueDate; pair it with a \"not_empty\" leaf in an \"and\" group to exclude them"});
+        let mut info = Vec::new();
+        let rows = complete_pages_with_info(|offset| Ok(if offset == 0 {
+            json!({"data":[1],"has_more":true,"total":2,"warnings":[notice.clone()]})
+        } else {
+            json!({"data":[2],"has_more":false,"total":2})
+        }), |message| info.push(message.to_string())).unwrap();
+        assert_eq!(rows, vec![json!(1), json!(2)]);
+        assert_eq!(info, vec![notice["message"].as_str().unwrap()]);
+        for warnings in [
+            json!([notice.clone(), {"message":"Some stores are still loading."}]),
+            json!([{"path":"/filters/0","message":"A dynamic filter could not be resolved."}]),
+            json!([{}]),
+            json!({"message":"Malformed warning container"}),
+        ] {
+            assert!(complete_pages(|_| Ok(json!({"data":[],"has_more":false,"warnings":warnings}))).is_err());
+        }
+        // An informational notice must never bypass completeness validation.
+        assert!(complete_pages(|_| Ok(json!({"data":[],"has_more":false,"total":2,"warnings":[notice]}))).is_err());
+    }
+
     #[test]
     fn view_properties_are_scoped_to_source_schema_and_configured_columns() {
         let relations = json!({
@@ -1436,9 +1512,32 @@ mod tests {
         assert!(source_signature(&inline_target, None, &canonical_block, &definition).is_none());
     }
     #[test]
+    fn type_search_preserves_scope_filters_sorts_and_requested_fields() {
+        let document = json!({"kind":"object_type","internal_key":"stored-key","type_settings":{"api_key":"task"}});
+        let view = json!({"filters":[{"property":"done","condition":"equal","value":true}],"sorts":[{"property":"estimate","direction":"desc"}]});
+        let fields = vec!["estimate".to_string(), "status".to_string()];
+        let body = type_view_search(&document, &view, &fields).unwrap();
+        assert_eq!(list_kind(&document), Some("types"));
+        assert_eq!(body["type"], "task");
+        assert_eq!(body["fields"], json!(fields));
+        assert_eq!(body["filters"], view["filters"]);
+        assert_eq!(body["sorts"], view["sorts"]);
+        assert_eq!(type_view_search(&json!({"internal_key":"stored-key"}), &json!({}), &[]).unwrap(), json!({"type":"stored-key","fields":[],"filters":[],"sorts":[]}));
+        assert!(type_view_search(&json!({}), &view, &fields).is_err());
+        assert!(type_view_search(&document, &json!({"filters":true}), &fields).is_err());
+    }
+
+    #[test]
+    fn multi_select_is_unavailable_and_duplicate_option_names_remain_ambiguous() {
+        let properties = vec![Property {key:"tags".into(),name:"Tags".into(),format:"multi_select".into()}];
+        assert!(grouping_property(&json!({"group_by":"tags"}), &properties).unwrap_err().contains("Multi-select"));
+        let mut options = BTreeMap::new();
+        insert_option_id(&mut options, "Done", "option-a").unwrap();
+        assert!(insert_option_id(&mut options, "Done", "option-b").is_err());
+    }
+
+    #[test]
     fn exact_anytype_category_rules() {
-        assert_eq!(md5("abc"), "900150983cd24fb0d6963f7d28e17f72");
-        assert_eq!(md5(""), "d41d8cd98f00b204e9800998ecf8427e");
         let mut grouping = Grouping {
             property: "tags".into(),
             format: "multi_select".into(),
@@ -1448,12 +1547,9 @@ mod tests {
             ]),
             categories: BTreeMap::new(),
         };
-        assert_eq!(
-            grouping.category(&json!(["B", "A"])).unwrap(),
-            md5("option-aoption-b")
-        );
-        assert_eq!(grouping.category(&json!([])).unwrap(), "empty");
+        assert!(grouping.category(&json!(["B", "A"])).is_err());
         grouping.format = "select".into();
+        assert_eq!(grouping.category(&json!([])).unwrap(), "empty");
         assert_eq!(grouping.category(&json!("A")).unwrap(), "option-a");
         assert!(grouping.category(&json!(["A", "B"])).is_err());
         assert!(grouping.category(&json!("Missing")).is_err());

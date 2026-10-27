@@ -869,6 +869,10 @@
   function setStatus(message, kind, record = true) {
     statusMessage.textContent = message;
     if (!record) return;
+    addLog(message, kind);
+  }
+
+  function addLog(message, kind) {
     const level = kind === "error" || kind === "warning" ? kind : "info";
     const entry = { message: String(message), level, time: new Date().toLocaleTimeString() };
     logs.push(entry);
@@ -2443,7 +2447,7 @@
   }
 
   window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
-  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
   el("settings-v21-enabled").addEventListener("change", () => {
     if (!draft || saveBusy || isInstallingUpdate()) return;
