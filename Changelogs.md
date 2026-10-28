@@ -2,6 +2,9 @@
 
 *Insert random ah text.*
 
+## General
+- the sidebar is now resizable
+
 ## Advanced Settings -> App Settings
 - organized and modernized the UI of "App Settings"
 
