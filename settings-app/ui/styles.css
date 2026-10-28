@@ -764,3 +764,52 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 #advanced-app-panel .app-backup-description { display: block; color: var(--text-secondary); font-size: 14px; line-height: 20px; margin-top: 4px; }
 #advanced-app-panel .blob-backup-button { flex-shrink: 0; }
 #advanced-app-panel .blob-backup-status:empty { margin: 0; }
+
+/* Shared Settings and Docs sidebar experiment. */
+.sidebar, .documentation-layout { position: relative; }
+.sidebar { min-width: 0; }
+.sidebar-resizer { position: absolute; z-index: 1; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.sidebar > .sidebar-resizer { right: -4px; }
+.documentation-layout > .sidebar-resizer { left: calc(var(--sidebar-width) - 4px); }
+.sidebar-resizer[hidden] { display: none; }
+.sidebar-resizer:focus-visible { outline: none; }
+.sidebar-resizing, .sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
+.sidebar-experiment-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item > span,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item-label,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item-label,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-chevron,
+:root[data-sidebar-collapsed="true"] .documentation-category-label > span:not(.documentation-category-icon),
+:root[data-sidebar-collapsed="true"] .nav-group-label { display: none; }
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item { justify-content: center; padding-inline: 0; gap: 0; }
+:root[data-sidebar-collapsed="true"] .documentation-children { margin-left: 0; padding-inline: 0; }
+:root[data-sidebar-collapsed="true"] .documentation-children::before { display: none; }
+:root[data-sidebar-collapsed="true"] .documentation-category-label { justify-content: center; padding-inline: 0; }
+:root[data-sidebar-collapsed="true"] .sidebar-bottom { justify-content: center; }
+:root[data-sidebar-collapsed="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.help-popup { max-width: calc(100vw - 32px); }
+
+/* Sidebar labels never wrap, including the original Settings navigation. */
+.sidebar .nav-item > span:not(.nav-icon) { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:root[data-sidebar-collapsed="true"] .window-title { margin-left: 72px; }
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item { width: 32px; height: 32px; min-height: 32px; margin-inline: auto; border-radius: 50%; }
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-child .documentation-item-icon,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-child .documentation-item-icon { color: var(--text-muted); }
+.sidebar-navigation-tooltip { position: fixed; z-index: 100; max-width: min(320px, calc(100vw - 24px)); padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--text); font: 14px/20px var(--font-interface); overflow-wrap: anywhere; pointer-events: none; }
+.sidebar-navigation-tooltip[hidden] { display: none; }
+.advanced-tabs { overflow-x: hidden; scrollbar-width: none; }
+.advanced-tabs::-webkit-scrollbar { display: none; }
+.sidebar-resizing .advanced-tabs::after { transition: none; }
+
+.sidebar-nav, .documentation-article-list, .documentation-children-inner { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.sidebar .nav-item, .documentation-item { min-width: 0; }
+
+.kanban-select-option-description { color: var(--text-secondary); font-size: 12px; line-height: 16px; }
+.kanban-select-option:has(.kanban-select-option-description) { height: auto; min-height: 52px; padding-block: 6px; }
+
+#advanced-experiments-panel .settings-list { overflow: visible; }

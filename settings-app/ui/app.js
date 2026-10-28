@@ -463,7 +463,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode;
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1227,6 +1227,7 @@
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       settingsV21Enabled: settings.settingsV21Enabled === true,
+      sidebarResizeMode: "standard",
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1243,6 +1244,7 @@
     collapsedCategories.checked = draft.collapsedCategories;
     calendarColorsEnabled.checked = draft.calendarColorsEnabled;
     el("settings-v21-enabled").checked = draft.settingsV21Enabled;
+    window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
     applyFontFamilies();
@@ -2455,7 +2457,7 @@
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     markDirty();
   });
-  window.appReady = false;
+    window.appReady = false;
   loadState();
   window.setInterval(refreshTheme, 2000);
   window.setInterval(() => {
