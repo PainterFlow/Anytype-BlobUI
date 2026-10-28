@@ -29,102 +29,43 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
       } } };
     });
     await page.goto('http://fixture/'); await page.waitForFunction(() => window.appReady);
-    const mode = page.locator('#sidebar-resize-mode');
     const handle = page.locator('.sidebar > .sidebar-resizer');
     const width = () => page.locator('.sidebar').evaluate(n => n.getBoundingClientRect().width);
-    const select = async value => { await page.locator('#advanced-nav').click(); await page.locator('#advanced-experiments-tab').click(); await mode.click(); await page.locator(`#sidebar-resize-options [data-value="${value}"]`).click(); };
-    assert.equal(await mode.evaluate(n => n.value), 'off'); assert.equal(await handle.isVisible(), false);
-    await select('standard'); assert.equal(await width(), 256);
-    assert.deepEqual(await page.locator('#sidebar-resize-options .kanban-option-label').allTextContents(), ['Off', 'Variant 1', 'Variant 2']);
-    assert.deepEqual(await page.locator('#sidebar-resize-options .kanban-select-option-description').allTextContents(), ['Resizable Sidebar', 'Resizable Sidebar pro']);
-    await mode.click();
-    await page.locator('#sidebar-resize-options').evaluate(async n => { await Promise.allSettled(n.getAnimations().map(a => a.finished)); });
-    await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-picker-dark.png') });
-    await page.keyboard.press('Escape');
-    await handle.focus(); await page.keyboard.press('End'); assert.equal(await width(), 320);
-    assert.equal(await page.locator('#save-button').isVisible(), true);
-    await page.locator('#save-button').click(); await page.waitForFunction(() => window.saved?.sidebarResizeMode === 'standard');
-    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#sidebar-resize-mode').count(), 0);
+    assert.equal(await handle.isVisible(), true);
+    assert.equal(await width(), 256);
     await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 160);
-    assert.equal(await page.locator('#save-button').isVisible(), false, 'Geometry does not dirty settings');
-    await page.reload(); await page.waitForFunction(() => window.appReady); assert.equal(await width(), 160);
     await page.locator('#advanced-nav').hover();
-    assert.equal(await page.locator('#sidebar-navigation-tooltip').textContent(), 'Advanced Settings');
-    assert.equal(await page.locator('#advanced-nav > span').evaluate(n => getComputedStyle(n).whiteSpace), 'nowrap');
-    await select('pro'); await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 56);
-    await page.locator('#settings-v21-enabled').check();
-    await page.locator('#preferences-nav').click();
-    assert.equal(await page.locator('#preferences-nav').getAttribute('aria-expanded'), 'true');
-    const child = page.locator('.v21-section-link').first(); await child.click();
-    assert.equal(await child.getAttribute('data-sidebar-tooltip'), 'Accent');
-    assert.equal(await page.locator('#preferences-nav').getAttribute('aria-label'), 'Preferences');
-    assert.equal(await child.locator('.documentation-item-icon').isVisible(), true);
-    assert.equal(await child.locator('.documentation-item-label').isVisible(), false);
-    await child.hover();
-    assert.equal(await page.locator('#sidebar-navigation-tooltip').isVisible(), true);
-    assert.equal(await child.evaluate(n => getComputedStyle(n).borderRadius), '50%');
-    await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-mini-tooltip-dark.png') });
-    assert.ok(await page.locator('.window-title').evaluate(n => n.getBoundingClientRect().left + parseFloat(getComputedStyle(n).paddingLeft)) > 56);
-    for (const name of ['log', 'help']) {
-      await page.locator(`#${name}-button`).click();
-      const popup = await page.locator(`#${name}-popup`).boundingBox();
-      assert.ok(popup);
-      assert.equal(await page.evaluate(({x,y}) => document.elementFromPoint(x,y)?.classList.contains('sidebar-resizer'), { x: 55, y: popup.y + popup.height / 2 }), false);
-      await page.locator(`#${name}-button`).click();
+    assert.equal(await page.locator('#advanced-nav').getAttribute('title'), 'Advanced Settings');
+    assert.equal(await page.locator('#sidebar-navigation-tooltip').isVisible(), false);
+    await handle.focus(); await page.keyboard.press('End'); assert.equal(await width(), 320);
+    assert.equal(await page.locator('#advanced-nav').getAttribute('title'), null);
+    assert.equal(await page.locator('#save-button').isVisible(), false);
+    await page.reload(); await page.waitForFunction(() => window.appReady); assert.equal(await width(), 320);
+    for (const layout of [false, true]) {
+      await page.evaluate(value => window.BlobUI.SettingsV21.setEnabled(value), layout);
+      const box = await handle.boundingBox();
+      await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(220, box.y + 50);
+      await page.keyboard.press('Escape'); await page.mouse.up(); assert.equal(await width(), 320);
+      await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 160);
+      await page.keyboard.press('ArrowLeft'); assert.equal(await width(), 160);
+      await page.keyboard.press('ArrowRight'); assert.equal(await width(), 168);
+      await page.evaluate(() => { document.querySelector('.documentation').hidden = false; });
+      const docsHandle = page.locator('.documentation-layout > .sidebar-resizer');
+      assert.equal(await docsHandle.getAttribute('aria-valuenow'), '168');
+      await docsHandle.focus(); await page.keyboard.press('End');
+      assert.equal(await handle.getAttribute('aria-valuenow'), '320');
+      await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-standard-' + layout + '-dark.png') });
+      await page.evaluate(() => { document.querySelector('.documentation').hidden = true; });
     }
-    const drag = async (target, cancel) => {
-      const box = await handle.boundingBox(); await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(target + box.x + 4 - await width(), box.y + 50);
-      if (cancel) await page.keyboard.press('Escape');
-      await page.mouse.up();
-    };
-    await drag(220, true); assert.equal(await width(), 56);
-    await drag(220); assert.equal(await width(), 220);
-    for (let i = 0; i < 6; i++) { await drag(i % 2 ? 160 : 320); }
-    await drag(220);
-    assert.equal(await page.locator('.preference-tabs').evaluate(n => getComputedStyle(n).overflowX), 'hidden');
-    const tabState = await page.locator('.preference-tabs').evaluate(n => {
-      const selected = n.querySelector('[aria-selected="true"]');
-      return { left: parseFloat(n.style.getPropertyValue('--tab-left')), expected: selected.offsetLeft, width: parseFloat(n.style.getPropertyValue('--tab-width')), expectedWidth: selected.offsetWidth };
-    });
-    assert.equal(tabState.left, tabState.expected); assert.equal(tabState.width, tabState.expectedWidth);
-    const box = await handle.boundingBox();
-    await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(300, box.y + 50);
-    await handle.dispatchEvent('pointercancel'); await page.mouse.up(); assert.equal(await width(), 220);
-    await drag(150); assert.equal(await width(), 56);
-    await handle.focus(); await page.keyboard.press('ArrowRight'); assert.equal(await width(), 160);
-    await page.keyboard.press('ArrowRight'); assert.equal(await width(), 168);
     await page.setViewportSize({ width: 600, height: 850 });
-    await page.keyboard.press('End'); assert.equal(await width(), 240);
-    await select('off'); assert.equal(await width(), 224);
-    await page.evaluate(() => window.BlobUI.discardChanges()); assert.equal(await mode.evaluate(n => n.value), 'standard');
-    await select('pro'); await page.evaluate(() => { window.failSave = true; }); await page.locator('#save-button').click();
-    await page.waitForFunction(() => document.getElementById('status-message').textContent.includes('fixture save failed'));
-    assert.equal(await mode.evaluate(n => n.value), 'pro');
-    await page.evaluate(() => window.BlobUI.discardChanges()); assert.equal(await mode.evaluate(n => n.value), 'standard');
-    // Show the real Docs layout without invoking a native app or external service.
-    await page.evaluate(() => { document.querySelector('.documentation').hidden = false; });
-    const docsHandle = page.locator('.documentation-layout > .sidebar-resizer');
-    await docsHandle.focus(); await page.keyboard.press('Home');
-    assert.equal(await page.locator('#documentation-navigation').evaluate(n => n.getBoundingClientRect().width), 160);
-    assert.equal(await width(), 160);
-    await page.evaluate(async () => {
-      window.BlobUI.DocsData = { ...window.BlobUI.DocsData, videoAliases: {}, resolveImage() { return ""; }, load: async () => ({ categories: [{ id: 'features', name: 'Features' }], articles: [
-        { id: 'parent', category: 'features', name: 'Parent guide', markdown: '# Parent guide', icon: 'features' },
-        { id: 'child', category: 'features', parent: 'parent', name: 'Child guide', markdown: '# Child guide', icon: 'book' }
-      ] }) };
-      await window.BlobUI.DocsUI.load();
-      window.BlobUI.SidebarResize.setMode('pro');
-    });
-    await docsHandle.focus(); await page.keyboard.press('Home');
-    const parent = page.locator('[data-article-id="parent"]'); if (await parent.getAttribute("aria-expanded") !== "true") await parent.click();
-    await page.locator('[data-article-id="child"]').click();
-    assert.equal(await page.locator('#documentation-article h1').textContent(), 'Child guide');
-    assert.equal(await parent.getAttribute('data-sidebar-tooltip'), 'Parent guide');
-    assert.equal(await page.locator('[data-article-id="child"] .documentation-item-icon').isVisible(), true);
-    await page.setViewportSize({ width: 1000, height: 850 });
-    await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-pro-docs-dark.png') });
-    await page.evaluate(() => { document.querySelector('.documentation').hidden = true; });
-    await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-pro-settings-dark.png') });
+    await handle.focus(); await page.keyboard.press('End'); assert.equal(await width(), 240);
+    for (const legacy of ['off', 'pro']) {
+      await page.evaluate(value => sessionStorage.setItem('saved', JSON.stringify({ sidebarResizeMode: value })), legacy);
+      await page.reload(); await page.waitForFunction(() => window.appReady);
+      assert.equal(await handle.isVisible(), true); assert.equal(await width(), 240);
+      assert.equal(await page.locator('html').getAttribute('data-sidebar-collapsed'), 'false');
+    }
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await browser.close(); }
@@ -144,7 +85,7 @@ test('corrupt or unavailable geometry storage keeps resizing usable', async () =
       assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), stored?.includes('9999') ? '320' : '256');
       if (stored?.includes('9999')) {
         await page.evaluate(() => window.BlobUI.SidebarResize.setMode('pro'));
-        assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), '56');
+        assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), '320');
         await page.evaluate(() => window.BlobUI.SidebarResize.setMode('standard'));
       }
       const handle = page.locator('.sidebar-resizer').first(); await handle.focus(); await page.keyboard.press('Home');

@@ -104,8 +104,8 @@ Documentation groups Appearance, Kanban, Calendar Colors, and QoL Features under
 
 Website links always open in the system's default browser. Documentation article selection and local heading anchors stay in the reader. Never navigate the Settings webview to a website or create an embedded browser window.
 
-## Resizable sidebar experiment
+## Resizable sidebar
 
-Advanced > Experiments contains an independent single-select Resizable Sidebar control, defaulting to Off. Standard and pro share width between Settings and Docs in both layouts. Separators support pointer dragging and keyboard resizing in 8px steps. Expanded width ranges from 160px to 320px, capped at 40% of the window with a 160px minimum. Pro snaps below 160px to a 56px icon rail. Child navigation retains disclosure behavior and tooltips. Mode previews use Save and Undo; geometry is remembered automatically across restarts and does not mark settings dirty. Off restores the original responsive width.
+Variant 1 is the standard sidebar in Settings and Documentation in both layouts. Drag the divider or focus it and use Left and Right to resize in 8px steps. Home selects 160px and End selects the maximum of 320px, capped at 40% of the window with a 160px minimum. Escape cancels an active drag. Geometry persists automatically without marking settings dirty. Earlier Off and Pro selections now use this behavior, including restoring labels for saved icon rails.
 
-The experiment uses the shared Picker with Off, Variant 1, and Variant 2; variant names appear as gray second lines. Navigation labels use ellipsis and full-name tooltips. Pro uses circular navigation targets and darker child icons. The title moves right of the mini rail. Resizing never brightens the divider or covers Logs and Help popovers. Tab geometry updates without underline animation during resizing, and horizontal tab scrollbars remain hidden while keyboard selection still reveals the selected tab.
+Navigation labels use ellipsis and native full-name tooltips only when clipped. Resizing never brightens the divider or covers Logs and Help popovers. Tab geometry updates without underline animation during resizing, and horizontal tab scrollbars remain hidden while keyboard selection still reveals the selected tab.

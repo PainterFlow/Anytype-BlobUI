@@ -391,7 +391,6 @@
     "advanced-experiments-tab-list": content => C.Group({
       content
     }),
-    "sidebar-resize-mode": content => C.Button({ attributes: { id: "sidebar-resize-mode", class: "kanban-select-trigger", "aria-haspopup": "listbox", "aria-expanded": "false", "aria-controls": "sidebar-resize-options", "aria-labelledby": "sidebar-resize-label", "aria-describedby": "experiments-warning" }, content }),
     "settings-v21-enabled": () => C.ToggleSetting({
       id: "settings-v21-enabled",
       label: "Settings Future Proof UI Refresh",

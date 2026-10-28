@@ -48,11 +48,6 @@
   const preferencesPage = el("preferences-page");
   const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
-  const sidebarResizePicker = window.BlobUI.Components.Picker({ root: el("sidebar-resize-picker"), value: "off", options: [
-    { value: "off", label: "Off" },
-    { value: "standard", label: "Variant 1", description: "Resizable Sidebar" },
-    { value: "pro", label: "Variant 2", description: "Resizable Sidebar pro" }
-  ] });
   const kanbanPicker = window.BlobUI.Components.Picker({ root: kanbanSelect });
   function closeKanbanStyleMenu(restoreFocus = false) { kanbanPicker.close(restoreFocus); }
   function syncKanbanStyleSelection(value) {
@@ -1232,7 +1227,7 @@
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       settingsV21Enabled: settings.settingsV21Enabled === true,
-      sidebarResizeMode: ["standard", "pro"].includes(settings.sidebarResizeMode) ? settings.sidebarResizeMode : "off",
+      sidebarResizeMode: "standard",
     };
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
@@ -1249,7 +1244,6 @@
     collapsedCategories.checked = draft.collapsedCategories;
     calendarColorsEnabled.checked = draft.calendarColorsEnabled;
     el("settings-v21-enabled").checked = draft.settingsV21Enabled;
-    sidebarResizePicker.setValue(draft.sidebarResizeMode);
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
@@ -2461,12 +2455,6 @@
     if (!draft || saveBusy || isInstallingUpdate()) return;
     draft.settingsV21Enabled = el("settings-v21-enabled").checked;
     window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
-    markDirty();
-  });
-  el("sidebar-resize-mode").addEventListener("change", () => {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
-    draft.sidebarResizeMode = el("sidebar-resize-mode").value;
-    window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     markDirty();
   });
     window.appReady = false;

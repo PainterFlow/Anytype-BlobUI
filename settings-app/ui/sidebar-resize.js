@@ -16,6 +16,7 @@
   }
   function showTooltip(target) {
     if (!target || drag || target === tooltipTarget) return;
+    if (mode === "standard") { updateNativeTooltips(); return; }
     const label = target.querySelector(".documentation-item-label") || target.querySelector("span:not(.nav-icon)");
     if (html.dataset.sidebarCollapsed !== "true" && (!label || label.scrollWidth <= label.clientWidth)) return;
     hideTooltip(); tooltipTarget = target;
@@ -26,7 +27,7 @@
     tooltip.style.left = `${Math.max(8, Math.min(rect.right + 10, root.innerWidth - box.width - 8))}px`;
     tooltip.style.top = `${Math.max(8, Math.min(rect.top + (rect.height - box.height) / 2, root.innerHeight - box.height - 8))}px`;
   }
-  let mode = "off", width = 256, collapsed = false, drag = null;
+  let mode = "standard", width = 256, collapsed = false, drag = null;
   try {
     const saved = JSON.parse(root.localStorage.getItem(key));
     if (Number.isFinite(saved?.width)) width = Math.max(160, Math.min(320, saved.width));
@@ -35,6 +36,13 @@
   const max = () => Math.max(160, Math.min(320, root.innerWidth * .4));
   const current = () => mode === "pro" && collapsed ? 56 : Math.min(width, max());
   const handles = [];
+  function updateNativeTooltips() {
+    doc.querySelectorAll("[data-sidebar-tooltip]").forEach(button => {
+      const label = button.querySelector(".documentation-item-label") || button.querySelector("span:not(.nav-icon)");
+      if (mode === "standard" && label && label.scrollWidth > label.clientWidth) button.setAttribute("title", button.dataset.sidebarTooltip);
+      else button.removeAttribute("title");
+    });
+  }
   function persist() {
     try { root.localStorage.setItem(key, JSON.stringify({ width, collapsed })); } catch (_) { /* Session state still works. */ }
   }
@@ -50,6 +58,7 @@
       handle.setAttribute("aria-valuenow", String(current()));
       handle.setAttribute("aria-valuetext", collapsed && mode === "pro" ? "Icons only" : `${Math.round(current())} pixels`);
     }
+    updateNativeTooltips();
   }
   function resize(value) {
     collapsed = mode === "pro" && value < 160;
@@ -90,6 +99,7 @@
       const value = event.key === "Home" ? (mode === "pro" ? 56 : 160) : event.key === "End" ? max() : event.key === "ArrowRight" && mode === "pro" && collapsed ? 160 : current() + (event.key === "ArrowLeft" ? -8 : 8);
       resize(value); persist();
     });
+    updateNativeTooltips();
   }
   function labelButtons() {
     doc.querySelectorAll(".sidebar .nav-item,.sidebar .documentation-item,.documentation-navigation .documentation-item,.sidebar-action").forEach(button => {
@@ -103,6 +113,8 @@
     if (target) observer.observe(target, { childList: true, subtree: true });
   }
   labelButtons();
+  const resizeObserver = new ResizeObserver(updateNativeTooltips);
+  doc.querySelectorAll(".sidebar,.documentation-navigation").forEach(sidebar => resizeObserver.observe(sidebar));
   doc.addEventListener("pointerover", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));
   doc.addEventListener("pointermove", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));
   doc.addEventListener("focusin", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));
@@ -116,7 +128,7 @@
     if (event.key === "Escape") hideTooltip();
     if (event.key === "Escape" && drag) { event.preventDefault(); event.stopImmediatePropagation(); finish(true); }
   }, true);
-  root.addEventListener("unload", () => observer.disconnect());
-  UI.SidebarResize = { setMode(value) { finish(true); mode = ["standard", "pro"].includes(value) ? value : "off"; render(); } };
+  root.addEventListener("unload", () => { observer.disconnect(); resizeObserver.disconnect(); });
+  UI.SidebarResize = { setMode(value) { finish(true); mode = "standard"; render(); } };
   render();
 })(window);
