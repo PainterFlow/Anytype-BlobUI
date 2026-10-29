@@ -457,11 +457,11 @@
 
   function createPropertyControls(record, host) {
     const area = make('div', 'formula-variable-actions'); record.variableActions=area;
-    const picker = make('div', 'kanban-select formula-property-picker');
-    const trigger = button('Insert property', event => {
+    const pickerShell = UI.Components.PropertyPickerShell({ label: 'Insert property', onClick: event => {
       if (!record.sourceMode) { event.preventDefault(); event.stopImmediatePropagation(); }
       else if (trigger.getAttribute('aria-expanded') !== 'true') record.resetPropertyPicker?.();
-    }, 'formula-insert-property');
+    } });
+    const picker = pickerShell.element, trigger = pickerShell.trigger, menu = pickerShell.menu;
     trigger.addEventListener('keydown', event => {
       if (!record.sourceMode && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
         event.preventDefault();
@@ -470,7 +470,6 @@
     });
     trigger.tabIndex = -1;
     trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
-    const menu=make('div','kanban-select-menu'); menu.setAttribute('role','listbox'); menu.setAttribute('aria-label','Insert property'); menu.hidden=true;
     picker.append(trigger,menu); area.append(picker,button('Card count',()=>insertVariable(record,{kind:'count'}),'formula-variable-button'));
     const properties=()=>(record.view.properties||[])
       .filter(property=>(property.format==="number"||property.format==="boolean"||property.format==="checkbox")
@@ -559,23 +558,7 @@
         key.tabIndex = -1;
         key.setAttribute("aria-label", accessible); key.title = accessible;
         if (action === "backspace") {
-          const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
-          icon.setAttribute("viewBox", "0 0 20 20");
-          icon.setAttribute("aria-hidden", "true");
-          const outline = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-          outline.setAttribute("d", "M8 4.5h9.5v11H8L3.5 10 8 4.5Z");
-          outline.setAttribute("fill", "none");
-          outline.setAttribute("stroke", "currentColor");
-          outline.setAttribute("stroke-width", "1.5");
-          outline.setAttribute("stroke-linejoin", "round");
-          const cross = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-          cross.setAttribute("d", "m11 8 4 4m0-4-4 4");
-          cross.setAttribute("fill", "none");
-          cross.setAttribute("stroke", "currentColor");
-          cross.setAttribute("stroke-width", "1.5");
-          cross.setAttribute("stroke-linecap", "round");
-          icon.append(outline, cross);
-          key.append(icon);
+          key.append(UI.Components.DeleteIcon());
         }
         utility.append(key);
       });

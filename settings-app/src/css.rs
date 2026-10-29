@@ -380,10 +380,6 @@ fn numeric_component(value: &str) -> Option<f64> {
     (number.is_finite() && number >= 0.0).then_some(number)
 }
 
-fn calendar_color_css(colors: Option<&Value>) -> Result<Option<String>, String> {
-    calendar_color_css_scoped(colors, None)
-}
-
 fn calendar_scope(target: &crate::kanban_snapshot::Target) -> Result<String, String> {
     target.validate()?;
     let quote = |s: &str| format!("\"{}\"", s.chars().map(|c| format!("\\{:x} ", c as u32)).collect::<String>());
@@ -601,7 +597,7 @@ mod tests {
         assert!(color_css("rgb(256, 0, 0)", "Calendar Color", false, false).is_err());
         assert!(color_css("#FFFFFF", "Accent Color", false, true).is_err());
         let invalid = json!({"event/unsafe": "Green"});
-        assert!(calendar_color_css(invalid.as_object().map(|_| &invalid)).is_err());
+        assert!(calendar_color_css_scoped(Some(&invalid), None).is_err());
     }
 
     #[test]

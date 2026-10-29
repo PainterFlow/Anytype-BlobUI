@@ -37,7 +37,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
           ] },
           { spaceId: 'space-b', key: 'task', name: 'Task', space: 'Home', properties: [] },
           { spaceId: 'space-a', key: 'note', name: 'Note', space: 'Work', properties: [] }
-        ], views: ['month', 'week'].map(viewId => ({ target: target(viewId), name: viewId === 'month' ? 'Month' : 'Week', space: 'Work', source: 'Tasks', kind: 'Calendar' })) };
+        ], views: (window.__manyViews ? Array.from({length:60}, (_,index) => 'view-' + index) : ['month', 'week']).map(viewId => ({ target: target(viewId), name: viewId === 'month' ? 'Month' : 'Week', space: 'Work', source: 'Tasks', kind: 'Calendar' })) };
       }
       if (command === 'save_settings') return { calendarStatus: 'refreshed' };
       return null;
@@ -46,7 +46,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   const modal = page.locator('#calendar-rule-dialog');
   const typeRow = () => page.locator('#calendar-type-list .formula-view-row').filter({ hasText: 'Task' }).filter({ hasText: 'Work' });
   const choose = async (name, property) => {
-    await modal.getByRole('button', { name, exact: false }).first().click();
+    await modal.getByRole('button', { name: name + ' color property', exact: true }).click();
     await modal.getByRole('option', { name: property, exact: true }).click();
   };
   const close = async () => { await modal.getByRole('button', { name: 'Close color rules' }).click(); await modal.waitFor({ state: 'hidden' }); };
@@ -57,9 +57,11 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     await page.locator('#open-calendar-colors').evaluate(button => button.click());
     await typeRow().click();
     await choose('Default', 'Status');
-    assert.equal(await modal.getByRole('button', { name: /Default Status/ }).count(), 1);
-    await modal.getByRole('button', { name: 'Default Status', exact: true }).click();
-    assert.deepEqual(await modal.getByRole('option').allTextContents().then(text => text.map(t => t.trim())), ['Use Calendar Color', 'No color', 'DoneCheckbox', 'StatusSingle-select']);
+    assert.equal(await modal.getByRole('button', { name: 'Default color property', exact: true }).count(), 1);
+    assert.equal(await modal.locator('.calendar-property-picker .formula-insert-property').count(), 1);
+    assert.equal(await modal.locator('.calendar-picker-chevron').count(), 0);
+    await modal.getByRole('button', { name: 'Default color property', exact: true }).click();
+    assert.deepEqual(await modal.getByRole('option').allTextContents().then(text => text.map(t => t.trim())), ['Use Calendar Color', 'No color', 'Done', 'Status']);
     await modal.getByRole('option', { name: 'Status', exact: true }).click();
     await modal.getByRole('button', { name: 'Add override', exact: true }).click();
     await modal.getByRole('button', { name: /Month/ }).click();
@@ -67,7 +69,12 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     await modal.getByRole('button', { name: 'Add override', exact: true }).click();
     assert.equal(await modal.getByRole('button', { name: /Month/ }).count(), 0, 'Existing calendar overrides cannot be duplicated.');
     await page.keyboard.press('Escape');
+    await modal.getByRole('button', { name: 'Add override', exact: true }).waitFor({ state: 'visible' });
     assert.equal(await modal.getByRole('button', { name: 'Add override', exact: true }).count(), 1);
+    assert.equal(await modal.getByText("Select uses Anytype's option color.", { exact: false }).count(), 0);
+    assert.equal(await modal.locator('.calendar-property-picker .kanban-select-menu').count(), 0, 'Menus overlay the dialog instead of creating an embedded scrolling panel.');
+    await modal.getByRole('button', { name: 'Default color property', exact: true }).focus();
+    assert.equal(await modal.getByRole('button', { name: 'Default color property', exact: true }).evaluate(el => getComputedStyle(el).outlineStyle), 'none');
     await modal.screenshot({ path: path.join(root, `rules-${refreshed}.png`) });
     await close();
     const read = () => page.evaluate(() => window.BlobUI.CalendarPage.read());
@@ -90,11 +97,34 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     assert.equal((await read()).types[0].overrides.length, 1);
     await page.evaluate(() => { window.__failDiscover = false; window.__hideProperty = true; });
     await page.locator('#calendar-reload').click(); await typeRow().click();
-    await modal.getByRole('button', { name: /Default Unavailable property/ }).click();
+    await modal.getByRole('button', { name: 'Default color property', exact: true }).click();
     assert.equal(await modal.getByRole('option', { name: 'Unavailable property', exact: true }).count(), 1);
     await modal.getByRole('option', { name: 'No color', exact: true }).click();
-    await modal.getByRole('button', { name: 'Remove override', exact: true }).click();
+    const remove = modal.getByRole('button', { name: 'Remove override', exact: true });
+    assert.equal(await remove.textContent(), '');
+    assert.equal(await remove.locator('svg').count(), 1);
+    assert.equal(await remove.evaluate(el => el.closest('.calendar-rule-name-group') !== null), true);
+    assert.equal(await remove.evaluate(el => { const values = getComputedStyle(el).color.match(/\d+/g).map(Number); return values[0] > values[1] && values[0] > values[2]; }), true);
+    await remove.click();
     assert.equal((await read()).types[0].overrides.length, 0);
+    await close();
+    await page.evaluate(() => { window.__manyViews = true; });
+    await page.locator('#calendar-reload').click(); await typeRow().click();
+    await modal.getByRole('button', { name: 'Add override', exact: true }).click();
+    await modal.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
+    const top = await modal.locator('.calendar-modal-header').evaluate(el => el.getBoundingClientRect().top);
+    const toolbarTop = await modal.locator('.calendar-sticky-toolbar').evaluate(el => el.getBoundingClientRect().top);
+    await modal.locator('.calendar-modal-content').evaluate(el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+    assert.equal(await modal.locator('.calendar-modal-header').evaluate(el => el.getBoundingClientRect().top), top);
+    assert.equal(await modal.locator('.calendar-sticky-toolbar').evaluate(el => el.getBoundingClientRect().top), toolbarTop);
+    assert.equal(await modal.evaluate(el => el.scrollHeight <= el.clientHeight), true);
+    await modal.screenshot({ path: path.join(root, 'calendar-chooser-' + refreshed + '.png') });
+    assert.equal(await page.evaluate(() => {
+      document.querySelector('#calendar-rule-dialog [aria-label="Close color rules"]').click();
+      return document.querySelector('#calendar-rule-backdrop').classList.contains('is-closing') && !document.querySelector('#calendar-rule-backdrop').hidden;
+    }), true, 'Close animates from the calendar chooser too.');
+    await modal.getByRole('button', { name: 'Default color property', exact: true }).waitFor({ state: 'visible' });
+    assert.equal(await modal.getByRole('button', { name: 'Back', exact: true }).count(), 0);
     await close();
     await page.locator('#calendar-search-toggle').click(); await page.locator('#calendar-search').fill('Note');
     assert.equal(await page.locator('#calendar-type-list .formula-view-row:visible').count(), 1);
@@ -121,6 +151,83 @@ test('calendar CSS scopes overrides and suppression to their exact view while ov
     assert.equal(await page.locator('#none .record').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(40, 40, 40)');
     assert.equal(await page.locator('#none .name').evaluate(el => getComputedStyle(el).color), 'rgb(200, 200, 200)');
     assert.equal(await page.locator('#item-event').evaluate(el => getComputedStyle(el).borderLeftColor), 'rgb(128, 0, 128)');
+  } finally { await browser.close(); }
+});
+
+test('single-select array values override legacy colors through the API snapshot, compiler, and calendar DOM', async () => {
+  const css = fs.readFileSync(path.join(root, 'array-priority.css'), 'utf8');
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const page = await browser.newPage({ colorScheme: 'dark' });
+  try {
+    await page.setContent(`<style>${css}
+      :root{--color-blue:#0011ff!important;--color-purple:#800080!important}
+      body{background:#171717}.record{background:#282828;border-left:3px solid pink}
+      </style><div class="viewContent viewCalendar"><div class="record" id="record-event">Array selection</div><div class="record" id="record-empty">Empty selection</div></div>
+      <div data-view-type="4" data-drop-type="record" data-id="event">Drag record</div>`);
+    for (const selector of ['#record-event', '[data-view-type="4"][data-id="event"]']) {
+      assert.equal(await page.locator(selector).evaluate(el => getComputedStyle(el).borderLeftColor), 'rgb(0, 17, 255)');
+    }
+    assert.equal(await page.locator('#record-empty').evaluate(el => getComputedStyle(el).borderLeftColor), 'rgb(128, 0, 128)');
+  } finally { await browser.close(); }
+});
+
+test('saved calendar rules do not become unavailable during initial loading, failed discovery, or reload', async () => {
+  fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
+  process.env.TEMP = process.env.TMP = path.join(root, 'temp');
+  const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 }, colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    window.__space = 'bafy' + 'x'.repeat(60) + '.replication-key';
+    window.__savedRules = { version: 1, types: [{ spaceId: window.__space, typeKey: 'task', default: { mode: 'property', key: 'status' }, overrides: [] }] };
+    window.__TAURI__ = { core: { invoke: async command => {
+      if (command === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: true, settings: {} };
+      if (command === 'get_calendar_api_availability') return 'available';
+      if (command === 'load_kanban_formulas') return { configuration: { version: 2, display: 'balanced', definitions: [] } };
+      if (command === 'discover_kanban_views') return { views: [] };
+      if (command === 'load_calendar_rules') return window.__savedRules;
+      if (command === 'discover_calendar_colors') return new Promise((resolve, reject) => { window.__pendingDiscover = { resolve, reject }; });
+      return null;
+    } } };
+  });
+  const resolveCatalog = async missing => page.evaluate(missing => {
+    const pending = window.__pendingDiscover; window.__pendingDiscover = null;
+    pending.resolve({ types: missing ? [] : [{ spaceId: window.__space, key: 'task', name: 'Task', space: 'Work', properties: [] }], views: [] });
+  }, missing);
+  const rejectCatalog = async () => page.evaluate(() => { const pending = window.__pendingDiscover; window.__pendingDiscover = null; pending.reject(Error('Fixture discovery unavailable')); });
+  const list = page.locator('#calendar-type-list');
+  try {
+    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await page.waitForFunction(() => window.appReady && !document.querySelector('#open-calendar-colors').disabled);
+    await page.locator('#open-calendar-colors').evaluate(button => button.click());
+    await page.waitForFunction(() => !!window.__pendingDiscover);
+    assert.match(await list.textContent(), /Loading object types/);
+    assert.doesNotMatch(await list.textContent(), /Unavailable type/);
+    await rejectCatalog();
+    await page.waitForFunction(() => document.querySelector('#calendar-rules-message').textContent.includes('Fixture discovery unavailable'));
+    assert.doesNotMatch(await list.textContent(), /Unavailable type/);
+    assert.equal(await list.getByRole('button', { name: 'Remove saved rules' }).count(), 0);
+    await page.locator('#calendar-reload').click(); await page.waitForFunction(() => !!window.__pendingDiscover);
+    await resolveCatalog(false); await list.getByRole('button', { name: 'Task Work' }).waitFor({ state: 'visible' });
+    await page.evaluate(() => { void window.BlobUI.CalendarPage.reload(); });
+    await page.waitForFunction(() => !!window.__pendingDiscover);
+    assert.match(await list.textContent(), /Task/);
+    assert.doesNotMatch(await list.textContent(), /Unavailable type/);
+    await rejectCatalog();
+    await page.waitForFunction(() => !document.querySelector('#calendar-reload').disabled);
+    assert.match(await list.textContent(), /Task/);
+    await page.locator('#calendar-reload').click(); await page.waitForFunction(() => !!window.__pendingDiscover);
+    await resolveCatalog(true);
+    const row = list.locator('.formula-view-row');
+    await row.filter({ hasText: 'Unavailable type' }).waitFor({ state: 'visible' });
+    const layout = await row.evaluate(el => {
+      const title = el.querySelector('.formula-view-name'), warning = el.querySelector('.formula-view-warning');
+      return { width: el.clientWidth, titleWidth: title.getBoundingClientRect().width, warningWidth: warning.getBoundingClientRect().width, overflowing: el.scrollWidth > el.clientWidth };
+    });
+    assert.ok(layout.titleWidth > layout.width * 0.35);
+    assert.ok(layout.warningWidth > layout.width * 0.8);
+    assert.equal(layout.overflowing, false);
+    assert.deepEqual(await page.evaluate(() => window.BlobUI.CalendarPage.read()), await page.evaluate(() => window.__savedRules));
+    await list.screenshot({ path: path.join(root, 'unavailable-row-dark.png') });
   } finally { await browser.close(); }
 });
 

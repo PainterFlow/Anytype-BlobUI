@@ -65,7 +65,7 @@ pub fn configuration(data: &Value) -> Result<Configuration, String> {
     Ok(config)
 }
 fn enc(value: &str) -> String { crate::api::encode_segment(value) }
-fn name(value: &Value) -> &str { value["name"].as_str().unwrap_or("Untitled") }
+fn name(value: &Value) -> &str { value["name"].as_str().filter(|name| !name.trim().is_empty()).unwrap_or("Untitled") }
 fn required(value: &Value, key: &str) -> Result<String, String> {
     value[key].as_str().filter(|s| !s.is_empty()).map(String::from)
         .ok_or_else(|| format!("Calendar discovery received a missing {key}."))
@@ -115,7 +115,7 @@ pub fn discover(client: &Client) -> Result<Value, String> {
         }
         for row in client.pages("POST", &format!("/v2/spaces/{}/search?ids=full", enc(&sid)), Some(&json!({})))? {
             let id = required(&row, "id")?;
-            match client.request("GET", &format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks", enc(&sid), enc(&id)), None) {
+            match client.calendar_document(&format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks", enc(&sid), enc(&id))) {
                 Ok(mut document) => {
                     if document["name"].as_str().is_none() { document["name"] = json!(name(&row)); }
                     views.extend(calendar_views(&sid, name(&space), &document));
@@ -143,6 +143,13 @@ fn resolve(rule: &Rule, object: &Value, eligible: &[Value], options: &BTreeMap<S
             if format == "checkbox" {
                 return value.as_bool().map(|value| Some(if value { "Green" } else { "Grey" }.into()));
             }
+            // v2 search serves single-select properties as arrays too. Only a
+            // single value is valid here; never choose arbitrarily from many.
+            let value = match value.as_array() {
+                Some(values) if values.len() == 1 => &values[0],
+                Some(_) => return None,
+                None => value,
+            };
             let selected = value.as_str().or_else(|| value["name"].as_str())?;
             let matching = options.get(key)?.iter().filter(|option| option["name"] == selected).collect::<Vec<_>>();
             if matching.len() != 1 { return None; }
@@ -193,9 +200,10 @@ pub fn snapshot(key: &str, ip: &str, port: u16, config: &Configuration) -> Resul
             }
         }
         if fields.is_empty() && matches!(entry.default, Rule::Inherit) && entry.overrides.is_empty() { continue; }
-        let objects = client.pages("POST", &format!("/v2/spaces/{space}/search?ids=full"), Some(&json!({"fields":fields.into_iter().collect::<Vec<_>>()})))?;
+        // Let v2 resolve the canonical type. Comparing the search row spelling
+        // locally can skip valid objects and leave their legacy color in place.
+        let objects = client.pages("POST", &format!("/v2/spaces/{space}/search?ids=full"), Some(&json!({"type": document.pointer("/type_settings/api_key").and_then(Value::as_str).filter(|key| !key.is_empty()).or_else(|| document["internal_key"].as_str().filter(|key| !key.is_empty())).unwrap_or(&entry.type_key), "fields":fields.into_iter().collect::<Vec<_>>()})))?;
         for object in objects {
-            if object["type"].as_str() != Some(&entry.type_key) { continue; }
             let id = required(&object, "id")?;
             let fallback = resolve(&entry.default, &object, &eligible, &options);
             let legacy = base.get(&id).cloned();
@@ -256,8 +264,19 @@ mod tests {
         assert_eq!(resolve(&checkbox, &json!({"properties":{"done":null}}), &eligible, &options), None);
         assert_eq!(resolve(&checkbox, &json!({"properties":{}}), &eligible, &options), None);
         assert_eq!(resolve(&select, &json!({"properties":{"status":"Active"}}), &eligible, &options), Some(Some("Green".into())));
+        for object in [
+            json!({"properties":{"status":["Active"]}}),
+            json!({"properties":{"status":{"select":["Active"]}}}),
+            json!({"properties":[{"key":"status","select":["Active"]}]}),
+        ] {
+            assert_eq!(resolve(&select, &object, &eligible, &options), Some(Some("Green".into())));
+        }
+        for value in [json!([]), json!(["Active","Other"]), json!([null]), json!(["Unknown"])] {
+            assert_eq!(resolve(&select, &json!({"properties":{"status":value}}), &eligible, &options), None);
+        }
         options.get_mut("status").unwrap().push(json!({"name":"Active","color":"red"}));
         assert_eq!(resolve(&select, &json!({"properties":{"status":"Active"}}), &eligible, &options), None);
+        assert_eq!(resolve(&select, &json!({"properties":{"status":["Active"]}}), &eligible, &options), None);
         assert_eq!(resolve(&Rule::None, &json!({}), &eligible, &options), Some(None));
         assert_eq!(resolve(&Rule::Inherit, &json!({}), &eligible, &options), None);
         assert_eq!(resolve(&Rule::Property{key:"missing".into()}, &json!({}), &eligible, &options), None);
@@ -320,8 +339,13 @@ mod tests {
                 else if path.starts_with("/v2/spaces/space/properties?") { page(properties) }
                 else if path.starts_with("/v2/spaces/space/objects/") { json!({"id":"event","name":"Event","blocks":[]}) }
                 else if path.starts_with("/v2/spaces/space/search?") {
-                    if path.contains("offset=0") { json!({"data":[{"id":"event","type":"task","properties":{"legacy":"Pink","done":false,"status":"Active"}}],"has_more":true}) }
-                    else { page(json!([{"id":"empty","type":"task","properties":{"legacy":"Purple","done":true,"status":null}},{"id":"missing","type":"task","properties":{"legacy":"Red"}}])) }
+                    let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+                    let payload: Value = serde_json::from_str(body).unwrap();
+                    if payload["fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field == "done")) {
+                        assert_eq!(payload["type"], "task", "Property rules must use a server-side type filter");
+                    }
+                    if path.contains("offset=0") { json!({"data":[{"id":"event","type":"type-task-full-id","properties":{"legacy":"Pink","done":false,"status":["Active"]}}],"has_more":true}) }
+                    else { page(json!([{"id":"empty","type":"task","properties":{"legacy":"Purple","done":true,"status":[]}},{"id":"missing","type":"task","properties":{"legacy":"Red"}}])) }
                 } else { panic!("Unexpected fixture request {path}"); };
                 let body = serde_json::to_vec(&response).unwrap();
                 let status = if failure.load(Ordering::Relaxed) { "503 Service Unavailable" } else { "200 OK" };
@@ -342,6 +366,17 @@ mod tests {
             assert!(colors["overrides"].as_array().unwrap().iter().any(|v| v["objectId"] == "empty" && v["color"] == "Green"));
             assert!(colors["overrides"].as_array().unwrap().iter().any(|v| v["objectId"] == "missing" && v["color"] == "Red"));
             assert!(colors["overrides"].as_array().unwrap().iter().any(|v| v["target"]["viewId"] == "none" && v["color"].is_null()));
+            config.types[0].default = Rule::Property { key: "status".into() };
+            let colors = snapshot("fixture-key", "127.0.0.1", port, &config)?;
+            assert_eq!(colors["base"]["event"], "Blue", "A single-select array must override the legacy Pink color");
+            assert_eq!(colors["base"]["empty"], "Purple", "An empty selection must use the legacy fallback");
+            let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+            let root = workspace.join(".test-run/calendar-property");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut data = json!({"calendarObjectColors": colors["base"], "calendarViewColors": []});
+            crate::apply_settings(&mut data, &root, &crate::SettingsDraft { accent_mode: "native".into(), accent_color: "Default".into(), accent_preset: String::new(), ..crate::SettingsDraft::default() });
+            let css = crate::css::compile(workspace, &root, &data)?;
+            std::fs::write(root.join("array-priority.css"), css).unwrap();
             config.types[0].default = Rule::None;
             let colors = snapshot("fixture-key", "127.0.0.1", port, &config)?;
             assert!(colors["base"].as_object().unwrap().is_empty());

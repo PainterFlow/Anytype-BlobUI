@@ -91,6 +91,13 @@ impl Client {
         })?;
         Ok(document)
     }
+    pub(crate) fn calendar_document(&self, path: &str) -> Result<Value, String> {
+        let document = api::request(&self.key, &self.ip, self.port, "GET", path, None)?;
+        warnings::check_calendar_document(&document, |message| {
+            if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+        })?;
+        Ok(document)
+    }
     fn document_blocks(&self, space: &str, object: &str) -> Result<Value, String> {
         self.board_document(
             &format!(

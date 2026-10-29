@@ -1,9 +1,9 @@
 (function (root) {
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
-  UI.PickControl = { attach({ root: container, options, value, onChange, closeOnSelect = true, focusOnOpen = true, restoreFocusOnSelect = true, emptyMessage = "" }) {
+  UI.PickControl = { attach({ root: container, menu: suppliedMenu, options, value, onChange, closeOnSelect = true, focusOnOpen = true, restoreFocusOnSelect = true, emptyMessage = "" }) {
     const trigger = container.querySelector('[aria-haspopup="listbox"]');
-    const menu = container.querySelector('[role="listbox"]');
+    const menu = suppliedMenu || container.querySelector('[role="listbox"]');
     const label = trigger.querySelector('[data-pick-value]') || trigger.querySelector('span:not(.sr-only)');
     const events = [], listen = (node, type, action) => { node.addEventListener(type, action); events.push(() => node.removeEventListener(type, action)); };
     let timer, frame;
@@ -82,8 +82,8 @@
       else if (event.key === 'Escape') { event.preventDefault(); close(true); }
       else if (event.key === 'Tab') close(true);
     });
-    listen(document, 'pointerdown', event => { if (!container.contains(event.target)) close(); });
-    listen(document, 'focusin', event => { if (!container.contains(event.target)) close(); });
+    listen(document, 'pointerdown', event => { if (!container.contains(event.target) && !menu.contains(event.target)) close(); });
+    listen(document, 'focusin', event => { if (!container.contains(event.target) && !menu.contains(event.target)) close(); });
     if (options) setOptions(options);
     setValue(value === undefined ? trigger.value : value);
     return { setValue, setOptions, open, close, destroy() { cancel(); events.forEach(remove => remove()); } };

@@ -61,6 +61,23 @@
     return result.update(props);
   }
 
+  function PropertyPickerShell({ label, onClick, showValue = false, accessibleLabel, menuLabel = label } = {}) {
+    const trigger = Button({ label, onClick, attributes: { class: "formula-insert-property", "aria-haspopup": "listbox", "aria-expanded": "false", "aria-label": accessibleLabel } }).element;
+    if (showValue) { const value = element("span", { "data-pick-value": "" }, [label]); trigger.replaceChildren(value); }
+    const menu = element("div", { class: "kanban-select-menu", role: "listbox", "aria-label": menuLabel, hidden: true });
+    const root = element("div", { class: "kanban-select formula-property-picker" }, [trigger, menu]);
+    return component(root, { trigger, menu });
+  }
+
+  function DeleteIcon() {
+    const ns = "http://www.w3.org/2000/svg", icon = doc.createElementNS(ns, "svg");
+    icon.setAttribute("viewBox", "0 0 20 20"); icon.setAttribute("aria-hidden", "true");
+    for (const [d, cap] of [["M8 4.5h9.5v11H8L3.5 10 8 4.5Z", "round"], ["m11 8 4 4m0-4-4 4", "round"]]) {
+      const path = doc.createElementNS(ns, "path"); path.setAttribute("d", d); path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor"); path.setAttribute("stroke-width", "1.5"); path.setAttribute("stroke-linecap", cap); path.setAttribute("stroke-linejoin", "round"); icon.append(path);
+    }
+    return icon;
+  }
+
   function IconButton(props = {}) {
     return Button({ ...props, attributes: { class: "neutral-icon-button", ...props.attributes } });
   }
@@ -230,5 +247,5 @@
   }
 
   UI.Components = { element, component, destroyTree, Button, IconButton, OnboardingChoice, ToggleSetting, TextField, Heading,
-    Container, Section, Group, SettingsRow, DialogShell, Tabs, Disclosure, Picker, Search, Modal, Visibility, NavigationItem };
+    PropertyPickerShell, DeleteIcon, Container, Section, Group, SettingsRow, DialogShell, Tabs, Disclosure, Picker, Search, Modal, Visibility, NavigationItem };
 })(window);
