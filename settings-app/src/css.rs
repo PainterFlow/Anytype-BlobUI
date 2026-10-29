@@ -178,7 +178,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
     css_text = declaration.replace_all(&css_text, "").into_owned();
     let api_disabled = data.pointer("/apiConnection/enabled").and_then(Value::as_bool) == Some(false);
     if !api_disabled && settings.get("calendarColorsEnabled").and_then(Value::as_bool).unwrap_or(true) {
-        if let Some(calendar_css) = calendar_color_css(data.get("calendarObjectColors"))? {
+        if let Some(calendar_css) = calendar_color_css_scoped(data.get("calendarObjectColors"), data.get("calendarViewColors"))? {
             if !css_text.trim_end().is_empty() {
                 css_text = format!("{}{newline}{newline}{calendar_css}{newline}", css_text.trim_end());
             }
@@ -381,6 +381,29 @@ fn numeric_component(value: &str) -> Option<f64> {
 }
 
 fn calendar_color_css(colors: Option<&Value>) -> Result<Option<String>, String> {
+    calendar_color_css_scoped(colors, None)
+}
+
+fn calendar_scope(target: &crate::kanban_snapshot::Target) -> Result<String, String> {
+    target.validate()?;
+    let quote = |s: &str| format!("\"{}\"", s.chars().map(|c| format!("\\{:x} ", c as u32)).collect::<String>());
+    Ok(format!("[id={}]:has([data-root-id={}] > [id={}].viewItem.active)",
+        quote(&format!("block-{}", target.block_id)), quote(&target.object_id),
+        quote(&format!("view-item-{}-{}", target.block_id, target.view_id))))
+}
+
+fn calendar_color_css_scoped(colors: Option<&Value>, overrides: Option<&Value>) -> Result<Option<String>, String> {
+    let mut scopes = Vec::new();
+    for item in overrides.and_then(Value::as_array).into_iter().flatten() {
+        let target = serde_json::from_value::<crate::kanban_snapshot::Target>(item["target"].clone())
+            .map_err(|_| "Invalid calendar view target.")?;
+        let id = item["objectId"].as_str().ok_or("Missing calendar object identity.")?;
+        if !Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$").unwrap().is_match(id) { return Err("Invalid calendar object identity.".into()); }
+        let color = if item["color"].is_null() { None } else {
+            Some(color_css(item["color"].as_str().ok_or("Invalid calendar color.")?, "Calendar Color", true, false)?)
+        };
+        scopes.push((calendar_scope(&target)?, id.to_string(), color));
+    }
     let Some(colors) = colors.and_then(Value::as_object) else { return Ok(None); };
     let newline = newline();
     let mut rules = Vec::new();
@@ -391,8 +414,10 @@ fn calendar_color_css(colors: Option<&Value>) -> Result<Option<String>, String> 
         let raw = raw_color.as_str().ok_or_else(|| format!("Calendar Color data for '{object_id}' is not text."))?;
         let color = color_css(raw, "Calendar Color", true, false)?;
         if color.is_empty() { continue; }
-        let selector = format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]:not(.record *),");
-        let calendar = format!(".viewContent.viewCalendar .record[id=\"record-{object_id}\"]");
+        let exclusions = scopes.iter().filter(|(_, id, _)| id == object_id)
+            .map(|(scope, _, _)| format!(":not({scope} *)")).collect::<String>();
+        let selector = format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]:not(.record *){exclusions},");
+        let calendar = format!(".viewContent.viewCalendar .record[id=\"record-{object_id}\"]{exclusions}");
         rules.push(selector);
         rules.push(format!("{calendar} {{"));
         rules.push(format!("    background-color: {color} !important;"));
@@ -401,8 +426,8 @@ fn calendar_color_css(colors: Option<&Value>) -> Result<Option<String>, String> 
         rules.push("    border-radius: 3px !important;".into());
         rules.push("    color: #FFFFFF !important;".into());
         rules.push("}".into());
-        rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"] .name,"));
-        rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"] .name span,"));
+        rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name,"));
+        rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name span,"));
         rules.push(format!("{calendar} .name,"));
         rules.push(format!("{calendar} .name span {{"));
         rules.push("    color: #FFFFFF !important;".into());
@@ -420,6 +445,12 @@ fn calendar_color_css(colors: Option<&Value>) -> Result<Option<String>, String> 
         rules.push("    color: #FFFFFF !important;".into());
         rules.push("}".into());
     }
+    for (scope, id, color) in scopes {
+        let Some(color) = color.filter(|color| !color.is_empty()) else { continue; };
+        let selector = format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"], {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"]:not(.record *)");
+        rules.push(format!("{selector} {{ background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important; border-left: 3px solid {color} !important; border-radius: 3px !important; color: #FFFFFF !important; }}"));
+        rules.push(format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name, {scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name span, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name span {{ color: #FFFFFF !important; }}"));
+    }
     if rules.is_empty() { Ok(None) } else { Ok(Some(format!("/* BlobUI Calendar Color overrides */{newline}{}", rules.join(newline)))) }
 }
 
@@ -433,6 +464,26 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn calendar_scoped_rules_export_isolated_dom_fixture() {
+        let target = |view: &str| json!({"spaceId":"space","objectId":"host","blockId":"calendar","viewId":view});
+        let colors = json!({"event":"Purple"});
+        let overrides = json!([
+            {"target":target("green"),"objectId":"event","color":"Green"},
+            {"target":target("none"),"objectId":"event","color":null}
+        ]);
+        let css = calendar_color_css_scoped(Some(&colors), Some(&overrides)).unwrap().unwrap();
+        assert!(css.contains(":not([id="));
+        assert!(css.contains("color-mix"));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run/calendar-property");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("scoped.css"), &css).unwrap();
+        let invalid = json!([{"target":target("green"),"objectId":"event\"]{}","color":"Green"}]);
+        assert!(calendar_color_css_scoped(Some(&colors), Some(&invalid)).is_err());
+        let invalid = json!([{"target":target("green"),"objectId":"event","color":"url(https://example.com)"}]);
+        assert!(calendar_color_css_scoped(Some(&colors), Some(&invalid)).is_err());
+    }
 
     fn fixture() -> PathBuf {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run");

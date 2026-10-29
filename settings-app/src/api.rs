@@ -83,7 +83,7 @@ pub fn calendar_colors(api_key: &str, ip: &str, port: u16) -> Result<Value, Stri
     Ok(Value::Object(colors))
 }
 
-fn canonical_calendar_color(value: &str) -> Result<String, String> {
+pub(crate) fn canonical_calendar_color(value: &str) -> Result<String, String> {
     let value = value.trim();
     let lower = value.to_ascii_lowercase();
     let palette_variables = [
@@ -117,7 +117,7 @@ fn valid_object_id(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
 }
 
-fn object_property<'a>(object: &'a Value, key: &str, display_name: &str) -> Option<&'a Value> {
+pub(crate) fn object_property<'a>(object: &'a Value, key: &str, display_name: &str) -> Option<&'a Value> {
     let properties = object.get("properties")?;
     if let Some(map) = properties.as_object() {
         if let Some(value) = map.get(key).or_else(|| map.get(display_name)) { return Some(value); }
@@ -232,7 +232,7 @@ fn http_error(status: u16) -> String {
         400 => "Anytype rejected the API v2 request (HTTP 400). Check the connection settings.".into(),
         401 => "Anytype rejected this key (HTTP 401). Paste a current API v2 key.".into(),
         403 => "Anytype denied API access (HTTP 403). Give this key read access to the spaces you want to use.".into(),
-        404 => "This port did not provide Anytype API v2. Check the port and your Anytype version.".into(),
+        404 => "This port did not provide the requested Anytype API v2 resource (HTTP 404). Check the port and your Anytype version.".into(),
         _ => format!("Anytype returned HTTP {status} while reading local API data."),
     }
 }

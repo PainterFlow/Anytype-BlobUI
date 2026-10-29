@@ -17,6 +17,7 @@ mod connection;
 mod folder_dialog;
 mod calculator;
 mod kanban;
+mod calendar;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
@@ -169,6 +170,7 @@ struct AppState {
 #[serde(rename_all = "camelCase")]
 struct SaveResult {
     calendar_status: String,
+    info: Vec<String>,
 }
 
 #[tauri::command]
@@ -785,35 +787,39 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         if connection.keep_existing_key {
             api_key = SecretString::new(read_saved_api_key_at(&install)?);
         }
+        let same_endpoint = data.pointer("/apiConnection/ip").and_then(Value::as_str).unwrap_or(DEFAULT_API_IP) == ip
+            && data.pointer("/apiConnection/port").and_then(Value::as_u64).unwrap_or(31009) == u64::from(port);
+        // Changing the connection invalidates cached colors even while coloring is off.
+        if !connection.keep_existing_key || !same_endpoint {
+            data["calendarObjectColors"] = json!({});
+            data["calendarViewColors"] = json!([]);
+            data["calendarColorInfo"] = json!([]);
+        }
         let connection_result = (|| {
             api::verify_connection(&api_key, ip, port)?;
             if !connection.keep_existing_key {
                 protected_key = Some(connection::encrypt_api_key(&api_key)?);
             }
             Ok::<_, String>(if current_settings.calendar_colors_enabled {
-                api::calendar_colors(&api_key, ip, port).map(Some)
+                calendar::snapshot(&api_key, ip, port, &calendar::configuration(&data)?).map(Some)
             } else { Ok(None) })
         })();
         let colors_result = connection_result?;
         match colors_result {
             Ok(Some(colors)) => {
-                data["calendarObjectColors"] = colors;
+                data["calendarObjectColors"] = colors["base"].clone();
+                data["calendarViewColors"] = colors["overrides"].clone();
+                data["calendarColorInfo"] = colors["info"].clone();
                 calendar_status = "refreshed";
             }
             Ok(None) => { calendar_status = "off"; }
             Err(_) => {
-                // A connection change must not carry calendar data forward
-                // from a different API identity or an earlier permission set.
-                let same_endpoint = data.pointer("/apiConnection/ip").and_then(Value::as_str).unwrap_or(DEFAULT_API_IP) == ip
-                    && data.pointer("/apiConnection/port").and_then(Value::as_u64).unwrap_or(31009) == u64::from(port);
-                if !connection.keep_existing_key || !same_endpoint {
-                    data["calendarObjectColors"] = json!({});
-                }
                 calendar_status = "cached";
             }
         }
     } else {
         data["calendarObjectColors"] = json!({});
+        data["calendarViewColors"] = json!([]);
         calendar_status = "disabled";
     }
 
@@ -837,7 +843,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         &serialized,
         credential,
     )?;
-    Ok(SaveResult { calendar_status: calendar_status.into() })
+    Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
 }
 
 fn normalize_connection(mut connection: ConnectionDraft) -> Result<ConnectionDraft, String> {
@@ -998,6 +1004,10 @@ fn load_app_state() -> Result<AppState, String> {
 }
 
 fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String> {
+    save_settings_with_calendar_rules(settings, None)
+}
+
+fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<calendar::Configuration>) -> Result<SaveResult, String> {
     let settings = validate_settings(settings)?;
     let install = resolve_install_directory(&app_data_directory())?;
     let (_, data_path, css_path, credential_path) = save_paths(&install)?;
@@ -1008,6 +1018,7 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
     }
     apply_settings(&mut data, &install, &settings);
 
+    if let Some(rules) = &rules { data["calendarColorRules"] = json!(rules); }
     let mut calendar_status = "cached";
     let api_connection = data.get("apiConnection");
     let api_enabled = api_connection
@@ -1018,6 +1029,7 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
         .unwrap_or(true);
     if !api_enabled {
         data["calendarObjectColors"] = json!({});
+        data["calendarViewColors"] = json!([]);
         calendar_status = "disabled";
     } else if !settings.calendar_colors_enabled {
         calendar_status = "off";
@@ -1034,13 +1046,16 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
             .filter(|port| *port > 0)
             .unwrap_or(31009);
         if let Ok(api_key) = read_saved_api_key_at(&install).map(SecretString::new) {
-            if let Ok(colors) = api::calendar_colors(&api_key, &ip, port) {
-                data["calendarObjectColors"] = colors;
+            if let Ok(colors) = calendar::snapshot(&api_key, &ip, port, &calendar::configuration(&data)?) {
+                data["calendarObjectColors"] = colors["base"].clone();
+                data["calendarViewColors"] = colors["overrides"].clone();
+                data["calendarColorInfo"] = colors["info"].clone();
                 calendar_status = "refreshed";
             }
         }
     }
 
+    if rules.is_some() && calendar_status == "cached" { return Err("Calendar colors could not be refreshed. Your rules and previous snapshot are unchanged.".into()); }
     let css = css::compile(&runtime, &install, &data)?;
     let serialized = serialize_data(&data)?;
     storage::commit_settings(
@@ -1051,7 +1066,7 @@ fn save_settings_blocking(settings: SettingsDraft) -> Result<SaveResult, String>
         &serialized,
         storage::CredentialChange::Keep,
     )?;
-    Ok(SaveResult { calendar_status: calendar_status.into() })
+    Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
 }
 
 #[cfg(test)]
@@ -1718,6 +1733,9 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            calendar::load_calendar_rules,
+            calendar::discover_calendar_colors,
+            calendar::save_calendar_rules,
             kanban::load_kanban_formulas,
             kanban::discover_kanban_views,
             kanban::evaluate_kanban_formula,

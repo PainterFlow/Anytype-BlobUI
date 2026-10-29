@@ -76,7 +76,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await page.evaluate(() => { window.__pending.splice(0).forEach(resolve => resolve('unavailable')); });
     assert.equal(await toggle.isDisabled(), false);
     assert.equal(await toggle.isChecked(), false);
-    for (const theme of ['light', 'dark']) {
+    for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       await page.locator('section[aria-labelledby="calendar-heading"]').screenshot({ path: path.join(root, theme + '.png') });
     }

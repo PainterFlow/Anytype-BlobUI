@@ -26,6 +26,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
         if (command === 'get_calendar_api_availability') return 'available';
         if (command === 'get_keyboard_shortcuts') return [{ action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false }];
         if (command === 'load_kanban_formulas') return { configuration: { version: 2, display: 'balanced', definitions: [] }, calculatedAt: null };
+        if (command === 'load_calendar_rules') return { version: 1, types: window.imported ? [{ spaceId: 'space', typeKey: 'task', default: { mode: 'none' }, overrides: [] }] : [] };
         if (command === 'discover_kanban_views') return { views: [] };
         if (command === 'get_release_notes' || command === 'get_latest_release_notes') return null;
         if (command === 'get_anytype_version') return 'Anytype 1.2.3';
@@ -105,6 +106,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#blob-import-confirm').click();
     await page.waitForFunction(() => document.getElementById('blob-backup-status').textContent.includes('Backup imported:'));
     assert.equal(await page.locator('#font-family').inputValue(), 'Georgia', 'import reloads the restored settings');
+    assert.equal(await page.evaluate(() => window.BlobUI.CalendarPage.read().types[0].default.mode), 'none', 'import reloads the restored calendar rules');
     assert.equal(await page.locator('#save-button').isHidden(), true, 'restored settings become the clean baseline');
 
     await page.evaluate(() => { window.failNextReload = true; });

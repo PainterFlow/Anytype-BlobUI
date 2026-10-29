@@ -7,21 +7,19 @@
   const el = id => doc.getElementById(id);
   const contents = el("formula-contents"), message = el("formula-storage-message"), preference = el("formula-display");
   const fields = el("formula-fields"), search = el("formula-search"), reload = el("formula-reload");
-  const filterButton = el("formula-filter"), filterRoot = el("formula-filter-control"), filterMenu = el("formula-filter-options");
-  const searchRoot = el("formula-search-control"), searchToggle = el("formula-search-toggle");
+  const filterButton = el("formula-filter");
   const displayPickerRoot = el("formula-display-select");
   const modalBackdrop = el("formula-calculator-backdrop"), modalDialog = el("formula-calculator-dialog");
   const modalClose = el("formula-calculator-close"), modalContent = el("formula-calculator-content");
   function setMessage(text, success = false) {
     if (!message) return;
-    message.textContent = text;
-    message.dataset.status = success ? "success" : "error";
+    UI.CatalogBrowser.status(message, text, success);
   }
   const operations = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum", median: "Median" };
   let state = defaults(), persistedState = defaults(), catalog = [], api, invoke, calculatorModal;
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
-  let selectedSpace = "", searchControl, filterControl, displayControl, reloadController, unregisterReload;
+  let displayControl, reloadController, unregisterReload, browser;
   let discoveryRequested = false;
   let discoveryGeneration = 0;
   const localDrafts = new Map();
@@ -688,53 +686,12 @@
     }
     updateSaveActions(record);
   }
-  function filter() {
-    const query = (search ? search.value : "").trim().toLocaleLowerCase();
-    records.forEach(record => {
-      const matchesSpace = !selectedSpace || record.view.target.spaceId === selectedSpace;
-      const searchable = (record.view.name + " " + record.view.space + " " + record.view.source + " " + record.view.kind).toLocaleLowerCase();
-      record.item.hidden = !matchesSpace || !searchable.includes(query);
-    });
-    const empty = el("formula-no-matches");
-    if (empty) empty.hidden = !records.length || records.some(record => !record.item.hidden);
-    if (filterButton) {
-      const filtered = !!selectedSpace;
-      filterButton.classList.toggle("is-filtered", filtered);
-      filterButton.dataset.filtered = String(filtered);
-      filterButton.setAttribute("aria-pressed", String(filtered));
-      const chosen = records.find(record => record.view.target.spaceId === selectedSpace);
-      filterButton.title = filtered ? "Filtered to " + (chosen ? chosen.view.space : selectedSpace) : "Filter by space";
-    }
-  }
-  function updateFilterOptions() {
-    if (!filterControl) return;
-    const spaces = new Map();
-    records.forEach(record => {
-      const id = record.view.target.spaceId;
-      if (id) spaces.set(id, record.view.space || "Unnamed space");
-    });
-    const nameCounts = new Map();
-    spaces.forEach(name => nameCounts.set(name, (nameCounts.get(name) || 0) + 1));
-    const options = [{ value: "", label: "All spaces" }, ...[...spaces.entries()]
-      .sort((left, right) => left[1].localeCompare(right[1]) || left[0].localeCompare(right[0]))
-      .map(([id, name]) => ({ value: id, label: nameCounts.get(name) > 1 ? name + " · " + id.slice(0, 6) : name }))];
-    if (selectedSpace && !spaces.has(selectedSpace)) selectedSpace = "";
-    filterControl.setOptions(options);
-    filterControl.setValue(selectedSpace);
-  }
+  function filter() { browser?.filter(); }
+  function updateFilterOptions() { browser?.refresh(); }
   function attachSharedControls() {
-    if (UI.ExpandableSearch && searchRoot && searchToggle && search) {
-      searchControl = UI.Components.Search({ container: searchRoot, button: searchToggle, input: search });
-    }
-    if (UI.PickControl && filterRoot && filterButton && filterMenu) {
-      filterControl = UI.Components.Picker({
-        root: filterRoot,
-        options: [{ value: "", label: "All spaces" }],
-        value: selectedSpace,
-        closeOnSelect: false,
-        onChange(value) { selectedSpace = value || ""; filter(); },
-      });
-    }
+    let empty = el("formula-no-matches");
+    if (!empty) { empty = make("p", "input-hint"); empty.id = "formula-no-matches"; contents.after(empty); }
+    browser = UI.CatalogBrowser.attach({ prefix: "formula", toolbar: el("formulas-page").querySelector(".formula-toolbar"), records: () => records, empty });
     if (UI.PickControl && displayPickerRoot) displayControl = UI.Components.Picker({ root: displayPickerRoot });
   }
   function render() {
@@ -763,22 +720,17 @@
     }
     views.sort((left, right) => left.name.localeCompare(right.name) || left.space.localeCompare(right.space) || left.source.localeCompare(right.source));
     views.forEach(view => {
-      const item = make("section", "formula-view");
       let record;
-      const row = button("", () => openCalculator(record), "formula-view-row");
+      const { item, row } = UI.CatalogBrowser.row({ name: view.name,
+        metadata: view.space + " · " + view.source + " · " + view.kind,
+        warning: view.unsupported, onSelect: () => openCalculator(record) });
       row.setAttribute("aria-pressed", "false");
-      row.append(make("span", "formula-view-name", view.name));
-      row.append(make("span", "formula-source", view.space + " · " + view.source + " · " + view.kind));
-
-      if (view.unsupported) row.append(make("span", "formula-view-warning", view.unsupported));
-      item.append(row);
       record = { view, item, row, key: identity(view.target) };
       records.push(record);
       contents.append(item);
     });
     if (!views.length) {
-      const text = discovering || !discovered ? "Loading Kanban views…" : "No accessible Kanban views found.";
-      contents.append(make("p", "input-hint formula-empty-message", text));
+      UI.CatalogBrowser.empty(contents, { loading: discovering || !discovered, loadingLabel: "Loading Kanban views…", emptyLabel: "No accessible Kanban views found." });
     }
     let empty = el("formula-no-matches");
     if (!empty) {
@@ -876,7 +828,6 @@
         syncDisplayPicker();
         api.onChange();
       });
-      if (search) search.addEventListener("input", filter);
       if (UI.AppReload) {
         reloadController = UI.AppReload;
         reloadController.bindButton(reload);
@@ -905,7 +856,7 @@
       discoveryGeneration++;
       discovering = false;
       catalog = [];
-      selectedSpace = "";
+      browser?.reset();
       draftGeneration++;
       if (calculatorModal?.isOpen()) calculatorModal.close({ restoreFocus: false });
       localDrafts.clear();
@@ -964,8 +915,7 @@
       return reloadController ? reloadController.run() : !discovering && !loading && !locked ? discover() : undefined;
     },
     destroy() {
-      if (searchControl) searchControl.destroy();
-      if (filterControl) filterControl.destroy();
+      browser?.destroy();
       if (displayControl) displayControl.destroy();
       unregisterReload?.();
       if (reloadController) reloadController.bindButton(null);
