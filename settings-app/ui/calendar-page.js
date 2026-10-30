@@ -179,8 +179,8 @@
       } catch (error) { loadFailed = true; message.textContent = "Could not load calendar rules. Reload Settings to retry. " + String(error.message || error); }
       loading = false; render(); return !loadFailed;
     },
-    async save(bridge, configuration) {
-      const result = await bridge("save_calendar_rules", { configuration });
+    async save(bridge, configuration, settings) {
+      const result = await bridge("save_calendar_rules", { configuration, settings });
       UI.CatalogBrowser.status(message, "Calendar rules saved. Press Ctrl+R in Anytype to apply.", true);
       (result?.info || []).forEach(text => api.onInfo?.(text)); return result;
     },

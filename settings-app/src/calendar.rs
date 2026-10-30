@@ -93,6 +93,27 @@ fn calendar_views(space: &str, space_name: &str, document: &Value) -> Vec<Value>
     }
     views
 }
+// Bound API work while preserving input order and per-document failures.
+fn parallel_metadata<'a, T: Send>(rows: &'a [Value], read: impl Fn(&Value) -> T + Sync) -> Vec<(&'a Value, T)> {
+    use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex};
+    let next = AtomicUsize::new(0);
+    let results = Mutex::new(Vec::with_capacity(rows.len()));
+    std::thread::scope(|scope| {
+        for _ in 0..rows.len().min(4) {
+            let read = &read; let next = &next; let results = &results;
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(row) = rows.get(index) else { break; };
+                let result = read(row);
+                results.lock().unwrap().push((index, result));
+            });
+        }
+    });
+    let mut results = results.into_inner().unwrap();
+    results.sort_by_key(|(index, _)| *index);
+    results.into_iter().map(|(index, result)| (&rows[index], result)).collect()
+}
+
 pub fn discover(client: &Client) -> Result<Value, String> {
     let mut types = Vec::new();
     let mut views = Vec::new();
@@ -100,27 +121,35 @@ pub fn discover(client: &Client) -> Result<Value, String> {
     for space in client.pages("GET", "/v2/spaces?ids=full", None)? {
         let sid = required(&space, "id")?;
         let properties = client.pages("GET", &format!("/v2/spaces/{}/properties", enc(&sid)), None)?;
-        for row in client.pages("GET", &format!("/v2/spaces/{}/types?ids=full", enc(&sid)), None)? {
-            let key = required(&row, "key")?;
+        let rows = client.pages("GET", &format!("/v2/spaces/{}/types?ids=full", enc(&sid)), None)?;
+        for result in parallel_metadata(&rows, |row| -> Result<_, String> {
+            let key = required(row, "key")?;
             let document = client.request("GET", &format!("/v2/spaces/{}/types/{}?ids=full", enc(&sid), enc(&key)), None);
+            Ok((key, document))
+        }) {
+            let (row, result) = result;
+            let (key, document) = result?;
             let eligible = match document {
                 Ok(mut document) => {
-                    if document["name"].as_str().is_none() { document["name"] = json!(name(&row)); }
+                    if document["name"].as_str().is_none() { document["name"] = json!(name(row)); }
                     views.extend(calendar_views(&sid, name(&space), &document));
                     type_properties(&document, &properties)
                 }
-                Err(error) => { info.push(format!("Could not read type '{}'. {error}", name(&row))); Vec::new() }
+                Err(error) => { info.push(format!("Could not read type '{}'. {error}", name(row))); Vec::new() }
             };
-            types.push(json!({"spaceId":sid,"space":name(&space),"key":key,"name":name(&row),"properties":eligible}));
+            types.push(json!({"spaceId":sid,"space":name(&space),"key":key,"name":name(row),"properties":eligible}));
         }
-        for row in client.pages("POST", &format!("/v2/spaces/{}/search?ids=full", enc(&sid)), Some(&json!({})))? {
-            let id = required(&row, "id")?;
-            match client.calendar_document(&format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks", enc(&sid), enc(&id))) {
+        let rows = client.pages("POST", &format!("/v2/spaces/{}/search?ids=full", enc(&sid)), Some(&json!({})))?;
+        for (row, result) in parallel_metadata(&rows, |row| -> Result<_, String> {
+            let id = required(row, "id")?;
+            Ok(client.calendar_document(&format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks", enc(&sid), enc(&id))))
+        }) {
+            match result? {
                 Ok(mut document) => {
-                    if document["name"].as_str().is_none() { document["name"] = json!(name(&row)); }
+                    if document["name"].as_str().is_none() { document["name"] = json!(name(row)); }
                     views.extend(calendar_views(&sid, name(&space), &document));
                 }
-                Err(error) => info.push(format!("Could not inspect calendar views in '{}'. {error}", name(&row))),
+                Err(error) => info.push(format!("Could not inspect calendar views in '{}'. {error}", name(row))),
             }
         }
     }
@@ -237,20 +266,38 @@ pub async fn discover_calendar_colors() -> Result<Value, String> {
         .map_err(|_| "Calendar discovery stopped. Reload to retry.".to_string())?
 }
 #[tauri::command]
-pub async fn save_calendar_rules(configuration: Configuration) -> Result<crate::SaveResult, String> {
+pub async fn save_calendar_rules(configuration: Configuration, settings: Option<crate::SettingsDraft>) -> Result<crate::SaveResult, String> {
     configuration.validate()?;
     let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
         let data = crate::read_json_file(&install.join("blob/data.json"))?;
-        crate::save_settings_with_calendar_rules(crate::settings_from_data(&data), Some(configuration))
+        crate::save_settings_with_calendar_rules(settings.unwrap_or_else(|| crate::settings_from_data(&data)), Some(configuration))
     }).await.map_err(|_| "Calendar save stopped. Your pending edits are kept.".to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn metadata_reads_overlap_and_preserve_order() {
+        use std::sync::{atomic::{AtomicUsize, Ordering}, Barrier};
+        let rows = (0..12).map(|n| json!(n)).collect::<Vec<_>>();
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let barrier = Barrier::new(4);
+        let results = parallel_metadata(&rows, |row| {
+            let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(count, Ordering::SeqCst);
+            barrier.wait();
+            active.fetch_sub(1, Ordering::SeqCst);
+            row.as_u64().unwrap()
+        });
+        assert_eq!(peak.load(Ordering::SeqCst), 4);
+        assert_eq!(results.into_iter().map(|(_, value)| value).collect::<Vec<_>>(), (0..12).collect::<Vec<_>>());
+    }
+
     #[test]
     fn calendar_rules_resolve_only_typed_properties_and_unambiguous_colors() {
         let properties = vec![json!({"key":"done","format":"checkbox"}), json!({"key":"status","format":"select"}), json!({"key":"tags","format":"multi_select"})];

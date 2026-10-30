@@ -1261,6 +1261,7 @@
     const request = ++calendarApiRequest;
     calendarApiAvailability = "checking";
     const help = el("calendar-colors-help");
+    help.hidden = false;
     help.textContent = "Checking the Anytype API connection...";
     updateSaveButton();
     try {
@@ -1272,10 +1273,11 @@
       calendarApiAvailability = "unavailable";
     }
     help.textContent = calendarApiAvailability === "available"
-      ? "Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes."
+      ? ""
       : calendarApiAvailability === "missing"
         ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
         : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
+    help.hidden = calendarApiAvailability === "available";
     updateSaveButton();
   }
 
@@ -1728,11 +1730,16 @@
         formulasSaved = true;
       }
       if (calendarRulesChanged) {
-        result = await window.BlobUI.CalendarPage.save(invoke, submittedCalendarRules);
+        result = await window.BlobUI.CalendarPage.save(invoke, submittedCalendarRules, submittedSettings);
         editSession.commit({ calendarRules: submittedCalendarRules });
         calendarRulesSaved = true;
+        if (settingsChanged) {
+          generalSettingsSaved = true;
+          initialDraft = submittedSettings;
+          editSession.commit({ settings: submittedSettings });
+        }
       }
-      if (settingsChanged || options.forceRebuild) {
+      if (!calendarRulesChanged && (settingsChanged || options.forceRebuild)) {
         result = await invoke("save_settings", { settings: submittedSettings });
         generalSettingsSaved = settingsChanged;
         if (settingsChanged) {

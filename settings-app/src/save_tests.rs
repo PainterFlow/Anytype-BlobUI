@@ -36,9 +36,22 @@ fn calendar_rule_save_is_transactional_and_preserves_cache_on_outage() {
     assert_eq!(serde_json::to_value(calendar::configuration(&saved).unwrap()).unwrap(), serde_json::to_value(config).unwrap());
     assert_eq!(saved["calendarObjectColors"]["event"], "Purple");
     assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event"));
-    let cached = save_settings_blocking(draft).unwrap();
+    let cached = save_settings_blocking(draft.clone()).unwrap();
     assert_eq!(cached.calendar_status, "cached");
     assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"]["event"], "Purple");
+    // A rules-only save must refresh the snapshot and replace CSS immediately.
+    fs::create_dir_all(install.join("blob/credentials")).unwrap();
+    fs::write(install.join("blob/credentials/anytype-api-key.dpapi"), connection::encrypt_api_key("fixture-key").unwrap()).unwrap();
+    let (port, server) = mock_api_server("127.0.0.1", "fixture-key", successful_api_responses().into_iter().skip(1).collect());
+    let mut data = read_json_file(&data_path).unwrap();
+    data["apiConnection"] = json!({"enabled":true,"port":port});
+    fs::write(&data_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let result = save_settings_with_calendar_rules(draft, Some(calendar::Configuration::default())).unwrap();
+    assert_eq!(result.calendar_status, "refreshed");
+    assert_eq!(server.join().unwrap().len(), 3);
+    assert!(fs::read_to_string(&css_path).unwrap().contains("record-event-1"));
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event\""));
+    assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"]["event-1"], "Green");
 }
 
 struct EnvironmentGuard(Vec<(&'static str, Option<OsString>)>);

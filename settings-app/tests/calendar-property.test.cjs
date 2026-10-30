@@ -15,7 +15,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   const page = await browser.newPage({ viewport: { width: 1050, height: 1000 }, colorScheme: 'dark' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(({ refreshed }) => {
-    window.__calls = []; window.__saves = []; window.__savedCalendar = { version: 1, types: [] };
+    window.__calls = []; window.__saves = []; window.__calendarSettings = []; window.__savedCalendar = { version: 1, types: [] };
     const target = viewId => ({ spaceId: 'space-a', objectId: 'host', blockId: 'calendar', viewId });
     window.__TAURI__ = { core: { invoke: async (command, args) => {
       window.__calls.push(command);
@@ -26,6 +26,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
       if (command === 'load_calendar_rules') return window.__savedCalendar;
       if (command === 'save_calendar_rules') {
         if (window.__failSave) throw Error('API unavailable');
+        window.__calendarSettings.push(args.settings);
         window.__savedCalendar = JSON.parse(JSON.stringify(args.configuration)); window.__saves.push(args.configuration);
         return { calendarStatus: 'refreshed', info: [] };
       }
@@ -54,6 +55,17 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
     await page.waitForFunction(() => window.appReady && window.__calls.includes('load_calendar_rules'));
     assert.equal(await page.locator('#open-calendar-colors').count(), 1);
+    assert.deepEqual(await page.evaluate(() => {
+      const metrics = id => {
+        const style = getComputedStyle(document.getElementById(id));
+        return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
+      };
+      return metrics('open-formulas');
+    }), await page.evaluate(() => {
+      const style = getComputedStyle(document.getElementById('open-calendar-colors'));
+      return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
+    }));
+    assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
     await page.locator('#open-calendar-colors').evaluate(button => button.click());
     await typeRow().click();
     await choose('Default', 'Status');
@@ -80,8 +92,15 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     const read = () => page.evaluate(() => window.BlobUI.CalendarPage.read());
     assert.equal((await read()).types[0].default.key, 'status');
     assert.equal((await read()).types[0].overrides[0].rule.mode, 'none');
+    await page.evaluate(() => {
+      const toggle = document.getElementById('calendar-colors-enabled');
+      toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
+    assert.equal(await page.evaluate(() => window.__calendarSettings[0].calendarColorsEnabled), false);
+    assert.equal(await page.evaluate(() => window.__calls.filter(call => call === 'save_settings').length), 0);
+    assert.equal(await page.locator('#save-button').isHidden(), true);
     await typeRow().click(); await choose('Default', 'Done'); await close();
     await page.locator('#discard-button').click();
     await page.locator('#discard-confirmation-undo').click();

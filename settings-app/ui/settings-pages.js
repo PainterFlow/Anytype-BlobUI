@@ -165,7 +165,7 @@
     "open-formulas": content => C.Button({
       attributes: {
         id: "open-formulas",
-        class: "formula-button button-label-centered"
+        class: "formula-button view-open-button button-label-centered"
       },
       content
     }),

@@ -52,7 +52,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     await page.locator('#save-button').click();
     await page.waitForFunction(() => document.getElementById('status-message').textContent.includes('fixture save failed'));
     await page.evaluate(() => { window.failSave = false; window.BlobUI.discardChanges(); });
-    assert.equal(await page.locator('input[type="search"]:not(#formula-search), .v21-search').count(), 0);
+    assert.equal(await page.locator('input[type="search"]:not(#formula-search):not(#calendar-search), .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
     assert.equal(await page.locator('.v21-section-link svg').count(), 8);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);
@@ -75,7 +75,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     assert.equal(await page.locator('#preference-tab-0').getAttribute('aria-selected'), 'true');
     await page.locator('#preference-tab-3').click(); await page.locator('#font-family').fill('Arial');
     await page.locator('#preferences-section-links').getByRole('button', { name: 'Calendar', exact: true }).click();
-    assert.match(await page.locator('#calendar-colors-help').innerText(), /Alt\+R.*Ctrl\+R/);
+    assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
     await page.locator('#accessibility-nav').click();
     assert.equal(await page.locator('#accessibility-nav').getAttribute('aria-expanded'), null);
     assert.equal(await page.locator('#accessibility-section-links').count(), 0);
