@@ -12,6 +12,48 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
 
+#[test]
+fn calendar_rule_save_is_transactional_and_preserves_cache_on_outage() {
+    let _lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixture = source.join(".test-run").join(format!("calendar-save-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let install = fixture.join("Anytype"); let runtime = fixture.join("runtime");
+    fs::create_dir_all(install.join("blob")).unwrap();
+    copy_tree(&source.join("Dev"), &runtime.join("Dev")); copy_tree(&source.join("assets"), &runtime.join("assets"));
+    let data_path = install.join("blob/data.json"); let css_path = install.join("custom.css");
+    fs::write(&data_path, serde_json::to_vec(&json!({"calendarObjectColors":{"event":"Purple"}})).unwrap()).unwrap();
+    fs::write(&css_path, b"previous css").unwrap();
+    let _environment = EnvironmentGuard::set(&[("BLOBUI_INSTALL_DIRECTORY", &install), ("BLOBUI_SOURCE_DIRECTORY", &runtime)]);
+    let config: calendar::Configuration = serde_json::from_value(json!({"version":1,"types":[{"spaceId":"space","typeKey":"task","default":{"mode":"none"},"overrides":[]}]})).unwrap();
+    let draft = SettingsDraft { accent_color: "#27A879".into(), accent_mode: "custom".into(), accent_preset: String::new(), ..SettingsDraft::default() };
+    let before = fs::read(&data_path).unwrap();
+    let error = save_settings_with_calendar_rules(draft.clone(), Some(config.clone())).unwrap_err();
+    assert!(error.contains("could not be refreshed"));
+    assert_eq!(fs::read(&data_path).unwrap(), before); assert_eq!(fs::read(&css_path).unwrap(), b"previous css");
+    let settings = SettingsDraft { calendar_colors_enabled:false, ..draft.clone() };
+    assert_eq!(save_settings_with_calendar_rules(settings, Some(config.clone())).unwrap().calendar_status, "off");
+    let saved = read_json_file(&data_path).unwrap();
+    assert_eq!(serde_json::to_value(calendar::configuration(&saved).unwrap()).unwrap(), serde_json::to_value(config).unwrap());
+    assert_eq!(saved["calendarObjectColors"]["event"], "Purple");
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event"));
+    let cached = save_settings_blocking(draft.clone()).unwrap();
+    assert_eq!(cached.calendar_status, "cached");
+    assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"]["event"], "Purple");
+    // A rules-only save must refresh the snapshot and replace CSS immediately.
+    fs::create_dir_all(install.join("blob/credentials")).unwrap();
+    fs::write(install.join("blob/credentials/anytype-api-key.dpapi"), connection::encrypt_api_key("fixture-key").unwrap()).unwrap();
+    let (port, server) = mock_api_server("127.0.0.1", "fixture-key", successful_api_responses().into_iter().skip(1).collect());
+    let mut data = read_json_file(&data_path).unwrap();
+    data["apiConnection"] = json!({"enabled":true,"port":port});
+    fs::write(&data_path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let result = save_settings_with_calendar_rules(draft, Some(calendar::Configuration::default())).unwrap();
+    assert_eq!(result.calendar_status, "refreshed");
+    assert_eq!(server.join().unwrap().len(), 3);
+    assert!(fs::read_to_string(&css_path).unwrap().contains("record-event-1"));
+    assert!(!fs::read_to_string(&css_path).unwrap().contains("record-event\""));
+    assert_eq!(read_json_file(&data_path).unwrap()["calendarObjectColors"]["event-1"], "Green");
+}
+
 struct EnvironmentGuard(Vec<(&'static str, Option<OsString>)>);
 
 impl EnvironmentGuard {

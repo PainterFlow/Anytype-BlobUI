@@ -165,7 +165,7 @@
     "open-formulas": content => C.Button({
       attributes: {
         id: "open-formulas",
-        class: "formula-button button-label-centered"
+        class: "formula-button view-open-button button-label-centered"
       },
       content
     }),
@@ -178,7 +178,7 @@
     "calendar-heading": () => C.Heading({
       id: "calendar-heading",
       title: "Calendar",
-      description: "Use each object's Calendar Color in calendar views."
+      description: "Color calendar objects by a property or their Calendar Color value."
     }),
     "calendar-heading-list": content => C.Group({
       content

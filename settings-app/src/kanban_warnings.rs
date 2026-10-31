@@ -153,10 +153,42 @@ pub(super) fn check_board_document(
     check(&serde_json::json!({"warnings":relevant}), false, on_info)
 }
 
+// Calendar discovery consumes view identities, not prose or the host's type.
+// Do not reject an entire document because an unrelated mention cannot resolve.
+pub(super) fn check_calendar_document(document: &Value, on_info: impl FnMut(&str)) -> Result<(), String> {
+    let blocks = document["blocks"].as_array();
+    let has_calendar = blocks.into_iter().flatten().any(|block| block["views"].as_array()
+        .into_iter().flatten().any(|view| view["type"] == "calendar" || view["layout"] == "calendar"));
+    if !has_calendar { return Ok(()); }
+    let Some(raw) = document.get("warnings").filter(|value| !value.is_null()) else { return Ok(()); };
+    let warnings = raw.as_array().ok_or("Anytype returned malformed API warnings.")?;
+    let relevant = warnings.iter().filter(|warning| {
+        let path = warning["path"].as_str().unwrap_or("");
+        if path == "/type" || path == "/icon" || path.starts_with("/icon/") || path == "/cover" || path.starts_with("/cover/") { return false; }
+        if path.starts_with("/blocks/") {
+            let parts = path.split('/').collect::<Vec<_>>();
+            if parts.get(3) == Some(&"text") { return false; }
+        }
+        true
+    }).cloned().collect::<Vec<_>>();
+    check(&serde_json::json!({"warnings": relevant}), false, on_info)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn calendar_discovery_ignores_unrelated_type_and_mention_warnings_only() {
+        let removed = json!({"path":"/type","message":"the type \"weekly_planner\" of this object was removed from the space — the object keeps it, but nothing new is created in it and searches cannot filter by it"});
+        let mention = json!({"path":"/blocks/text-id/text/marks/0/param","code":"unresolved_target","message":"mention target names no object in this space — not synced, or never here"});
+        let calendar = json!({"id":"calendar","views":[{"id":"month","type":"calendar"}]});
+        check_calendar_document(&json!({"blocks":[],"warnings":[removed.clone(),mention.clone()]}), |_| panic!("Unrelated document should be ignored")).unwrap();
+        check_calendar_document(&json!({"blocks":[calendar.clone()],"warnings":[removed,mention]}), |_| {}).unwrap();
+        let lost = json!({"path":"/blocks/calendar/views/0","message":"The view identity was dropped."});
+        assert!(check_calendar_document(&json!({"blocks":[calendar],"warnings":[lost]}), |_| {}).is_err());
+    }
 
     #[test]
     fn unrelated_documents_and_text_mentions_do_not_make_discovery_incomplete() {

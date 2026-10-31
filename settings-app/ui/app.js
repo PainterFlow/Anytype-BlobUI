@@ -1049,6 +1049,7 @@
   function readEditSnapshot() {
     return {
       formulas: window.BlobUI.FormulaPage.read(),
+      calendarRules: window.BlobUI.CalendarPage?.read(),
       settings: draft ? { ...draft } : null,
       updaterSettings: updaterDraft ? { ...updaterDraft } : null,
       connection: {
@@ -1075,6 +1076,7 @@
 
   function editSnapshotsEqual(left, right) {
     if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    if (JSON.stringify(left.calendarRules) !== JSON.stringify(right.calendarRules)) return false;
     if (JSON.stringify(left.formulas) !== JSON.stringify(right.formulas)) return false;
     if (left.updaterSettings || right.updaterSettings) {
       if (!updaterSettingsEqual(left.updaterSettings, right.updaterSettings)) return false;
@@ -1101,6 +1103,7 @@
   function restoreEditSnapshot(snapshot) {
     if (!snapshot || !snapshot.settings || !snapshot.connection) return;
     window.BlobUI.FormulaPage.restore(snapshot.formulas);
+    window.BlobUI.CalendarPage?.restore(snapshot.calendarRules);
 
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
@@ -1171,6 +1174,7 @@
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
+    window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
     el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
@@ -1257,6 +1261,7 @@
     const request = ++calendarApiRequest;
     calendarApiAvailability = "checking";
     const help = el("calendar-colors-help");
+    help.hidden = false;
     help.textContent = "Checking the Anytype API connection...";
     updateSaveButton();
     try {
@@ -1268,10 +1273,11 @@
       calendarApiAvailability = "unavailable";
     }
     help.textContent = calendarApiAvailability === "available"
-      ? "Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes."
+      ? ""
       : calendarApiAvailability === "missing"
         ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
         : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
+    help.hidden = calendarApiAvailability === "available";
     updateSaveButton();
   }
 
@@ -1295,6 +1301,7 @@
 
     await loadUpdaterState();
     await window.BlobUI.FormulaPage.load(invoke);
+    await window.BlobUI.CalendarPage?.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
       setStatus(stateError.message || String(stateError), "error");
@@ -1337,6 +1344,11 @@
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
     await loadUpdaterState();
+    if (window.BlobUI.CalendarPage && !await window.BlobUI.CalendarPage.load(invoke)) {
+      blobRestoreReloadFailed = true;
+      updateSaveButton();
+      throw new Error("The imported calendar rules could not be reloaded. Settings are locked to protect the restored folder.");
+    }
     if (reloadFormulas) {
       const loaded = await window.BlobUI.FormulaPage.load(invoke, { discover: false });
       if (!loaded) {
@@ -1456,30 +1468,35 @@
   function showSettingsPage(page) {
     closeKanbanStyleMenu();
     const isFormulas = page === "formulas";
+    const isCalendarColors = page === "calendar-colors";
+    const isBrowser = isFormulas || isCalendarColors;
+    const calendarPage = el("calendar-colors-page");
+    if (calendarPage) calendarPage.hidden = !isCalendarColors;
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    if (!isAccessibility && !isAdvanced && !isFormulas && draft) void refreshCalendarApiAvailability();
-    preferencesPage.hidden = isAccessibility || isAdvanced || isFormulas;
+    if (!isAccessibility && !isAdvanced && !isBrowser && draft) void refreshCalendarApiAvailability();
+    preferencesPage.hidden = isAccessibility || isAdvanced || isBrowser;
     el("formulas-page").hidden = !isFormulas;
     el("formulas-nav").classList.toggle("active", isFormulas);
     el("formulas-nav").setAttribute("aria-current", isFormulas ? "page" : "false");
     accessibilityPage.hidden = !isAccessibility;
     advancedPage.hidden = !isAdvanced;
     if (isAdvanced) advancedTabController.refresh();
-    else if (!isAccessibility && !isFormulas) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
-    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isFormulas);
+    else if (!isAccessibility && !isBrowser) window.BlobUI.SettingsV21?.refreshTabs();
+    pageTitle.textContent = isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isBrowser);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
-    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced && !isFormulas ? "page" : "false");
+    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced && !isBrowser ? "page" : "false");
     accessibilityNav.setAttribute("aria-current", isAccessibility ? "page" : "false");
     advancedNav.setAttribute("aria-current", isAdvanced ? "page" : "false");
     pageContent.scrollTop = 0;
     updatePageScrollbar();
+    if (isCalendarColors) window.BlobUI.CalendarPage?.refresh();
     if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
@@ -1524,6 +1541,7 @@
   }
 
   function saveStatus(result, connectionOnly) {
+    (result.info || []).forEach(message => addLog(message, "info"));
     if (result.calendarStatus === "off") {
       setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar Colors are off.");
       return;
@@ -1613,6 +1631,8 @@
     el("accent-error").textContent = !safeAccentSyntax || !supportedAccent ? "Use a 3 or 6 digit hex color, a supported rgb()/rgba() value, or an Anytype color variable. Pure white is reserved." : "";
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
+    const submittedCalendarRules = window.BlobUI.CalendarPage?.read();
+    const calendarRulesChanged = JSON.stringify(submittedCalendarRules) !== JSON.stringify(editSession.getBaseline().calendarRules);
     const settingsChanged = !settingsEqual(draft, initialDraft);
     const submittedFormulas = window.BlobUI.FormulaPage.read();
     const formulasChanged = JSON.stringify(submittedFormulas) !== JSON.stringify(editSession.getBaseline().formulas);
@@ -1659,7 +1679,7 @@
       return;
     }
 
-    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged)) {
+    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged || calendarRulesChanged)) {
       setStatus("Save or undo your appearance and Anytype API changes before changing the Anytype data folder.", "warning", false);
       return;
     }
@@ -1671,7 +1691,7 @@
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -1692,6 +1712,7 @@
     let connectionSaved = false;
     let generalSettingsSaved = false;
     let formulasSaved = false;
+    let calendarRulesSaved = false;
     let updaterSettingsSaved = false;
     try {
       let result = null;
@@ -1701,13 +1722,24 @@
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
         window.BlobUI.FormulaPage.reload();
+        window.BlobUI.CalendarPage?.reload();
       }
       if (formulasChanged) {
         await window.BlobUI.FormulaPage.save(invoke, submittedFormulas);
         editSession.commit({ formulas: submittedFormulas });
         formulasSaved = true;
       }
-      if (settingsChanged || options.forceRebuild) {
+      if (calendarRulesChanged) {
+        result = await window.BlobUI.CalendarPage.save(invoke, submittedCalendarRules, submittedSettings);
+        editSession.commit({ calendarRules: submittedCalendarRules });
+        calendarRulesSaved = true;
+        if (settingsChanged) {
+          generalSettingsSaved = true;
+          initialDraft = submittedSettings;
+          editSession.commit({ settings: submittedSettings });
+        }
+      }
+      if (!calendarRulesChanged && (settingsChanged || options.forceRebuild)) {
         result = await invoke("save_settings", { settings: submittedSettings });
         generalSettingsSaved = settingsChanged;
         if (settingsChanged) {
@@ -1733,6 +1765,8 @@
         setStatus(updaterPathChanged
           ? "App Settings saved. Loaded settings from the selected Anytype data folder."
           : "App Settings saved.", "info");
+      } else if (calendarRulesChanged && !connectionChanged) {
+        setStatus("Calendar rules saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else if (formulasChanged && !connectionChanged) {
         setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else {
@@ -1742,7 +1776,7 @@
       const message = error.message || String(error);
       setStatus(connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
-        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved
+        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved || calendarRulesSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
           : message, "error");
     } finally {
@@ -2449,6 +2483,7 @@
   }
 
   window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
+  window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
   el("settings-v21-enabled").addEventListener("change", () => {

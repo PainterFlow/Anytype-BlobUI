@@ -24,6 +24,9 @@ pub struct Client {
     info: Mutex<BTreeSet<String>>,
 }
 impl Client {
+    pub(crate) fn with_connection(key: &str, ip: &str, port: u16) -> Self {
+        Self { key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()) }
+    }
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
         let data = crate::read_json_file(&install.join("blob/data.json"))?;
@@ -51,7 +54,7 @@ impl Client {
                 .unwrap_or(31009),
         })
     }
-    fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+    pub(crate) fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
         let response = api::request(&self.key, &self.ip, self.port, method, path, body)?;
         let explicit_view = path.split_once('?').is_some_and(|(_, query)|
             query.split('&').any(|parameter| parameter.starts_with("view=")));
@@ -84,6 +87,13 @@ impl Client {
     fn board_document(&self, path: &str) -> Result<Value, String> {
         let document = api::request(&self.key, &self.ip, self.port, "GET", path, None)?;
         warnings::check_board_document(&document, |message| {
+            if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+        })?;
+        Ok(document)
+    }
+    pub(crate) fn calendar_document(&self, path: &str) -> Result<Value, String> {
+        let document = api::request(&self.key, &self.ip, self.port, "GET", path, None)?;
+        warnings::check_calendar_document(&document, |message| {
             if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
         })?;
         Ok(document)
