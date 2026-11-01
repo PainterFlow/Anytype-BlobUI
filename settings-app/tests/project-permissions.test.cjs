@@ -43,6 +43,16 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.evaluate(()=>window.projectError='Fixture project refresh failed');await page.locator('#projects-reload').click();await page.getByRole('status').filter({hasText:'Fixture project refresh failed'}).waitFor();assert.equal(await projects.count(),2);
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
+    // The shared modal scrollbar fades in on real scrolling, then fades out after idle.
+    const content=dialog.locator('.project-source-content');
+    await content.evaluate(node=>{node.style.maxHeight='180px';});
+    await page.waitForFunction(()=>document.querySelector('.project-source-content').classList.contains('has-overflow'));
+    assert.equal(await content.evaluate(node=>getComputedStyle(node).getPropertyValue('--page-scrollbar-color').trim()),'rgba(0, 0, 0, 0)');
+    await content.evaluate(node=>{node.scrollTop=40;});
+    await page.waitForFunction(()=>document.querySelector('.project-source-content').getAnimations().some(animation=>animation.transitionProperty==='--page-scrollbar-color'));
+    await page.waitForFunction(()=>{const node=document.querySelector('.project-source-content');return !node.classList.contains('is-scrolling')&&node.getAnimations().some(animation=>animation.transitionProperty==='--page-scrollbar-color');});
+    await page.waitForFunction(()=>getComputedStyle(document.querySelector('.project-source-content')).getPropertyValue('--page-scrollbar-color').trim()==='rgba(0, 0, 0, 0)');
+    await content.evaluate(node=>{node.style.maxHeight='';node.scrollTop=0;});
     const query=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Work"]')});
     assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').isDisabled(),true);
     const disabledAccess=query.locator('.codex-space-bottom button[aria-label^="Access"]');
@@ -104,6 +114,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.evaluate(()=>Promise.all(document.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
     await page.screenshot({path:path.join(fixture,'sources-dark.png'),fullPage:true});
     await page.setViewportSize({width:620,height:850});await page.emulateMedia({reducedMotion:'reduce'});
+    assert.equal(await content.evaluate(node=>getComputedStyle(node).transitionDuration),'0s');
     assert.equal(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth),true);
     await page.screenshot({path:path.join(fixture,'sources-narrow-dark.png'),fullPage:true});
     await page.locator('button[aria-label="Close project sources"]').click();

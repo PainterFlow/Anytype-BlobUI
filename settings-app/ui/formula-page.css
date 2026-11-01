@@ -111,7 +111,7 @@
 .confirm-dialog.calendar-rule-dialog { display: flex; flex-direction: column; width: min(580px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 16px; box-shadow: none; }
 .calendar-modal-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .calendar-modal-header h2 { flex: 1; min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
-.calendar-modal-content { min-height: 0; overflow-y: auto; padding: 6px 0 0; --page-scrollbar-color: transparent; }
+.calendar-modal-content { min-height: 0; overflow-y: auto; padding: 6px 0 0; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .calendar-rule-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px; }
 .calendar-rule-name-group { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .calendar-rule-name { flex: 0 1 auto; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
@@ -144,3 +144,6 @@
 
 .calendar-modal-controls { flex-shrink: 0; min-width: 0; }
 .calendar-modal-controls:empty { display: none; }
+
+:root[data-reduced-motion="true"] .calendar-modal-content { transition: none; }
+@media (prefers-reduced-motion: reduce) { .calendar-modal-content { transition: none; } }
