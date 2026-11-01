@@ -16,7 +16,8 @@ if (process.argv[2] === '--fixture') {
       console.log(JSON.stringify(allowed ? {jsonrpc:'2.0',id:request.id,result:{contents:[{uri:request.params.uri,text:'Authorized A',mimeType:'text/plain'}]}} : {jsonrpc:'2.0',id:request.id,error:{code:-32000,message:'Read denied'}}));return;
     }
     const query=request.params.arguments.query;
-    const result={items:[{type:'resource_link',uri:'anyblob://objects/fixture/object',name:'猫 shared metadata'}].filter(item=>item.name.includes(query))};
+    const terms=query.toLowerCase().split(/\s+/).filter(Boolean);
+    const result={items:[{type:'resource_link',uri:'anyblob://objects/fixture/object',name:'猫 shared metadata'}].filter(item=>terms.every(term=>item.name.toLowerCase().includes(term)))};
     console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [], structuredContent: result } }));
   });
 } else {
@@ -123,6 +124,11 @@ async function main() {
     assert.equal(observed.length, 2);
     assert(observed.every(request => !request.params._meta?.threadId));
     assert(results.every(result => result[0].items.length === 1));
+    for(const query of ['猫 ','猫 shared',' shared   metadata ']) {
+      const found=await context.sIn({},'local',providers,{query});
+      assert.equal(found[0].items.length,1);
+      assert.equal(observed.at(-1).params.arguments.query,query,'Installed dispatcher must preserve spaces');
+    }
     assert.equal((await call({threadId:'helper-chat'},'absent')).structuredContent.items.length,0);
     const uri=results[0][0].items[0].uri;
     const scope={get:()=>({})};

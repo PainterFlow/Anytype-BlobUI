@@ -144,6 +144,14 @@ mod windows {
                 match GetLastError() {
                     ERROR_PIPE_CONNECTED => Ok(true),
                     ERROR_PIPE_LISTENING => Ok(false),
+                    ERROR_NO_DATA | ERROR_BROKEN_PIPE => {
+                        // A canceled typeahead can close its handle before our polling accept.
+                        // Reset this instance instead of terminating the entire bridge listener.
+                        if DisconnectNamedPipe(self.0)==0 && GetLastError()!=ERROR_PIPE_NOT_CONNECTED {
+                            return Err(io::Error::last_os_error());
+                        }
+                        Ok(false)
+                    },
                     _ => Err(io::Error::last_os_error()),
                 }
             }
@@ -160,7 +168,7 @@ mod windows {
                     ptr::null_mut(),
                 );
                 if handle == INVALID_HANDLE_VALUE {
-                    return Err(io::Error::new(io::ErrorKind::NotConnected,"BlobUI is unavailable. Start BlobUI and enable Anyblob in Integrations > Anyblob."));
+                    return Err(io::Error::last_os_error());
                 }
                 let mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
                 if SetNamedPipeHandleState(handle, &mode, ptr::null(), ptr::null()) == 0 {
@@ -168,6 +176,19 @@ mod windows {
                     return Err(io::Error::last_os_error());
                 }
                 Ok(Self(handle))
+            }
+        }
+        pub fn connect_wait(cancel:&AtomicBool, deadline:Instant)->io::Result<Self> {
+            loop {
+                stopped(cancel,deadline)?;
+                match Self::connect() {
+                    Ok(pipe)=>return Ok(pipe),
+                    Err(error) if error.raw_os_error()==Some(ERROR_PIPE_BUSY as i32)=>{
+                        // The listener creates another instance after accepting the previous one.
+                        std::thread::sleep(Duration::from_millis(10));
+                    },
+                    Err(_)=>return Err(io::Error::new(io::ErrorKind::NotConnected,"BlobUI is unavailable. Start BlobUI and enable Anyblob in Integrations > Anyblob.")),
+                }
             }
         }
         pub fn connected(&self) -> bool {
@@ -264,11 +285,35 @@ mod windows {
 }
 #[cfg(windows)]
 pub use windows::Pipe;
+#[cfg(all(test,windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn aborted_typeahead_connections_do_not_poison_the_listener() {
+        std::env::set_var("ANYBLOB_BRIDGE_INSTANCE",format!("fixture-aborted-{}",std::process::id()));
+        let listener=Pipe::listen(true).unwrap();
+        for _ in 0..3 {
+            let client=Pipe::connect().unwrap();drop(client);
+            assert!(!listener.accept().expect("A client that leaves before accept must reset the listener"));
+            assert!(!listener.accept().unwrap()); // Re-arm the disconnected instance on the next poll.
+        }
+        let client=Pipe::connect().unwrap();assert!(listener.accept().unwrap());
+        let cancel=AtomicBool::new(false);
+        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_millis(20)).err().unwrap().kind(),io::ErrorKind::TimedOut);
+        let waiting=std::thread::spawn(||Pipe::connect_wait(&AtomicBool::new(false),Instant::now()+Duration::from_secs(5)));
+        let next=Pipe::listen(false).unwrap();
+        let second=waiting.join().unwrap().expect("Concurrent searches wait for the next pipe instance");
+        assert!(next.accept().unwrap());
+        cancel.store(true,Ordering::Release);
+        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_secs(5)).err().unwrap().kind(),io::ErrorKind::TimedOut);
+        drop((second,next,client,listener));
+    }
+}
 pub fn call(request: &crate::Request, cancel: &AtomicBool) -> Result<crate::Response, String> {
     #[cfg(windows)]
     {
         let deadline = Instant::now() + CALL_TIMEOUT;
-        let pipe = Pipe::connect().map_err(|e| e.to_string())?;
+        let pipe = Pipe::connect_wait(cancel,deadline).map_err(|e| e.to_string())?;
         pipe.send(
             &serde_json::to_vec(request).map_err(|_| "Invalid bridge request.")?,
             cancel,

@@ -18,6 +18,8 @@ Metadata search requires the enabled integration and existing bridge authenticat
 
 Search uses API v2, enumerating selected spaces with empty-query search and matching titles by Unicode lowercase substring comparison. This avoids full-text capped snapshots and overlapping pages. Saved full type IDs resolve to current API keys before filtering, preserving space-scoped identity despite duplicate names or keys. Unknown types never broaden searches. Filtering precedes deduplication, deterministic sorting and limiting. Sort order is title, space name, space ID and object ID in Rust string order.
 
+Anyblob 0.1.4 matches every whitespace-separated query term, ignoring leading, trailing and repeated whitespace. A canceled client that disconnects before pipe accept no longer kills the bridge listener. Concurrent requests wait for a busy pipe instance with cancellation and timeout checks. Isolated Windows regression tests reproduce the original error 232 and verify recovery. Desktop logs showed unavailable-bridge errors being hidden by the native mention UI as empty results. Settings must remain running for searches; closing its window hides it, while Quit stops the bridge.
+
 Failures return errors without broader fallbacks. Enumeration fails at 100,000 rows per space or space list. Large spaces may be slow. There are no search or body caches. Requests recheck cancellation, authentication, saved filters and integration revision between HTTP requests and before returning results. Settings and connection changes invalidate in-flight requests, including changes during HTTP.
 
 ## Resource reads

@@ -45,6 +45,8 @@ Projectless chats and projects without selected sources use global permissions. 
 
 If the bridge is unavailable, start BlobUI and enable Anyblob. If the credential is rejected, disable and enable Anyblob in BlobUI. If a space is absent or a read is denied, check saved Permissions and the saved API connection. If Anytype is unavailable or an object is missing, restore the connection or correct the ID and retry. A timed-out approval must be requested again. Object data is never served from a persistent cache.
 
+Keep BlobUI Settings running while searching. Closing its window hides it; Quit stops the bridge. Some desktop hosts show bridge failures as an empty mention list. Anyblob 0.1.4 repairs listener shutdown after canceled typeahead connections and retries busy connections. Mention queries match all entered words and ignore trailing or repeated spaces.
+
 The MCP executable contains no Anytype credentials and makes no HTTP requests. BlobUI constructs the allowed API v2 operations and checks saved access before dispatch and before returning results. The Windows pipe restricts clients to the current user and rejects remote clients. These restrictions do not isolate the integration from unrelated processes with unrestricted access to the same Windows account.
 
 Packaging follows the [OpenAI plugin format](https://developers.openai.com/plugins/build/plugins) and [local execution guidance](https://developers.openai.com/plugins/deploy/desktop-only).

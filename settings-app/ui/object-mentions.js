@@ -39,9 +39,11 @@
       const scrollbar=UI.Scrollbar.attach(shell.menu);
       const controller = C.Picker({root:shell.element,menu:shell.menu,multiple:true,closeOnSelect:false,onChange:values=>change(kind,values)});
       const place = () => {
-        const rect=shell.trigger.getBoundingClientRect(), width=Math.min(390,root.innerWidth-32);
+        const rect=shell.trigger.getBoundingClientRect(), width=Math.min(300,root.innerWidth-80);
         shell.menu.style.width=width+'px';shell.menu.style.left=Math.max(16,Math.min(rect.right-width,root.innerWidth-width-16))+'px';
-        const below=root.innerHeight-rect.bottom-16, above=rect.top-16, up=below<180&&above>below;
+        const below=root.innerHeight-rect.bottom-16, above=rect.top-16;
+        const desired=Math.min(360,12+[...shell.menu.children].reduce((height,option)=>height+(option.querySelector('.kanban-select-option-description')?52:34),0));
+        const up=below<desired&&above>below;
         shell.menu.style.top=up?'auto':rect.bottom+6+'px';shell.menu.style.bottom=up?root.innerHeight-rect.top+6+'px':'auto';
         shell.menu.style.maxHeight=Math.max(80,Math.min(360,up?above-6:below-6))+'px';
       };

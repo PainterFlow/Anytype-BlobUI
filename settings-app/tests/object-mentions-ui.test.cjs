@@ -99,6 +99,11 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     await spaceMenu.getByRole('option',{name:'Space 00',exact:true}).waitFor();
     await page.waitForFunction(()=>document.querySelector('#object-mentions-group [role=listbox]:not([hidden])')?.dataset.state==='open');
     await spaceMenu.evaluate(menu=>Promise.all(menu.getAnimations().map(animation=>animation.finished)));
+    const position=await spaceMenu.evaluate(menu=>{
+      const trigger=document.querySelector('[aria-label="Filtered spaces"][aria-haspopup]');
+      return {menu:menu.getBoundingClientRect().right,trigger:trigger.getBoundingClientRect().right};
+    });
+    assert.ok(Math.abs(position.menu-position.trigger)<2,'Picker right edge must align with its trigger');
     assert.doesNotMatch(await spaceMenu.innerText(),/private-id-/);
     assert.equal(await spaceMenu.locator('.kanban-select-option-description').count(),0);
     const longLabel=spaceMenu.getByRole('option',{name:/School Notebook Entry/}).locator('.kanban-option-label');
@@ -114,6 +119,13 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(scrollbar.width,'12px');assert.equal(scrollbar.radius,'6px');assert.equal(scrollbar.buttons,'none');
     await page.screenshot({path:path.join(fixture,'picker-dark.png')});
     await page.waitForFunction(()=>!document.querySelector('#object-mentions-group [role=listbox]:not([hidden])').classList.contains('is-scrolling'));
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({width:620,height:650});
+    await types.click();
+    await page.waitForFunction(()=>document.querySelector('[role=listbox][aria-label="Filtered object types"]')?.dataset.state==='open');
+    const typePosition=await typeMenu.evaluate(menu=>({menu:menu.getBoundingClientRect().right,trigger:document.querySelector('[aria-label="Filtered object types"][aria-haspopup]').getBoundingClientRect().right,bottom:menu.getBoundingClientRect().bottom}));
+    assert.ok(Math.abs(typePosition.menu-typePosition.trigger)<2);
+    assert.ok(typePosition.bottom<=650-10,'Picker must stay inside the viewport when space below is limited');
     await page.keyboard.press('Escape');
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}

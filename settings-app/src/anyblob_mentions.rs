@@ -120,6 +120,7 @@ fn search_with(
     }
     let spaces = pages("GET", "/v2/spaces?ids=full", None, check, &mut request)?;
     let query = query.to_lowercase();
+    let terms:Vec<_>=query.split_whitespace().collect();
     let mut results = BTreeMap::new();
     for space in spaces {
         let sid = text(&space, "id")?;
@@ -163,7 +164,8 @@ fn search_with(
                 if !selected {continue;}
             }
             let title = row["name"].as_str().ok_or("Anytype omitted an object title.")?;
-            if !title.to_lowercase().contains(&query) { continue; }
+            let searchable=title.to_lowercase();
+            if !terms.iter().all(|term|searchable.contains(term)) { continue; }
             let item = json!({"type":"resource_link","uri":blobui_mcp::object_uri(sid,oid),
                 "name":title,"title":title,"description":space_name,
                 "_meta":{"anyblob/spaceId":sid,"anyblob/spaceName":space_name,"anyblob/objectId":oid}});
@@ -329,5 +331,14 @@ mod tests {
             else{assert_eq!(body,Some(&json!({})));json!({"data":[{"id":"done","name":"Done task","properties":{"done":true}},{"id":"page","name":"Regular page"}],"has_more":false})})
         }).unwrap();
         assert_eq!(off["items"].as_array().unwrap().len(),2);
+    }
+    #[test]
+    fn typing_spaces_does_not_clear_matching_mentions() {
+        for query in ["School", "School ", " School   Notebook ", "notebook school", "school\tnotebook", "  "] {
+            let result=search_with(&Filters::default(),query,&||Ok(()),|method,_,_|Ok(if method=="GET"{
+                json!({"data":[{"id":"s","name":"Space"}],"has_more":false})
+            }else{json!({"data":[{"id":"note","name":"School Notebook Entry"}],"has_more":false})})).unwrap();
+            assert_eq!(result["items"].as_array().unwrap().len(),1,"{query:?}");
+        }
     }
 }
