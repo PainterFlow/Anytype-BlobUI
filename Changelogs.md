@@ -2,6 +2,31 @@
 
 *Insert random ah text.*
 
+# Introducing Anyblob!
+
+Anyblob is a optional plugin + MCP server to integrate Anytype with codex.
+It uses API v2, allowing you to restrict access, but you can restrict access even further.
+Anyblob allows you to configure permissions for each space, the available permissions are:
+- **No Access:** default, AI can't see the space or access it.
+- **Read Only:** Codex can only read the contents of the space.
+- **Read-Write:** Codex can read contents of the space and edit objects, modify properties, send chat messages, edit views, react to messages, etc..
+- **Create-Delete:** Codex can create and delete objects, properties and views. (*+ Read-Write permissions).
+
+Additionally codex will also ask for approval depending on how you configure it:
+- **Always Ask:** codex will always ask for every action that isn't just reading.
+- **Approve for me:** codex will only ask when deleting and creating objects.
+- **Never Ask:** codex will never ask.
+
+There is also a toggle which allows you to chose whether you want to give codex access to upload/delete files.
+*Developers Note: I made this a separate thing, because I know not everyone self-hosts Anytype or buys the premium plan.*
+
+Additionally, you can also configure these things for each project, since you can also configure which codex project has access to what.
+You can configure the things mentioned above for: queries, spaces and collections.
+*Developers Note: these permissions act as overrides to the global per-space permissions. Unconfigured or projectless chats/projects use the global permissions.*
+
+Anyblob also allows mentioning Anytype objects in the codex app.
+You can also use it to manage your Anytype space as there are quite a few skills you can use to do so.
+
 ## General
 - the sidebar is now resizable.
 
@@ -17,9 +42,6 @@
 ## Advanced Settings -> App Settings
 - organized and modernized the UI of "App Settings".
 
-## Codex integration prototype
-- Added Integrations > Codex with per-space access, file, and approval preferences.
-- Preferences support Save, Undo, and settings export/import. This prototype does not connect Codex or enforce permissions.
 
 ## Bugfixes
 - Issue#71 - In-Object searched text results are unaffected by the accent color setting.
