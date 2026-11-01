@@ -4,6 +4,8 @@
 
 ## General
 - the sidebar is now resizable
+- In-object search results now use the accent color, even with Include Selections disabled.
+- The slash-command checkmark preview now follows the custom accent color.
 
 ## Color Calendar Events by property
 - Added the ability to color calendar events by property

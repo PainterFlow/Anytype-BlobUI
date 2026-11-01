@@ -19,7 +19,8 @@
 
 /* Recolor checked property icons only when a custom accent is selected. */
 /* @blobui-if-custom-accent */
-.icon.markerCheckbox2.iconColor-accent100 {
+.icon.markerCheckbox2.iconColor-accent100,
+.icon.menuBlockTextCheckbox {
     color: var(--color-blob-accent) !important;
 }
 
