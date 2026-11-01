@@ -1,0 +1,11 @@
+.codex-space { padding: 12px 14px; border-radius: 12px; }
+.codex-space:hover { background: var(--active); }
+.codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.codex-space-bottom { margin-top: 6px; }
+.codex-space-top .formula-view-name { flex: 1 1 140px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.codex-space-bottom .settings-row { padding: 0; border: 0; gap: 12px; flex: 1 1 200px; }
+.codex-space .formula-property-picker { flex: 0 1 auto; }
+.codex-space .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; max-width: min(300px, 75vw); }
+#codex-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#codex-nav .nav-icon svg { width: 20px; height: 20px; }
+#sidebar-nav > .nav-group-label:not(:first-child) { margin-top: 16px; }

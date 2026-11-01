@@ -123,3 +123,8 @@ Calendar rule selectors keep their menus outside the scrolling list, within the 
 Calculator Insert property and calendar rule selectors share Components.PropertyPickerShell, including the same rounded neutral trigger and menu. Calendar selectors show their current value without a chevron. Override removal uses the shared calculator DeleteIcon in a red icon button immediately after the calendar name.
 
 Calendar discovery preserves its last successful catalog during reload, as Kanban does. Saved types are marked unavailable only after a successful discovery confirms their absence. Initial loading and failed discovery must never create unavailable rows. Shared catalog rows constrain both text columns, and warnings span the full row so long identifiers cannot squeeze names into a narrow strip.
+## Codex integration prototype
+
+Integrations > Codex has Settings and Permissions tabs using the shared tab controller. Settings is empty. Permissions saves preferences per full space ID through the settings draft. Space discovery uses the saved native API v2 connection and complete pagination. The page never receives credentials, connects to Codex, or enforces permissions.
+
+Permissions uses the shared catalog search and reload toolbar without a space filter. Each flat row places the space name and access picker above the file switch and approval picker. The pickers use PropertyPickerShell and Components.Picker, and the switch uses ToggleSetting. File and approval controls remain editable at every access level. Names truncate with full name and ID tooltips. Search and reload preserve drafts and entries for undiscovered spaces. Failed reloads retain the last successful catalog. The refreshed layout adds Settings and Permissions section links beneath Codex.

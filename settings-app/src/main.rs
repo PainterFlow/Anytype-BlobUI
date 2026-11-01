@@ -18,6 +18,7 @@ mod folder_dialog;
 mod calculator;
 mod kanban;
 mod calendar;
+mod codex;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
@@ -94,6 +95,8 @@ impl Drop for SecretString {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct SettingsDraft {
+    #[serde(default, deserialize_with = "codex::deserialize")]
+    codex_integration: codex::Configuration,
     font_family: String,
     code_font_family: String,
     accent_color: String,
@@ -1123,6 +1126,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "objectMentionHoverEffect": settings.object_mention_hover_effect,
         "kanbanViewStyle": settings.kanban_view_style,
         "collapsedCategories": settings.collapsed_categories,
+        "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
@@ -1151,7 +1155,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
             "kanbanViewStyle": settings.kanban_view_style,
             "collapsedCategories": settings.collapsed_categories,
-            "calendarColorsEnabled": settings.calendar_colors_enabled,
+            "codexIntegration": settings.codex_integration,
+        "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
         }
@@ -1294,6 +1299,7 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
     };
 
     SettingsDraft {
+        codex_integration: codex::normalize(local.and_then(|v| v.get("codexIntegration")).or_else(|| normalized.get("codexIntegration")).unwrap_or(&Value::Null)),
         font_family,
         code_font_family,
         accent_color,
@@ -1733,6 +1739,7 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            codex::discover_codex_spaces,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -1829,6 +1836,7 @@ fn main() {
 impl Default for SettingsDraft {
     fn default() -> Self {
         Self {
+            codex_integration: codex::Configuration::default(),
             font_family: DEFAULT_FONT.into(),
             code_font_family: DEFAULT_CODE_FONT.into(),
             accent_color: DEFAULT_ACCENT.into(),

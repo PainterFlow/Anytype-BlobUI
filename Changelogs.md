@@ -17,6 +17,10 @@
 ## Advanced Settings -> App Settings
 - organized and modernized the UI of "App Settings".
 
+## Codex integration prototype
+- Added Integrations > Codex with per-space access, file, and approval preferences.
+- Preferences support Save, Undo, and settings export/import. This prototype does not connect Codex or enforce permissions.
+
 ## Bugfixes
 - Issue#71 - In-Object searched text results are unaffected by the accent color setting.
 - Issue#72 - The `/` command preview of checkmarks is unaffected by the accent color setting.

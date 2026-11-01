@@ -463,7 +463,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1174,6 +1174,7 @@
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
+    window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
     el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
@@ -1216,6 +1217,7 @@
   function assignDraftToForm(settings) {
     const accent = normalizeForUi(settings);
     draft = {
+      codexIntegration: window.BlobUI.CodexPage.normalize(settings.codexIntegration),
       fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
@@ -1233,6 +1235,7 @@
       settingsV21Enabled: settings.settingsV21Enabled === true,
       sidebarResizeMode: "standard",
     };
+    window.BlobUI.CodexPage?.render();
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
     accentValue.value = draft.accentColor;
@@ -1469,7 +1472,9 @@
     closeKanbanStyleMenu();
     const isFormulas = page === "formulas";
     const isCalendarColors = page === "calendar-colors";
-    const isBrowser = isFormulas || isCalendarColors;
+    const isCodex = page === "codex";
+    window.BlobUI.CodexPage?.show(isCodex);
+    const isBrowser = isFormulas || isCalendarColors || isCodex;
     const calendarPage = el("calendar-colors-page");
     if (calendarPage) calendarPage.hidden = !isCalendarColors;
     const isAccessibility = page === "accessibility";
@@ -1487,7 +1492,7 @@
     advancedPage.hidden = !isAdvanced;
     if (isAdvanced) advancedTabController.refresh();
     else if (!isAccessibility && !isBrowser) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    pageTitle.textContent = isCodex ? "Codex" : isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isBrowser);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
@@ -2482,6 +2487,7 @@
     });
   }
 
+  window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
   window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });

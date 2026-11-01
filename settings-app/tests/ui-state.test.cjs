@@ -303,6 +303,10 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.window.BlobUI.SettingsV21.setEnabled = () => {};
   // The formula page has its own browser and storage tests. Keep this form
   // harness independent of its DOM while retaining a stable edit snapshot.
+  context.window.BlobUI.CodexPage = {
+    normalize: value => value || { spaces: {} },
+    init() {}, render() {}, show() {}, setLocked() {},
+  };
   context.window.BlobUI.FormulaPage = {
     read: () => ({ version: 2, display: 'balanced', definitions: [] }),
     restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},

@@ -52,9 +52,9 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     await page.locator('#save-button').click();
     await page.waitForFunction(() => document.getElementById('status-message').textContent.includes('fixture save failed'));
     await page.evaluate(() => { window.failSave = false; window.BlobUI.discardChanges(); });
-    assert.equal(await page.locator('input[type="search"]:not(#formula-search):not(#calendar-search), .v21-search').count(), 0);
+    assert.equal(await page.locator('input[type="search"]:not(#formula-search):not(#calendar-search):not(#codex-search), .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
-    assert.equal(await page.locator('.v21-section-link svg').count(), 8);
+    assert.equal(await page.locator('.v21-section-link svg').count(), 10);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);
     await page.locator('#preferences-nav').click();
     assert.equal(await page.locator('#preferences-nav').getAttribute('aria-expanded'), 'true');
