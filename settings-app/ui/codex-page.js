@@ -1,8 +1,8 @@
 (function (root) {
   'use strict';
   const UI = root.BlobUI, C = UI.Components, doc = root.document;
-  const access = [{value:'none',label:'No Access'}, {value:'read',label:'Read Only'}, {value:'readWrite',label:'Read-Write'}, {value:'createDelete',label:'Create-Delete',description:'Read, edit, create, and delete objects.'}];
-  const approvals = [{value:'alwaysAsk',label:'Always Ask',description:'Ask before every change.'}, {value:'approveForMe',label:'Approve for me',description:'Ask before object creation or deletion.'}, {value:'fullAccess',label:'Full Access',description:'No approvals within the selected permissions.'}];
+  const access = [{value:'none',label:'No Access'}, {value:'read',label:'Read Only'}, {value:'readWrite',label:'Read-Write'}, {value:'createDelete',label:'Create-Delete'}];
+  const approvals = [{value:'alwaysAsk',label:'Always Ask'}, {value:'approveForMe',label:'Approve for me'}, {value:'fullAccess',label:'Full Access'}];
   function normalize(value) {
     const spaces = Object.create(null);
     const entries = value?.spaces && typeof value.spaces === 'object' && !Array.isArray(value.spaces) ? value.spaces : {};
@@ -28,7 +28,7 @@
       function picker(parent,key,options,label) {
         const shell = C.PropertyPickerShell({label,showValue:true,accessibleLabel:label+' for '+view.name+' '+view.id,menuLabel:label});
         shell.trigger.disabled = locked;
-        shell.trigger.setAttribute('aria-describedby','codex-permission-help'); parent.append(shell.element);
+        parent.append(shell.element);
         const controller = C.Picker({root:shell.element,options,value:permission[key],onChange:value=>change(key,value)});
         const place = () => {
           const rect = shell.trigger.getBoundingClientRect();
@@ -50,7 +50,7 @@
         pickers.push({destroy() { controller.destroy(); for (const event of ['click','keydown']) shell.trigger.removeEventListener(event,place,true); doc.querySelector('.page-content').removeEventListener('scroll',dismiss); root.removeEventListener('resize',dismiss); }});
       }
       picker(top,'access',access,'Access');
-      const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+view.name+' '+view.id,'aria-describedby':'codex-permission-help'},onChange:()=>change('filesEnabled',toggle.input.checked)});
+      const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+view.name+' '+view.id},onChange:()=>change('filesEnabled',toggle.input.checked)});
       toggle.input.checked = permission.filesEnabled; toggle.input.disabled = locked; bottom.append(toggle.element);
       picker(bottom,'approval',approvals,'Approval'); item.append(top,bottom); list.append(item); return {item,view};
     });
@@ -77,8 +77,6 @@
     const bar=make('div','advanced-tabs');bar.setAttribute('role','tablist');bar.setAttribute('aria-label','Codex');
     const panels=['Settings','Permissions'].map((label,index)=>{const button=make('button','',label);button.type='button';button.id='codex-tab-'+index;button.setAttribute('role','tab');const panel=make('section','');panel.id='codex-panel-'+index;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);button.setAttribute('aria-controls',panel.id);bar.append(button);return panel;});
     page.append(bar,...panels);tabs=C.Tabs({container:bar,buttons:[...bar.children],panels,onSelect:index=>{if(index===1&&!loaded&&!busy)void reload();}});
-    panels[1].append(make('p','accessibility-note','This prototype saves preferences only. It does not connect Codex or enforce permissions.'));
-    const help=make('p','accessibility-note','File and approval choices cannot grant access beyond the selected access level.');help.id='codex-permission-help';panels[1].append(help);
     const toolbar=UI.CatalogBrowser.toolbar('codex','Search spaces');toolbar.querySelector('#codex-filter-control').hidden=true;
     list=make('div','');message=make('p','input-hint');message.setAttribute('role','status');empty=make('p','input-hint');empty.hidden=true;panels[1].append(toolbar,message,list,empty);
     browser=UI.CatalogBrowser.attach({prefix:'codex',toolbar,records:()=>records,empty,onReload:reload});
