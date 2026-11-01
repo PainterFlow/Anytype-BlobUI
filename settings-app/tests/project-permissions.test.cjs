@@ -47,6 +47,11 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
       assert.equal(await sourceRows.filter({has:page.locator('input[aria-label*=" · '+kind+' · "]')}).locator('input[role=switch]').count(),0);
     }
     const space=sourceRows.filter({has:page.locator('input[aria-label="Select Work · Spaces · Work"]')});
+    const accessX = row => row.locator('.codex-space-bottom button[aria-label^="Access"]').evaluate(node=>node.getBoundingClientRect().x);
+    const expectedAccessX = await accessX(space);
+    for (let index=0;index<await sourceRows.count();index++) {
+      assert.ok(Math.abs(await accessX(sourceRows.nth(index))-expectedAccessX)<1,'Access pickers retain their column without file switches');
+    }
     assert.equal(await space.locator('input[role=switch]').isDisabled(),true);
     await space.locator('.formula-view-name').click();
     assert.equal(await space.locator('input[role=switch]').isChecked(),true);

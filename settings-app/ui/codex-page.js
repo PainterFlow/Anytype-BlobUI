@@ -61,6 +61,10 @@
     if (!selection || view.kind === 'space') {
     const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+description},onChange:()=>change('filesEnabled',toggle.input.checked)});
     toggle.input.checked = permission.filesEnabled; toggle.input.disabled = disabled; bottom.append(toggle.element);
+    } else {
+      const spacer = make('div','settings-row');
+      spacer.setAttribute('aria-hidden','true');
+      bottom.append(spacer);
     }
     picker(bottom,'access',access,'Access');
     picker(bottom,'approval',approvals,'Approval'); item.append(top);
