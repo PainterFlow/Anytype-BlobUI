@@ -24,7 +24,7 @@ Additionally, you can also configure these things for each project, since you ca
 You can configure the things mentioned above for: queries, spaces and collections.
 *Developers Note: these permissions act as overrides to the global per-space permissions. Unconfigured or projectless chats/projects use the global permissions.*
 
-Anyblob also allows mentioning Anytype objects in the codex app.
+Anyblob adds global object mention suggestions to the desktop composer. Object Mentions in Settings filters suggestions by space and object type, with dynamic All defaults and Save/Undo. Suggestions can include objects outside a project's read access. Selecting one does not grant access or bypass Always Ask.
 You can also use it to manage your Anytype space as there are quite a few skills you can use to do so.
 
 ## General

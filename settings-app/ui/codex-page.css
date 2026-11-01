@@ -1,4 +1,6 @@
 .codex-space { padding: 12px 14px; border-radius: 12px; }
+.object-mention-row .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; }
+.object-mention-row .formula-property-picker { flex: 0 1 auto; min-width: 0; }
 .codex-space:hover { background: var(--active); }
 .codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .codex-space-bottom { margin-top: 6px; }

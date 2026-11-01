@@ -33,7 +33,16 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         "anyblob"
     );
     let tools = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
-    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 3);
+    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 4);
+    let mentions=&tools["result"]["tools"][0];
+    assert_eq!(mentions["name"],"search_mentions");
+    assert_eq!(mentions["_meta"]["ui"]["visibility"],json!(["app"]));
+    assert_eq!(mentions["outputSchema"]["properties"]["items"]["maxItems"],20);
+    let initialized=call(json!({"jsonrpc":"2.0","id":30,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}));
+    assert_eq!(initialized["result"]["capabilities"]["extensions"]["openai/mentions"]["searchTool"],"search_mentions");
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":31,"method":"resources/list"}))["result"]["resources"],json!([]));
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
     for tool in tools["result"]["tools"].as_array().unwrap() {
         assert_eq!(tool["annotations"]["readOnlyHint"], true);
     }

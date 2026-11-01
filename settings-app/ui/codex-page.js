@@ -81,6 +81,7 @@
   }
   function render() {
     if (!list) return;
+    doc.getElementById('codex-panel-0')?.refreshMentions?.();
     pickers.forEach(p => p.destroy()); pickers = []; C.destroyTree(list); list.replaceChildren();
     const preferences = normalize(api.read());
     records = records.map(({view}) => {
@@ -111,6 +112,8 @@
     const toggle=C.ToggleSetting({label:'Enable Anyblob',onChange:()=>configure(toggle.input.checked)});
     const install=C.Button({label:'Install',attributes:{class:'banner-image-button update-check-button'},onClick:()=>void installMarketplace()});
     panel.append(C.Heading({title:'General'}).element,C.Group({content:[toggle.element,C.SettingsRow({label:'Install Marketplace',content:[install.element],attributes:{class:'settings-row kanban-setting-row'}}).element]}).element,status);
+    const mentions=UI.ObjectMentions.mount(panel,api,normalize);
+    panel.refreshMentions=()=>mentions.refresh();
     let changing=false,installing=false,integrationEpoch=0,installationEpoch=0,installation=null;
     function showInstallation(value){installation=value;install.element.textContent=value?.updateAvailable?'Update':value?.installed?'Installed':'Install';install.element.title=value?.bundledVersion?'Anyblob '+value.bundledVersion:'';}
     async function configure(enabled) {
@@ -135,8 +138,8 @@
       }catch(error){showInstallation(installation);status.textContent=String(error.message||error);}
       finally{installing=false;install.element.disabled=false;}
     }
-    panel.refreshIntegration=()=>{void refresh();void refreshInstallation();};
-    panel.refreshIntegration();
+    panel.refreshIntegration=()=>{void refresh();void refreshInstallation();mentions.show();};
+    void refresh();void refreshInstallation();
     const eventApi=root.__TAURI__?.event;
     if(!eventApi)return;
     let current=null,closing=null;

@@ -74,6 +74,29 @@ pub async fn discover_codex_spaces() -> Result<Vec<Value>, String> {
         .map_err(|_| "Space discovery stopped. Reload to retry.".to_string())?
 }
 
+#[tauri::command]
+pub async fn discover_anyblob_types(space_ids: Vec<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let client=crate::kanban_api::Client::connect()?;
+        let spaces=discover(&client)?;
+        let mut types=Vec::new();let mut errors=Vec::new();
+        for sid in space_ids.into_iter().collect::<std::collections::BTreeSet<_>>() {
+            blobui_mcp::Operation::ReadObject{space_id:sid.clone(),object_id:sid.clone()}.validate()?;
+            let Some(space)=spaces.iter().find(|s|s["id"]==sid) else {
+                errors.push(serde_json::json!({"spaceId":sid,"error":"A selected space is unavailable."}));continue;
+            };
+            let base=format!("/v2/spaces/{}",crate::api::encode_segment(&sid));
+            match source_types(&client,&base) {
+                Ok(rows)=>for row in rows {
+                    types.push(serde_json::json!({"spaceId":sid,"space":space["name"],"id":row["id"],"name":row["name"].as_str().unwrap_or("Unnamed type")}));
+                },
+                Err(_)=>errors.push(serde_json::json!({"spaceId":sid,"error":format!("Could not discover object types in {}. Saved selections remain available.",space["name"].as_str().unwrap_or("this space"))})),
+            }
+        }
+        Ok(serde_json::json!({"types":types,"errors":errors}))
+    }).await.map_err(|_|"Object type discovery stopped. Reload options to retry.".to_string())?
+}
+
 // Type lists can contain API keys without object IDs, even with ids=full.
 // Resolve those entries through the v2 type document before saving permissions.
 pub(crate) fn source_types(client: &crate::kanban_api::Client, base: &str) -> Result<Vec<Value>, String> {

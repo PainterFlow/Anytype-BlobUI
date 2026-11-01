@@ -1,6 +1,6 @@
 {
   "name": "anyblob",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Search and read permitted Anytype objects through BlobUI on Windows.",
   "requires_local_executor": true,
   "mcpServers": "./.mcp.json",

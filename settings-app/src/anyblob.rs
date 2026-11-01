@@ -675,6 +675,18 @@ mod tests {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":"none"}},
             "projects":{"project":{"sources":[source]}}}))
     }
+    #[test]
+    fn saving_filters_during_metadata_http_withholds_the_old_results() {
+        let changed=Arc::new(AtomicBool::new(false));
+        let(client,server)=mock(vec![("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
+            json!({"data":[{"id":"space","name":"Work"}],"has_more":false}))],Some(changed.clone()));
+        let result=dispatch_resolved_with(request(Operation::SearchMentions{query:String::new()}),||true,||Ok(enabled()),||{
+            let mut config=config("none","alwaysAsk");
+            if changed.load(Ordering::Acquire){config.object_mentions.spaces.all=false;}
+            Ok(config)
+        },||Ok(client.clone_for_fixture()),|_,_|panic!("no metadata approvals"),||panic!("no metadata project lookup"));
+        assert!(result.unwrap_err().contains("mention filters"));server.join().unwrap();
+    }
     fn scoped_request(op: Operation) -> Request {
         let mut request = request(op); request.thread_id = Some("chat-a".into()); request
     }
@@ -1089,6 +1101,10 @@ mod tests {
                     "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
                     json!({"id":"object","markdown":"fixture content"}),
                 ),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+                ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Note"}],"has_more":false})),
+                ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Note","properties":{}})),
+                ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"resource content"})),
             ],
             None,
         );
@@ -1097,7 +1113,7 @@ mod tests {
         let mut listener = Pipe::listen(true).unwrap();
         let bridge = std::thread::spawn(move || {
             let mut outcomes = Vec::new();
-            for index in 0..5 {
+            for index in 0..8 {
                 let deadline = Instant::now() + Duration::from_secs(15);
                 while !listener.accept().unwrap() {
                     assert!(Instant::now() < deadline);
@@ -1107,7 +1123,8 @@ mod tests {
                 let cancel = AtomicBool::new(false);
                 let request: Request =
                     serde_json::from_slice(&pipe.receive(&cancel, deadline).unwrap()).unwrap();
-                if index < 3 { assert_eq!(request.thread_id.as_deref(),Some("fixture-chat")); }
+                if index < 3 || index==4 { assert_eq!(request.thread_id.as_deref(),Some("fixture-chat")); }
+                let prompted=std::cell::Cell::new(false);
                 let result = dispatch_with(
                     request,
                     || pipe.connected(),
@@ -1115,13 +1132,16 @@ mod tests {
                     || Ok(saved.lock().unwrap().clone()),
                     || Ok(client.clone_for_fixture()),
                     |_, check| {
-                        if index == 4 {
+                        prompted.set(true);
+                        assert_ne!(index,3,"Metadata must not request read approval");
+                        if index == 7 {
                             approve_with(check, Duration::from_secs(5), || None)
                         } else {
                             check()
                         }
                     },
                 );
+                if index==4 {assert!(prompted.get(),"Resource reads retain Always Ask");}
                 outcomes.push(result.is_ok());
                 let response = match result {
                     Ok(value) => Response {
@@ -1214,6 +1234,14 @@ mod tests {
             assert_eq!(response["result"]["isError"], false, "{response}");
             assert!(response["result"]["structuredContent"].is_object());
         }
+        send(&mut input,7,"tools/call",json!({"name":"search_mentions","arguments":{"query":""}}));
+        let mentions=receive(&mut output);
+        assert_eq!(mentions["result"]["structuredContent"]["items"][0]["uri"],"anyblob://objects/space/object");
+        send(&mut input,8,"resources/read",json!({"uri":"anyblob://objects/space/object","_meta":{"threadId":"fixture-chat"}}));
+        let resource=receive(&mut output);
+        assert_eq!(resource["result"]["contents"][0]["uri"],"anyblob://objects/space/object");
+        let document:Value=serde_json::from_str(resource["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(document["markdown"],"resource content");
         *saved_config.lock().unwrap() = config("none", "alwaysAsk");
         send(
             &mut input,
@@ -1224,6 +1252,9 @@ mod tests {
         let denied = receive(&mut output);
         assert_eq!(denied["result"]["isError"], true);
         assert!(denied["result"].get("structuredContent").is_none());
+        send(&mut input,9,"resources/read",json!({"uri":"anyblob://objects/space/object"}));
+        let denied=receive(&mut output);
+        assert_eq!(denied["error"]["code"],-32000);assert!(denied.get("result").is_none());
         *saved_config.lock().unwrap() = config("read", "alwaysAsk");
         send(
             &mut input,
@@ -1242,7 +1273,7 @@ mod tests {
         assert_eq!(receive(&mut output)["error"]["code"], -32800);
         drop(input);
         assert!(child.wait().unwrap().success());
-        assert_eq!(bridge.join().unwrap(), vec![true, true, true, false, false]);
+        assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false]);
         api.join().unwrap();
     }
     #[test]

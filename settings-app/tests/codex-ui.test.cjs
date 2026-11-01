@@ -19,7 +19,8 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
         if(name==='get_app_state')return {ready:true,onboardingComplete:true,theme:'dark',hasSavedApiKey:true,settings:{codexIntegration:{spaces:{absent:{access:'read',filesEnabled:true,approval:'fullAccess'}}}}};
         if(name==='get_updater_state')return {automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return 'available';
-        if(name==='discover_codex_spaces'){if(window.holdDiscovery)await new Promise(resolve=>window.resolveDiscovery=resolve);if(window.discoveryError)throw Error(window.discoveryError);return window.spaces;}
+        if(name==='discover_codex_spaces'){if(window.holdDiscovery)await new Promise(resolve=>{(window.pendingDiscovery||=[]).push(resolve);window.resolveDiscovery=()=>window.pendingDiscovery.splice(0).forEach(done=>done());});if(window.discoveryError)throw Error(window.discoveryError);return window.spaces;}
+        if(name==='discover_anyblob_types')return{types:[],errors:[]};
         if(name==='save_settings'){if(window.saveError)throw Error('Save failed');window.saved=args.settings;return {};}
         return null;
       }}};
@@ -29,9 +30,9 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.locator('#codex-nav').click();
     assert.equal(await page.locator('#codex-panel-0').getAttribute('hidden'),null);
     assert.match(await page.locator('#codex-panel-0').innerText(),/Enable Anyblob/);
-    assert.equal(await page.evaluate(()=>calls.filter(c=>c==='discover_codex_spaces').length),0);
+    assert.equal(await page.evaluate(()=>calls.filter(c=>c==='discover_codex_spaces').length),1);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('ArrowRight');
-    await page.getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
+    await page.locator('#codex-panel-1').getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
     await page.evaluate(()=>{window.holdDiscovery=false;window.resolveDiscovery();});
     await page.locator('.codex-space').first().waitFor();
     assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]}}});

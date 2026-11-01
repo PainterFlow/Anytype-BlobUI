@@ -1748,6 +1748,7 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             codex::discover_codex_spaces,
+            codex::discover_anyblob_types,
             codex::discover_codex_sources,
             codex_projects::discover_codex_projects,
             anyblob::anyblob_status,

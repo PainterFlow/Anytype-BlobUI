@@ -26,7 +26,7 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
     await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);await page.waitForFunction(()=>window.appReady);await page.locator('#codex-nav').click();
     const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]'),install=panel.getByRole('button',{name:'Install',exact:true});
     assert.equal(await page.locator('#codex-nav .nav-label').count() ? await page.locator('#codex-nav .nav-label').innerText() : await page.locator('#codex-nav').innerText(),'Anyblob');
-    assert.equal(await panel.locator('h2').innerText(),'General');assert.equal(await panel.locator('.settings-list > .settings-row').count(),2);
+    assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),4);
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
     assert.equal(await toggle.isChecked(),false);await toggle.check();await page.waitForFunction(()=>window.enabled);await toggle.uncheck();await page.waitForFunction(()=>!window.enabled);
     await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);
@@ -40,8 +40,8 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
     await page.evaluate(()=>window.finishInstall());const updated=page.getByRole('dialog',{name:'Anyblob marketplace updated'});await updated.waitFor();assert.match(await updated.innerText(),/uninstall and reinstall/);await page.keyboard.press('Escape');await updated.waitFor({state:'hidden'});
     await update.waitFor();await page.evaluate(()=>window.updateAvailable=false);
     await page.locator('#preferences-nav').click();await page.evaluate(()=>window.installed=false);await page.locator('#codex-nav').click();await install.waitFor();
-    await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('[role=status]').innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
-    await page.locator('#codex-tab-0').focus();await page.keyboard.press('End');assert.equal(await page.locator('#codex-tab-1').getAttribute('aria-selected'),'true');await page.keyboard.press('Home');assert.equal(await page.locator('#codex-tab-0').getAttribute('aria-selected'),'true');
+    await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('[role=status]').first().innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
+    await page.locator('#codex-tab-0').focus();await page.keyboard.press('End');assert.equal(await page.locator('#codex-tab-2').getAttribute('aria-selected'),'true');await page.keyboard.press('Home');assert.equal(await page.locator('#codex-tab-0').getAttribute('aria-selected'),'true');
     await page.screenshot({path:path.join(fixture,'settings-original-dark.png')});
     await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();
     assert.equal(await panel.isVisible(),true);assert.equal(await page.locator('#codex-nav').innerText(),'Anyblob');

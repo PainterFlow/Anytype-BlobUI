@@ -3,17 +3,20 @@
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const path = require('node:path');
 const readline = require('node:readline');
 
 if (process.argv[2] === '--fixture') {
   readline.createInterface({ input: process.stdin }).on('line', line => {
     const request = JSON.parse(line);
     const threadId = request.params._meta?.threadId;
-    const objects = { 'project-a-chat': 'Only A', 'project-b-chat': 'Only B' };
-    const result = objects[threadId]
-      ? { items: [{ type: 'resource_link', uri: `anyblob://spaces/fixture/objects/${threadId}`, name: objects[threadId] }] }
-      : { items: [], denied: 'Missing verified chat identity' };
+    if(request.method==='resources/read') {
+      const allowed=threadId==='project-a-chat';
+      console.log(JSON.stringify(allowed ? {jsonrpc:'2.0',id:request.id,result:{contents:[{uri:request.params.uri,text:'Authorized A',mimeType:'text/plain'}]}} : {jsonrpc:'2.0',id:request.id,error:{code:-32000,message:'Read denied'}}));return;
+    }
+    const query=request.params.arguments.query;
+    const result={items:[{type:'resource_link',uri:'anyblob://objects/fixture/object',name:'猫 shared metadata'}].filter(item=>item.name.includes(query))};
     console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { content: [], structuredContent: result } }));
   });
 } else {
@@ -51,6 +54,16 @@ async function main() {
   const start = source.indexOf('async function sIn(');
   const end = source.indexOf('async function cIn(', start);
   assert(end > start);
+  // Feed the production executable's real discovery response into the installed selector.
+  const executable=process.argv[3]||path.resolve(__dirname,'../dist/anyblob/bin/blobui-mcp.exe');
+  const discovery=spawnSync(executable,[],{encoding:'utf8',windowsHide:true,env:{...process.env,ANYBLOB_BRIDGE_INSTANCE:'fixture-discovery'},
+    input:[{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25'}},{jsonrpc:'2.0',id:2,method:'tools/list'}].map(v=>JSON.stringify(v)+'\n').join('')});
+  assert.equal(discovery.status,0,discovery.stderr||discovery.error?.message);
+  const [initialized,listed]=discovery.stdout.trim().split(/\r?\n/).map(line=>JSON.parse(line).result);
+  assert.equal(initialized.capabilities.extensions['openai/mentions'].searchTool,'search_mentions');
+  const searchTool=listed.tools.find(t=>t.name==='search_mentions');
+  assert.equal(searchTool.annotations.readOnlyHint,true);
+  assert(searchTool._meta.ui.visibility.includes('app'));
   const child = spawn(process.execPath, [__filename, '--fixture'], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
   const pending = new Map();
   const deadline = setTimeout(() => { child.kill(); console.error('Fixture timed out.'); process.exitCode = 1; }, 10000);
@@ -58,7 +71,8 @@ async function main() {
   const lines = readline.createInterface({ input: child.stdout });
   lines.on('line', line => {
     const response = JSON.parse(line);
-    pending.get(response.id)?.(response.result);
+    const callback=pending.get(response.id);
+    if(response.error)callback?.reject(Error(response.error.message));else callback?.resolve(response.result);
     pending.delete(response.id);
   });
   const observed = [];
@@ -66,8 +80,8 @@ async function main() {
     const request = { jsonrpc: '2.0', id: ++sequence, method: 'tools/call', params: { name: 'search_mentions', arguments: { query } } };
     if (options.threadId) request.params._meta = { threadId: options.threadId };
     observed.push(request);
-    return new Promise(resolve => {
-      pending.set(request.id, resolve);
+    return new Promise((resolve,reject) => {
+      pending.set(request.id, {resolve,reject});
       child.stdin.write(JSON.stringify(request) + '\n');
     });
   }
@@ -77,19 +91,47 @@ async function main() {
     bIn: parser, _In: parser,
     // Capture exactly what the installed dispatcher supplies to its tool caller.
     cIn: (_scope, _host, _server, _tool, args, options) => call(options, args.query),
+    QNn: (_labels,_meta,run)=>run(()=>{}),
+    // Isolate the transport resolver. Never let the installed helper create fallback chats.
+    uIn: (_scope,_host,threadId,_retry,_options,run)=>run(threadId,0),
+    Hn: ()=>false,Yh:{},Pde:{parse:value=>value},
+    tg: ()=>({sendRequest:async(method,params)=>{
+      assert.equal(method,'mcpServer/resource/read');
+      const request={jsonrpc:'2.0',id:++sequence,method:'resources/read',params:{uri:params.uri,_meta:{threadId:params.threadId}}};
+      observed.push(request);
+      return new Promise((resolve,reject)=>{pending.set(request.id,{resolve,reject});child.stdin.write(JSON.stringify(request)+'\n');});
+    }}),
+    Cy:()=>false,vSn:'openai/mentions',ySn:{},
+    yMn:(capabilities,name)=>{const data=capabilities.extensions?.[name]??capabilities.experimental?.[name];return data?{success:typeof data.searchTool==='string'&&!!data.searchTool.trim(),data}:null;},
+    lO:tools=>Object.values(tools),x1r:()=>null,wy:()=>null,hMn:()=>null,C1r:()=>null,S1r:tool=>tool.name,
   });
   vm.runInContext(source.slice(start, end), context, { timeout: 1000 });
+  const readStart=source.indexOf('async function oIn(');
+  assert(readStart>0&&readStart<start,'Host resource read helper changed. Inspect before updating this probe.');
+  vm.runInContext(source.slice(readStart,start),context,{timeout:1000});
+  const discoveryStart=source.indexOf('function m1r('),discoveryEnd=source.indexOf('function h1r(',discoveryStart);
+  assert(discoveryStart>0&&discoveryEnd>discoveryStart,'Host mention provider discovery changed.');
+  vm.runInContext(source.slice(discoveryStart,discoveryEnd),context,{timeout:1000});
+  const server={name:'fixture',serverCapabilities:initialized.capabilities,serverInfo:initialized.serverInfo,tools:Object.fromEntries(listed.tools.map(tool=>[tool.name,tool]))};
+  const discovered=context.m1r([server]);assert.equal(discovered.length,1);assert.equal(discovered[0].mentionSearchTool,'search_mentions');
+  const invalid=structuredClone(server);invalid.tools.search_mentions.annotations.readOnlyHint=false;
+  assert.equal(context.m1r([invalid]).length,0,'Writable search tools must not become mention providers');
   try {
-    const providers = [{ mentionSearchTool: 'search_mentions', server: 'fixture', usesLegacySearchArguments: false }];
+    const providers = discovered;
     const results = await Promise.all(['project-a-chat', 'project-b-chat'].map(threadId =>
-      context.sIn({ activeThreadId: threadId }, 'local', providers, { query: '', threadId })));
+      context.sIn({ activeThreadId: threadId }, 'local', providers, { query: threadId==='project-a-chat'?'':'猫', threadId })));
     assert.equal(observed.length, 2);
     assert(observed.every(request => !request.params._meta?.threadId));
-    assert(results.every(result => result[0].items.length === 0));
-    // Control cases prove that the fixture distinguishes projects when identified.
-    assert.equal((await call({ threadId: 'project-a-chat' }, '')).structuredContent.items[0].name, 'Only A');
-    assert.equal((await call({ threadId: 'project-b-chat' }, '')).structuredContent.items[0].name, 'Only B');
-    console.log(JSON.stringify({ asset, extensionRecognized: true, concurrentSearches: 2, activeChatForwarded: false, projectControlsPassed: true, decision: 'BLOCKED' }, null, 2));
+    assert(results.every(result => result[0].items.length === 1));
+    assert.equal((await call({threadId:'helper-chat'},'absent')).structuredContent.items.length,0);
+    const uri=results[0][0].items[0].uri;
+    const scope={get:()=>({})};
+    const allowed=await context.oIn(scope,'local',{server:'fixture',uri,threadId:'project-a-chat'});
+    assert.equal(allowed.contents[0].text,'Authorized A');
+    await assert.rejects(context.oIn(scope,'local',{server:'fixture',uri,threadId:'project-b-chat'}),/Read denied/);
+    await assert.rejects(context.oIn(scope,'local',{server:'fixture',uri}),/Read denied/);
+    assert.deepEqual(observed.filter(r=>r.method==='resources/read').map(r=>r.params._meta.threadId),['project-a-chat','project-b-chat',undefined]);
+    console.log(JSON.stringify({asset,extensionRecognized:true,productionCapabilityDiscoveryPassed:true,concurrentSearches:2,globalMetadataPassed:true,resourceReadBoundaryIdentityPassed:true,deniedReadsPassed:true,decision:'PASS',scope:'Installed webview dispatcher with isolated resolver and fixture transport; not full host-to-MCP transport'},null,2));
   } finally {
     clearTimeout(deadline);
     child.stdin.end();

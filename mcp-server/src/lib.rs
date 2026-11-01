@@ -84,10 +84,33 @@ pub struct Response {
     pub result: Option<Value>,
     pub error: Option<String>,
 }
+pub fn capabilities() -> Value {
+    json!({"tools":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},
+        "extensions":{"openai/mentions":{"searchTool":"search_mentions"}},
+        "experimental":{"openai/mentions":{"searchTool":"search_mentions"}}})
+}
+pub fn object_uri(space: &str, object: &str) -> String {
+    format!("anyblob://objects/{space}/{object}")
+}
+/// Parse raw canonical URIs without URL normalization, decoding or model-selected paths.
+pub fn resource_operation(params: &Value) -> Result<Operation, String> {
+    let params=params.as_object().ok_or("Resource read parameters must be an object.")?;
+    if params.keys().any(|key| key!="uri" && key!="_meta") {
+        return Err("Unknown resource read argument. Chat identity must come from host metadata.".into());
+    }
+    let uri=params.get("uri").and_then(Value::as_str).ok_or("Resource URI is required.")?;
+    let path=uri.strip_prefix("anyblob://objects/").ok_or("Unsupported Anyblob resource URI.")?;
+    let (space,object)=path.split_once('/').ok_or("Invalid Anyblob object resource URI.")?;
+    let op=Operation::ReadObject{space_id:space.into(),object_id:object.into()};
+    op.validate()?;
+    if object_uri(space,object)!=uri {return Err("Invalid Anyblob object resource URI.".into());}
+    Ok(op)
+}
 pub fn tools() -> Value {
     let id = json!({"type":"string","minLength":1,"maxLength":512});
     let annotations = json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false});
     json!([
+        {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
         {"name":"read_object","description":"Read an explicit object as properties and Markdown. Attachments remain references.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"annotations":annotations}
@@ -110,6 +133,17 @@ pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resource_uris_are_canonical_and_never_carry_consent_or_identity() {
+        assert!(matches!(resource_operation(&json!({"uri":object_uri("space-id","object_id"),"_meta":{"threadId":"host-chat"}})).unwrap(),Operation::ReadObject{..}));
+        for uri in ["anyblob://objects/a/b/c","anyblob://objects/a/..","anyblob://objects/a/%62","anyblob://objects/a/b?consent=true","anyblob://objects/a/b#x","anyblob://objects/a/","anyblob://other/a/b","ANYBLOB://objects/a/b","anyblob://objects/a\\b/c","anyblob://objects/a/猫"] {
+            assert!(resource_operation(&json!({"uri":uri})).is_err(),"{uri}");
+        }
+        for key in ["threadId","consent","approval","space_id"] {
+            let mut params=json!({"uri":object_uri("a","b")});params[key]=json!("forged");
+            assert!(resource_operation(&params).is_err());
+        }
+    }
     #[test]
     fn chat_identity_comes_only_from_host_metadata() {
         assert_eq!(thread_id(&json!({"_meta":{"threadId":"chat-123"},"arguments":{"threadId":"spoof"}})).unwrap(),Some("chat-123".into()));

@@ -124,6 +124,25 @@ fn search_with(
         if !filters.spaces.all && !filters.spaces.items.iter().any(|s| s.id == sid) { continue; }
         if !filters.types.all && !filters.types.items.iter().any(|t| t.space_id == sid) { continue; }
         let space_name = text(&space, "name")?;
+        let base=format!("/v2/spaces/{}",crate::api::encode_segment(sid));
+        let mut type_keys=std::collections::BTreeSet::new();
+        if !filters.types.all {
+            for mut object_type in pages("GET",&format!("{base}/types?ids=full"),None,check,&mut request)? {
+                let key=text(&object_type,"key")?.to_string();
+                if object_type["id"].as_str().filter(|s|!s.is_empty()).is_none() {
+                    check()?;
+                    let document=request("GET",&format!("{base}/types/{}?ids=full",crate::api::encode_segment(&key)),None)
+                        .map_err(|_|"Anytype mention type discovery failed. Retry the search.".to_string())?;
+                    check()?;
+                    object_type["id"]=json!(text(&document,"id")?);
+                }
+                let id=text(&object_type,"id")?;
+                if filters.types.items.iter().any(|t|t.space_id==sid&&t.id==id) {
+                    type_keys.insert(key);type_keys.insert(id.to_string());
+                }
+            }
+            if type_keys.is_empty(){continue;}
+        }
         // Enumerate once with an empty API query. Full-text API search has a capped snapshot
         // and overlapping pages, so match titles locally for a complete deterministic order.
         let path = format!("/v2/spaces/{}/search?ids=full", crate::api::encode_segment(sid));
@@ -131,13 +150,16 @@ fn search_with(
             let oid = text(&row, "id")?;
             valid_id(oid)?;
             if !filters.types.all {
-                let type_id = row.pointer("/type/id").and_then(Value::as_str)
-                    .ok_or("Anytype omitted the full object type ID. Mention search cannot apply saved filters.")?;
-                if !filters.types.items.iter().any(|t| t.space_id == sid && t.id == type_id) { continue; }
+                // v2 search rows use type keys; stored filters retain full, space-scoped IDs.
+                let selected=if let Some(type_key)=row["type"].as_str() {type_keys.contains(type_key)}
+                else if let Some(id)=row.pointer("/type/id").and_then(Value::as_str) {
+                    filters.types.items.iter().any(|t| t.space_id==sid&&t.id==id)
+                } else {return Err("Anytype omitted the object type. Mention search cannot apply saved filters.".into());};
+                if !selected {continue;}
             }
             let title = row["name"].as_str().ok_or("Anytype omitted an object title.")?;
             if !title.to_lowercase().contains(&query) { continue; }
-            let item = json!({"type":"resource_link","uri":format!("anyblob://objects/{sid}/{oid}"),
+            let item = json!({"type":"resource_link","uri":blobui_mcp::object_uri(sid,oid),
                 "name":title,"title":title,"description":space_name,
                 "_meta":{"anyblob/spaceId":sid,"anyblob/spaceName":space_name,"anyblob/objectId":oid}});
             let key = (sid.to_string(), oid.to_string());
@@ -186,6 +208,7 @@ mod tests {
         let result = search_with(&saved, "Ü", &|| Ok(()), |method,path,body| {
             calls.push(path.to_string());
             assert!(!path.contains("/objects/"));
+            if path.contains("/types?"){return Ok(json!({"data":[{"id":"task","key":"task-key"}],"has_more":false}));}
             if method == "GET" { return Ok(json!({"data":[{"id":"b","name":"Same"},{"id":"a","name":"Same"},{"id":"excluded","name":"Other"}],"has_more":false})); }
             assert_eq!(body,Some(&json!({})));
             if path.ends_with("offset=0") {
@@ -199,7 +222,7 @@ mod tests {
         assert_eq!(rows[0]["uri"],"anyblob://objects/a/obj00");
         assert_eq!(rows[19]["uri"],"anyblob://objects/a/obj19");
         assert!(!result.to_string().contains("never"));
-        assert_eq!(calls.len(),5);
+        assert_eq!(calls.len(),7);
     }
     #[test]
     fn dynamic_all_empty_selection_unicode_and_deduplication() {
@@ -214,6 +237,41 @@ mod tests {
             let result=search_with(&saved,"",&||Ok(()),|_,_,_|panic!("Empty selection must not make HTTP calls")).unwrap();
             assert_eq!(result,json!({"items":[]}));
         }
+    }
+    #[test]
+    fn full_type_ids_resolve_to_current_api_keys_without_cross_space_collisions() {
+        let saved=filters(json!({"spaces":{"all":true},"types":{"all":false,"items":[
+            {"spaceId":"a","id":"full-task","name":"Duplicate","space":"Same"},
+            {"spaceId":"b","id":"unavailable","name":"Duplicate","space":"Same"}]}}));
+        let mut calls=Vec::new();
+        let result=search_with(&saved,"",&||Ok(()),|method,path,_|{
+            calls.push(path.to_string());
+            Ok(if path.starts_with("/v2/spaces?") {json!({"data":[{"id":"a","name":"Same"},{"id":"b","name":"Same"}],"has_more":false})}
+            else if path.contains("/types?"){json!({"data":[{"key":"renamed task / key"}],"has_more":false})}
+            else if path.contains("/types/renamed%20task%20%2F%20key?"){json!({"id":"full-task"})}
+            else {assert_eq!(method,"POST");assert!(path.contains("/spaces/a/"));json!({"data":[{"id":"one","name":"Task","type":"renamed task / key"},{"id":"two","name":"Wrong","type":"other"}],"has_more":false})})
+        }).unwrap();
+        assert_eq!(result["items"].as_array().unwrap().len(),1);
+        assert_eq!(result["items"][0]["uri"],"anyblob://objects/a/one");
+        assert!(!calls.iter().any(|p|p.contains("/spaces/b/search")));
+    }
+    #[test]
+    fn concurrent_queries_and_filter_snapshots_do_not_mix() {
+        let barrier=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let threads:Vec<_>=[("a","猫"),("b","Über")].into_iter().map(|(sid,query)|{
+            let barrier=barrier.clone();
+            std::thread::spawn(move||{
+                let saved=filters(json!({"spaces":{"all":false,"items":[{"id":sid,"name":"Saved"}]},"types":{"all":true}}));
+                search_with(&saved,query,&||Ok(()),|method,path,_|{
+                    if method=="GET"{barrier.wait();return Ok(json!({"data":[{"id":"a","name":"A"},{"id":"b","name":"B"}],"has_more":false}));}
+                    assert!(path.contains(&format!("/spaces/{sid}/")));
+                    Ok(json!({"data":[{"id":"cat","name":"猫"},{"id":"word","name":"Über"}],"has_more":false}))
+                }).unwrap()
+            })
+        }).collect();
+        let results:Vec<_>=threads.into_iter().map(|t|t.join().unwrap()).collect();
+        assert_eq!(results[0]["items"][0]["uri"],"anyblob://objects/a/cat");
+        assert_eq!(results[1]["items"][0]["uri"],"anyblob://objects/b/word");
     }
     #[test]
     fn cancellation_failures_and_forged_ids_fail_closed() {
