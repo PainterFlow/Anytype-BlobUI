@@ -76,6 +76,14 @@ impl Client {
         let growing_total = method == "POST"
             && path.split('?').next().is_some_and(|path| path.ends_with("/search"))
             && body.and_then(|body| body["query"].as_str()).is_some_and(|query| !query.trim().is_empty());
+        if growing_total {
+            return complete_search_snapshot(|limit| {
+                let separator = if path.contains('?') { '&' } else { '?' };
+                self.request(method, &format!("{path}{separator}limit={limit}&offset=0"), body)
+            }, |message| {
+                if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+            });
+        }
         complete_pages_with_totals(|offset| {
             let separator = if path.contains('?') { '&' } else { '?' };
             self.request(
@@ -1035,6 +1043,35 @@ fn complete_pages_with_info(
     complete_pages_with_totals(fetch, on_info, false)
 }
 
+// Full-text rankings can shift with the candidate budget. Never stitch together
+// offset pages: grow a prefix and use only the final complete response.
+fn complete_search_snapshot(
+    mut fetch: impl FnMut(usize) -> Result<Value, String>,
+    mut on_info: impl FnMut(&str),
+) -> Result<Vec<Value>, String> {
+    let mut limit = 100;
+    loop {
+        let response = fetch(limit)?;
+        warnings::check(&response, false, &mut on_info)?;
+        let rows = response["data"].as_array().ok_or("Anytype returned a page without data.")?;
+        let more = response.get("has_more").or_else(|| response.pointer("/pagination/has_more"))
+            .and_then(Value::as_bool).ok_or("Anytype returned a page without completeness metadata.")?;
+        if rows.len() > limit || (more && rows.is_empty()) {
+            return Err("Anytype returned inconsistent search pagination.".into());
+        }
+        if !more {
+            let mut response = Some(response);
+            return complete_pages_with_totals(|_| response.take().ok_or("Anytype returned inconsistent search pagination.".into()), on_info, true);
+        }
+        // API v2 caps a request at 1000 rows. Refuse partial results rather than
+        // silently dropping objects or mixing unstable result pages.
+        if limit == 1000 {
+            return Err("Full-text search exceeds the safe 1000-result snapshot limit. Narrow the search and retry.".into());
+        }
+        limit = (limit * 2).min(1000);
+    }
+}
+
 fn complete_pages_with_totals(
     mut fetch: impl FnMut(usize) -> Result<Value, String>,
     mut on_info: impl FnMut(&str),
@@ -1397,6 +1434,28 @@ mod tests {
             .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
+    }
+    #[test]
+    fn fulltext_snapshot_discards_shifting_prefixes() {
+        let mut limits = Vec::new();
+        let rows = complete_search_snapshot(|limit| {
+            limits.push(limit);
+            Ok(if limit == 100 {
+                json!({"data":[{"id":"a"},{"id":"b"}],"has_more":true,"total":3})
+            } else {
+                json!({"data":[{"id":"b"},{"id":"c"},{"id":"a"}],"has_more":false,"total":3})
+            })
+        }, |_| {}).unwrap();
+        assert_eq!(limits, vec![100,200]);
+        assert_eq!(rows.iter().map(|row| row["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["b","c","a"]);
+        assert!(complete_search_snapshot(|_| Ok(json!({"data":[{"id":"a"},{"id":"a"}],"has_more":false,"total":2})), |_| {}).is_err());
+        let mut limits = Vec::new();
+        let error = complete_search_snapshot(|limit| {
+            limits.push(limit);
+            Ok(json!({"data":[{"id":"a"}],"has_more":true,"total":1001}))
+        }, |_| {}).unwrap_err();
+        assert!(error.contains("Narrow the search"));
+        assert_eq!(limits, vec![100,200,400,800,1000]);
     }
     #[test]
     fn fulltext_paging_accepts_lower_bounds_and_rejects_incomplete_results() {

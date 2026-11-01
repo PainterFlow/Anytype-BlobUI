@@ -228,7 +228,10 @@ fn execute_scoped(
     allowed(config, op)?;
     op.validate()?;
     check()?;
-    let unavailable = |_: String| {
+    let unavailable = |error: String| {
+        if error == "Full-text search exceeds the safe 1000-result snapshot limit. Narrow the search and retry." {
+            return error;
+        }
         "Anytype API v2 could not complete this read. Check the saved API connection, object ID and Anytype availability.".to_string()
     };
     match op {
@@ -667,7 +670,7 @@ mod tests {
         requests.extend(membership.clone());
         requests.extend(vec![
             ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"hidden","name":"Hidden","type":"page"},{"id":"allowed","name":"First","type":"page"}],"total":3,"has_more":true})),
-            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=2 ".into(),json!({"data":[{"id":"second","name":"Second","type":"page"},{"id":"hidden-later","name":"Hidden later","type":"page"}],"total":4,"has_more":false}))]);
+            ("POST /v2/spaces/space/search?ids=full&limit=200&offset=0 ".into(),json!({"data":[{"id":"hidden-later","name":"Hidden later","type":"page"},{"id":"allowed","name":"First","type":"page"},{"id":"second","name":"Second","type":"page"},{"id":"hidden","name":"Hidden","type":"page"}],"total":4,"has_more":false}))]);
         requests.extend(membership);
         let (client,server)=mock(requests,None);
         let result=dispatch_resolved_with(scoped_request(Operation::SearchObjects{space_id:"space".into(),query:"private fixture query".into(),limit:1,offset:1}),
