@@ -1492,7 +1492,7 @@
     advancedPage.hidden = !isAdvanced;
     if (isAdvanced) advancedTabController.refresh();
     else if (!isAccessibility && !isBrowser) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isCodex ? "Codex" : isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    pageTitle.textContent = isCodex ? "Anyblob" : isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isBrowser);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);

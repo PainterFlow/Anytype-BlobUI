@@ -117,7 +117,7 @@ fn main() {
                 }
                 let pending = pending.clone();
                 std::thread::spawn(move || {
-                    let result=std::env::var("ANYBLOB_BRIDGE_TOKEN").map_err(|_|"Set ANYBLOB_BRIDGE_TOKEN in the MCP process environment using the token from BlobUI.".into()).and_then(|token|transport::call(&Request{id:key.clone(),token,request:op},&cancel));
+                    let result=blobui_mcp::credential::read().and_then(|token|transport::call(&Request{id:key.clone(),token,request:op},&cancel));
                     let result = result.and_then(|r| {
                         r.result
                             .ok_or_else(|| r.error.unwrap_or("BlobUI denied the request.".into()))

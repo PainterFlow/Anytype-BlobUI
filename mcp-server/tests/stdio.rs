@@ -6,7 +6,8 @@ use std::{
 #[test]
 fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_blobui-mcp"))
-        .env_remove("ANYBLOB_BRIDGE_TOKEN")
+        .env("ANYBLOB_BRIDGE_INSTANCE", "fixture-missing-credential")
+        .env_remove("ANYBLOB_CREDENTIAL_FILE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

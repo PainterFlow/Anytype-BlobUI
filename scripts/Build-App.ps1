@@ -45,6 +45,7 @@ if ($c -and $env:BLOBUI_BUILD_ONLY -ne '1') {
     }
 }
 
+& (Join-Path $PSScriptRoot 'Build-Codex.ps1')
 $buildEnvironment = @{}
 foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER', 'CARGO_TARGET_DIR')) {
     $buildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')

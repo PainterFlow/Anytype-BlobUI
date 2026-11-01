@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub mod transport;
+pub mod credential;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]

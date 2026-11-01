@@ -72,24 +72,34 @@
 
   function mountIntegration(panel) {
     const status=make('p','input-hint');status.setAttribute('role','status');
-    const token=C.TextField({label:'Bridge token, shown once',inputAttributes:{type:'text',readonly:true,'aria-label':'New Anyblob bridge token',autocomplete:'off'}});
-    token.element.hidden=true;
     const toggle=C.ToggleSetting({label:'Enable Anyblob',onChange:()=>configure(toggle.input.checked)});
-    const rotate=C.Button({label:'Regenerate token',attributes:{class:'formula-button'},onClick:()=>configure(true)});
-    const clear=C.Button({label:'Hide token',attributes:{class:'formula-button'},onClick:()=>{token.input.value='';token.element.hidden=true;}});
-    clear.element.hidden=true;
-    const help=make('p','input-hint','Anyblob reads permitted objects through this running app. Integration changes save immediately. Space permissions use Save and Undo. Set ANYBLOB_BRIDGE_TOKEN in the MCP process environment, then manually install the built Anyblob plugin. Never paste the token into chat.');
-    const details=make('p','input-hint','Build with scripts/Build-Codex.ps1. Install codex-plugin/dist/anyblob manually. Read the packaged README for setup and troubleshooting. Local Windows execution is required.');
-    panel.append(C.Heading({title:'Anyblob'}).element,toggle.element,help,rotate.element,token.element,clear.element,status,details);
-    let changing=false;
+    const install=C.Button({label:'Install',attributes:{class:'formula-button update-check-button'},onClick:()=>void installMarketplace()});
+    panel.append(C.Heading({title:'General'}).element,C.Group({content:[toggle.element,C.SettingsRow({label:'Install Marketplace',content:[install.element],attributes:{class:'settings-row kanban-setting-row'}}).element]}).element,status);
+    let changing=false,installing=false,integrationEpoch=0,installationEpoch=0;
     async function configure(enabled) {
-      if(changing)return;changing=true;toggle.input.disabled=true;rotate.element.disabled=true;
-      try {const value=await api.invoke('configure_anyblob',{enabled});toggle.input.checked=value.enabled;token.input.value=value.token||'';token.element.hidden=!value.token;clear.element.hidden=!value.token;status.textContent=value.enabled?'Saved. Copy the token now, then hide it. Regeneration invalidates pending reads.':'Anyblob disabled and pending reads invalidated.';}
+      if(changing)return;changing=true;integrationEpoch++;toggle.input.disabled=true;status.textContent='';
+      try {const value=await api.invoke('configure_anyblob',{enabled});toggle.input.checked=value.enabled;}
       catch(error){status.textContent=String(error.message||error);await refresh();}
-      finally {changing=false;toggle.input.disabled=false;rotate.element.disabled=!toggle.input.checked;}
+      finally {changing=false;toggle.input.disabled=false;}
     }
-    async function refresh(){try{const value=await api.invoke('anyblob_status');toggle.input.checked=value.enabled;rotate.element.disabled=!value.enabled;}catch(error){status.textContent=String(error.message||error);}}
-    void refresh();
+    async function refresh(){const epoch=++integrationEpoch;try{const value=await api.invoke('anyblob_status');if(epoch===integrationEpoch)toggle.input.checked=value.enabled;}catch(error){if(epoch===integrationEpoch)status.textContent=String(error.message||error);}}
+    async function refreshInstallation(){if(installing)return;const epoch=++installationEpoch;try{const value=await api.invoke('anyblob_installation_status');if(epoch===installationEpoch)install.element.textContent=value?.installed?'Installed':'Install';}catch(error){if(epoch===installationEpoch){install.element.textContent='Install';status.textContent=String(error.message||error);}}}
+    async function installMarketplace(){
+      if(installing)return;installing=true;installationEpoch++;install.element.disabled=true;install.element.textContent='Installing…';status.textContent='';
+      try {
+        await api.invoke('install_anyblob_marketplace');install.element.textContent='Installed';
+        const title=make('h2','','Anyblob marketplace installed');
+        const text=make('p','','Open the Plugins Directory, select your personal marketplace, then choose Anyblob to install and enable it. You may need to reopen Codex. Space access still requires saved BlobUI permissions.');
+        let modal;
+        const done=C.Button({label:'Done',attributes:{class:'confirm-cancel'},onClick:()=>modal.close()});
+        const actions=make('div','confirm-actions');actions.append(done.element);
+        const shell=C.DialogShell({dialogAttributes:{'aria-label':'Anyblob marketplace installed'},content:[title,text,actions]});doc.body.append(shell.element);
+        modal=C.Modal({backdrop:shell.element,dialog:shell.dialog,initialFocus:done.element,inertTargets:[...doc.body.children].filter(node=>node!==shell.element&&node.tagName!=='SCRIPT'),onClose:()=>root.setTimeout(()=>{modal.destroy();shell.destroy();shell.element.remove();},180)});modal.open();
+      }catch(error){install.element.textContent='Install';status.textContent=String(error.message||error);}
+      finally{installing=false;install.element.disabled=false;}
+    }
+    panel.refreshIntegration=()=>{void refresh();void refreshInstallation();};
+    panel.refreshIntegration();
     const eventApi=root.__TAURI__?.event;
     if(!eventApi)return;
     let current=null,closing=null;
@@ -110,15 +120,15 @@
       current={id:payload.id,modal,shell};modal.open();
     }).catch(()=>{});
     eventApi.listen('anyblob-approval-closed',({payload})=>{if(current?.id===payload.id)close();}).catch(()=>{});
-    root.addEventListener('pagehide',()=>{token.input.value='';if(current)void api.invoke('approve_anyblob',{id:current.id,allow:false}).catch(()=>{});});
+    root.addEventListener('pagehide',()=>{if(current)void api.invoke('approve_anyblob',{id:current.id,allow:false}).catch(()=>{});});
   }
 
   function init(options) {
     api = options;
     const navigation = doc.getElementById('sidebar-nav'); navigation.append(make('span','nav-group-label','Integrations'));
-    nav = C.NavigationItem({label:'Codex',icon: (() => { const span=make('span','nav-icon'); span.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m7 5-5 5 5 5m6-10 5 5-5 5m-2-12-2 14"/></svg>'; return span; })(),attributes:{id:'codex-nav',class:'nav-item','data-settings-page':'codex'},onClick:()=>api.navigate('codex')}).element; navigation.append(nav);
+    nav = C.NavigationItem({label:'Anyblob',icon: (() => { const span=make('span','nav-icon'); span.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m7 5-5 5 5 5m6-10 5 5-5 5m-2-12-2 14"/></svg>'; return span; })(),attributes:{id:'codex-nav',class:'nav-item','data-settings-page':'codex'},onClick:()=>api.navigate('codex')}).element; navigation.append(nav);
     page = make('div','settings-page');page.id='codex-page';page.hidden=true;doc.getElementById('advanced-page').after(page);
-    const bar=make('div','advanced-tabs');bar.setAttribute('role','tablist');bar.setAttribute('aria-label','Codex');
+    const bar=make('div','advanced-tabs');bar.setAttribute('role','tablist');bar.setAttribute('aria-label','Anyblob');
     const panels=['Settings','Permissions'].map((label,index)=>{const button=make('button','',label);button.type='button';button.id='codex-tab-'+index;button.setAttribute('role','tab');const panel=make('section','');panel.id='codex-panel-'+index;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);button.setAttribute('aria-controls',panel.id);bar.append(button);return panel;});
     page.append(bar,...panels);tabs=C.Tabs({container:bar,buttons:[...bar.children],panels,onSelect:index=>{if(index===1&&!loaded&&!busy)void reload();}});
     mountIntegration(panels[0]);
@@ -126,5 +136,5 @@
     list=make('div','');message=make('p','input-hint');message.setAttribute('role','status');empty=make('p','input-hint');empty.hidden=true;panels[1].append(toolbar,message,list,empty);
     browser=UI.CatalogBrowser.attach({prefix:'codex',toolbar,records:()=>records,empty,onReload:reload});
   }
-  UI.CodexPage={normalize,init,render,show(value){if(!page)return;page.hidden=!value;nav.classList.toggle('active',value);nav.setAttribute('aria-current',value?'page':'false');if(value){tabs.refresh();if(!doc.getElementById('codex-panel-1').hidden&&!loaded&&!busy)void reload();}},select(index){tabs.select(index);if(index===1&&!loaded&&!busy)void reload();},setLocked(value){if(locked===value)return;locked=value;render();browser?.setLocked(value,busy);}};
+  UI.CodexPage={normalize,init,render,show(value){if(!page)return;page.hidden=!value;nav.classList.toggle('active',value);nav.setAttribute('aria-current',value?'page':'false');if(value){doc.getElementById('codex-panel-0').refreshIntegration();tabs.refresh();if(!doc.getElementById('codex-panel-1').hidden&&!loaded&&!busy)void reload();}},select(index){tabs.select(index);if(index===1&&!loaded&&!busy)void reload();},setLocked(value){if(locked===value)return;locked=value;render();browser?.setLocked(value,busy);}};
 })(window);

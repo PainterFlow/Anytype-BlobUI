@@ -46,7 +46,7 @@ fn digest(token: &str) -> String {
 }
 fn authenticate(state: &Value, token: &str) -> Result<(), String> {
     if state["enabled"] != true {
-        return Err("Anyblob is disabled. Enable it in BlobUI Integrations > Codex.".into());
+        return Err("Anyblob is disabled. Enable it in BlobUI Integrations > Anyblob.".into());
     }
     let expected = state["verifier"].as_str().unwrap_or("");
     let actual = digest(token);
@@ -56,38 +56,109 @@ fn authenticate(state: &Value, token: &str) -> Result<(), String> {
         .zip(actual.bytes())
         .fold(0u8, |a, (b, c)| a | (b ^ c));
     if token.len() != 64 || expected.len() != 64 || mismatch != 0 {
-        return Err(
-            "Bridge token rejected. Copy a new token from BlobUI and update ANYBLOB_BRIDGE_TOKEN."
-                .into(),
-        );
+        return Err("Anyblob credential rejected. Disable and enable Anyblob in BlobUI.".into());
     }
     Ok(())
 }
+// The save guard serializes migration, toggles and permission saves.
+fn configure_at(
+    path: &std::path::Path,
+    credential: &std::path::Path,
+    enabled: bool,
+) -> Result<(), String> {
+    use crate::storage as store;
+    blobui_mcp::credential::reject_links(credential)?;
+    crate::reject_reparse_component(path)?;
+    let before = store::snapshot(path, false)?;
+    let secret_before = store::snapshot(credential, true)?;
+    let mut bytes = [0u8; 32];
+    if enabled {
+        getrandom::fill(&mut bytes)
+            .map_err(|_| "Windows could not generate an Anyblob credential.")?;
+    }
+    let token = bytes.iter().map(|v| format!("{v:02x}")).collect::<String>();
+    bytes.fill(0);
+    let encrypted = if enabled {
+        Some(blobui_mcp::credential::encrypt(&token)?)
+    } else {
+        None
+    };
+    let state = serde_json::to_vec(
+        &json!({"enabled":enabled,"verifier":if enabled {digest(&token)}else{String::new()}}),
+    )
+    .unwrap();
+    let state_temp = store::prepare_temp(path, &state, None, false)?;
+    let secret_temp = match encrypted
+        .as_ref()
+        .map(|data| store::prepare_temp(credential, data, None, true))
+        .transpose()
+    {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = std::fs::remove_file(&state_temp);
+            return Err(e);
+        }
+    };
+    let result = (|| {
+        if let Some(temp) = &secret_temp {
+            store::replace_credential(temp, credential)
+                .map_err(|_| "Could not save the Anyblob credential.")?;
+        } else if credential.exists() {
+            std::fs::remove_file(credential)
+                .map_err(|_| "Could not remove the Anyblob credential.")?;
+        }
+        store::replace_credential(&state_temp, path)
+            .map_err(|e| format!("Could not save Anyblob state: {e}"))?;
+        Ok::<_, String>(())
+    })();
+    let _ = std::fs::remove_file(state_temp);
+    if let Some(p) = secret_temp {
+        let _ = std::fs::remove_file(p);
+    }
+    if let Err(error) = result {
+        let rollback = [store::restore(&before), store::restore(&secret_before)];
+        invalidate();
+        if rollback.iter().any(Result::is_err) {
+            return Err(format!(
+                "{error} Could not fully restore the previous Anyblob configuration."
+            ));
+        }
+        return Err(error);
+    }
+    invalidate();
+    Ok(())
+}
+fn migrate() -> Result<bool, String> {
+    let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
+    migrate_at(&bridge_path()?, &blobui_mcp::credential::path()?)
+}
+fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bool, String> {
+    let value = if path.exists() {
+        crate::read_json_file(path)?
+    } else {
+        json!({"enabled":false})
+    };
+    let enabled = value["enabled"] == true;
+    if enabled
+        && blobui_mcp::credential::read_at(credential)
+            .ok()
+            .is_none_or(|token| authenticate(&value, &token).is_err())
+    {
+        configure_at(path, credential, true)?;
+    } else if !enabled && credential.exists() {
+        configure_at(path, credential, false)?;
+    }
+    Ok(enabled)
+}
 #[tauri::command]
 pub fn anyblob_status() -> Result<Value, String> {
-    Ok(json!({"enabled":state()?["enabled"]==true}))
+    Ok(json!({"enabled":migrate()?}))
 }
 #[tauri::command]
 pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
-    let mut bytes = [0u8; 32];
-    if enabled {
-        getrandom::fill(&mut bytes).map_err(|_| "Windows could not generate a bridge token.")?;
-    }
-    let token = bytes.iter().map(|v| format!("{v:02x}")).collect::<String>();
-    bytes.fill(0);
-    let path = bridge_path()?;
-    crate::reject_reparse_component(&path)?;
-    std::fs::write(
-        &path,
-        serde_json::to_vec(
-            &json!({"enabled":enabled,"verifier":if enabled {digest(&token)} else {String::new()}}),
-        )
-        .unwrap(),
-    )
-    .map_err(|_| "Could not save Anyblob integration state.")?;
-    invalidate();
-    Ok(json!({"enabled":enabled,"token":if enabled {Some(token)} else {None}}))
+    configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
+    Ok(json!({"enabled":enabled}))
 }
 #[tauri::command]
 pub fn approve_anyblob(id: String, allow: bool) -> Result<(), String> {
@@ -364,6 +435,9 @@ fn dispatch(
     )
 }
 pub fn start(app: tauri::AppHandle) {
+    if migrate().is_err() {
+        eprintln!("Anyblob credential setup needs attention in Settings.");
+    }
     #[cfg(windows)]
     std::thread::spawn(move || {
         use blobui_mcp::transport::{Pipe, CALL_TIMEOUT};
@@ -848,7 +922,16 @@ mod tests {
                     .map(|a| a.as_str().unwrap()),
             )
             .current_dir(package.join(launch["cwd"].as_str().unwrap()))
-            .env("ANYBLOB_BRIDGE_TOKEN", "a".repeat(64))
+            .env("ANYBLOB_CREDENTIAL_FILE", {
+                let path = package.join("../../../.test-run/anyblob-handoff/fixture.dpapi");
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(
+                    &path,
+                    blobui_mcp::credential::encrypt(&"a".repeat(64)).unwrap(),
+                )
+                .unwrap();
+                path.canonicalize().unwrap()
+            })
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -972,5 +1055,120 @@ mod tests {
             );
         }
         assert!(approve_anyblob("stale".into(), true).is_err());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod credential_tests {
+    use super::*;
+    #[test]
+    fn lifecycle_migration_encryption_and_rollback() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.test-run")
+            .join(format!(
+                "credential-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("state.json");
+        let secret = root.join("bridge.dpapi");
+        // Existing enabled installs cannot recover the old token from its verifier.
+        let old = "a".repeat(64);
+        std::fs::write(
+            &state_path,
+            json!({"enabled":true,"verifier":digest(&old)}).to_string(),
+        )
+        .unwrap();
+        assert!(migrate_at(&state_path, &secret).unwrap());
+        let token = blobui_mcp::credential::read_at(&secret).unwrap();
+        assert_ne!(token, old);
+        let value = crate::read_json_file(&state_path).unwrap();
+        authenticate(&value, &token).unwrap();
+        assert!(authenticate(&value, &old).is_err());
+        assert!(!std::fs::read(&secret)
+            .unwrap()
+            .windows(64)
+            .any(|v| v == token.as_bytes()));
+        // The credential must have one protected owner-only access rule.
+        unsafe {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::{
+                Foundation::LocalFree,
+                Security::{
+                    Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW,
+                    GetFileSecurityW, DACL_SECURITY_INFORMATION,
+                },
+            };
+            let name = secret
+                .as_os_str()
+                .encode_wide()
+                .chain(Some(0))
+                .collect::<Vec<_>>();
+            let mut size = 0;
+            GetFileSecurityW(
+                name.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                0,
+                &mut size,
+            );
+            let mut descriptor = vec![0u8; size as usize];
+            assert_ne!(
+                GetFileSecurityW(
+                    name.as_ptr(),
+                    DACL_SECURITY_INFORMATION,
+                    descriptor.as_mut_ptr().cast(),
+                    size,
+                    &mut size
+                ),
+                0
+            );
+            let mut text = std::ptr::null_mut();
+            assert_ne!(
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    descriptor.as_mut_ptr().cast(),
+                    1,
+                    DACL_SECURITY_INFORMATION,
+                    &mut text,
+                    std::ptr::null_mut()
+                ),
+                0
+            );
+            let mut len = 0;
+            while *text.add(len) != 0 {
+                len += 1;
+            }
+            let acl = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            LocalFree(text.cast());
+            assert!(acl.starts_with("D:P"));
+            assert!(acl.contains("(A;;FA;;;OW)"));
+            assert_eq!(acl.matches('(').count(), 1);
+        }
+        let saved_secret = std::fs::read(&secret).unwrap();
+        let saved_state = std::fs::read(&state_path).unwrap();
+        assert!(migrate_at(&state_path, &secret).unwrap());
+        assert_eq!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
+        for failed in [&secret, &state_path] {
+            crate::storage::FAIL_AFTER_REPLACE.with(|v| *v.borrow_mut() = Some(failed.clone()));
+            assert!(configure_at(&state_path, &secret, true).is_err());
+            assert_eq!(std::fs::read(&secret).unwrap(), saved_secret);
+            assert_eq!(std::fs::read(&state_path).unwrap(), saved_state);
+        }
+        configure_at(&state_path, &secret, false).unwrap();
+        assert!(!secret.exists());
+        assert!(authenticate(&crate::read_json_file(&state_path).unwrap(), &token).is_err());
+        configure_at(&state_path, &secret, true).unwrap();
+        assert_ne!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
+        std::fs::write(&secret, b"corrupted credential").unwrap();
+        assert!(migrate_at(&state_path, &secret).unwrap());
+        authenticate(
+            &crate::read_json_file(&state_path).unwrap(),
+            &blobui_mcp::credential::read_at(&secret).unwrap(),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -160,7 +160,7 @@ mod windows {
                     ptr::null_mut(),
                 );
                 if handle == INVALID_HANDLE_VALUE {
-                    return Err(io::Error::new(io::ErrorKind::NotConnected,"BlobUI is unavailable. Start BlobUI and enable Anyblob in Integrations > Codex."));
+                    return Err(io::Error::new(io::ErrorKind::NotConnected,"BlobUI is unavailable. Start BlobUI and enable Anyblob in Integrations > Anyblob."));
                 }
                 let mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
                 if SetNamedPipeHandleState(handle, &mode, ptr::null(), ptr::null()) == 0 {

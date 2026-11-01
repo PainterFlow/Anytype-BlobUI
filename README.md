@@ -66,4 +66,4 @@ in their contributions and must have permission to submit them.
 
 ## Anyblob integration
 
-Anyblob adds read-only Codex tools through the running BlobUI app. Build the local Windows plugin with `scripts/Build-Codex.ps1`. Follow the [setup and permissions guide](codex-plugin/src/README.md) before manually installing it. The build does not install the plugin or change Codex settings.
+Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrations > Anyblob > Settings > Install to register its personal marketplace, then select Anyblob in the Codex Plugins Directory. Credentials are configured automatically when you enable Anyblob. Follow the [setup and permissions guide](codex-plugin/src/README.md).

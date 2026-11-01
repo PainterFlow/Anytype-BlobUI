@@ -3,9 +3,6 @@
     "anyblob": {
       "command": "cmd.exe",
       "cwd": ".",
-      "env_vars": [
-        "ANYBLOB_BRIDGE_TOKEN"
-      ],
       "tool_timeout_sec": 180,
       "args": [
         "/d",

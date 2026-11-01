@@ -13,7 +13,7 @@ assert.equal(server.command, 'cmd.exe');
 assert.deepEqual(server.args, ['/d','/c','.\\bin\\blobui-mcp.exe']);
 assert.equal(server.cwd, '.');
 assert(server.tool_timeout_sec > 120);
-assert.deepEqual(server.env_vars, ['ANYBLOB_BRIDGE_TOKEN']);
+assert.equal(server.env_vars, undefined);
 assert.equal(server.env, undefined);
 for (const relative of ['bin/blobui-mcp.exe', 'assets/icon.png', 'README.md']) assert(fs.statSync(path.join(root, relative)).size > 0);
 assert.deepEqual(fs.readFileSync(path.join(root,'bin/blobui-mcp.exe')),fs.readFileSync(path.resolve(__dirname,'../../mcp-server/dist/blobui-mcp.exe')));

@@ -1,10 +1,14 @@
+param([switch]$SkipMcpBuild)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $PSScriptRoot 'Workspace-Build-Paths.ps1')
 Assert-WorkspaceBuildPath (Join-Path $workspaceRoot 'codex-plugin/dist/anyblob')
 Assert-WorkspaceBuildPath (Join-Path $workspaceRoot 'codex-plugin/dist/anyblob.zip')
-& (Join-Path $PSScriptRoot 'Build-MCP.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'MCP build failed.' }
+Assert-WorkspaceBuildPath (Join-Path $workspaceRoot 'codex-plugin/dist/marketplace-payload.json')
+if (-not $SkipMcpBuild) {
+    & (Join-Path $PSScriptRoot 'Build-MCP.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'MCP build failed.' }
+}
 $dist = Join-Path $workspaceRoot 'codex-plugin/dist'
 $package = Join-Path $dist 'anyblob'
 if(Test-Path -LiteralPath $package){Remove-Item -LiteralPath $package -Recurse -Force}
@@ -39,3 +43,17 @@ try {
     if(@(Compare-Object $expected $actual).Count -ne 0){throw 'The ZIP does not contain the exact validated plugin files.'}
 } finally {$archive.Dispose()}
 Write-Host "Packaged Anyblob at $package and $zip"
+# A fixed manifest is embedded in Settings, so installation needs no external runtime.
+$files = [ordered]@{}
+foreach ($relative in $expected) {
+    $files[$relative] = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $package $relative)))
+}
+$payload = [ordered]@{
+    marketplace = (Get-Content -LiteralPath (Join-Path $workspaceRoot 'codex-plugin/marketplace/marketplace.json') -Raw | ConvertFrom-Json)
+    files = $files
+}
+$payloadPath = Join-Path $dist 'marketplace-payload.json'
+$payloadText = $payload | ConvertTo-Json -Depth 20
+if (-not (Test-Path -LiteralPath $payloadPath) -or [IO.File]::ReadAllText($payloadPath) -cne $payloadText) {
+    [IO.File]::WriteAllText($payloadPath, $payloadText, [Text.UTF8Encoding]::new($false))
+}
