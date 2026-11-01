@@ -8,7 +8,7 @@
   const make = UI.CatalogBrowser.node;
   let state = defaults(), catalog = { types: [], views: [] }, invoke, api, loading = true, locked = false;
   let browser, modalBrowser, modal, shell, dialog, content, controls, title, close, message, empty, list, page;
-  let pickers = [], scrollController;
+  let pickers = [], scrollController, refreshCalendars;
   let hasCatalog = false, discoveryError = false;
   let records = [], active, activeRow, screen = "type", generation = 0, discovering = false, discovered = false, loadFailed = false;
   function button(label, onClick, className = "formula-button") {
@@ -25,7 +25,7 @@
     if (rule.mode === "none") return "No color";
     return (type.properties || []).find(property => property.key === rule.key)?.name || "Unavailable property";
   }
-  function cleanContent() { pickers.forEach(picker => picker.destroy()); pickers = []; dialog?.querySelectorAll(".calendar-property-menu").forEach(menu => menu.remove()); scrollController?.destroy(); scrollController = null; modalBrowser?.destroy(); modalBrowser = null; C.destroyTree(content); content.replaceChildren(); if (controls) { C.destroyTree(controls); controls.replaceChildren(); } }
+  function cleanContent() { refreshCalendars = null; pickers.forEach(picker => picker.destroy()); pickers = []; dialog?.querySelectorAll(".calendar-property-menu").forEach(menu => menu.remove()); scrollController?.destroy(); scrollController = null; modalBrowser?.destroy(); modalBrowser = null; C.destroyTree(content); content.replaceChildren(); if (controls) { C.destroyTree(controls); controls.replaceChildren(); } }
   function setScreen(value, heading) {
     cleanContent(); content.getAnimations?.().forEach(animation => animation.cancel()); screen = value; title.textContent = heading; dialog.dataset.screen = value;
     close.setAttribute("aria-label", "Close color rules");
@@ -49,6 +49,7 @@
       }
       wrapper.append(nameGroup, root);
       content.append(wrapper);
+      const getOptions = () => {
       const options = [{ value: "inherit", label: override ? "Use type default" : "Use Calendar Color" }, { value: "none", label: "No color" }];
       const properties = (active.properties || []).filter(p => ["select", "checkbox"].includes(p.format));
       const counts = new Map(); properties.forEach(p => counts.set(p.name, (counts.get(p.name) || 0) + 1));
@@ -57,7 +58,9 @@
       const current = override?.rule || entry(active)?.default || { mode: "inherit" };
       const value = current.mode === "property" ? "property:" + current.key : current.mode;
       if (current.mode === "property" && !properties.some(p => p.key === current.key)) options.push({ value, label: "Unavailable property", description: current.key });
-      const picker = C.Picker({ root, menu, options, value, onChange(value) {
+      return { options, value };
+      };
+      const picker = C.Picker({ root, menu, ...getOptions(), onChange(value) {
         const rule = value.startsWith("property:") ? { mode: "property", key: value.slice(9) } : { mode: value };
         if (override) override.rule = rule; else entry(active, true).default = rule;
         changed();
@@ -71,7 +74,7 @@
       };
       trigger.addEventListener("pointerdown", place); trigger.addEventListener("keydown", place); trigger.addEventListener("click", place);
       const dismiss = () => picker.close(); content.addEventListener("scroll", dismiss);
-      pickers.push({ destroy() { content.removeEventListener("scroll", dismiss); picker.destroy(); }, close: () => picker.close() });
+      pickers.push({ refresh() { const next = getOptions(); picker.setOptions(next.options, { preserveOpen: true }); picker.setValue(next.value); }, destroy() { content.removeEventListener("scroll", dismiss); picker.destroy(); }, close: () => picker.close() });
     };
     addRow("Default", null);
     for (const override of saved?.overrides || []) {
@@ -87,9 +90,11 @@
     setScreen("calendars", "Choose calendar view");
     const toolbar = UI.CatalogBrowser.toolbar("calendar-override", "Search calendar views"); controls.append(toolbar); toolbar.classList.add("calendar-sticky-toolbar");
     const rows = [], saved = entry(active);
+    const results = make("div", "calendar-view-results");
+    refreshCalendars = () => {
+    C.destroyTree(results); results.replaceChildren(); rows.length = 0;
     const views = catalog.views.filter(view => view.target.spaceId === active.spaceId
       && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)));
-    const results = make("div", "calendar-view-results");
     views.sort((a,b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source)).forEach(view => {
       const result = UI.CatalogBrowser.row({ name: view.name, metadata: view.source + " · " + view.space, onSelect() {
         if (locked) return;
@@ -98,8 +103,11 @@
       rows.push({ ...result, view }); results.append(result.item);
     });
     if (!rows.length) results.append(make("p", "input-hint", "No more accessible calendar views in this space."));
+    modalBrowser?.refresh();
+    };
+    refreshCalendars();
     const empty = make("p", "input-hint"); empty.hidden = true; content.append(results, empty);
-    modalBrowser = UI.CatalogBrowser.attach({ prefix: "calendar-override", toolbar, records: () => rows, empty, onReload: async () => { await discover(); if (screen === "calendars") calendarsScreen(); } });
+    modalBrowser = UI.CatalogBrowser.attach({ prefix: "calendar-override", toolbar, records: () => rows, empty, onReload: () => discover(true) });
     modalBrowser.refresh(); finishScreen();
   }
   function render() {
@@ -127,18 +135,20 @@
     page?.querySelectorAll(".formula-view-row,.formula-view .formula-button").forEach(button => { button.disabled = locked || loading || loadFailed; });
     if (content) content.querySelectorAll("button,input").forEach(button => { button.disabled = locked || loading || loadFailed; });
   }
-  async function discover() {
+  async function discover(forceRefresh = false) {
     if (!invoke || discovering || locked || loading) return;
     const request = ++generation; discovering = true; discoveryError = false; if (!hasCatalog) render(); syncLocks();
     try {
-      const result = await invoke("discover_calendar_colors");
+      const result = await invoke("discover_calendar_colors", { forceRefresh });
       if (request !== generation) return;
       if (!result || !Array.isArray(result.types) || !Array.isArray(result.views)) throw Error("No calendar catalog was returned.");
       catalog = result; discovered = true; hasCatalog = true; message.textContent = "";
       if (active) active = catalog.types.find(type => key(type) === key(active)) || { ...active, properties: [], unavailable: true };
+      pickers.forEach(picker => picker.refresh?.());
+      refreshCalendars?.();
       (result.info || []).forEach(text => api.onInfo?.(text));
       if (result.info?.length) message.textContent = "Some metadata could not be read. Check Logs and reload to retry.";
-    } catch (error) { if (request === generation) { discoveryError = true; UI.CatalogBrowser.status(message, String(error.message || error) + " Your saved rules are kept."); } }
+    } catch (error) { if (request === generation) { discoveryError = true; api.onInfo?.(String(error.message || error)); UI.CatalogBrowser.status(message, String(error.message || error) + " Your saved rules are kept."); } }
     finally { if (request === generation) { discovering = false; render(); } }
   }
   UI.CalendarPage = {
@@ -148,7 +158,7 @@
       message = make("p", "field-error"); message.setAttribute("role", "status"); message.setAttribute("aria-live", "polite"); message.id = "calendar-rules-message";
       list = make("div"); list.id = "calendar-type-list"; empty = make("p", "input-hint"); empty.hidden = true;
       page.append(toolbar, message, list, empty);
-      browser = UI.CatalogBrowser.attach({ prefix: "calendar", toolbar, records: () => records, empty, onReload: discover });
+      browser = UI.CatalogBrowser.attach({ prefix: "calendar", toolbar, records: () => records, empty, onReload: () => discover(true) });
       title = make("h2"); title.id = "calendar-rule-title";
       close = button("×", () => modal.close(), "neutral-icon-button calendar-modal-close");
       close.setAttribute("aria-label", "Close color rules");
@@ -164,7 +174,7 @@
           cleanContent(); active = null; screen = "type";
         } });
       doc.getElementById("open-calendar-colors").addEventListener("click", () => { api.navigate("calendar-colors"); doc.getElementById("page-title")?.focus({ preventScroll: true }); if (!discovered) void discover(); });
-      UI.AppReload?.register(() => !page.hidden ? discover() : undefined);
+      UI.AppReload?.register(() => discover(true));
       render();
     },
     read: () => copy(state),

@@ -96,11 +96,11 @@
     } catch(error) {UI.CatalogBrowser.status(status,String(error.message||error));}
     finally {busy=false;browser.setLocked(locked);}
   }
-  async function reloadSources() {
+  async function reloadSources(forceRefresh = false) {
     if (sourceBusy || locked) return;
     sourceBusy=true;sourceBrowser.setLocked(locked,true);sourceStatus.textContent='Loading sources…';
     try {
-      const result=await api.invoke('discover_codex_sources');
+      const result=await api.invoke('discover_codex_sources',{forceRefresh});
       if (!Array.isArray(result) || result.some(source=>!source.id||!source.spaceId||!kinds.some(kind=>kind.value===source.kind)||typeof source.name!=='string')) throw Error('Source discovery returned an invalid response.');
       sources=result;sourcesScanned=true;sourceStatus.textContent='';renderSources();
     } catch(error) {UI.CatalogBrowser.status(sourceStatus,String(error.message||error).replace(' to use Kanban formulas',' to discover sources'));}
@@ -108,6 +108,7 @@
   }
   function init(options) {
     api=options;
+    UI.AppReload?.register(() => reloadSources(true));
     const toolbar=UI.CatalogBrowser.toolbar('projects','Search projects and folders');toolbar.querySelector('#projects-filter-control').hidden=true;
     status=make('p','input-hint');status.setAttribute('role','status');list=make('div');list.id='codex-project-list';empty=make('p','input-hint');empty.hidden=true;
     api.panel.append(toolbar,status,list,empty);
@@ -120,7 +121,7 @@
     const content=make('div','calendar-modal-content project-source-content');content.append(sourceStatus,sourceList,sourceEmpty);
     shell=C.DialogShell({attributes:{id:'project-source-backdrop'},dialogAttributes:{id:'project-source-dialog',class:'confirm-dialog calendar-rule-dialog project-source-dialog','aria-labelledby':heading.id},content:[header,sourceToolbar,content]});
     doc.body.append(shell.element);
-    sourceBrowser=UI.CatalogBrowser.attach({prefix:'project-sources',toolbar:sourceToolbar,records:()=>sourceRecords,empty:sourceEmpty,onReload:reloadSources,categories:kinds});
+    sourceBrowser=UI.CatalogBrowser.attach({prefix:'project-sources',toolbar:sourceToolbar,records:()=>sourceRecords,empty:sourceEmpty,onReload:()=>reloadSources(true),categories:kinds});
     scroll=UI.Scrollbar.attach(content);
     modal=shell.attach({initialFocus:close,fallbackFocus:()=>doc.getElementById('codex-tab-2'),inertTargets:[doc.getElementById('settings-shell'),doc.getElementById('title-drag-region')].filter(Boolean)});
     renderProjects();

@@ -275,12 +275,30 @@
     updateConnectionScrollbar();
   });
 
+  let metadataEpoch = 0;
+  const metadataPending = new Set();
+  const metadataRequests = new Map();
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;
     if (!api || typeof api.invoke !== "function") {
       return Promise.reject(new Error("The settings app bridge is unavailable. Launch BlobUI Settings using blobui-settings.exe."));
     }
-    return api.invoke(name, args || {});
+    if (name === "configure_connection") metadataEpoch++;
+    const epoch = metadataEpoch;
+    const metadata = ["discover_kanban_views", "discover_calendar_colors", "discover_codex_spaces", "discover_anyblob_types", "discover_codex_sources"].includes(name);
+    const requestKey = JSON.stringify([metadataEpoch, name, args || {}]);
+    if (metadata && metadataRequests.has(requestKey)) return metadataRequests.get(requestKey);
+    const request = api.invoke(name, args || {}).then(result => {
+      if (metadata && epoch !== metadataEpoch) throw Error("The saved Anytype connection changed. Refresh metadata again.");
+      if (metadata && Array.isArray(result?.errors)) result.errors.forEach(error => addLog(String(error.error || error), "error"));
+      return result;
+    });
+    if (metadata) {
+      metadataPending.add(request);
+      metadataRequests.set(requestKey, request);
+      request.then(() => { metadataPending.delete(request); metadataRequests.delete(requestKey); }, error => { metadataPending.delete(request); metadataRequests.delete(requestKey); addLog(String(error.message || error), "error"); });
+    }
+    return request;
   }
 
   function themeSwatch(preset) {
@@ -1176,6 +1194,7 @@
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
     window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
     el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
@@ -1724,6 +1743,7 @@
       if (submittedConnection) {
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
+        void window.BlobUI.AppReload.run();
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
         window.BlobUI.FormulaPage.reload();
@@ -2487,8 +2507,8 @@
     });
   }
 
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create({ isCapturing: () => !!shortcutCaptureAction, beforeRun: () => Promise.allSettled([...metadataPending]), onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); } });
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
-  window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
   window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });

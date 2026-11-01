@@ -480,6 +480,7 @@
         description:math.propertyReference(property.key,record.view.properties),
       }));
     let pendingProperty = null;
+    record.refreshPropertyOptions = () => { if (!pendingProperty) record.propertyPicker?.setOptions(properties(), { preserveOpen: true }); };
     record.resetPropertyPicker = () => {
       pendingProperty = null;
       record.propertyPicker?.setOptions(properties());
@@ -728,7 +729,7 @@
     syncLocks();
     updateTimestamp();
   }
-  async function discover() {
+  async function discover(forceRefresh = false) {
     if (!invoke) return;
     if (loading || locked) { discoveryRequested = true; return; }
     if (discovering) return;
@@ -738,10 +739,16 @@
     setMessage(loadError);
     syncLocks();
     try {
-      const result = await invoke("discover_kanban_views");
+      const result = await invoke("discover_kanban_views", { forceRefresh });
       if (!result || !Array.isArray(result.views)) throw Error("Anytype did not return a view list.");
       if (generation !== discoveryGeneration) return;
       catalog = result.views;
+      if (activeRecord) {
+        const next = catalog.find(view => identity(view.target) === activeRecord.viewKey);
+        Object.assign(activeRecord.view, next ? { ...next, target: activeRecord.view.target } : { properties: [], unsupported: "This view is unavailable. Your draft is retained." });
+        activeRecord.refreshPropertyOptions?.();
+        syncLocks();
+      }
       (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
       const logged = new Set();
       catalog.forEach(view => {
@@ -754,7 +761,7 @@
       discovered = true;
       setMessage([loadError, result.warning].filter(Boolean).join(" "));
     } catch (error) {
-      if (generation === discoveryGeneration) setMessage(String(error.message || error));
+      if (generation === discoveryGeneration) { setMessage(String(error.message || error)); api?.onInfo?.(String(error.message || error)); }
     } finally {
       if (generation === discoveryGeneration) {
         discovering = false;
@@ -813,8 +820,8 @@
       });
       if (UI.AppReload) {
         reloadController = UI.AppReload;
-        reloadController.bindButton(reload);
-        unregisterReload = reloadController.register(discover);
+        reload.addEventListener("click", () => void discover(true));
+        unregisterReload = reloadController.register(() => discover(true));
       }
       configureModal();
       attachSharedControls();
@@ -862,8 +869,7 @@
       loading = false;
       render();
       if (options.discover !== false) {
-        if (reloadController) void reloadController.run();
-        else void discover();
+        void discover();
       }
       return !loadError;
     },
@@ -891,11 +897,11 @@
         void discover();
       }
     },
-    refresh() { if (!discovered && !discovering && !loading) return reloadController ? reloadController.run() : discover(); },
+    refresh() { if (!discovered && !discovering && !loading) return discover(); },
     reload() {
       discovered = false;
       discoveryRequested = true;
-      return reloadController ? reloadController.run() : !discovering && !loading && !locked ? discover() : undefined;
+      return !discovering && !loading && !locked ? discover() : undefined;
     },
     destroy() {
       browser?.destroy();

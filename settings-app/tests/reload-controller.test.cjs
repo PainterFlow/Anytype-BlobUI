@@ -89,3 +89,29 @@ test('Ctrl+R reloads the app, while other modifiers pass through', async () => {
   document.fire('keydown', afterDestroy);
   assert.equal(afterDestroy.prevented, false);
 });
+
+test('locked shortcuts queue once, wait for every catalog, and respect shortcut capture', async () => {
+  let capture = false, calls = 0, finish;
+  const {controller, document} = harness({isCapturing:()=>capture});
+  controller.register(async()=>{calls++;await new Promise(resolve=>{finish=resolve;});});
+  controller.setLocked(true);
+  await controller.run();await controller.run();
+  assert.equal(calls,0);
+  controller.setLocked(false);
+  await Promise.resolve();
+  assert.equal(calls,1);
+  const active=controller.run();assert.equal(controller.run(),active);
+  finish();await active;
+  capture=true;
+  document.fire('keydown',{ctrlKey:true,key:'r',preventDefault(){throw Error('Capture must own the shortcut');}});
+  assert.equal(calls,1);
+});
+
+test('a failing catalog does not release coalescing while another is loading', async () => {
+  const {controller}=harness();let finish,calls=0;
+  controller.register(()=>{throw Error('offline');});
+  controller.register(()=>{calls++;return new Promise(resolve=>{finish=resolve;});});
+  const active=controller.run();await Promise.resolve();await Promise.resolve();
+  assert.equal(controller.run(),active);assert.equal(calls,1);
+  finish();await active;
+});

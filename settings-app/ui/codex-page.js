@@ -94,11 +94,11 @@
     });
     browser?.refresh();
   }
-  async function reload() {
+  async function reload(forceRefresh = false) {
     if (busy) return; busy = true; browser.setLocked(locked,true);
     message.textContent = 'Loading spaces…';
     try {
-      const spaces = await api.invoke('discover_codex_spaces');
+      const spaces = await api.invoke('discover_codex_spaces',{forceRefresh});
       if (!Array.isArray(spaces)) throw new Error('Space discovery returned an invalid response.');
       records = spaces.map(space=>({view:{...space,target:{spaceId:space.id}}})); loaded = true;
       message.replaceChildren(); if (!spaces.length) message.textContent = 'No accessible spaces found.'; render();
@@ -171,12 +171,13 @@
     page = make('div','settings-page');page.id='codex-page';page.hidden=true;doc.getElementById('advanced-page').after(page);
     const bar=make('div','advanced-tabs');bar.setAttribute('role','tablist');bar.setAttribute('aria-label','Anyblob');
     const panels=['Settings','Permissions','Projects'].map((label,index)=>{const button=make('button','',label);button.type='button';button.id='codex-tab-'+index;button.setAttribute('role','tab');const panel=make('section','');panel.id='codex-panel-'+index;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);button.setAttribute('aria-controls',panel.id);bar.append(button);return panel;});
+    UI.AppReload?.register(() => reload(true));
     page.append(bar,...panels);tabs=C.Tabs({container:bar,buttons:[...bar.children],panels,onSelect:index=>{if(index===1&&!loaded&&!busy)void reload();if(index===2)UI.ProjectPermissions.open();}});
     mountIntegration(panels[0]);
     UI.ProjectPermissions.init({...api, panel:panels[2], permissionRow, normalize});
     const toolbar=UI.CatalogBrowser.toolbar('codex','Search spaces');toolbar.querySelector('#codex-filter-control').hidden=true;
     list=make('div','');message=make('p','input-hint');message.setAttribute('role','status');empty=make('p','input-hint');empty.hidden=true;panels[1].append(toolbar,message,list,empty);
-    browser=UI.CatalogBrowser.attach({prefix:'codex',toolbar,records:()=>records,empty,onReload:reload});
+    browser=UI.CatalogBrowser.attach({prefix:'codex',toolbar,records:()=>records,empty,onReload:()=>reload(true)});
   }
   UI.CodexPage={normalize,init,render(){render();UI.ProjectPermissions.render();},show(value){if(!page)return;page.hidden=!value;nav.classList.toggle('active',value);nav.setAttribute('aria-current',value?'page':'false');if(value){doc.getElementById('codex-panel-0').refreshIntegration();tabs.refresh();if(!doc.getElementById('codex-panel-2').hidden)UI.ProjectPermissions.open();if(!doc.getElementById('codex-panel-1').hidden&&!loaded&&!busy)void reload();}},select(index){tabs.select(index);if(index===2)UI.ProjectPermissions.open();if(index===1&&!loaded&&!busy)void reload();},setLocked(value){if(locked===value)return;locked=value;render();UI.ProjectPermissions.setLocked(value);browser?.setLocked(value,busy);}};
 })(window);

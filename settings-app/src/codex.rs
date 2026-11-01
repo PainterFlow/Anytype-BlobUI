@@ -69,32 +69,32 @@ fn discover(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
     }).collect()
 }
 #[tauri::command]
-pub async fn discover_codex_spaces() -> Result<Vec<Value>, String> {
-    tauri::async_runtime::spawn_blocking(|| discover(&crate::kanban_api::Client::connect()?)).await
+pub async fn discover_codex_spaces(force_refresh: Option<bool>) -> Result<Vec<Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::metadata_cache::get("spaces", Value::Null, force_refresh.unwrap_or(false), discover)).await
         .map_err(|_| "Space discovery stopped. Reload to retry.".to_string())?
 }
 
 #[tauri::command]
-pub async fn discover_anyblob_types(space_ids: Vec<String>) -> Result<Value, String> {
+pub async fn discover_anyblob_types(space_ids: Vec<String>, force_refresh: Option<bool>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let client=crate::kanban_api::Client::connect()?;
-        let spaces=discover(&client)?;
-        let mut types=Vec::new();let mut errors=Vec::new();
+        let mut types = Vec::new(); let mut errors = Vec::new();
         for sid in space_ids.into_iter().collect::<std::collections::BTreeSet<_>>() {
-            blobui_mcp::Operation::ReadObject{space_id:sid.clone(),object_id:sid.clone()}.validate()?;
-            let Some(space)=spaces.iter().find(|s|s["id"]==sid) else {
-                errors.push(serde_json::json!({"spaceId":sid,"error":"A selected space is unavailable."}));continue;
-            };
-            let base=format!("/v2/spaces/{}",crate::api::encode_segment(&sid));
-            match source_types(&client,&base) {
-                Ok(rows)=>for row in rows {
-                    types.push(serde_json::json!({"spaceId":sid,"space":space["name"],"id":row["id"],"name":row["name"].as_str().unwrap_or("Unnamed type")}));
-                },
-                Err(_)=>errors.push(serde_json::json!({"spaceId":sid,"error":format!("Could not discover object types in {}. Saved selections remain available.",space["name"].as_str().unwrap_or("this space"))})),
-            }
+            blobui_mcp::Operation::ReadObject { space_id: sid.clone(), object_id: sid.clone() }.validate()?;
+            let result: Value = crate::metadata_cache::get("types", serde_json::json!([sid]), force_refresh.unwrap_or(false), |client| {
+                let spaces = crate::metadata_cache::get("spaces", Value::Null, false, discover)?;
+                let Some(space) = spaces.iter().find(|space| space["id"] == sid) else {
+                    return Ok(serde_json::json!({"types":[],"errors":[{"spaceId":sid,"error":"A selected space is unavailable."}]}));
+                };
+                let base = format!("/v2/spaces/{}", crate::api::encode_segment(&sid));
+                let rows = source_types(client, &base)?;
+                let types: Vec<_> = rows.into_iter().map(|row| serde_json::json!({"spaceId":sid,"space":space["name"],"id":row["id"],"name":row["name"].as_str().unwrap_or("Unnamed type")})).collect();
+                Ok(serde_json::json!({"types":types,"errors":[]}))
+            }).unwrap_or_else(|error| serde_json::json!({"types":[],"errors":[{"spaceId":sid,"error":error}]}));
+            types.extend(result["types"].as_array().into_iter().flatten().cloned());
+            errors.extend(result["errors"].as_array().into_iter().flatten().cloned());
         }
         Ok(serde_json::json!({"types":types,"errors":errors}))
-    }).await.map_err(|_|"Object type discovery stopped. Reload options to retry.".to_string())?
+    }).await.map_err(|_|"Object type discovery stopped. Press Ctrl+R to retry.".to_string())?
 }
 
 // Type lists can contain API keys without object IDs, even with ids=full.
@@ -139,8 +139,8 @@ fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, St
     Ok(sources)
 }
 #[tauri::command]
-pub async fn discover_codex_sources() -> Result<Vec<Value>, String> {
-    tauri::async_runtime::spawn_blocking(|| discover_sources(&crate::kanban_api::Client::connect()?)).await
+pub async fn discover_codex_sources(force_refresh: Option<bool>) -> Result<Vec<Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::metadata_cache::get("sources", Value::Null, force_refresh.unwrap_or(false), discover_sources)).await
         .map_err(|_| "Source discovery stopped. Reload to retry.".to_string())?
 }
 #[cfg(test)]

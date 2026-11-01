@@ -6,8 +6,7 @@
     const status = make('p','input-hint'); status.setAttribute('role','status'); status.id='object-mentions-status';
     const note = make('p','input-hint','Filters control suggestions. Reading an object still requires permission, including Always Ask. Save to apply changes.');
     const group = C.Group({attributes:{id:'object-mentions-group'}});
-    const reload = C.Button({label:'Reload options',attributes:{class:'banner-image-button'},onClick:()=>void discover()});
-    const section=C.Section({attributes:{id:'object-mentions-section'},content:[C.Heading({title:'Object Mentions'}).element,group.element,note,status,reload.element]});
+    const section=C.Section({attributes:{id:'object-mentions-section'},content:[C.Heading({title:'Object Mentions'}).element,group.element,note,status]});
     panel.append(section.element);
     const pickers = {};
     const key = (kind,row) => kind==='spaces' ? row.id : JSON.stringify([row.spaceId,row.id]);
@@ -62,7 +61,7 @@
       for (const kind of ['spaces','types']) {
         const selection=filters()[kind], picker=pickers[kind];
         const available=options(kind), signature=JSON.stringify(available);
-        if(picker.signature!==signature){picker.controller.setOptions(available);picker.signature=signature;}
+        if(picker.signature!==signature){picker.controller.setOptions(available, { preserveOpen: true });picker.signature=signature;}
         picker.controller.setValue(selection.all ? ['*'] : selection.items.map(row=>key(kind,row)));
         picker.shell.trigger.querySelector('[data-pick-value]').textContent=selection.all?'All':selection.items.length?selection.items.length+' selected':'None';
         // These are suggestion filters, independent of the permission lock and discovery state.
@@ -70,13 +69,13 @@
         picker.scrollbar.update();
       }
     }
-    async function discoverTypes() {
+    async function discoverTypes(forceRefresh = false) {
       const current=++epoch, saved=filters();
-      const ids=spaces.filter(s=>saved.spaces.all||saved.spaces.items.some(v=>v.id===s.id)).map(s=>s.id);
+      const ids=spaces.filter(s=>forceRefresh||saved.spaces.all||saved.spaces.items.some(v=>v.id===s.id)).map(s=>s.id);
       if (!ids.length) { status.textContent='';refresh(); return; }
       status.textContent='Loading object types…';
       try {
-        const result=await api.invoke('discover_anyblob_types',{spaceIds:ids});
+        const result=await api.invoke('discover_anyblob_types',{spaceIds:ids,forceRefresh});
         if(current!==epoch)return;
         if(!Array.isArray(result?.types)||!Array.isArray(result?.errors))throw Error('Type discovery returned an invalid response.');
         const failed=new Set(result.errors.map(e=>e.spaceId));
@@ -87,15 +86,16 @@
       } catch(error) {if(current===epoch)status.textContent=String(error.message||error);}
       finally {if(current===epoch)refresh();}
     }
-    async function discover() {
+    async function discover(forceRefresh = false) {
       if(pending)return;pending=true;status.textContent='Loading spaces…';
       try {
-        const result=await api.invoke('discover_codex_spaces');
+        const result=await api.invoke('discover_codex_spaces',{forceRefresh});
         if(!Array.isArray(result))throw Error('Space discovery returned an invalid response.');
-        spaces=result;loaded=true;status.textContent='';refresh();await discoverTypes();
+        spaces=result;loaded=true;status.textContent='';refresh();await discoverTypes(forceRefresh);
       } catch(error) {status.textContent=String(error.message||error);}
       finally {pending=false;refresh();}
     }
+    UI.AppReload?.register(() => discover(true));
     refresh();
     return {refresh,show(){refresh();if(!loaded&&!pending)void discover();}};
   }};

@@ -261,8 +261,8 @@ pub fn load_calendar_rules() -> Result<Configuration, String> {
     configuration(&crate::read_json_file(&install.join("blob/data.json"))?)
 }
 #[tauri::command]
-pub async fn discover_calendar_colors() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(|| discover(&Client::connect()?)).await
+pub async fn discover_calendar_colors(force_refresh: Option<bool>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::metadata_cache::get("calendar", Value::Null, force_refresh.unwrap_or(false), discover)).await
         .map_err(|_| "Calendar discovery stopped. Reload to retry.".to_string())?
 }
 #[tauri::command]

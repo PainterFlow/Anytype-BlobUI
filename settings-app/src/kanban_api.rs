@@ -18,6 +18,7 @@ use std::sync::{
 const DISCOVERY_CONCURRENCY: usize = 4;
 
 pub struct Client {
+    metadata_revision: String,
     key: crate::SecretString,
     ip: String,
     port: u16,
@@ -29,7 +30,10 @@ impl Client {
         Self::with_connection(&self.key, &self.ip, self.port)
     }
     pub(crate) fn with_connection(key: &str, ip: &str, port: u16) -> Self {
-        Self { key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()) }
+        Self { metadata_revision: String::new(), key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()) }
+    }
+    pub(crate) fn metadata_scope(&self) -> String {
+        format!("{:x}", Sha256::digest(serde_json::to_vec(&(&self.ip, self.port, &*self.key, &self.metadata_revision)).unwrap()))
     }
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
@@ -47,6 +51,7 @@ impl Client {
             );
         }
         Ok(Self {
+            metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
             info: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new(crate::read_saved_api_key_at(&install)?),
             ip: crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?,
@@ -1302,6 +1307,7 @@ mod tests {
             }
         });
         let client = Client {
+            metadata_revision: String::new(),
             info: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new("fixture-key".into()),
             ip: "127.0.0.1".into(),

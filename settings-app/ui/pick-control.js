@@ -47,8 +47,11 @@
       if (!reduced()) frame = root.requestAnimationFrame(() => { menu.dataset.state = 'open'; });
       if (focusOnOpen) focus(Math.max(0, items().findIndex(item => item.dataset.value === trigger.value)));
     }
-    function setOptions(next) {
-      close(); menu.replaceChildren();
+    function setOptions(next, { preserveOpen = false } = {}) {
+      const wasOpen = preserveOpen && trigger.getAttribute('aria-expanded') === 'true';
+      const focused = preserveOpen && menu.contains(document.activeElement) ? document.activeElement.dataset.value : null;
+      const scroll = menu.scrollTop;
+      if (!wasOpen) close(); menu.replaceChildren();
       if (!next.length && emptyMessage) {
         const empty = document.createElement('div');
         empty.className = 'kanban-select-empty';
@@ -84,6 +87,7 @@
         menu.append(option);
       });
       setValue(multiple ? selectedValues : trigger.value);
+      if (wasOpen) { open(); menu.scrollTop = scroll; if (focused !== null) items().find(item => item.dataset.value === focused)?.focus({ preventScroll: true }); }
     }
     listen(trigger, 'click', () => trigger.getAttribute('aria-expanded') === 'true' ? close() : open());
     listen(trigger, 'keydown', event => { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) { event.preventDefault(); if (trigger.getAttribute('aria-expanded') !== 'true') open(); else { const selected = items().findIndex(item => item.dataset.value === trigger.value); focus(Math.max(0, selected - (event.key === 'ArrowUp' ? 1 : 0))); } } else if (event.key === 'Escape') close(true); });

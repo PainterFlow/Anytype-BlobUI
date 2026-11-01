@@ -57,9 +57,9 @@
       if (categories) { apply(); return; }
       const spaces = new Map(records().map(record => [record.view.target.spaceId, record.view.space || "Unnamed space"]));
       const counts = new Map(); spaces.forEach(label => counts.set(label, (counts.get(label) || 0) + 1));
-      if (!spaces.has(selectedSpace)) selectedSpace = "";
+      if (selectedSpace && !spaces.has(selectedSpace)) spaces.set(selectedSpace, "Unavailable space");
       filterControl.setOptions([{ value: "", label: "All spaces" }, ...[...spaces].sort((a,b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
-        .map(([value,label]) => ({ value, label: counts.get(label) > 1 ? label + " · " + value.slice(0,6) : label }))]);
+        .map(([value,label]) => ({ value, label: counts.get(label) > 1 ? label + " · " + value.slice(0,6) : label }))], { preserveOpen: true });
       filterControl.setValue(selectedSpace); apply();
     }
     function click() { if (!locked) onReload?.(); }

@@ -52,13 +52,13 @@ impl Configuration {
         Ok(())
     }
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Property {
     pub key: String,
     pub name: String,
     pub format: String,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct View {
     pub target: Target,
     pub name: String,
@@ -70,7 +70,7 @@ pub struct View {
     pub properties: Vec<Property>,
     pub unsupported: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Catalog {
     pub views: Vec<View>,
     pub info: Vec<String>,
@@ -329,8 +329,8 @@ pub fn load_kanban_formulas() -> Result<Loaded, String> {
     })
 }
 #[tauri::command]
-pub async fn discover_kanban_views() -> Result<Catalog, String> {
-    tauri::async_runtime::spawn_blocking(|| Client::connect()?.discover())
+pub async fn discover_kanban_views(force_refresh: Option<bool>) -> Result<Catalog, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::metadata_cache::get("kanban", Value::Null, force_refresh.unwrap_or(false), |client| client.discover()))
         .await
         .map_err(|_| "The Kanban discovery task stopped. Try loading views again.".to_string())?
 }

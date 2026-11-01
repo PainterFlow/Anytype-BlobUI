@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod metadata_cache;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
@@ -833,6 +834,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
     }
 
     data["apiConnection"] = json!({
+        "metadataRevision": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos().to_string(),
         "enabled": connection.enabled,
         "ip": ip,
         "port": port,
