@@ -37,6 +37,11 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     const spaceMenu=page.getByRole('listbox',{name:'Filtered spaces',exact:true}),typeMenu=page.getByRole('listbox',{name:'Filtered object types',exact:true});
     assert.equal(await spaces.isEnabled(),true);assert.equal(await types.isEnabled(),true);
     assert.equal(await spaces.innerText(),'All');assert.equal(await types.innerText(),'All');
+    assert.equal(await page.evaluate(()=>{
+      const heading=document.querySelector('#object-mentions-section h2').getBoundingClientRect();
+      const general=document.querySelector('#codex-panel-0 > .settings-list').getBoundingClientRect();
+      return heading.top-general.bottom>=32;
+    }),true);
     await types.focus();await page.keyboard.press('ArrowDown');await typeMenu.getByRole('option',{name:'All',exact:true}).waitFor();
     await page.keyboard.press('Enter');await page.keyboard.press('Escape');assert.equal(await types.innerText(),'None');
     // An empty type selection cannot lock either picker while spaces are still loading.
@@ -81,6 +86,25 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(await spaces.isVisible(),true);await page.setViewportSize({width:620,height:950});
     await page.screenshot({path:path.join(fixture,'settings-refreshed-dark.png'),fullPage:true});
     assert.equal(await page.evaluate(()=>document.querySelector('.page-content').scrollWidth<=document.querySelector('.page-content').clientWidth),true);
+    await page.evaluate(()=>window.fixtureSpaces.push(...Array.from({length:40},(_,i)=>({id:'private-id-'+i,name:'Space '+String(i).padStart(2,'0')}))));
+    await page.getByRole('button',{name:'Reload options',exact:true}).click();await spaces.click();
+    await spaceMenu.getByRole('option',{name:'Space 00',exact:true}).waitFor();
+    await page.waitForFunction(()=>document.querySelector('#object-mentions-group [role=listbox]:not([hidden])')?.dataset.state==='open');
+    await spaceMenu.evaluate(menu=>Promise.all(menu.getAnimations().map(animation=>animation.finished)));
+    assert.doesNotMatch(await spaceMenu.innerText(),/private-id-/);
+    assert.equal(await spaceMenu.locator('.kanban-select-option-description').count(),0);
+    await spaceMenu.evaluate(menu=>{menu.scrollTop=120;menu.dispatchEvent(new Event('scroll'));});
+    assert.equal(await spaceMenu.evaluate(menu=>menu.classList.contains('has-overflow')&&menu.classList.contains('is-scrolling')),true);
+    const scrollbar=await spaceMenu.evaluate(menu=>({
+      width:getComputedStyle(menu,'::-webkit-scrollbar').width,
+      radius:getComputedStyle(menu,'::-webkit-scrollbar-thumb').borderRadius,
+      buttons:getComputedStyle(menu,'::-webkit-scrollbar-button').display,
+      color:getComputedStyle(menu).getPropertyValue('--page-scrollbar-color').trim()
+    }));
+    assert.equal(scrollbar.width,'12px');assert.equal(scrollbar.radius,'6px');assert.equal(scrollbar.buttons,'none');
+    await page.screenshot({path:path.join(fixture,'picker-dark.png')});
+    await page.waitForFunction(()=>!document.querySelector('#object-mentions-group [role=listbox]:not([hidden])').classList.contains('is-scrolling'));
+    await page.keyboard.press('Escape');
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
 });

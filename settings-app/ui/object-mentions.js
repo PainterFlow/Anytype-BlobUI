@@ -7,7 +7,8 @@
     const note = make('p','input-hint','Filters control suggestions. Reading an object still requires permission, including Always Ask. Save to apply changes.');
     const group = C.Group({attributes:{id:'object-mentions-group'}});
     const reload = C.Button({label:'Reload options',attributes:{class:'banner-image-button'},onClick:()=>void discover()});
-    panel.append(C.Heading({title:'Object Mentions'}).element,group.element,note,status,reload.element);
+    const section=C.Section({attributes:{id:'object-mentions-section'},content:[C.Heading({title:'Object Mentions'}).element,group.element,note,status,reload.element]});
+    panel.append(section.element);
     const pickers = {};
     const key = (kind,row) => kind==='spaces' ? row.id : JSON.stringify([row.spaceId,row.id]);
     const filters = () => normalize(api.read()).objectMentions;
@@ -19,7 +20,7 @@
       for (const row of selected.items) if (!entries.has(key(kind,row))) entries.set(key(kind,row),{row,available:false});
       return [{value:'*',label:'All'},...[...entries].map(([value,{row,available}])=>({value,row,
         label:kind==='spaces' ? row.name : row.name+' · '+row.space,
-        description:kind==='types'&&!active(row.spaceId) ? 'Inactive outside filtered spaces' : available ? (kind==='spaces'?row.id:row.spaceId+' · '+row.id) : 'Unavailable saved selection'
+        description:kind==='types'&&!active(row.spaceId) ? 'Inactive outside filtered spaces' : available ? '' : 'Unavailable saved selection'
       })).sort((a,b)=>a.label.localeCompare(b.label)||a.value.localeCompare(b.value))];
     }
     function change(kind,values) {
@@ -34,6 +35,8 @@
       const shell = C.PropertyPickerShell({label:'All',showValue:true,accessibleLabel:label,menuLabel:label});
       const row = C.SettingsRow({label,content:[shell.element],attributes:{class:'settings-row kanban-setting-row object-mention-row'}});
       group.element.append(row.element);
+      shell.menu.classList.add('app-scrollbar');
+      const scrollbar=UI.Scrollbar.attach(shell.menu);
       const controller = C.Picker({root:shell.element,menu:shell.menu,multiple:true,closeOnSelect:false,onChange:values=>change(kind,values)});
       const place = () => {
         const rect=shell.trigger.getBoundingClientRect(), width=Math.min(390,root.innerWidth-32);
@@ -45,7 +48,7 @@
       shell.trigger.addEventListener('click',place,true);shell.trigger.addEventListener('keydown',place,true);
       root.addEventListener('resize',()=>controller.close());
       root.document.querySelector('.page-content').addEventListener('scroll',()=>controller.close());
-      pickers[kind]={shell,controller};
+      pickers[kind]={shell,controller,scrollbar};
     }
     function refresh() {
       for (const kind of ['spaces','types']) {
@@ -56,6 +59,7 @@
         picker.shell.trigger.querySelector('[data-pick-value]').textContent=selection.all?'All':selection.items.length?selection.items.length+' selected':'None';
         // These are suggestion filters, independent of the permission lock and discovery state.
         picker.shell.trigger.disabled=false;
+        picker.scrollbar.update();
       }
     }
     async function discoverTypes() {

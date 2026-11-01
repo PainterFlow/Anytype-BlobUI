@@ -1,4 +1,5 @@
 .codex-space { padding: 12px 14px; border-radius: 12px; }
+#object-mentions-section { margin-top: 32px; }
 .object-mention-row .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; }
 .object-mention-row .formula-property-picker { flex: 0 1 auto; min-width: 0; }
 .codex-space:hover { background: var(--active); }
