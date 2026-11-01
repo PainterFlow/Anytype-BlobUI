@@ -3,7 +3,7 @@
   const UI = root.BlobUI = root.BlobUI || {};
 
   UI.ReloadController = {
-    create({ button = null, onBusyChange = null, onError = null, isCapturing = null, beforeRun = null } = {}) {
+    create({ button = null, onBusyChange = null, onError = null, isCapturing = null, beforeRun = null, onReload = null } = {}) {
       const handlers = new Set();
       let pending = null;
       let locked = false, queued = false;
@@ -24,7 +24,9 @@
         if (typeof onBusyChange === "function") {
           try { onBusyChange(true); } catch (_) { /* Keep reload execution independent of UI callbacks. */ }
         }
-        const execute = () => { if (locked) { queued = true; return []; } return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(handler))); };
+        const execute = () => { if (locked) { queued = true; return []; }
+          try { onReload?.(); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
+          return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(handler))); };
         pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
           .then(results => {
             const error = results.find(result => result.status === "rejected")?.reason;

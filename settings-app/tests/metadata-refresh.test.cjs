@@ -49,6 +49,7 @@ test('Ctrl+R refreshes hidden catalogs and an open calculator without changing d
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
+    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata. Refreshing Anytype lists and pickers.'}).count(),1);
     const calls=await page.evaluate(()=>window.calls);
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');
@@ -92,6 +93,12 @@ test('Ctrl+R refreshes hidden catalogs and an open calculator without changing d
     assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='discover_kanban_views').args.forceRefresh),true);
     await page.evaluate(()=>document.getElementById('help-keybinds').click());
     await page.locator('#keybinds-dialog').waitFor({state:'visible'});
+    const localShortcut=page.locator('#keybind-button-refreshMetadata');
+    assert.equal(await localShortcut.locator('kbd').allTextContents().then(keys=>keys.join('+')),'Ctrl+R');
+    assert.match(await page.locator('#keybind-label-refreshMetadata').innerText(),/Available in-app only/);
+    assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
+    await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
+    await page.screenshot({path:path.join(temp,'keybinds-dark.png')});
     await page.locator('#keybind-button-openSettings').click();
     const capturedRequests=await page.evaluate(()=>window.network);
     await page.keyboard.press('Control+r');

@@ -920,6 +920,7 @@
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
+    ["refreshMetadata", "Refresh Anytype lists and pickers", { code: "KeyR", ctrl: true }],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
@@ -958,21 +959,27 @@
     const list = el("keybind-list");
     window.BlobUI.Components.destroyTree(list);
     list.replaceChildren();
-    shortcutActions.forEach(([action, label]) => {
-      const binding = shortcutBindings.find((item) => item.action === action);
+    shortcutActions.forEach(([action, label, fixedBinding]) => {
+      const binding = fixedBinding || shortcutBindings.find((item) => item.action === action);
       const row = document.createElement("div");
       row.className = "keybind-row";
       const name = document.createElement("span");
       name.className = "keybind-label";
       name.id = `keybind-label-${action}`;
       name.textContent = label;
-      const button = window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
+      if (fixedBinding) {
+        const note = document.createElement("span");
+        note.className = "keybind-note";
+        note.textContent = "Available in-app only.";
+        name.append(note);
+      }
+      const button = fixedBinding ? document.createElement("span") : window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
       button.className = "keybind-button";
-      button.type = "button";
-      button.dataset.shortcutAction = action;
+      if (fixedBinding) { button.classList.add("keybind-fixed"); button.setAttribute("role", "img"); button.title = "Fixed shortcut. Available in-app only."; }
+      else { button.type = "button"; button.dataset.shortcutAction = action; }
       button.setAttribute("aria-labelledby", `${name.id} keybind-button-${action}`);
       button.id = `keybind-button-${action}`;
-      button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
+      if (!fixedBinding) button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
       if (shortcutCaptureAction === action || !binding) {
         button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : "Unavailable";
       } else {
@@ -2507,7 +2514,7 @@
     });
   }
 
-  window.BlobUI.AppReload = window.BlobUI.ReloadController.create({ isCapturing: () => !!shortcutCaptureAction, beforeRun: () => Promise.allSettled([...metadataPending]), onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); } });
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create({ onReload: () => addLog("Reloading app metadata. Refreshing Anytype lists and pickers.", "info"), isCapturing: () => !!shortcutCaptureAction, beforeRun: () => Promise.allSettled([...metadataPending]), onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); } });
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });

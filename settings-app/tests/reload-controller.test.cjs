@@ -91,12 +91,12 @@ test('Ctrl+R reloads the app, while other modifiers pass through', async () => {
 });
 
 test('locked shortcuts queue once, wait for every catalog, and respect shortcut capture', async () => {
-  let capture = false, calls = 0, finish;
-  const {controller, document} = harness({isCapturing:()=>capture});
+  let capture = false, calls = 0, reloads = 0, finish;
+  const {controller, document} = harness({isCapturing:()=>capture,onReload:()=>reloads++});
   controller.register(async()=>{calls++;await new Promise(resolve=>{finish=resolve;});});
   controller.setLocked(true);
   await controller.run();await controller.run();
-  assert.equal(calls,0);
+  assert.equal(calls,0);assert.equal(reloads,0);
   controller.setLocked(false);
   await Promise.resolve();
   assert.equal(calls,1);
@@ -104,7 +104,7 @@ test('locked shortcuts queue once, wait for every catalog, and respect shortcut 
   finish();await active;
   capture=true;
   document.fire('keydown',{ctrlKey:true,key:'r',preventDefault(){throw Error('Capture must own the shortcut');}});
-  assert.equal(calls,1);
+  assert.equal(calls,1);assert.equal(reloads,1);
 });
 
 test('a failing catalog does not release coalescing while another is loading', async () => {
