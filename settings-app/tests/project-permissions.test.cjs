@@ -44,10 +44,21 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
     const query=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Work"]')});
-    assert.equal(await query.locator('.codex-space-top button').isDisabled(),true);
+    assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').isDisabled(),true);
+    const disabledAccess=query.locator('.codex-space-bottom button[aria-label^="Access"]');
+    const disabledStyle=await disabledAccess.evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor}));
+    await disabledAccess.hover();
+    assert.deepEqual(await disabledAccess.evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor})),disabledStyle);
+    assert.equal(disabledStyle.color,'rgb(102, 102, 102)');
     await query.locator('.formula-view-name').click();
-    assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');
-    assert.equal(await query.locator('.codex-space-bottom button').innerText(),'Always Ask');
+    await query.locator('.settings-row > span').first().click();
+    assert.equal(await query.locator('input[role=switch]').isChecked(),false);
+    assert.equal(await query.locator('input[type=checkbox]').first().isChecked(),true);
+    await query.locator('.formula-view-name').click();
+    assert.equal(await page.locator('#save-button').isVisible(),false);
+    await query.locator('.formula-view-name').click();
+    assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read Only');
+    assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Approval"]').innerText(),'Always Ask');
     assert.equal(await query.locator('input[role=switch]').isChecked(),true);
     assert.equal(await sourceRows.first().getAttribute('data-selected'),'true');
     assert.equal(await query.evaluate(node=>getComputedStyle(node).outlineWidth),'2px');
@@ -56,8 +67,8 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     assert.equal(await query.locator('input[type=checkbox]').first().evaluate(node=>getComputedStyle(node).clipPath),'inset(50%)');
     // Equal names in another space retain independent identities and permissions.
     const privateQuery=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Private"]')});
-    await privateQuery.locator('.formula-view-name').click();assert.equal(await privateQuery.locator('.codex-space-top button').innerText(),'No Access');
-    await privateQuery.locator('.codex-space-top button').click();await dialog.getByRole('option',{name:'Read-Write',exact:true}).click();
+    await privateQuery.locator('.formula-view-name').click();assert.equal(await privateQuery.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'No Access');
+    await privateQuery.locator('.codex-space-bottom button[aria-label^="Access"]').click();await dialog.getByRole('option',{name:'Read-Write',exact:true}).click();
     // Multiple categories remain selected and the filter stays open.
     await page.locator('#project-sources-filter').click();await dialog.getByRole('option',{name:'Spaces',exact:true}).click();
     assert.equal(await page.locator('#project-sources-filter').getAttribute('aria-expanded'),'true');
@@ -67,7 +78,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     assert.equal(await sourceRows.filter({visible:true}).count(),3);
     await page.locator('#project-sources-search-toggle').click();await page.locator('#project-sources-search').fill('Private');assert.equal(await sourceRows.filter({visible:true}).count(),1);
     await page.evaluate(()=>window.sourceError='Fixture source refresh failed');await page.locator('#project-sources-reload').click();await page.getByRole('status').filter({hasText:'Fixture source refresh failed'}).waitFor();
-    assert.equal(await privateQuery.locator('.codex-space-top button').innerText(),'Read-Write');
+    assert.equal(await privateQuery.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read-Write');
     await page.locator('#project-sources-search').fill('');
     // Escape and backdrop dismissal preserve selections and the shared draft.
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
@@ -80,13 +91,13 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     assert.equal(await page.evaluate(()=>saved.codexIntegration.spaces.private.access),'none');
     // Global changes cannot mutate an independent saved override.
     await page.locator('#codex-tab-1').click();const global=page.locator('#codex-panel-1 .codex-space').first();await global.waitFor();
-    await global.locator('.codex-space-top button[aria-haspopup]').click();await page.locator('#codex-panel-1').getByRole('option',{name:'No Access',exact:true}).click();
+    await global.locator('.codex-space-bottom button[aria-label^="Access"][aria-haspopup]').click();await page.locator('#codex-panel-1').getByRole('option',{name:'No Access',exact:true}).click();
     await page.locator('#codex-tab-2').click();await projects.filter({hasText:'Renamed'}).click();
-    assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');
+    assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read Only');
     await query.locator('input[type=checkbox]').first().focus();await page.keyboard.press('Space');await query.locator('.formula-view-name').click();
-    assert.equal(await query.locator('.codex-space-top button').innerText(),'No Access');
+    assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'No Access');
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.evaluate(()=>window.BlobUI.discardChanges());await projects.filter({hasText:'Renamed'}).click();assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');
+    await page.evaluate(()=>window.BlobUI.discardChanges());await projects.filter({hasText:'Renamed'}).click();assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read Only');
     // Only successful scans mark saved sources unavailable, while retaining them.
     await page.evaluate(()=>{window.sourceError='';window.sources=[];});await page.locator('#project-sources-reload').click();await dialog.getByText('Unavailable source. Its saved selection is retained.').first().waitFor();
     assert.equal(await query.locator('input[type=checkbox]').first().isChecked(),true);

@@ -25,7 +25,12 @@
   function configuration() { return api.normalize(api.read()); }
   function saveSources(nextSources) {
     const next = configuration();
-    next.projects[active.id] = {name:active.name,rootPaths:active.rootPaths.slice(),sources:nextSources};
+    const baseline = api.normalize(api.readSaved()).projects[active.id];
+    const ordered = entries => entries.slice().sort((a,b)=>identity(a).localeCompare(identity(b)));
+    if (JSON.stringify(ordered(nextSources)) === JSON.stringify(ordered(baseline?.sources || []))) {
+      if (baseline) next.projects[active.id] = copy(baseline);
+      else delete next.projects[active.id];
+    } else next.projects[active.id] = {name:active.name,rootPaths:active.rootPaths.slice(),sources:nextSources};
     api.onChange(next);
   }
   function renderSources(focusKey) {
@@ -54,9 +59,7 @@
           saveSources(entries.map(row=>identity(row)===key ? {...row,permission} : row));
         }});
       row.item.dataset.selected=String(!!saved);
-      row.item.addEventListener('click',event=>{
-        if (!event.target.closest('button, input, a, [role="option"]')) selection.click();
-      });
+      row.item.querySelector('.formula-view-name').addEventListener('click',()=>selection.click());
       if (source.unavailable) row.item.append(make('p','formula-view-warning','Unavailable source. Its saved selection is retained.'));
       sourceList.append(row.item);rows.push(row);sourceRecords.push({item:row.item,view:{...source,target:{spaceId:source.spaceId}}});
     }
