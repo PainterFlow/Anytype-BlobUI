@@ -967,12 +967,6 @@
       name.className = "keybind-label";
       name.id = `keybind-label-${action}`;
       name.textContent = label;
-      if (fixedBinding) {
-        const note = document.createElement("span");
-        note.className = "keybind-note";
-        note.textContent = "Available in-app only.";
-        name.append(note);
-      }
       const button = fixedBinding ? document.createElement("span") : window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
       button.className = "keybind-button";
       if (fixedBinding) { button.classList.add("keybind-fixed"); button.setAttribute("role", "img"); button.title = "Fixed shortcut. Available in-app only."; }

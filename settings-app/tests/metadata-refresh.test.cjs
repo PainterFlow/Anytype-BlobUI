@@ -95,7 +95,7 @@ test('Ctrl+R refreshes hidden catalogs and an open calculator without changing d
     await page.locator('#keybinds-dialog').waitFor({state:'visible'});
     const localShortcut=page.locator('#keybind-button-refreshMetadata');
     assert.equal(await localShortcut.locator('kbd').allTextContents().then(keys=>keys.join('+')),'Ctrl+R');
-    assert.match(await page.locator('#keybind-label-refreshMetadata').innerText(),/Available in-app only/);
+    assert.equal(await page.locator('#keybind-label-refreshMetadata').innerText(),'Refresh Anytype lists and pickers');
     assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
     await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
     await page.screenshot({path:path.join(temp,'keybinds-dark.png')});

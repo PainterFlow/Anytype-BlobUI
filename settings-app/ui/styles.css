@@ -299,7 +299,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .keybinds-content > p:first-child { margin: 0 0 12px; font-size: 13px; line-height: 20px; }
 .keybind-list { display: grid; gap: 2px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; padding: 4px 0; }
-.keybind-note { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
 .keybind-button.keybind-fixed { cursor: default; }
 .keybind-label { color: var(--text); font-size: 13.5px; }
 .keybind-button { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; flex: 0 0 auto; min-height: 28px; max-width: 60%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-family: var(--font-interface); font-size: 13px; letter-spacing: 0; text-align: right; overflow-wrap: anywhere; cursor: pointer; }
