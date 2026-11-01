@@ -63,7 +63,18 @@ impl Operation {
 pub struct Request {
     pub id: String,
     pub token: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
     pub request: Operation,
+}
+/// Host metadata is deliberately separate from model-controlled tool arguments.
+pub fn thread_id(params: &Value) -> Result<Option<String>, String> {
+    match params.pointer("/_meta/threadId") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(id)) if !id.is_empty() && id.len() <= 128
+            && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') => Ok(Some(id.clone())),
+        _ => Err("Codex supplied invalid chat identity metadata.".into()),
+    }
 }
 #[derive(Serialize, Deserialize)]
 pub struct Response {
@@ -96,6 +107,15 @@ pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chat_identity_comes_only_from_host_metadata() {
+        assert_eq!(thread_id(&json!({"_meta":{"threadId":"chat-123"},"arguments":{"threadId":"spoof"}})).unwrap(),Some("chat-123".into()));
+        assert_eq!(thread_id(&json!({"arguments":{"threadId":"spoof"}})).unwrap(),None);
+        for bad in [json!(""),json!(false),json!("../escape"),json!("x".repeat(129))] {
+            assert!(thread_id(&json!({"_meta":{"threadId":bad}})).is_err());
+        }
+        assert!(operation("list_spaces",json!({"threadId":"spoof"})).is_err());
+    }
     #[test]
     fn strict_arguments() {
         for name in ["delete_object", "GET", ""] {

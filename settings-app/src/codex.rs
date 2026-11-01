@@ -123,7 +123,22 @@ mod tests {
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();let port=listener.local_addr().unwrap().port();
         let server=std::thread::spawn(move|| {
             for index in 0..5 {
-                let(mut stream,_)=listener.accept().unwrap();let mut bytes=[0;8192];let n=stream.read(&mut bytes).unwrap();let request=String::from_utf8_lossy(&bytes[..n]);
+                let(mut stream,_)=listener.accept().unwrap();
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut bytes=Vec::new();
+                // Drain the body before closing, otherwise Windows can reset the socket.
+                loop {
+                    let mut chunk=[0;4096];let n=stream.read(&mut chunk).unwrap();assert!(n>0);bytes.extend_from_slice(&chunk[..n]);
+                    assert!(bytes.len()<65536);
+                    if let Some(end)=bytes.windows(4).position(|part|part==b"\r\n\r\n") {
+                        let header=String::from_utf8_lossy(&bytes[..end]);
+                        let length=header.lines().filter_map(|line|line.split_once(':'))
+                            .find(|(key,_)|key.eq_ignore_ascii_case("content-length"))
+                            .map(|(_,value)|value.trim().parse::<usize>().unwrap()).unwrap_or(0);
+                        if bytes.len()>=end+4+length {break;}
+                    }
+                }
+                let request=String::from_utf8_lossy(&bytes);
                 let body=match index {
                     0=>{assert!(request.starts_with("GET /v2/spaces?ids=full"));json!({"data":[{"id":"space","name":"Work"}],"has_more":false})},
                     1=>{assert!(request.starts_with("GET /v2/spaces/space/types?ids=full"));json!({"data":[{"id":"type-full","name":"Task"}],"has_more":false})},

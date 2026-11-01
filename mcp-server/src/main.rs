@@ -95,6 +95,10 @@ fn main() {
             "tools/list" => reply(id, json!({"tools":tools()})),
             "tools/call" => {
                 let params = &message["params"];
+                let thread_id = match blobui_mcp::thread_id(params) {
+                    Ok(value) => value,
+                    Err(message) => { error(id, -32602, &message); continue; }
+                };
                 let op = match operation(
                     params["name"].as_str().unwrap_or(""),
                     params.get("arguments").cloned().unwrap_or(json!({})),
@@ -117,7 +121,7 @@ fn main() {
                 }
                 let pending = pending.clone();
                 std::thread::spawn(move || {
-                    let result=blobui_mcp::credential::read().and_then(|token|transport::call(&Request{id:key.clone(),token,request:op},&cancel));
+                    let result=blobui_mcp::credential::read().and_then(|token|transport::call(&Request{id:key.clone(),token,thread_id,request:op},&cancel));
                     let result = result.and_then(|r| {
                         r.result
                             .ok_or_else(|| r.error.unwrap_or("BlobUI denied the request.".into()))

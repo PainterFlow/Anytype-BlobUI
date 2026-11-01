@@ -182,10 +182,10 @@ pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> boo
         .is_some_and(|p| matches!(p.access.as_str(), "read" | "readWrite"))
 }
 fn allowed(config: &crate::codex::Configuration, op: &Operation) -> Result<(), String> {
-    // No supported host-owned chat identity reaches this bridge yet. Do not
-    // mistake installation credentials or model arguments for project identity.
+    // Callers must resolve project identity before using this global/effective config.
+    // Installation credentials and model arguments cannot select a project.
     if config.projects.values().any(|project| !project.sources.is_empty()) {
-        return Err("Anyblob reads are paused because project sources are saved, but Codex has not supplied verified chat identity. Remove every project source selection to use global permissions.".into());
+        return Err("Project permissions require resolved, verified chat identity.".into());
     }
     if op.space().is_some_and(|space| !readable(config, space)) {
         Err("Access denied by saved BlobUI space permissions. Save Read Only or Read-Write access first.".into())
@@ -216,6 +216,15 @@ fn execute(
     op: &Operation,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
+    execute_scoped(client, config, op, check, None)
+}
+fn execute_scoped(
+    client: &crate::kanban_api::Client,
+    config: &crate::codex::Configuration,
+    op: &Operation,
+    check: &impl Fn() -> Result<(), String>,
+    scope: Option<&crate::anyblob_scope::Scope>,
+) -> Result<Value, String> {
     allowed(config, op)?;
     op.validate()?;
     check()?;
@@ -238,7 +247,12 @@ fn execute(
             limit,
             offset,
         } => {
-            let response = client
+            let response = if let Some(scope) = scope {
+                // Paginate after restriction, so totals and offsets reveal only allowed objects.
+                let rows = client.pages("POST", &format!("/v2/spaces/{}/search?ids=full",enc(space_id)),Some(&json!({"query":query})))
+                    .map_err(unavailable)?;
+                scope.filter_search(space_id, rows, *offset, *limit)?
+            } else { client
                 .request(
                     "POST",
                     &format!(
@@ -247,7 +261,7 @@ fn execute(
                     ),
                     Some(&json!({"query":query})),
                 )
-                .map_err(unavailable)?;
+                .map_err(unavailable)? };
             let rows = response["data"]
                 .as_array()
                 .ok_or("Anytype returned invalid search results.")?;
@@ -268,6 +282,9 @@ fn execute(
             space_id,
             object_id,
         } => {
+            if scope.is_some_and(|scope| !scope.readable(space_id, object_id)) {
+                return Err("Access denied by saved BlobUI project sources.".into());
+            }
             let path = format!(
                 "/v2/spaces/{}/objects/{}?ids=full",
                 enc(space_id),
@@ -388,11 +405,35 @@ fn dispatch_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
+    let thread = request.thread_id.clone();
+    dispatch_resolved_with(request, connected, load_state, load_config, connect, approve, || {
+        thread.as_deref().map(crate::codex_identity::resolve).transpose()
+    })
+}
+fn dispatch_resolved_with(
+    request: Request,
+    connected: impl Fn() -> bool,
+    load_state: impl Fn() -> Result<Value, String>,
+    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
+    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
+    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
+) -> Result<Value, String> {
     request.request.validate()?;
+    blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
     let config = load_config()?;
-    allowed(&config, &request.request)?;
+    let restricted = config.projects.values().any(|project| !project.sources.is_empty());
+    let membership = if restricted {
+        Some(resolve()?.ok_or("Codex did not supply verified chat identity. Update Anyblob in Codex and retry.")?)
+    } else { None };
+    let project = match &membership {
+        Some(crate::codex_identity::Membership::Project(id)) => config.projects.get(id).filter(|project| !project.sources.is_empty()),
+        _ => None,
+    };
+    let mut effective = config.clone();
+    effective.projects.clear();
     let revision = REVISION.load(Ordering::Acquire);
     let check = || {
         if !connected() {
@@ -407,19 +448,43 @@ fn dispatch_with(
         {
             return Err("BlobUI permissions or integration changed. Retry the request.".into());
         }
-        allowed(&current_config, &request.request)
+        if restricted && resolve()? != membership {
+            return Err("Codex chat project changed during the request. Retry the request.".into());
+        }
+        Ok(())
     };
     check()?;
-    if request
-        .request
-        .space()
-        .and_then(|s| config.spaces.get(s))
-        .is_some_and(|p| p.approval == "alwaysAsk")
+    let client = if project.is_some() { Some(connect()?) } else { None };
+    let scope = project.map(|project| crate::anyblob_scope::Scope::load(client.as_ref().unwrap(), project, &check)).transpose()?;
+    if let Some(scope) = &scope { effective = scope.configuration(); }
+    allowed(&effective, &request.request)?;
+    if let (Some(scope), Operation::ReadObject {space_id, object_id}) = (&scope, &request.request) {
+        if !scope.readable(space_id,object_id) { return Err("Access denied by saved BlobUI project sources.".into()); }
+    }
+    let approval = if let (Some(scope), Operation::ReadObject{space_id,object_id}) = (&scope,&request.request) {
+        scope.permission(space_id,object_id)
+    } else { request.request.space().and_then(|space| effective.spaces.get(space)) };
+    if approval.is_some_and(|p| p.approval == "alwaysAsk")
     {
         approve(&request.request, &check)?;
     }
     check()?;
-    guarded_read(&connect()?, &config, &request.request, &check)
+    if let Some(scope) = &scope {
+        let client = client.as_ref().unwrap();
+        // Approval may have waited; recheck membership before fetching any object content.
+        let project = project.unwrap();
+        if crate::anyblob_scope::Scope::load(client, project, &check)? != *scope {
+            return Err("Project source membership changed. Retry the request.".into());
+        }
+        let result = execute_scoped(client, &effective, &request.request, &check, Some(scope))?;
+        if crate::anyblob_scope::Scope::load(client, project, &check)? != *scope {
+            return Err("Project source membership changed. Retry the request.".into());
+        }
+        check()?;
+        Ok(result)
+    } else {
+        guarded_read(&connect()?, &effective, &request.request, &check)
+    }
 }
 fn dispatch(
     app: &tauri::AppHandle,
@@ -557,11 +622,104 @@ mod tests {
         Request {
             id: "fixture".into(),
             token: "a".repeat(64),
+            thread_id: None,
             request: op,
         }
     }
     fn enabled() -> Value {
         json!({"enabled":true,"verifier":digest(&"a".repeat(64))})
+    }
+    fn project_config(source: Value) -> crate::codex::Configuration {
+        crate::codex::normalize(&json!({"spaces":{"space":{"access":"none"}},
+            "projects":{"project":{"sources":[source]}}}))
+    }
+    fn scoped_request(op: Operation) -> Request {
+        let mut request = request(op); request.thread_id = Some("chat-a".into()); request
+    }
+    #[test]
+    fn chat_mapping_applies_project_grants_and_keeps_other_projects_global() {
+        use crate::codex_identity::Membership;
+        let config=project_config(json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"alwaysAsk"}}));
+        let (client,server)=mock(vec![
+            ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Allowed","type":"page","properties":{}})),
+            ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"project content"})),
+        ],None);
+        let approvals=std::cell::Cell::new(0);
+        let result=dispatch_resolved_with(scoped_request(Operation::ReadObject{space_id:"space".into(),object_id:"object".into()}),
+            ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),
+            |_,check|{approvals.set(approvals.get()+1);check()},||Ok(Some(Membership::Project("project".into())))).unwrap();
+        assert_eq!(result["markdown"],"project content"); assert_eq!(approvals.get(),1);server.join().unwrap();
+        for membership in [Membership::Project("other".into()),Membership::Projectless] {
+            assert!(dispatch_resolved_with(scoped_request(search()),||true,||Ok(enabled()),||Ok(config.clone()),
+                ||panic!("global denial must precede API connection"),|_,_|panic!("must not prompt"),||Ok(Some(membership.clone()))).is_err());
+        }
+    }
+    #[test]
+    fn query_search_filters_membership_before_pagination_and_hides_global_totals() {
+        use crate::codex_identity::Membership;
+        let config=project_config(json!({"kind":"query","id":"query","spaceId":"space","permission":{"access":"read","approval":"fullAccess"}}));
+        let membership=("GET /v2/spaces/space/queries/query/objects?ids=full&limit=100&offset=0 ".into(),
+            json!({"data":[{"id":"allowed"},{"id":"second"}],"total":2,"has_more":false}));
+        let (client,server)=mock(vec![membership.clone(),membership.clone(),
+            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"hidden","name":"Hidden","type":"page"},{"id":"allowed","name":"First","type":"page"}],"total":3,"has_more":true})),
+            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=2 ".into(),json!({"data":[{"id":"second","name":"Second","type":"page"}],"total":3,"has_more":false})),membership],None);
+        let result=dispatch_resolved_with(scoped_request(Operation::SearchObjects{space_id:"space".into(),query:"private fixture query".into(),limit:1,offset:1}),
+            ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|_,_|panic!("no approval"),
+            ||Ok(Some(Membership::Project("project".into())))).unwrap();
+        assert_eq!(result["total"],2);assert_eq!(result["objects"][0]["id"],"second");assert_eq!(result["has_more"],false);server.join().unwrap();
+    }
+    #[test]
+    fn direct_ids_cannot_bypass_collection_membership() {
+        use crate::codex_identity::Membership;
+        let config=project_config(json!({"kind":"collection","id":"collection","spaceId":"space","permission":{"access":"read"}}));
+        let (client,server)=mock(vec![("GET /v2/spaces/space/collections/collection/objects?ids=full&limit=100&offset=0 ".into(),
+            json!({"data":[{"id":"allowed"}],"total":1,"has_more":false}))],None);
+        assert!(dispatch_resolved_with(scoped_request(Operation::ReadObject{space_id:"space".into(),object_id:"outside".into()}),
+            ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|_,_|panic!("must deny before approval"),
+            ||Ok(Some(Membership::Project("project".into())))).unwrap_err().contains("project sources"));server.join().unwrap();
+    }
+    #[test]
+    fn identified_unconfigured_and_projectless_chats_keep_global_reads() {
+        use crate::codex_identity::Membership;
+        let mut config=project_config(json!({"kind":"space","id":"other","spaceId":"other","permission":{"access":"read"}}));
+        config.spaces.insert("space".into(),crate::codex::Permission{access:"read".into(),approval:"fullAccess".into(),files_enabled:false});
+        let page=("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Global"},{"id":"other","name":"Other project"}],"has_more":false}));
+        let (client,server)=mock(vec![page.clone(),page],None);
+        for membership in [Membership::Project("unconfigured".into()),Membership::Projectless] {
+            let result=dispatch_resolved_with(scoped_request(Operation::ListSpaces{}),||true,||Ok(enabled()),||Ok(config.clone()),
+                ||Ok(client.clone_for_fixture()),|_,_|panic!("discovery never prompts"),||Ok(Some(membership.clone()))).unwrap();
+            assert_eq!(result["spaces"],json!([{"id":"space","name":"Global"}]));
+        }
+        server.join().unwrap();
+    }
+    #[test]
+    fn object_type_scope_uses_exact_full_id_and_api_key() {
+        let config=project_config(json!({"kind":"type","id":"type-full","spaceId":"space","permission":{"access":"read"}}));
+        let (client,server)=mock(vec![
+            ("GET /v2/spaces/space/types?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"type-full","key":"task"},{"id":"different","key":"page"}],"has_more":false})),
+            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"task-object"}],"total":1,"has_more":false,"_fixture_request_body":{"type":"task"}})),
+        ],None);
+        let scope=crate::anyblob_scope::Scope::load(&client,&config.projects["project"],&||Ok(())).unwrap();
+        assert!(scope.readable("space","task-object"));assert!(!scope.readable("space","page-object"));server.join().unwrap();
+    }
+    #[test]
+    fn project_moves_and_source_revocation_withhold_results() {
+        use crate::codex_identity::Membership;
+        let config=project_config(json!({"kind":"collection","id":"collection","spaceId":"space","permission":{"access":"read"}}));
+        let member=("GET /v2/spaces/space/collections/collection/objects?ids=full&limit=100&offset=0 ".into(),
+            json!({"data":[{"id":"allowed"}],"total":1,"has_more":false}));
+        let (client,server)=mock(vec![member.clone(),member,
+            ("GET /v2/spaces/space/objects/allowed?ids=full ".into(),json!({"id":"allowed","name":"Note","type":"page","properties":{}})),
+            ("GET /v2/spaces/space/objects/allowed?ids=full&format=md ".into(),json!({"id":"allowed","markdown":"withheld"})),
+            ("GET /v2/spaces/space/collections/collection/objects?ids=full&limit=100&offset=0 ".into(),json!({"data":[],"total":0,"has_more":false}))],None);
+        assert!(dispatch_resolved_with(scoped_request(Operation::ReadObject{space_id:"space".into(),object_id:"allowed".into()}),
+            ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|_,check|check(),
+            ||Ok(Some(Membership::Project("project".into())))).unwrap_err().contains("membership changed"));server.join().unwrap();
+        let checks=std::cell::Cell::new(0);
+        assert!(dispatch_resolved_with(scoped_request(search()),||true,||Ok(enabled()),||Ok(config.clone()),
+            ||panic!("must deny before connecting"),|_,_|panic!(),||{
+                checks.set(checks.get()+1); Ok(Some(Membership::Project(if checks.get()==1 {"project"} else {"other"}.into())))
+            }).unwrap_err().contains("project changed"));
     }
     fn search() -> Operation {
         Operation::SearchObjects {
@@ -590,6 +748,8 @@ mod tests {
                         Err(e) => panic!("missing fixture request {expected}: {e}"),
                     }
                 };
+                // Accepted sockets inherit nonblocking mode on Windows.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
                     .unwrap();
@@ -617,7 +777,8 @@ mod tests {
                 assert!(text.starts_with(&expected), "{text}");
                 assert!(expected.contains("/v2/"));
                 if expected.starts_with("POST") {
-                    assert!(text.ends_with("{\"query\":\"private fixture query\"}"));
+                    let expected_body=body.get("_fixture_request_body").cloned().unwrap_or(json!({"query":"private fixture query"}));
+                    assert!(text.ends_with(&expected_body.to_string()));
                 }
                 if let Some(flag) = &revoke {
                     flag.store(true, Ordering::Release);
@@ -896,6 +1057,7 @@ mod tests {
                 let cancel = AtomicBool::new(false);
                 let request: Request =
                     serde_json::from_slice(&pipe.receive(&cancel, deadline).unwrap()).unwrap();
+                if index < 3 { assert_eq!(request.thread_id.as_deref(),Some("fixture-chat")); }
                 let result = dispatch_with(
                     request,
                     || pipe.connected(),
@@ -996,7 +1158,7 @@ mod tests {
                 &mut input,
                 id,
                 "tools/call",
-                json!({"name":name,"arguments":args}),
+                json!({"name":name,"arguments":args,"_meta":{"threadId":"fixture-chat"}}),
             );
             let response = receive(&mut output);
             assert_eq!(response["result"]["isError"], false, "{response}");

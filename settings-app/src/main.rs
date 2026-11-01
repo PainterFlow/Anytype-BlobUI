@@ -20,6 +20,8 @@ mod kanban;
 mod calendar;
 mod codex;
 mod codex_projects;
+mod codex_identity;
+mod anyblob_scope;
 mod anyblob;
 mod marketplace;
 mod kanban_api;
