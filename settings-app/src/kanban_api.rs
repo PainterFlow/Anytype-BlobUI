@@ -73,7 +73,10 @@ impl Client {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Vec<Value>, String> {
-        complete_pages_with_info(|offset| {
+        let growing_total = method == "POST"
+            && path.split('?').next().is_some_and(|path| path.ends_with("/search"))
+            && body.and_then(|body| body["query"].as_str()).is_some_and(|query| !query.trim().is_empty());
+        complete_pages_with_totals(|offset| {
             let separator = if path.contains('?') { '&' } else { '?' };
             self.request(
                 method,
@@ -82,7 +85,7 @@ impl Client {
             )
         }, |message| {
             if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
-        })
+        }, growing_total)
     }
     pub fn take_info(&self) -> Vec<String> {
         self.info.lock().map(|mut info| std::mem::take(&mut *info).into_iter().collect())
@@ -1024,12 +1027,22 @@ pub(crate) fn complete_pages(
     complete_pages_with_info(fetch, |_| {})
 }
 
+#[cfg(test)]
 fn complete_pages_with_info(
+    fetch: impl FnMut(usize) -> Result<Value, String>,
+    on_info: impl FnMut(&str),
+) -> Result<Vec<Value>, String> {
+    complete_pages_with_totals(fetch, on_info, false)
+}
+
+fn complete_pages_with_totals(
     mut fetch: impl FnMut(usize) -> Result<Value, String>,
     mut on_info: impl FnMut(&str),
+    growing_total: bool,
 ) -> Result<Vec<Value>, String> {
     let mut all = Vec::new();
     let mut total = None;
+    let mut seen = BTreeSet::new();
     loop {
         let response = fetch(all.len())?;
         warnings::check(&response, false, &mut on_info)?;
@@ -1046,7 +1059,7 @@ fn complete_pages_with_info(
             .or_else(|| response.pointer("/pagination/total"))
             .and_then(Value::as_u64);
         if let (Some(before), Some(now)) = (total, current) {
-            if before != now {
+            if if growing_total { now < before } else { before != now } {
                 return Err(
                     "The board changed during pagination. Refresh results to retry.".into(),
                 );
@@ -1055,6 +1068,18 @@ fn complete_pages_with_info(
         total = current.or(total);
         if more && data.is_empty() {
             return Err("Anytype returned an incomplete page. Refresh to retry.".into());
+        }
+        if growing_total {
+            for row in data {
+                let id = row["id"].as_str().filter(|id| !id.is_empty())
+                    .ok_or("Anytype returned a search result without an object ID.")?;
+                if !seen.insert(id.to_string()) {
+                    return Err("Search results changed during pagination. Retry the request.".into());
+                }
+            }
+            if more && current.is_some_and(|n| n <= (all.len() + data.len()) as u64) {
+                return Err("Anytype returned inconsistent search pagination.".into());
+            }
         }
         all.extend(data.iter().cloned());
         if all.len() > 1_000_000 {
@@ -1372,6 +1397,22 @@ mod tests {
             .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
+    }
+    #[test]
+    fn fulltext_paging_accepts_lower_bounds_and_rejects_incomplete_results() {
+        let first = json!({"data":[{"id":"a"},{"id":"b"}],"has_more":true,"total":3});
+        let last = json!({"data":[{"id":"c"},{"id":"d"}],"has_more":false,"total":4});
+        let fetch = |offset| Ok(if offset == 0 { first.clone() } else { last.clone() });
+        assert_eq!(complete_pages_with_totals(fetch, |_| {}, true).unwrap().len(), 4);
+        assert!(complete_pages_with_info(fetch, |_| {}).is_err());
+        for last in [
+            json!({"data":[],"has_more":false,"total":2}),
+            json!({"data":[{"id":"c"}],"has_more":false,"total":4}),
+            json!({"data":[{"id":"b"},{"id":"c"}],"has_more":false,"total":4}),
+            json!({"data":[],"has_more":true,"total":4}),
+        ] {
+            assert!(complete_pages_with_totals(|offset| Ok(if offset == 0 {first.clone()} else {last.clone()}), |_| {}, true).is_err());
+        }
     }
     #[test]
     fn paging_requires_complete_stable_responses() {
