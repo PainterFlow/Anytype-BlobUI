@@ -73,7 +73,7 @@
   function mountIntegration(panel) {
     const status=make('p','input-hint');status.setAttribute('role','status');
     const toggle=C.ToggleSetting({label:'Enable Anyblob',onChange:()=>configure(toggle.input.checked)});
-    const install=C.Button({label:'Install',attributes:{class:'formula-button update-check-button'},onClick:()=>void installMarketplace()});
+    const install=C.Button({label:'Install',attributes:{class:'banner-image-button update-check-button'},onClick:()=>void installMarketplace()});
     panel.append(C.Heading({title:'General'}).element,C.Group({content:[toggle.element,C.SettingsRow({label:'Install Marketplace',content:[install.element],attributes:{class:'settings-row kanban-setting-row'}}).element]}).element,status);
     let changing=false,installing=false,integrationEpoch=0,installationEpoch=0;
     async function configure(enabled) {
