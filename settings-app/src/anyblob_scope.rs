@@ -71,7 +71,7 @@ impl Scope {
                     )?
                 }
                 "type" => {
-                    let types = client.pages("GET", &format!("{base}/types?ids=full"), None)?;
+                    let types = crate::codex::source_types(client, &base)?;
                     let row = types.iter().find(|row| row["id"].as_str() == Some(&source.id))
                         .ok_or("A selected project object type is unavailable. Refresh project sources.")?;
                     let key = row["key"]

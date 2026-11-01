@@ -696,7 +696,8 @@ mod tests {
     fn object_type_scope_uses_exact_full_id_and_api_key() {
         let config=project_config(json!({"kind":"type","id":"type-full","spaceId":"space","permission":{"access":"read"}}));
         let (client,server)=mock(vec![
-            ("GET /v2/spaces/space/types?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"type-full","key":"task"},{"id":"different","key":"page"}],"has_more":false})),
+            ("GET /v2/spaces/space/types?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"key":"task"},{"id":"different","key":"page"}],"has_more":false})),
+            ("GET /v2/spaces/space/types/task?ids=full ".into(),json!({"id":"type-full"})),
             ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"task-object"}],"total":1,"has_more":false,"_fixture_request_body":{"type":"task"}})),
         ],None);
         let scope=crate::anyblob_scope::Scope::load(&client,&config.projects["project"],&||Ok(())).unwrap();

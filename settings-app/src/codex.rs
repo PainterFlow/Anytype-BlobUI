@@ -72,6 +72,22 @@ pub async fn discover_codex_spaces() -> Result<Vec<Value>, String> {
         .map_err(|_| "Space discovery stopped. Reload to retry.".to_string())?
 }
 
+// Type lists can contain API keys without object IDs, even with ids=full.
+// Resolve those entries through the v2 type document before saving permissions.
+pub(crate) fn source_types(client: &crate::kanban_api::Client, base: &str) -> Result<Vec<Value>, String> {
+    client.pages("GET", &format!("{base}/types?ids=full"), None)?.into_iter().map(|mut row| {
+        if row["id"].as_str().filter(|id| !id.is_empty()).is_none() {
+            let key = row["key"].as_str().filter(|key| !key.is_empty())
+                .ok_or("Type discovery returned a missing API key and full ID.")?;
+            let document = client.request("GET", &format!("{base}/types/{}?ids=full", crate::api::encode_segment(key)), None)?;
+            let id = document["id"].as_str().filter(|id| !id.is_empty())
+                .ok_or("Type discovery returned a missing full ID.")?;
+            row["id"] = Value::String(id.into());
+        }
+        Ok(row)
+    }).collect()
+}
+
 fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
     let mut sources = Vec::new();
     let mut identities = std::collections::BTreeSet::new();
@@ -85,7 +101,7 @@ fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, St
             sources.push(serde_json::json!({"spaceId":sid,"space":space["name"],"kind":kind,"id":id,"name":name})); Ok(())
         };
         add("space",sid,space["name"].as_str().unwrap_or("Unnamed space"))?;
-        for row in client.pages("GET", &format!("{path}/types?ids=full"), None)? {
+        for row in source_types(client, &path)? {
             let id = row["id"].as_str().filter(|s| !s.is_empty()).ok_or("Type discovery returned a missing full ID.")?;
             add("type",id,row["name"].as_str().unwrap_or("Unnamed type"))?;
         }
@@ -122,7 +138,7 @@ mod tests {
         use std::{io::{Read,Write},net::TcpListener};
         let listener=TcpListener::bind("127.0.0.1:0").unwrap();let port=listener.local_addr().unwrap().port();
         let server=std::thread::spawn(move|| {
-            for index in 0..5 {
+            for index in 0..6 {
                 let(mut stream,_)=listener.accept().unwrap();
                 stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
                 let mut bytes=Vec::new();
@@ -141,17 +157,18 @@ mod tests {
                 let request=String::from_utf8_lossy(&bytes);
                 let body=match index {
                     0=>{assert!(request.starts_with("GET /v2/spaces?ids=full"));json!({"data":[{"id":"space","name":"Work"}],"has_more":false})},
-                    1=>{assert!(request.starts_with("GET /v2/spaces/space/types?ids=full"));json!({"data":[{"id":"type-full","name":"Task"}],"has_more":false})},
-                    2=>{assert!(request.starts_with("POST /v2/spaces/space/search?ids=full"));json!({"data":[{"id":"collection","type":"collection","name":"Tasks"}],"has_more":true})},
-                    3=>{assert!(request.contains("offset=1 "));json!({"data":[{"id":"query","type":"query","name":"Tasks"},{"id":"page","type":"page","name":"Skip"}],"has_more":false})},
+                    1=>{assert!(request.starts_with("GET /v2/spaces/space/types?ids=full"));json!({"data":[{"key":"task / key","name":"Task"}],"has_more":false})},
+                    2=>{assert!(request.starts_with("GET /v2/spaces/space/types/task%20%2F%20key?ids=full "));json!({"id":"type-full"})},
+                    3=>{assert!(request.starts_with("POST /v2/spaces/space/search?ids=full"));json!({"data":[{"id":"collection","type":"collection","name":"Tasks"}],"has_more":true})},
+                    4=>{assert!(request.contains("offset=1 "));json!({"data":[{"id":"query","type":"query","name":"Tasks"},{"id":"page","type":"page","name":"Skip"}],"has_more":false})},
                     _=>json!({"error":"fixture"})
                 };
-                let body=body.to_string();let status=if index==4 {"503 Service Unavailable"}else{"200 OK"};
+                let body=body.to_string();let status=if index==5 {"503 Service Unavailable"}else{"200 OK"};
                 write!(stream,"HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
             }
         });
         let client=crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",port);
-        let sources=discover_sources(&client).unwrap();assert_eq!(sources.len(),4);
+        let sources=discover_sources(&client).unwrap();assert_eq!(sources.len(),4); assert_eq!(sources[1]["id"],"type-full");
         assert_eq!(sources.iter().map(|row|row["kind"].as_str().unwrap()).collect::<Vec<_>>(),vec!["space","type","collection","query"]);
         assert!(discover_sources(&client).is_err());server.join().unwrap();
     }
