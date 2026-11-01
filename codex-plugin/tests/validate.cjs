@@ -5,6 +5,8 @@ const root = path.resolve(process.argv[2]);
 const plugin = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json')));
 const mcp = JSON.parse(fs.readFileSync(path.join(root, '.mcp.json')));
 assert.equal(plugin.name, 'anyblob');
+assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
+assert.equal(plugin.version, JSON.parse(fs.readFileSync(path.resolve(__dirname, '../src/.codex-plugin/plugin.json'))).version);
 assert.equal(plugin.interface.displayName, 'Anyblob');
 assert.equal(plugin.requires_local_executor, true);
 const server = mcp.mcpServers.anyblob;

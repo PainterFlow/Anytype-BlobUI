@@ -147,6 +147,50 @@ fn installed(root: &Path, bytes: &[u8]) -> Result<bool, String> {
     }
     Ok(true)
 }
+fn package_version(package: &Path) -> Result<Option<String>, String> {
+    let path = package.join(".codex-plugin/plugin.json");
+    storage::reject_reparse_path(&path)?;
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let manifest: Value = serde_json::from_slice(&bytes)
+                .map_err(|_| "The installed Anyblob manifest is invalid.")?;
+            let version = manifest["version"].as_str().ok_or("Anyblob has no release version.")?;
+            semver::Version::parse(version).map_err(|_| "Invalid Anyblob release version.")?;
+            Ok(Some(version.to_string()))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("Could not read the installed Anyblob version.".into()),
+    }
+}
+fn installation_status(root: &Path, bytes: &[u8]) -> Result<Value, String> {
+    let (_, files) = payload(bytes)?;
+    let manifest: Value = serde_json::from_slice(&files[0].1).map_err(|_| "Invalid Anyblob manifest.")?;
+    let bundled = manifest["version"].as_str().ok_or("Anyblob has no release version.")?;
+    semver::Version::parse(bundled).map_err(|_| "Invalid bundled Anyblob release version.")?;
+    let version = package_version(&root.join(".codex/plugins/anyblob"))?;
+    let current = installed(root, bytes)?;
+    // Codex owns its cache. Inspect the documented local copy, never overwrite it.
+    let catalog_path = root.join(".agents/plugins/marketplace.json");
+    storage::reject_reparse_path(&catalog_path)?;
+    let catalog: Value = match fs::read(catalog_path) {
+        Ok(data) => serde_json::from_slice(&data).map_err(|_| "Invalid marketplace.")?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(_) => return Err("Could not read the personal marketplace.".into()),
+    };
+    let mut refresh = false;
+    if let Some(name) = catalog["name"].as_str() {
+        // A catalog name must be a single directory component before resolving cache paths.
+        if !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_".contains(&c)) {
+            let cache = root.join(".codex/plugins/cache").join(name).join("anyblob/local");
+            if package_version(&cache)?.is_some() {
+                tree(&cache)?;
+                refresh = files.iter().any(|(path, data)| fs::read(cache.join(path)).ok().as_deref() != Some(data.as_slice()));
+            }
+        }
+    }
+    Ok(json!({"installed":current,"updateAvailable":version.is_some() && (!current || refresh),
+        "bundledVersion":bundled,"installedVersion":version,"codexRefreshRequired":refresh}))
+}
 fn install_at(root: &Path, bytes: &[u8]) -> Result<(), String> {
     let (template, files) = payload(bytes)?;
     let target = root.join(".codex/plugins/anyblob");
@@ -184,8 +228,11 @@ fn install_at(root: &Path, bytes: &[u8]) -> Result<(), String> {
         if fs::read(&catalog_path).ok() != original {
             return Err("The personal marketplace changed during installation. Retry to keep those changes.".into());
         }
-        catalog_attempted = true;
-        storage::write_atomic(&catalog_path, &serde_json::to_vec_pretty(&value).unwrap())?;
+        let catalog_bytes = serde_json::to_vec_pretty(&value).unwrap();
+        if original.as_deref() != Some(catalog_bytes.as_slice()) {
+            catalog_attempted = true;
+            storage::write_atomic(&catalog_path, &catalog_bytes)?;
+        }
         Ok::<_, String>(())
     })();
     if let Err(error) = result {
@@ -223,7 +270,7 @@ pub fn anyblob_installation_status() -> Result<Value, String> {
     let _guard = INSTALL
         .lock()
         .map_err(|_| "Marketplace installation is unavailable.")?;
-    Ok(json!({"installed":installed(&profile()?,PAYLOAD)?}))
+    installation_status(&profile()?, PAYLOAD)
 }
 #[tauri::command]
 pub async fn install_anyblob_marketplace() -> Result<(), String> {
@@ -239,6 +286,41 @@ pub async fn install_anyblob_marketplace() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn release_status_detects_old_versions_and_stale_codex_copies() {
+        let root = root();
+        let absent = installation_status(&root, PAYLOAD).unwrap();
+        assert_eq!(absent["installed"], false);
+        assert_eq!(absent["updateAvailable"], false);
+        assert_eq!(absent["installedVersion"], Value::Null);
+        install_at(&root, PAYLOAD).unwrap();
+        let current = installation_status(&root, PAYLOAD).unwrap();
+        assert_eq!(current["updateAvailable"], false);
+        assert_eq!(current["installedVersion"], current["bundledVersion"]);
+        let manifest_path = root.join(".codex/plugins/anyblob/.codex-plugin/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["version"] = json!("0.0.1");
+        fs::write(&manifest_path, manifest.to_string()).unwrap();
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["updateAvailable"], true);
+        install_at(&root, PAYLOAD).unwrap();
+        let cache = root.join(".codex/plugins/cache/personal/anyblob/local");
+        let (_, files) = payload(PAYLOAD).unwrap();
+        for (relative, bytes) in files {
+            let path = cache.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["updateAvailable"], false);
+        fs::write(cache.join("README.md"), b"old release content").unwrap();
+        let stale = installation_status(&root, PAYLOAD).unwrap();
+        assert_eq!(stale["installed"], true);
+        assert_eq!(stale["updateAvailable"], true);
+        assert_eq!(stale["codexRefreshRequired"], true);
+        install_at(&root, PAYLOAD).unwrap();
+        assert_eq!(fs::read(cache.join("README.md")).unwrap(), b"old release content");
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], true);
+        fs::remove_dir_all(root).unwrap();
+    }
     fn root() -> PathBuf {
         let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../.test-run")

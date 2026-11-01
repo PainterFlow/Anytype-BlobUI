@@ -75,7 +75,8 @@
     const toggle=C.ToggleSetting({label:'Enable Anyblob',onChange:()=>configure(toggle.input.checked)});
     const install=C.Button({label:'Install',attributes:{class:'banner-image-button update-check-button'},onClick:()=>void installMarketplace()});
     panel.append(C.Heading({title:'General'}).element,C.Group({content:[toggle.element,C.SettingsRow({label:'Install Marketplace',content:[install.element],attributes:{class:'settings-row kanban-setting-row'}}).element]}).element,status);
-    let changing=false,installing=false,integrationEpoch=0,installationEpoch=0;
+    let changing=false,installing=false,integrationEpoch=0,installationEpoch=0,installation=null;
+    function showInstallation(value){installation=value;install.element.textContent=value?.updateAvailable?'Update':value?.installed?'Installed':'Install';install.element.title=value?.bundledVersion?'Anyblob '+value.bundledVersion:'';}
     async function configure(enabled) {
       if(changing)return;changing=true;integrationEpoch++;toggle.input.disabled=true;status.textContent='';
       try {const value=await api.invoke('configure_anyblob',{enabled});toggle.input.checked=value.enabled;}
@@ -83,19 +84,19 @@
       finally {changing=false;toggle.input.disabled=false;}
     }
     async function refresh(){const epoch=++integrationEpoch;try{const value=await api.invoke('anyblob_status');if(epoch===integrationEpoch)toggle.input.checked=value.enabled;}catch(error){if(epoch===integrationEpoch)status.textContent=String(error.message||error);}}
-    async function refreshInstallation(){if(installing)return;const epoch=++installationEpoch;try{const value=await api.invoke('anyblob_installation_status');if(epoch===installationEpoch)install.element.textContent=value?.installed?'Installed':'Install';}catch(error){if(epoch===installationEpoch){install.element.textContent='Install';status.textContent=String(error.message||error);}}}
+    async function refreshInstallation(){if(installing)return;const epoch=++installationEpoch;try{const value=await api.invoke('anyblob_installation_status');if(epoch===installationEpoch)showInstallation(value);}catch(error){if(epoch===installationEpoch){showInstallation(null);status.textContent=String(error.message||error);}}}
     async function installMarketplace(){
-      if(installing)return;installing=true;installationEpoch++;install.element.disabled=true;install.element.textContent='Installing…';status.textContent='';
+      if(installing)return;const updating=!!installation?.updateAvailable;installing=true;installationEpoch++;install.element.disabled=true;install.element.textContent=updating?'Updating…':'Installing…';status.textContent='';
       try {
-        await api.invoke('install_anyblob_marketplace');install.element.textContent='Installed';
-        const title=make('h2','','Anyblob marketplace installed');
-        const text=make('p','','Open the Plugins Directory, select your personal marketplace, then choose Anyblob to install and enable it. You may need to reopen Codex. Space access still requires saved BlobUI permissions.');
+        await api.invoke('install_anyblob_marketplace');showInstallation(await api.invoke('anyblob_installation_status'));
+        const title=make('h2','',updating?'Anyblob marketplace updated':'Anyblob marketplace installed');
+        const text=make('p','',updating?'The bundled Anyblob release is registered. Open Codex’s Plugins Directory and refresh Anyblob. If it still uses the previous release, uninstall and reinstall Anyblob there, then reopen Codex. BlobUI does not replace Codex’s running plugin copy.':'Open the Plugins Directory, select your personal marketplace, then choose Anyblob to install and enable it. You may need to reopen Codex. Space access still requires saved BlobUI permissions.');
         let modal;
         const done=C.Button({label:'Done',attributes:{class:'confirm-cancel'},onClick:()=>modal.close()});
         const actions=make('div','confirm-actions');actions.append(done.element);
-        const shell=C.DialogShell({dialogAttributes:{'aria-label':'Anyblob marketplace installed'},content:[title,text,actions]});doc.body.append(shell.element);
+        const shell=C.DialogShell({dialogAttributes:{'aria-label':title.textContent},content:[title,text,actions]});doc.body.append(shell.element);
         modal=C.Modal({backdrop:shell.element,dialog:shell.dialog,initialFocus:done.element,inertTargets:[...doc.body.children].filter(node=>node!==shell.element&&node.tagName!=='SCRIPT'),onClose:()=>root.setTimeout(()=>{modal.destroy();shell.destroy();shell.element.remove();},180)});modal.open();
-      }catch(error){install.element.textContent='Install';status.textContent=String(error.message||error);}
+      }catch(error){showInstallation(installation);status.textContent=String(error.message||error);}
       finally{installing=false;install.element.disabled=false;}
     }
     panel.refreshIntegration=()=>{void refresh();void refreshInstallation();};

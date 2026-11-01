@@ -13,6 +13,12 @@ Anyblob searches and reads Anytype objects through the running BlobUI Settings a
 
 Developers can build the plugin ZIP and bundled marketplace payload with scripts/Build-Codex.ps1. The Settings build embeds that payload, so end users need no source repository or build tools. Build scripts never write a personal marketplace or credential.
 
+## Updates
+
+BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
+
+The version in codex-plugin/src/.codex-plugin/plugin.json is the Anyblob release version and covers the plugin and its bundled MCP executable. Bump it for plugin or MCP releases, then build Settings to ship that package. BlobUI-only changes do not require an Anyblob version bump. File comparisons also detect rebuilt or incomplete packages with unchanged versions.
+
 ## Reading and permissions
 
 `list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. No files are downloaded, and no objects are modified.
