@@ -1304,7 +1304,7 @@
     updateSaveButton();
   }
 
-  async function loadState() {
+  async function loadState({ refreshMetadata = false } = {}) {
     let state = null;
     let stateError = null;
     try {
@@ -1323,7 +1323,8 @@
     }
 
     await loadUpdaterState();
-    await window.BlobUI.FormulaPage.load(invoke);
+    const refreshOnStart = refreshMetadata && state?.ready && state?.hasSavedApiKey;
+    await window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
     await window.BlobUI.CalendarPage?.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
@@ -1346,6 +1347,7 @@
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
+    if (refreshOnStart) await window.BlobUI.AppReload.run();
     if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
@@ -2520,7 +2522,7 @@
     markDirty();
   });
     window.appReady = false;
-  loadState();
+  loadState({ refreshMetadata: true });
   window.setInterval(refreshTheme, 2000);
   window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);

@@ -6,14 +6,14 @@ const {pathToFileURL}=require('node:url');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const workspace=path.resolve(__dirname,'../..');
 
-test('Ctrl+R refreshes hidden catalogs and an open calculator without changing drafts or publishing',async()=>{
+test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publishing',async()=>{
   const temp=path.join(workspace,'.test-run/metadata-refresh/temp');fs.mkdirSync(temp,{recursive:true});process.env.TEMP=process.env.TMP=temp;
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
   const page=await browser.newPage({colorScheme:'dark',viewport:{width:1050,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
     window.calls=[];window.network=0;window.revision=0;window.hold=false;
-    const cache=new Map();
+    const cache=new Map([[JSON.stringify(["discover_kanban_views",undefined]),{views:[],info:[]}]]);
     window.__TAURI__={core:{invoke:async(name,args={})=>{
       window.calls.push({name,args});
       if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,settings:{codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
@@ -41,7 +41,14 @@ test('Ctrl+R refreshes hidden catalogs and an open calculator without changing d
   const refresh=()=>page.evaluate(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,bubbles:true,cancelable:true}));return window.BlobUI.AppReload.run();});
   try{
     await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
-    await page.waitForFunction(()=>window.appReady);
+    await page.waitForFunction(()=>window.appReady && window.calls.some(c=>c.name==='discover_anyblob_types') && !document.getElementById('object-mentions-status').textContent.includes('Loading'));
+    const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
+    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
+      assert.equal(startup.filter(c=>c.name===name).length,1,name+' refreshes once at startup');
+      assert.equal(startup.find(c=>c.name===name).args.forceRefresh,true,name+' bypasses persistent cache at startup');
+    }
+    assert(!startup.some(c=>c.name==='discover_codex_projects'));
+    assert.equal(await page.evaluate(()=>window.calls.some(c=>/^(save_|evaluate_|configure_)/.test(c.name))),false);
     assert.equal(await page.getByRole('button',{name:'Reload options',exact:true}).count(),0);
     await page.evaluate(()=>{window.hold=true;window.calls=[];});
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
@@ -49,7 +56,7 @@ test('Ctrl+R refreshes hidden catalogs and an open calculator without changing d
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
-    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata. Refreshing Anytype lists and pickers.'}).count(),1);
+    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata. Refreshing Anytype lists and pickers.'}).count(),2);
     const calls=await page.evaluate(()=>window.calls);
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');
