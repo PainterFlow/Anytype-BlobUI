@@ -35,20 +35,28 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.locator('#codex-nav').click();await page.locator('#codex-tab-2').click();
     const projects=page.locator('#codex-project-list .formula-view-row');await projects.first().waitFor();assert.equal(await projects.count(),2);
     assert.equal(await page.locator('#projects-filter-control').isVisible(),false);
+    assert.equal(await projects.first().innerText(),'Same');
+    assert.equal(await projects.first().getAttribute('title'),'Same');
+    await page.locator('#codex-tab-2').focus();
+    assert.equal(await page.locator('#codex-tab-2').evaluate(node=>getComputedStyle(node).outlineStyle),'none');
     await page.locator('#projects-search-toggle').click();await page.locator('#projects-search').fill('worktree');assert.equal(await projects.filter({visible:true}).count(),1);
     await page.evaluate(()=>window.projectError='Fixture project refresh failed');await page.locator('#projects-reload').click();await page.getByRole('status').filter({hasText:'Fixture project refresh failed'}).waitFor();assert.equal(await projects.count(),2);
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
     const query=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Work"]')});
     assert.equal(await query.locator('.codex-space-top button').isDisabled(),true);
-    await query.locator('input[type=checkbox]').first().check();
+    await query.locator('.formula-view-name').click();
     assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');
     assert.equal(await query.locator('.codex-space-bottom button').innerText(),'Always Ask');
     assert.equal(await query.locator('input[role=switch]').isChecked(),true);
     assert.equal(await sourceRows.first().getAttribute('data-selected'),'true');
+    assert.equal(await query.evaluate(node=>getComputedStyle(node).outlineWidth),'2px');
+    assert.equal(await query.locator('.project-source-metadata').innerText(),'Queries · Work');
+    assert.equal(await query.locator('.formula-view-name').getAttribute('title'),'Tasks');
+    assert.equal(await query.locator('input[type=checkbox]').first().evaluate(node=>getComputedStyle(node).clipPath),'inset(50%)');
     // Equal names in another space retain independent identities and permissions.
     const privateQuery=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Private"]')});
-    await privateQuery.locator('input[type=checkbox]').first().check();assert.equal(await privateQuery.locator('.codex-space-top button').innerText(),'No Access');
+    await privateQuery.locator('.formula-view-name').click();assert.equal(await privateQuery.locator('.codex-space-top button').innerText(),'No Access');
     await privateQuery.locator('.codex-space-top button').click();await dialog.getByRole('option',{name:'Read-Write',exact:true}).click();
     // Multiple categories remain selected and the filter stays open.
     await page.locator('#project-sources-filter').click();await dialog.getByRole('option',{name:'Spaces',exact:true}).click();
@@ -75,7 +83,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await global.locator('.codex-space-top button[aria-haspopup]').click();await page.locator('#codex-panel-1').getByRole('option',{name:'No Access',exact:true}).click();
     await page.locator('#codex-tab-2').click();await projects.filter({hasText:'Renamed'}).click();
     assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');
-    await query.locator('input[type=checkbox]').first().uncheck();await query.locator('input[type=checkbox]').first().check();
+    await query.locator('input[type=checkbox]').first().focus();await page.keyboard.press('Space');await query.locator('.formula-view-name').click();
     assert.equal(await query.locator('.codex-space-top button').innerText(),'No Access');
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
     await page.evaluate(()=>window.BlobUI.discardChanges());await projects.filter({hasText:'Renamed'}).click();assert.equal(await query.locator('.codex-space-top button').innerText(),'Read Only');

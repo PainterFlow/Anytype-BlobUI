@@ -48,12 +48,15 @@
         saveSources(next);renderSources(key);renderProjects();
       });
       const row = api.permissionRow({view:source,permission:copy(saved?.permission || fallback()),disabled:locked || !saved,selection,dialog:shell.dialog,scrollContainer:sourceList.parentElement,
-        metadata:kindName(source.kind)+' · '+source.space+' · '+source.spaceId+' · '+source.id,
+        metadata:kindName(source.kind)+' · '+source.space,
         onChange(permission) {
           const entries=configuration().projects[active.id]?.sources || [];
           saveSources(entries.map(row=>identity(row)===key ? {...row,permission} : row));
         }});
       row.item.dataset.selected=String(!!saved);
+      row.item.addEventListener('click',event=>{
+        if (!event.target.closest('button, input, a, [role="option"]')) selection.click();
+      });
       if (source.unavailable) row.item.append(make('p','formula-view-warning','Unavailable source. Its saved selection is retained.'));
       sourceList.append(row.item);rows.push(row);sourceRecords.push({item:row.item,view:{...source,target:{spaceId:source.spaceId}}});
     }
@@ -68,12 +71,12 @@
     if (scanned) for (const [id, saved] of Object.entries(configuration().projects)) if (!catalog.some(project=>project.id===id)) catalog.push({id,name:saved.name,rootPaths:saved.rootPaths,unavailable:true});
     catalog.sort((a,b)=>a.name.localeCompare(b.name)||a.id.localeCompare(b.id));
     for (const project of catalog) {
-      const row=UI.CatalogBrowser.row({name:project.name,metadata:project.rootPaths.join(' · '),warning:project.unavailable?'Unavailable project. Saved selections are retained.':'',onSelect() {
+      const row=UI.CatalogBrowser.row({name:project.name,warning:project.unavailable?'Unavailable project. Saved selections are retained.':'',onSelect() {
         if (locked) return;
         active=project;heading.textContent=project.name;renderSources();modal.open();
         if (!sourcesScanned && !sourceBusy) void reloadSources();
       }});
-      row.row.disabled=locked;row.row.title=project.name+'\n'+project.id+'\n'+project.rootPaths.join('\n');
+      row.row.disabled=locked;row.row.title=project.name;
       list.append(row.item);records.push({...row,view:{name:project.name,source:project.rootPaths.join(' '),target:{spaceId:project.id}}});
     }
     if (scanned && !catalog.length) list.append(make('p','input-hint','No local Codex projects found.'));

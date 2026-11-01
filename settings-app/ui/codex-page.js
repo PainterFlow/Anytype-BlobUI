@@ -20,10 +20,11 @@
     const item = make('section','formula-view codex-space');
     const top = make('div','codex-space-top'), bottom = make('div','codex-space-bottom');
     if (selection) top.append(selection);
-    const name = make('span','formula-view-name',view.name); name.title = view.name + '\n' + view.id; top.append(name);
+    const description = view.name + (selection ? '' : '\n' + view.id);
+    const name = make('span','formula-view-name',view.name); name.title = description; top.append(name);
     const change = (key,value) => { if (!disabled) { permission[key]=value; onChange({...permission}); } };
       function picker(parent,key,options,label) {
-        const shell = C.PropertyPickerShell({label,showValue:true,accessibleLabel:label+' for '+view.name+' '+view.id,menuLabel:label});
+        const shell = C.PropertyPickerShell({label,showValue:true,accessibleLabel:label+' for '+description,menuLabel:label});
         shell.trigger.disabled = disabled;
         parent.append(shell.element);
         if (dialog) dialog.append(shell.menu);
@@ -57,7 +58,7 @@
         owned.push({destroy() { controller.destroy(); if(dialog)shell.menu.remove();scrollContainer?.removeEventListener('scroll',dismiss); for (const event of ['click','keydown']) shell.trigger.removeEventListener(event,place,true); doc.querySelector('.page-content').removeEventListener('scroll',dismiss); root.removeEventListener('resize',dismiss); }});
       }
     picker(top,'access',access,'Access');
-    const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+view.name+' '+view.id},onChange:()=>change('filesEnabled',toggle.input.checked)});
+    const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+description},onChange:()=>change('filesEnabled',toggle.input.checked)});
     toggle.input.checked = permission.filesEnabled; toggle.input.disabled = disabled; bottom.append(toggle.element);
     picker(bottom,'approval',approvals,'Approval'); item.append(top);
     if (metadata) item.append(make('p','input-hint project-source-metadata',metadata));
