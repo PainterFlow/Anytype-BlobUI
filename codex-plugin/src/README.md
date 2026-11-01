@@ -21,6 +21,8 @@ The version in codex-plugin/src/.codex-plugin/plugin.json is the Anyblob release
 
 ## Reading and permissions
 
+Native object mentions are blocked pending verified host support for project identity and submitted, message-scoped selection consent. See the repository's [compatibility investigation](../../docs/anyblob-mentions-compatibility.md). Existing search and read approvals remain unchanged.
+
 `list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. No files are downloaded, and no objects are modified.
 
 Always Ask requires a separate BlobUI approval for every search or object read. Approve for me and Never Ask permit reads within saved space access. Space discovery needs no extra approval. Unsaved permission edits have no effect. Denial, dismissal, cancellation, app exit and the two-minute approval timeout deny access. Prompts are serialized. Codex may require additional approvals, which cannot override BlobUI restrictions. The packaged call timeout is three minutes.
