@@ -179,7 +179,7 @@ pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> boo
     config
         .spaces
         .get(space)
-        .is_some_and(|p| matches!(p.access.as_str(), "read" | "readWrite"))
+        .is_some_and(|p| p.permits("read"))
 }
 fn allowed(config: &crate::codex::Configuration, op: &Operation) -> Result<(), String> {
     // Callers must resolve project identity before using this global/effective config.
@@ -235,6 +235,7 @@ fn execute_scoped(
         "Anytype API v2 could not complete this read. Check the saved API connection, object ID and Anytype availability.".to_string()
     };
     match op {
+        Operation::Content { .. } => Err("Content operations require the authorized mutation path.".into()),
         Operation::SearchMentions { .. } => Err("Metadata searches require the authenticated global search path.".into()),
         Operation::ListSpaces {} => {
             let rows = client
@@ -478,6 +479,46 @@ fn dispatch_resolved_with(
     let client = if project.is_some() { Some(connect()?) } else { None };
     let scope = project.map(|project| crate::anyblob_scope::Scope::load(client.as_ref().unwrap(), project, &check)).transpose()?;
     if let Some(scope) = &scope { effective = scope.configuration(); }
+    if let Operation::Content { content } = &request.request {
+        let client=match client {Some(client)=>client,None=>connect()?};
+        crate::anyblob_content::permission(&effective,scope.as_ref(),content,false)?;
+        if content.arguments["create_missing_options"]==true {
+            let mut wide=content.clone();wide.tool="create_property".into();
+            crate::anyblob_content::permission(&effective,scope.as_ref(),&wide,false)?;
+        }
+        // A saved source grants access to its members, never permission to expand itself.
+        if project.is_some_and(|p|p.sources.iter().any(|s|s.kind!="space" && Some(s.id.as_str())==content.target())) && content.mutates() {
+            let mut wide=content.clone();wide.tool=if content.capability()=="createDelete" {"create_object"}else{"update_property"}.into();
+            crate::anyblob_content::permission(&effective,scope.as_ref(),&wide,false)?;
+        }
+        let mut prepared=crate::anyblob_content::prepare(&client,content,&effective,scope.as_ref(),&check)?;
+        let permission=crate::anyblob_content::permission(&effective,scope.as_ref(),content,prepared.files)?;
+        if permission.approval=="alwaysAsk" || content.irreversible() {approve(&prepared.prompt(),&check)?;}
+        let initial_files=prepared.files;
+        let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,initial_files)?;}Ok(())};
+        crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
+        let files=prepared.files;
+        let before_dispatch=|| {
+            check()?;
+            if let Some(project)=project {
+                let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;
+                crate::anyblob_content::permission(&effective,Some(&current),content,files)?;
+                if content.arguments["create_missing_options"]==true {let mut wide=content.clone();wide.tool="create_property".into();crate::anyblob_content::permission(&effective,Some(&current),&wide,false)?;}
+            } else {crate::anyblob_content::permission(&effective,None,content,files)?;}
+            Ok(())
+        };
+        // Every preflight and commit rechecks live authorization. Mutation receipts survive
+        // membership changes caused by this edit, and are never followed by implicit reads.
+        let result=crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)?;
+        if !content.mutates() {
+            check()?;
+            if let Some(project)=project {
+                let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;
+                crate::anyblob_content::permission(&effective,Some(&current),content,false)?;
+            }
+        }
+        return Ok(result);
+    }
     allowed(&effective, &request.request)?;
     if let (Some(scope), Operation::ReadObject {space_id, object_id}) = (&scope, &request.request) {
         if !scope.readable(space_id,object_id) { return Err("Access denied by saved BlobUI project sources.".into()); }
@@ -565,7 +606,7 @@ pub fn start(app: tauri::AppHandle) {
                             pipe.receive(&cancel, Instant::now() + Duration::from_secs(5))
                         {
                             if let Ok(request) = serde_json::from_slice::<Request>(&bytes) {
-                                let operation = request.request.name();
+                                let operation = request.request.name().to_string();
                                 let id = NEXT.fetch_add(1, Ordering::Relaxed);
                                 let result = dispatch(&app, request, || {
                                     Instant::now() < deadline && pipe.connected()
@@ -624,6 +665,19 @@ mod tests {
         drop(first);
         next.join().unwrap();
         assert!(entered.load(Ordering::Acquire));
+    }
+    #[test]
+    fn content_migration_denials_and_approval_denial_dispatch_no_http() {
+        let operation=||blobui_mcp::operation("create_object",json!({"space_id":"space","body":{"type":"page","name":"fixture"}})).unwrap();
+        for (access,opt_in) in [("read",true),("readWrite",true),("createDelete",false)] {
+            let mut config=config(access,"fullAccess");config.spaces.get_mut("space").unwrap().mutations_enabled=opt_in;
+            let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|_,_|panic!("Denied requests must not prompt"),||Ok(None));
+            assert!(result.unwrap_err().contains("Access denied"));
+        }
+        let mut config=config("createDelete","alwaysAsk");config.spaces.get_mut("space").unwrap().mutations_enabled=true;
+        let prompted=std::cell::Cell::new(false);
+        let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|op,_|{prompted.set(true);assert_eq!(op.name(),"create_object");Err("User denied mutation".into())},||Ok(None));
+        assert!(prompted.get());assert!(result.unwrap_err().contains("User denied mutation"));
     }
     fn config(access: &str, approval: &str) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":access,"approval":approval}}}))
@@ -743,7 +797,7 @@ mod tests {
     fn identified_unconfigured_and_projectless_chats_keep_global_reads() {
         use crate::codex_identity::Membership;
         let mut config=project_config(json!({"kind":"space","id":"other","spaceId":"other","permission":{"access":"read"}}));
-        config.spaces.insert("space".into(),crate::codex::Permission{access:"read".into(),approval:"fullAccess".into(),files_enabled:false});
+        config.spaces.insert("space".into(),crate::codex::Permission{mutations_enabled:false,access:"read".into(),approval:"fullAccess".into(),files_enabled:false});
         let page=("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Global"},{"id":"other","name":"Other project"}],"has_more":false}));
         let (client,server)=mock(vec![page.clone(),page],None);
         for membership in [Membership::Project("unconfigured".into()),Membership::Projectless] {
@@ -1105,6 +1159,8 @@ mod tests {
                 ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Note"}],"has_more":false})),
                 ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Note","properties":{}})),
                 ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"resource content"})),
+                ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true})),
+                ("POST /v2/spaces/space/objects ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"id":"created-object","etag":"created-etag"})),
             ],
             None,
         );
@@ -1113,7 +1169,7 @@ mod tests {
         let mut listener = Pipe::listen(true).unwrap();
         let bridge = std::thread::spawn(move || {
             let mut outcomes = Vec::new();
-            for index in 0..8 {
+            for index in 0..9 {
                 let deadline = Instant::now() + Duration::from_secs(15);
                 while !listener.accept().unwrap() {
                     assert!(Instant::now() < deadline);
@@ -1271,9 +1327,12 @@ mod tests {
         .unwrap();
         input.flush().unwrap();
         assert_eq!(receive(&mut output)["error"]["code"], -32800);
+        let mut writable=config("createDelete","alwaysAsk");writable.spaces.get_mut("space").unwrap().mutations_enabled=true;*saved_config.lock().unwrap()=writable;
+        send(&mut input,10,"tools/call",json!({"name":"create_object","arguments":{"space_id":"space","body":{"type":"page","name":"fixture-created"}},"_meta":{"threadId":"fixture-chat"}}));
+        let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         drop(input);
         assert!(child.wait().unwrap().success());
-        assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false]);
+        assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false, true]);
         api.join().unwrap();
     }
     #[test]
@@ -1431,3 +1490,7 @@ mod credential_tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "anyblob_live.rs"]
+mod live_tests;

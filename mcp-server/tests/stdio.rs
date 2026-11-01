@@ -33,7 +33,7 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         "anyblob"
     );
     let tools = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
-    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 44);
     let mentions=&tools["result"]["tools"][0];
     assert_eq!(mentions["name"],"search_mentions");
     assert_eq!(mentions["_meta"]["ui"]["visibility"],json!(["app"]));
@@ -44,8 +44,10 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);
     assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
     for tool in tools["result"]["tools"].as_array().unwrap() {
-        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert!(tool["annotations"]["readOnlyHint"].is_boolean());
+        if tool["name"]=="patch_object" {assert_eq!(tool["annotations"]["readOnlyHint"],false);assert!(tool["inputSchema"]["required"].as_array().unwrap().contains(&json!("etag")));}
     }
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"create_object","arguments":{"space_id":"s","body":{"type":"page","name":"fixture"}},"_meta":{"threadId":"host-chat"}}}))["result"]["isError"],true);
     for (id, params) in [
         (4, json!({"name":"delete_object","arguments":{}})),
         (

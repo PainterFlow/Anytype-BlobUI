@@ -1,5 +1,13 @@
 # BlobUI v1.4.0 - What's new?
 
+## Anyblob 0.2.0
+
+- Added explicit v2 tools for objects, properties, types, templates, collections, queries, views, messages, reactions, widgets and file uploads.
+- Existing permissions retain their read behavior until Content changes is enabled and saved. Create-Delete then includes reading and editing.
+- Added ETag checks, dry runs, idempotency keys and explicit uncertain-outcome reporting. Irreversible deletions always require approval.
+- Local uploads use immutable snapshots, a 25 MiB limit and the saved file permission. URL uploads and separate attachment operations are supported.
+
+
 *Insert random ah text.*
 
 # Introducing Anyblob!

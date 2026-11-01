@@ -24,6 +24,7 @@ mod codex_projects;
 mod codex_identity;
 mod anyblob_scope;
 mod anyblob;
+mod anyblob_content;
 mod anyblob_mentions;
 mod marketplace;
 mod kanban_api;

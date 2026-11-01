@@ -1,14 +1,15 @@
 {
   "name": "anyblob",
-  "version": "0.1.4",
-  "description": "Search and read permitted Anytype objects through BlobUI on Windows.",
+  "version": "0.2.0",
+  "description": "Read and manage permitted Anytype content through BlobUI on Windows.",
   "requires_local_executor": true,
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Anyblob",
-    "shortDescription": "Read Anytype through BlobUI",
+    "shortDescription": "Manage Anytype through BlobUI",
     "capabilities": [
-      "Read"
+      "Read",
+      "Write"
     ],
     "composerIcon": "./assets/icon.png",
     "logo": "./assets/icon.png"

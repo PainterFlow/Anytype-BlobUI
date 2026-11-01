@@ -15,5 +15,5 @@ $env:CARGO_NET_OFFLINE='true'
 if($LASTEXITCODE -ne 0){throw 'MCP tests failed.'}
 if(-not $SkipBuild){ & (Join-Path $workspaceRoot 'scripts/Build-Codex.ps1') -SkipMcpBuild }
 $env:CARGO_TARGET_DIR=Join-Path $workspaceRoot 'settings-app/target'
-& cargo test --locked --release --manifest-path (Join-Path $workspaceRoot 'settings-app/Cargo.toml') -- --test-threads=1 anyblob:: anyblob_scope:: marketplace:: codex:: codex_identity:: codex_projects::
+& cargo test --locked --release --manifest-path (Join-Path $workspaceRoot 'settings-app/Cargo.toml') -- --test-threads=1 anyblob:: anyblob_content:: anyblob_scope:: marketplace:: codex:: codex_identity:: codex_projects::
 if($LASTEXITCODE -ne 0){throw 'Anyblob native validation failed.'}

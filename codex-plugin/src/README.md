@@ -1,13 +1,13 @@
 # Anyblob
 
-Anyblob searches and reads Anytype objects through the running BlobUI Settings app on Windows. Local Codex execution is required. WSL, Linux and remote execution are not supported.
+Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. Local Codex execution is required. WSL, Linux and remote execution are not supported.
 
 ## Setup
 
 1. Configure and save an Anytype API v2 connection in BlobUI Advanced Settings.
 2. Open Integrations > Anyblob > Settings and click Install beside Install Marketplace. This registers Anyblob in your personal marketplace for all projects, even while Anyblob is disabled.
 3. Open the Plugins Directory in Codex, select your personal marketplace, and choose Anyblob to install and enable it. Reopen Codex if the marketplace is not visible yet. BlobUI never launches or restarts either app.
-4. Under BlobUI Permissions, grant Read Only or Read-Write for each space you want to use, then Save. Create-Delete does not allow reads. The file switch does not grant attachment access in this release.
+4. Under BlobUI Permissions, grant Read Only or Read-Write for each space you want to use, then Save. Create-Delete includes reads, edits, creation and deletion after you enable Content changes and Save. Existing installations retain their effective read access until this opt-in. Uploads, file deletion and attachments also require the file switch.
 5. Enable Anyblob in Settings. This saves immediately and creates a current-user-only, Windows DPAPI encrypted bridge credential under %LOCALAPPDATA%\BlobUI\Anyblob. The MCP executable reads it automatically. Disabling removes the credential and invalidates pending reads. Existing enabled installations migrate automatically without changing space permissions.
 6. Keep BlobUI running, either visible or in its existing background mode. Ask Anyblob to list spaces, search one returned space ID, then read an object ID.
 
@@ -27,7 +27,7 @@ Filter Incomplete Tasks excludes objects whose built-in Done checkbox is checked
 
 Suggestions show only object titles and space metadata. They may include objects your current project cannot read. Selecting a suggestion grants no access. Resource reads use existing project/global permissions and Always Ask. Missing host identity retains the existing denial behavior. See the repository's [implementation and validation notes](../../docs/anyblob-mentions-compatibility.md) for the isolated host probe and its limits.
 
-`list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. No files are downloaded, and no objects are modified.
+`list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. These existing tools remain read-only. See Content tools below for explicit changes.
 
 Always Ask requires a separate BlobUI approval for every content search or object read. Mention metadata searches and space discovery need no extra read approval. Approve for me and Never Ask permit reads within saved space access. Unsaved permission edits have no effect. Denial, dismissal, cancellation, app exit and the two-minute approval timeout deny access. Prompts are serialized. Codex may require additional approvals, which cannot override BlobUI restrictions. The packaged call timeout is three minutes.
 
@@ -47,10 +47,38 @@ If the bridge is unavailable, start BlobUI and enable Anyblob. If the credential
 
 Keep BlobUI Settings running while searching. Closing its window hides it; Quit stops the bridge. Some desktop hosts show bridge failures as an empty mention list. Anyblob 0.1.4 repairs listener shutdown after canceled typeahead connections and retries busy connections. Mention queries match all entered words and ignore trailing or repeated spaces.
 
-The MCP executable contains no Anytype credentials and makes no HTTP requests. BlobUI constructs the allowed API v2 operations and checks saved access before dispatch and before returning results. The Windows pipe restricts clients to the current user and rejects remote clients. These restrictions do not isolate the integration from unrelated processes with unrestricted access to the same Windows account.
+The MCP executable contains no Anytype credentials and makes no HTTP requests. BlobUI constructs allowlisted API v2 operations, checks saved access before dispatch, and rechecks content-read authorization before returning results. The Windows pipe restricts clients to the current user and rejects remote clients. These restrictions do not isolate the integration from unrelated processes with unrestricted access to the same Windows account.
 
 Packaging follows the [OpenAI plugin format](https://developers.openai.com/plugins/build/plugins) and [local execution guidance](https://developers.openai.com/plugins/deploy/desktop-only).
 
 This package uses the supported Codex compatibility manifests, `.codex-plugin/plugin.json` and root `.mcp.json`. The compatibility format supplies the local launcher and call timeout.
 
 The compatibility MCP launcher uses Windows `cmd.exe /d /c` with a fixed plugin-relative executable path and the plugin folder as its working directory. This avoids unresolved portable path placeholders and preserves native stdio bytes, including Unicode names. No shell profile runs. `ANYBLOB_BRIDGE_INSTANCE` selects a separate current-user pipe for isolated fixtures; normal installations leave it unset. An isolated instance requires an absolute ANYBLOB_CREDENTIAL_FILE override and never falls back to personal credentials.
+
+## Content tools
+
+Anyblob 0.2.0 adds 40 explicit v2 tools. Each requires a space_id. Their input schemas describe named path/query arguments and a typed body. There is no arbitrary URL, method or header tool.
+
+- Use read_document for editable AnyBlock JSON, full IDs and etag. Existing read_object continues returning properties and Markdown.
+- Use list_schemas, get_schema and get_op_schema to inspect the connected server's document and operation schemas.
+- Use create_object, patch_object and delete_object for objects. patch_object requires etag and a body containing ops. Supported ops cover properties, type changes, blocks, text, table cells, views and collection membership. Markdown reads cannot be written back as document replacements.
+- Use the list/create/update/delete property and type tools for definitions. list_property_options discovers options. Creation supports options; create_missing_options requires a space-wide Create-Delete grant. Unsupported option mutations remain server limitations.
+- Use create_query and create_collection, their get_*_objects and get_*_views tools, and patch_object for edits and views. Queries, collections and templates use delete_object where the server permits archiving. Templates have list_templates and create_template tools.
+- Chat tools include list_chats, create_chat, get_chat_messages, add_chat_message, edit_chat_message, delete_chat_message, toggle_chat_reaction, read_chat and create_discussion. Replies use body.reply_to; attachments use body.attachments. Reading does not mark activity read. Reactions are toggles, so inspect the returned added value.
+- Widget tools list, create, update and delete widgets. They require space-wide permission. No account or space-administration tools are exposed.
+
+Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Content changes require the saved opt-in switch. Project source selections authorize existing members; they do not authorize creating new objects, changing their source definition, or modifying space-wide schemas. Those actions need an effective space-wide grant. File switches are independent additional requirements.
+
+Always Ask displays the exact request. Approve for me and Never Ask retain their existing behavior within saved grants. Irreversible deletion always needs separate approval, including chat-message deletion that may permanently erase attachment content. Objects, types and properties use the server's archive operations. Creator and system-object restrictions remain authoritative.
+
+Mutations use a server dry run where supported before committing. dry_run=true requests validation only. Document edits require etag; conflicts never overwrite newer edits. Mutation results report outcome as confirmed, rejected, validated or unknown and preserve receipts and warnings. Reuse idempotency_key only for an identical request. Never automatically retry an unknown outcome. A membership-changing edit returns its receipt without an implicit object reread.
+
+## Uploads
+
+upload_file accepts exactly one of local_path and url, plus optional name. Local paths must name a regular absolute local file no larger than 25 MiB. Network paths, device paths, alternate data streams and reparse points are refused. BlobUI checks permission before reading bytes, creates an immutable staging snapshot beside its executable, shows the filename, size and SHA-256 in approval, streams multipart bytes, and removes the snapshot afterward. Development and validation staging stays inside the workspace. URL uploads let Anytype fetch an HTTP or HTTPS URL; the server's fetch and size restrictions apply.
+
+Upload receipts return the file ID and metadata. Attach that ID with a separate object or message operation. An attachment failure does not silently delete an uploaded file. Downloads are not added by this release.
+
+Live validation is restricted to the uniquely resolved Codex Test space and disposable recorded fixtures. Upload files must be named codex-test-{num}, stay below 50,000 bytes, and normally contain 1 KiB. The persistent runner ledger reserves at most 10 total upload attempts, including preflights, retries and uncertain outcomes. Never restart or automate Anytype for validation.
+
+Developers can rerun the explicit live suite with scripts/tests/Test-Anyblob-Live.ps1 -TestExecutable pointing to the compiled Settings test executable. It copies only the connection and encrypted key into a workspace fixture, removes the encrypted copy on exit, and preserves the upload ledger across runs. A read-only Anytype key cannot validate mutations, even when BlobUI grants full access.

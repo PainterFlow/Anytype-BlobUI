@@ -1678,3 +1678,9 @@ mod tests {
         assert_eq!(grouping.category(&json!(true)).unwrap(), "true");
     }
 }
+
+impl Client {
+    pub(crate) fn content_request(&self, method:&str,path:&str,body:Option<&Value>,etag:Option<&str>,retry_key:Option<&str>,file:Option<(&mut std::fs::File,u64,&str)>) -> Result<Value,String> {
+        api::content_request(&self.key,&self.ip,self.port,method,path,body,etag,retry_key,file)
+    }
+}

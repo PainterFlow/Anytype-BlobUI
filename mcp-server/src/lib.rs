@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub mod transport;
 pub mod credential;
+pub mod content;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    Content { content: content::ContentRequest },
     SearchMentions { query: String },
     ListSpaces {},
     SearchObjects {
@@ -37,6 +39,7 @@ impl Operation {
                 && ![".", ".."].contains(&value)
         }
         match self {
+            Self::Content { content } => content.validate(),
             Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
             Self::ListSpaces{} => Ok(()),
             Self::SearchObjects { space_id, query, limit, offset } if id(space_id) && query.len() <= 4096 && *limit > 0 && *limit <= 100 && *offset <= i32::MAX as u32 => Ok(()),
@@ -44,8 +47,9 @@ impl Operation {
             _ => Err("Invalid arguments. Use explicit IDs, a limit of 1–100, and a nonnegative 32-bit offset.".into()),
         }
     }
-    pub fn name(&self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
+            Self::Content { content } => &content.tool,
             Self::SearchMentions { .. } => "search_mentions",
             Self::ListSpaces {} => "list_spaces",
             Self::SearchObjects { .. } => "search_objects",
@@ -54,6 +58,7 @@ impl Operation {
     }
     pub fn space(&self) -> Option<&str> {
         match self {
+            Self::Content { content } => content.arguments["space_id"].as_str(),
             Self::ListSpaces {} | Self::SearchMentions { .. } => None,
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
                 Some(space_id)
@@ -109,14 +114,21 @@ pub fn resource_operation(params: &Value) -> Result<Operation, String> {
 pub fn tools() -> Value {
     let id = json!({"type":"string","minLength":1,"maxLength":512});
     let annotations = json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false});
-    json!([
+    let mut tools = json!([
         {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
         {"name":"read_object","description":"Read an explicit object as properties and Markdown. Attachments remain references.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"annotations":annotations}
-    ])
+    ]);
+    tools.as_array_mut().unwrap().extend(content::tools());
+    tools
 }
 pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
+    if content::spec(name).is_some() {
+        let content = content::ContentRequest { tool: name.into(), arguments };
+        content.validate()?;
+        return Ok(Operation::Content { content });
+    }
     let mut arguments = arguments
         .as_object()
         .cloned()

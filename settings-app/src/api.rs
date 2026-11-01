@@ -349,3 +349,62 @@ mod tests {
         assert_eq!(decode_chunked(b"4\r\ntest\r\n0\r\n\r\n").unwrap(), b"test");
     }
 }
+
+/// HTTP transport for content tools. Never retries. Header values and routes are constructed
+/// by the allowlisted bridge, not accepted as model-controlled HTTP parameters.
+pub(crate) fn content_request(
+    api_key: &str, ip: &str, port: u16, method: &str, path: &str,
+    body: Option<&Value>, etag: Option<&str>, retry_key: Option<&str>,
+    file: Option<(&mut std::fs::File, u64, &str)>,
+) -> Result<Value, String> {
+    let mut sent = false;
+    let result = (|| {
+        if !path.starts_with("/v2/") || path.chars().any(|c| c.is_control() || c==' ') { return Err("Invalid v2 content route.".into()); }
+        for header in [etag,retry_key].into_iter().flatten() { if header.chars().any(char::is_control) {return Err("Invalid content header.".into());} }
+        let socket = SocketAddr::new(ip.parse::<IpAddr>().map_err(|_|"Invalid API address.")?,port);
+        let mut stream=TcpStream::connect_timeout(&socket,TIMEOUT).map_err(|e|network_error(&e))?;
+        stream.set_read_timeout(Some(TIMEOUT)).map_err(|_|"Could not set API timeout.")?;
+        stream.set_write_timeout(Some(TIMEOUT)).map_err(|_|"Could not set API timeout.")?;
+        let payload=body.map(serde_json::to_vec).transpose().map_err(|_|"Could not encode request.")?;
+        let mut header=SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAccept: application/json\r\nConnection: close\r\n"));
+        if let Some(value)=etag {header.0.push_str(&format!("If-Match: {value}\r\n"));}
+        if let Some(value)=retry_key {header.0.push_str(&format!("Idempotency-Key: {value}\r\n"));}
+        const BOUNDARY:&str="blobui-anyblob-upload-v2-7a687fb7";
+        let prefix=file.as_ref().map(|(_,_,name)| {
+            let name=name.replace(['\r','\n','"','\\'],"_");
+            format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+        });
+        let suffix=format!("\r\n--{BOUNDARY}--\r\n");
+        if let Some((_,size,_))=&file {header.0.push_str(&format!("Content-Type: multipart/form-data; boundary={BOUNDARY}\r\nContent-Length: {}\r\n",prefix.as_ref().unwrap().len() as u64+size+suffix.len() as u64));}
+        else if let Some(payload)=&payload {header.0.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n",payload.len()));}
+        header.0.push_str("\r\n");
+        sent=true;
+        stream.write_all(header.as_bytes()).map_err(|e|network_error(&e))?;
+        if let Some((file,size,_))=file {
+            stream.write_all(prefix.as_ref().unwrap().as_bytes()).map_err(|e|network_error(&e))?;
+            let copied=std::io::copy(&mut file.take(size),&mut stream).map_err(|e|network_error(&e))?;
+            if copied!=size {return Err("Staged upload was truncated.".into());}
+            stream.write_all(suffix.as_bytes()).map_err(|e|network_error(&e))?;
+        } else if let Some(payload)=payload {stream.write_all(&payload).map_err(|e|network_error(&e))?;}
+        let mut bytes=Vec::new();stream.take((MAX_RESPONSE_BYTES+64*1024+1) as u64).read_to_end(&mut bytes).map_err(|e|network_error(&e))?;
+        if bytes.len()>MAX_RESPONSE_BYTES+64*1024 {return Err("Content response exceeds limit.".into());}
+        let split=bytes.windows(4).position(|w|w==b"\r\n\r\n").ok_or("Invalid content HTTP response.")?;
+        let header=std::str::from_utf8(&bytes[..split]).map_err(|_|"Invalid content HTTP headers.")?;
+        let status=header.lines().next().and_then(|line|line.split_whitespace().nth(1)).and_then(|n|n.parse::<u16>().ok()).ok_or("Invalid content HTTP status.")?;
+        let headers=header.lines().skip(1).filter_map(|line|line.split_once(':')).map(|(k,v)|(k.to_ascii_lowercase(),v.trim().to_string())).collect::<Vec<_>>();
+        let mut data=bytes[split+4..].to_vec();
+        if headers.iter().any(|(k,v)|k=="transfer-encoding"&&v.eq_ignore_ascii_case("chunked")){data=decode_chunked(&data)?;}
+        else if let Some((_,n))=headers.iter().find(|(k,_)|k=="content-length") {
+            let n=n.parse::<usize>().map_err(|_|"Invalid content length.")?;if n>MAX_RESPONSE_BYTES||n!=data.len(){return Err("Incomplete or oversized content response.".into());}
+        }
+        if !(200..300).contains(&status) {
+            // An explicit HTTP refusal is confirmed. Preserve the server's structured issues.
+            let detail=serde_json::from_slice::<Value>(&data).unwrap_or(json!({"message":"No structured v2 error was returned."}));
+            return Ok(json!({"_http_error":status,"error":detail}));
+        }
+        let mut result:Value=if status==204 {json!({})}else{serde_json::from_slice(&data).map_err(|_|"Invalid content JSON response.")?};
+        if let Some((_,etag))=headers.iter().find(|(k,_)|k=="etag") {if result.is_object()&&result.get("etag").is_none(){result["etag"]=json!(etag);}}
+        Ok(result)
+    })();
+    result.map_err(|error:String|if sent&&method!="GET" {format!("Mutation outcome unknown. Do not retry automatically. {error}")}else{error})
+}

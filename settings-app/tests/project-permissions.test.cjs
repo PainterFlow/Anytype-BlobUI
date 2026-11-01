@@ -44,7 +44,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
     for (const kind of ['Object types','Collections','Queries']) {
-      assert.equal(await sourceRows.filter({has:page.locator('input[aria-label*=" · '+kind+' · "]')}).locator('input[role=switch]').count(),0);
+      assert.equal(await sourceRows.filter({has:page.locator('input[aria-label*=" · '+kind+' · "]')}).locator('input[role=switch]').count(),kind==='Queries'?4:2);
     }
     const space=sourceRows.filter({has:page.locator('input[aria-label="Select Work · Spaces · Work"]')});
     const accessX = row => row.locator('.codex-space-bottom button[aria-label^="Access"]').evaluate(node=>node.getBoundingClientRect().x);
@@ -52,17 +52,17 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     for (let index=0;index<await sourceRows.count();index++) {
       assert.ok(Math.abs(await accessX(sourceRows.nth(index))-expectedAccessX)<1,'Access pickers retain their column without file switches');
     }
-    assert.equal(await space.locator('input[role=switch]').isDisabled(),true);
+    assert.equal(await space.locator('input[aria-label^="Upload/delete"]').isDisabled(),true);
     await space.locator('.formula-view-name').click();
-    assert.equal(await space.locator('input[role=switch]').isChecked(),true);
-    await space.locator('input[role=switch]').uncheck();
-    await space.locator('input[role=switch]').check();
+    assert.equal(await space.locator('input[aria-label^="Upload/delete"]').isChecked(),true);
+    await space.locator('input[aria-label^="Upload/delete"]').uncheck();
+    await space.locator('input[aria-label^="Upload/delete"]').check();
     await space.locator('.formula-view-name').click();
     // The shared modal scrollbar fades in on real scrolling, then fades out after idle.
     const content=dialog.locator('.project-source-content');
     await content.evaluate(node=>{node.style.maxHeight='180px';});
     await page.waitForFunction(()=>document.querySelector('.project-source-content').classList.contains('has-overflow'));
-    assert.equal(await content.evaluate(node=>getComputedStyle(node).getPropertyValue('--page-scrollbar-color').trim()),'rgba(0, 0, 0, 0)');
+    await page.waitForFunction(()=>getComputedStyle(document.querySelector('.project-source-content')).getPropertyValue('--page-scrollbar-color').trim()==='rgba(0, 0, 0, 0)');
     await content.evaluate(node=>{node.scrollTop=40;});
     await page.waitForFunction(()=>document.querySelector('.project-source-content').getAnimations().some(animation=>animation.transitionProperty==='--page-scrollbar-color'));
     await page.waitForFunction(()=>{const node=document.querySelector('.project-source-content');return !node.classList.contains('is-scrolling')&&node.getAnimations().some(animation=>animation.transitionProperty==='--page-scrollbar-color');});
@@ -76,14 +76,14 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     assert.deepEqual(await disabledAccess.evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor})),disabledStyle);
     assert.equal(disabledStyle.color,'rgb(102, 102, 102)');
     await query.locator('.formula-view-name').click();
-    assert.equal(await query.locator('input[role=switch]').count(),0);
+    assert.equal(await query.locator('input[role=switch]').count(),2);
     assert.equal(await query.locator('input[type=checkbox]').first().isChecked(),true);
     await query.locator('.formula-view-name').click();
     assert.equal(await page.locator('#save-button').isVisible(),false);
     await query.locator('.formula-view-name').click();
     assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read Only');
     assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Approval"]').innerText(),'Always Ask');
-    assert.equal(await query.locator('input[role=switch]').count(),0);
+    assert.equal(await query.locator('input[role=switch]').count(),2);
     assert.equal(await sourceRows.first().getAttribute('data-selected'),'true');
     assert.equal(await query.evaluate(node=>getComputedStyle(node).outlineWidth),'2px');
     assert.equal(await query.locator('.project-source-metadata').innerText(),'Queries · Work');

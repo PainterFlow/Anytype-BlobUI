@@ -26,14 +26,24 @@ pub struct SourcePermission {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Permission { pub access: String, pub files_enabled: bool, pub approval: String }
+pub struct Permission { pub access: String, pub files_enabled: bool, pub approval: String, #[serde(default)] pub mutations_enabled: bool }
+impl Permission {
+    pub fn permits(&self, capability: &str) -> bool {
+        match capability {
+            "read" => matches!(self.access.as_str(), "read" | "readWrite") || (self.mutations_enabled && self.access=="createDelete"),
+            "write" => self.mutations_enabled && matches!(self.access.as_str(), "readWrite" | "createDelete"),
+            "createDelete" => self.mutations_enabled && self.access=="createDelete",
+            _ => false,
+        }
+    }
+}
 pub fn normalize(value: &Value) -> Configuration {
     let mut spaces = BTreeMap::new();
     if let Some(entries) = value.get("spaces").and_then(Value::as_object) {
         for (id, entry) in entries {
             let access = entry["access"].as_str().filter(|v| ["none", "read", "readWrite", "createDelete"].contains(v)).unwrap_or("none");
             let approval = entry["approval"].as_str().filter(|v| ["alwaysAsk", "approveForMe", "fullAccess"].contains(v)).unwrap_or("approveForMe");
-            spaces.insert(id.clone(), Permission { access: access.into(), files_enabled: entry["filesEnabled"].as_bool().unwrap_or(false), approval: approval.into() });
+            spaces.insert(id.clone(), Permission { access: access.into(), mutations_enabled: entry["mutationsEnabled"].as_bool().unwrap_or(false), files_enabled: entry["filesEnabled"].as_bool().unwrap_or(false), approval: approval.into() });
         }
     }
     let mut projects = BTreeMap::new();
@@ -48,7 +58,7 @@ pub fn normalize(value: &Value) -> Configuration {
                 }
             } else if !entry["sources"].is_null() {
                 // Corrupt saved selections must never silently restore global access.
-                sources.push(SourcePermission { space_id:String::new(),kind:String::new(),id:String::new(),name:"Invalid saved source".into(),space:String::new(),permission: Permission {access:"none".into(),files_enabled:false,approval:"alwaysAsk".into()} });
+                sources.push(SourcePermission { space_id:String::new(),kind:String::new(),id:String::new(),name:"Invalid saved source".into(),space:String::new(),permission: Permission {access:"none".into(),mutations_enabled:false,files_enabled:false,approval:"alwaysAsk".into()} });
             }
             projects.insert(id.clone(), ProjectConfiguration {
                 name:entry["name"].as_str().unwrap_or(id).into(),

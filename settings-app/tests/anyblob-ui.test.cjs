@@ -61,6 +61,11 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
     assert.equal(await page.locator('#codex-page').evaluate(el=>!!el.closest('[inert]')),true);
     assert.equal(await dialog.count(),1);assert.match(await dialog.innerText(),/next-object/);
     await page.getByRole('button',{name:'Deny',exact:true}).click();
+    await page.getByRole('dialog',{name:'Anyblob read approval'}).waitFor({state:'hidden'});
+    await page.evaluate(()=>events['anyblob-approval']({payload:{id:'content-request',request:{operation:'content',content:{tool:'delete_chat_message',arguments:{space_id:'Codex-Test-id',chat_id:'fixture-chat',message_id:'fixture-message',irreversible_effect:'This cannot be restored from Bin.',body:{text:'<script>untrusted</script>'}}}}}}));
+    const contentDialog=page.getByRole('dialog',{name:'Anyblob content change approval'});await contentDialog.waitFor();
+    assert.match(await contentDialog.innerText(),/delete_chat_message/);assert.match(await contentDialog.innerText(),/cannot be restored/);assert.equal(await contentDialog.locator('script').count(),0);
+    await page.screenshot({path:path.join(fixture,'content-approval-dark.png')});await contentDialog.getByRole('button',{name:'Deny',exact:true}).click();
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
 });

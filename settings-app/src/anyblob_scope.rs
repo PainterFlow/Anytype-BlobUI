@@ -13,10 +13,12 @@ pub struct Scope {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Space {
     all: Option<Permission>,
+    all_grants: Vec<Permission>,
+    object_grants: BTreeMap<String, Vec<Permission>>,
     objects: BTreeMap<String, Permission>,
 }
 fn reads(permission: &Permission) -> bool {
-    matches!(permission.access.as_str(), "read" | "readWrite")
+    permission.permits("read")
 }
 fn merge(existing: &mut Permission, incoming: &Permission) {
     // Only read grants contribute to read approval. A denial cannot add approval requirements.
@@ -47,6 +49,7 @@ impl Scope {
             let base = format!("/v2/spaces/{}", encoded(&source.space_id));
             let space = scope.spaces.entry(source.space_id.clone()).or_default();
             if source.kind == "space" {
+                space.all_grants.push(source.permission.clone());
                 if source.id != source.space_id {
                     return Err("Invalid saved project space selection.".into());
                 }
@@ -116,6 +119,7 @@ impl Scope {
                         "Project membership changed during pagination. Retry the request.".into(),
                     );
                 }
+                space.object_grants.entry(id.into()).or_default().push(source.permission.clone());
                 if let Some(permission) = space.objects.get_mut(id) {
                     merge(permission, &source.permission);
                 } else {
@@ -129,6 +133,17 @@ impl Scope {
     pub fn permission(&self, space: &str, object: &str) -> Option<&Permission> {
         let space = self.spaces.get(space)?;
         space.objects.get(object).or(space.all.as_ref())
+    }
+    pub fn content_permission(&self, request: &blobui_mcp::content::ContentRequest, files: bool) -> Option<Permission> {
+        let space=self.spaces.get(request.arguments["space_id"].as_str()?)?;
+        let grants=if request.space_wide() { &space.all_grants } else {
+            request.target().and_then(|id|space.object_grants.get(id)).unwrap_or(&space.all_grants)
+        };
+        let contributors=grants.iter().filter(|p|p.permits(request.capability()) && (!files || p.files_enabled)).collect::<Vec<_>>();
+        let first=contributors.first()?;
+        let mut effective=(*first).clone();
+        effective.approval=if contributors.iter().any(|p|p.approval=="alwaysAsk") {"alwaysAsk"} else {"approveForMe"}.into();
+        Some(effective)
     }
     pub fn readable(&self, space: &str, object: &str) -> bool {
         self.permission(space, object).is_some_and(reads)
@@ -147,6 +162,7 @@ impl Scope {
                     id.clone(),
                     Permission {
                         access: "read".into(),
+                        mutations_enabled: false,
                         files_enabled: false,
                         approval: if permissions.iter().any(|p| p.approval == "alwaysAsk") {
                             "alwaysAsk"
@@ -195,6 +211,7 @@ mod tests {
     fn p(access: &str, approval: &str) -> Permission {
         Permission {
             access: access.into(),
+            mutations_enabled: false,
             approval: approval.into(),
             files_enabled: false,
         }
@@ -204,6 +221,7 @@ mod tests {
         let mut space = Space {
             all: Some(p("read", "fullAccess")),
             objects: BTreeMap::new(),
+            ..Space::default()
         };
         space
             .objects
@@ -247,5 +265,29 @@ mod tests {
             page,
             json!({"data":[{"id":"other"}],"total":2,"has_more":false})
         );
+    }
+}
+
+#[cfg(test)]
+mod mutation_permission_tests {
+    use super::*;
+    fn grant(access:&str,approval:&str,files:bool)->Permission {Permission{access:access.into(),approval:approval.into(),files_enabled:files,mutations_enabled:true}}
+    fn req(name:&str,args:Value)->blobui_mcp::content::ContentRequest {let blobui_mcp::Operation::Content{content}=blobui_mcp::operation(name,args).unwrap()else{panic!()};content}
+    #[test] fn capabilities_and_approvals_are_combined_independently() {
+        let mut space=Space::default();space.all_grants=vec![grant("createDelete","fullAccess",true)];
+        space.object_grants.insert("o".into(),vec![grant("read","alwaysAsk",true),grant("readWrite","fullAccess",false)]);
+        let scope=Scope{spaces:BTreeMap::from([("s".into(),space)])};
+        let read=req("read_document",json!({"space_id":"s","object_id":"o"}));assert_eq!(scope.content_permission(&read,false).unwrap().approval,"alwaysAsk");
+        let edit=req("patch_object",json!({"space_id":"s","object_id":"o","etag":"e","body":{"ops":[{"op":"set_properties","set":{"name":"new"}}]}}));
+        assert_eq!(scope.content_permission(&edit,false).unwrap().approval,"approveForMe");assert!(scope.content_permission(&edit,true).is_none());
+        let delete=req("delete_object",json!({"space_id":"s","object_id":"o"}));assert!(scope.content_permission(&delete,false).is_none());
+        let create=req("create_object",json!({"space_id":"s","body":{"type":"page"}}));assert!(scope.content_permission(&create,false).is_some());
+    }
+    #[test] fn member_grants_cannot_create_objects_or_mutate_schema() {
+        let mut space=Space::default();space.object_grants.insert("o".into(),vec![grant("createDelete","fullAccess",true)]);
+        let scope=Scope{spaces:BTreeMap::from([("s".into(),space)])};
+        for (name,args) in [("create_object",json!({"space_id":"s","body":{"type":"page"}})),("update_property",json!({"space_id":"s","key":"property","body":{"name":"new"}})),("create_widget",json!({"space_id":"s","body":{"target":"o","scope":"personal"}}))] {
+            let req=req(name,args);assert!(scope.content_permission(&req,false).is_none());
+        }
     }
 }
