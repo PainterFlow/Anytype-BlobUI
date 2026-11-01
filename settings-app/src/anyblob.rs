@@ -235,6 +235,7 @@ fn execute_scoped(
         "Anytype API v2 could not complete this read. Check the saved API connection, object ID and Anytype availability.".to_string()
     };
     match op {
+        Operation::SearchMentions { .. } => Err("Metadata searches require the authenticated global search path.".into()),
         Operation::ListSpaces {} => {
             let rows = client
                 .pages("GET", "/v2/spaces?ids=full", None)
@@ -427,6 +428,23 @@ fn dispatch_resolved_with(
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
     let config = load_config()?;
+    if let Operation::SearchMentions { query } = &request.request {
+        let revision = REVISION.load(Ordering::Acquire);
+        let check = || {
+            if !connected() { return Err("MCP request cancelled or disconnected.".into()); }
+            let current = load_state()?;
+            authenticate(&current, &request.token)?;
+            if revision != REVISION.load(Ordering::Acquire) || current != initial
+                || load_config()?.object_mentions != config.object_mentions {
+                return Err("Anyblob mention filters or integration changed. Retry the search.".into());
+            }
+            Ok(())
+        };
+        check()?;
+        let result = crate::anyblob_mentions::search(&connect()?, &config.object_mentions, query, &check)?;
+        check()?;
+        return Ok(result);
+    }
     let restricted = config.projects.values().any(|project| !project.sources.is_empty());
     let membership = if restricted {
         Some(resolve()?.ok_or("Codex did not supply verified chat identity. Update Anyblob in Codex and retry.")?)
@@ -631,6 +649,27 @@ mod tests {
     }
     fn enabled() -> Value {
         json!({"enabled":true,"verifier":digest(&"a".repeat(64))})
+    }
+    #[test]
+    fn mention_metadata_ignores_read_grants_but_never_authorizes_reads() {
+        let config=project_config(json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"alwaysAsk"}}));
+        let (client,server)=mock(vec![
+            ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"denied","name":"Private"}],"has_more":false})),
+            ("POST /v2/spaces/denied/search?ids=full&limit=100&offset=0 ".into(),json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Visible metadata","markdown":"secret","properties":{"secret":true}}],"has_more":false})),
+        ],None);
+        let result=dispatch_resolved_with(request(Operation::SearchMentions{query:String::new()}),
+            ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),
+            |_,_|panic!("metadata search must not prompt"),||panic!("metadata search must not resolve a project")).unwrap();
+        assert_eq!(result["items"][0]["uri"],"anyblob://objects/denied/object");
+        assert!(!result.to_string().contains("secret"));
+        server.join().unwrap();
+        let read=Operation::ReadObject{space_id:"denied".into(),object_id:"object".into()};
+        assert!(dispatch_resolved_with(request(read),||true,||Ok(enabled()),||Ok(config.clone()),
+            ||panic!("unidentified read must deny before connecting"),|_,_|panic!(),||Ok(None)).is_err());
+        for state in [json!({"enabled":false}),json!({"enabled":true,"verifier":"invalid"})] {
+            assert!(dispatch_resolved_with(request(Operation::SearchMentions{query:String::new()}),
+                ||true,||Ok(state.clone()),||Ok(config.clone()),||panic!("authentication first"),|_,_|panic!(),||panic!()).is_err());
+        }
     }
     fn project_config(source: Value) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":"none"}},

@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Configuration {
+    #[serde(default, rename = "objectMentions")]
+    pub object_mentions: crate::anyblob_mentions::Filters,
     pub spaces: BTreeMap<String, Permission>,
     #[serde(default)]
     pub projects: BTreeMap<String, ProjectConfiguration>,
@@ -55,7 +57,7 @@ pub fn normalize(value: &Value) -> Configuration {
             });
         }
     }
-    Configuration { spaces, projects }
+    Configuration { spaces, projects, object_mentions: crate::anyblob_mentions::Filters::normalize(value.get("objectMentions")) }
 }
 pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Configuration, D::Error> {
     Ok(normalize(&Value::deserialize(deserializer)?))

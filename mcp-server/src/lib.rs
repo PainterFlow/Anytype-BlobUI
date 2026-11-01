@@ -7,6 +7,7 @@ pub mod credential;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    SearchMentions { query: String },
     ListSpaces {},
     SearchObjects {
         space_id: String,
@@ -36,6 +37,7 @@ impl Operation {
                 && ![".", ".."].contains(&value)
         }
         match self {
+            Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
             Self::ListSpaces{} => Ok(()),
             Self::SearchObjects { space_id, query, limit, offset } if id(space_id) && query.len() <= 4096 && *limit > 0 && *limit <= 100 && *offset <= i32::MAX as u32 => Ok(()),
             Self::ReadObject { space_id, object_id } if id(space_id) && id(object_id) => Ok(()),
@@ -44,6 +46,7 @@ impl Operation {
     }
     pub fn name(&self) -> &'static str {
         match self {
+            Self::SearchMentions { .. } => "search_mentions",
             Self::ListSpaces {} => "list_spaces",
             Self::SearchObjects { .. } => "search_objects",
             Self::ReadObject { .. } => "read_object",
@@ -51,7 +54,7 @@ impl Operation {
     }
     pub fn space(&self) -> Option<&str> {
         match self {
-            Self::ListSpaces {} => None,
+            Self::ListSpaces {} | Self::SearchMentions { .. } => None,
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
                 Some(space_id)
             }
@@ -118,6 +121,12 @@ mod tests {
     }
     #[test]
     fn strict_arguments() {
+        assert!(operation("search_mentions",json!({"query":"猫"})).is_ok());
+        assert!(operation("search_mentions",json!({"query":""})).is_ok());
+        assert!(operation("search_mentions",json!({"query":"x".repeat(4097)})).is_err());
+        for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {
+            assert!(operation("search_mentions",extra).is_err());
+        }
         for name in ["delete_object", "GET", ""] {
             assert!(operation(name, json!({})).is_err());
         }

@@ -34,7 +34,10 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
     await page.evaluate(()=>{window.holdDiscovery=false;window.resolveDiscovery();});
     await page.locator('.codex-space').first().waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{}});
+    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]}}});
+    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({objectMentions:null}).objectMentions),{spaces:{all:false,items:[]},types:{all:false,items:[]}});
+    const filters={spaces:{all:false,items:[{id:'unavailable',name:'Saved'}]},types:{all:false,items:[{spaceId:'other',id:'missing',name:'Task',space:'Old'}]}};
+    assert.deepEqual(await page.evaluate(filters=>window.BlobUI.CodexPage.normalize({objectMentions:filters}).objectMentions,filters),filters);
     const row=page.locator('.codex-space').first(), access=row.locator('.codex-space-bottom button[aria-label^="Access"][aria-haspopup]'), approval=row.locator('.codex-space-bottom button[aria-label^="Approval"]');
     assert.equal(await access.innerText(),'No Access');assert.equal(await approval.innerText(),'Approve for me');
     assert.equal(await row.locator('input').isChecked(),false);

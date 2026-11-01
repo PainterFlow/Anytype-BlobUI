@@ -21,7 +21,7 @@ The version in codex-plugin/src/.codex-plugin/plugin.json is the Anyblob release
 
 ## Reading and permissions
 
-Native object mentions are blocked pending verified host support for project identity and submitted, message-scoped selection consent. See the repository's [compatibility investigation](../../docs/anyblob-mentions-compatibility.md). Existing search and read approvals remain unchanged.
+Native object mentions are in development and are not advertised yet. The backend supports global saved metadata filters independently of project read permissions. Suggestions will not grant access or bypass Always Ask. The Settings pickers, native capability and authorized resource reader remain unfinished. See the repository's [implementation status](../../docs/anyblob-mentions-compatibility.md). Existing search and read approvals remain unchanged.
 
 `list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. No files are downloaded, and no objects are modified.
 

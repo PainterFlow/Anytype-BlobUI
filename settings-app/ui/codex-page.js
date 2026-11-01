@@ -11,7 +11,15 @@
       filesEnabled: entry?.filesEnabled === true,
       approval: approvals.some(o => o.value === entry?.approval) ? entry.approval : 'approveForMe'
     };
-    return {spaces, projects: UI.ProjectPermissions.normalize(value?.projects)};
+    const filters = value?.objectMentions;
+    const selection = (value, keys) => value?.all === true ? {all:true,items:[]} : {
+      all:false, items:Array.isArray(value?.items) ? value.items.filter(row => row && keys.every(key => typeof row[key] === 'string')).map(row => Object.fromEntries(keys.map(key => [key,row[key]]))) : []
+    };
+    const objectMentions = filters === undefined ? {spaces:{all:true,items:[]},types:{all:true,items:[]}} : {
+      spaces:selection(filters?.spaces,['id','name']),
+      types:selection(filters?.types,['spaceId','id','name','space'])
+    };
+    return {spaces, projects: UI.ProjectPermissions.normalize(value?.projects), objectMentions};
   }
   const make = UI.CatalogBrowser.node;
   let api, page, tabs, list, message, empty, browser, nav, loaded = false, busy = false, locked = true, records = [], pickers = [];
