@@ -12,6 +12,8 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = "2"
 
 [dependencies]
+blobui-mcp = { path = "../mcp-server" }
+getrandom = "0.3"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 regex = "1"

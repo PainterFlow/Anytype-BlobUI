@@ -28,7 +28,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.waitForFunction(()=>window.appReady);
     await page.locator('#codex-nav').click();
     assert.equal(await page.locator('#codex-panel-0').getAttribute('hidden'),null);
-    assert.equal(await page.locator('#codex-panel-0').innerText(),'');
+    assert.match(await page.locator('#codex-panel-0').innerText(),/Enable Anyblob/);
     assert.equal(await page.evaluate(()=>calls.filter(c=>c==='discover_codex_spaces').length),0);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('ArrowRight');
     await page.getByRole('status').filter({hasText:'Loading spaces'}).waitFor();

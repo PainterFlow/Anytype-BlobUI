@@ -24,6 +24,10 @@ pub struct Client {
     info: Mutex<BTreeSet<String>>,
 }
 impl Client {
+    #[cfg(test)]
+    pub(crate) fn clone_for_fixture(&self) -> Self {
+        Self::with_connection(&self.key, &self.ip, self.port)
+    }
     pub(crate) fn with_connection(key: &str, ip: &str, port: u16) -> Self {
         Self { key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()) }
     }

@@ -19,6 +19,7 @@ mod calculator;
 mod kanban;
 mod calendar;
 mod codex;
+mod anyblob;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
@@ -838,6 +839,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         None if !connection.enabled => storage::CredentialChange::Remove,
         None => storage::CredentialChange::Keep,
     };
+    anyblob::invalidate();
     storage::commit_settings(
         &css_path,
         &data_path,
@@ -1061,6 +1063,7 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
     if rules.is_some() && calendar_status == "cached" { return Err("Calendar colors could not be refreshed. Your rules and previous snapshot are unchanged.".into()); }
     let css = css::compile(&runtime, &install, &data)?;
     let serialized = serialize_data(&data)?;
+    anyblob::invalidate();
     storage::commit_settings(
         &css_path,
         &data_path,
@@ -1740,6 +1743,9 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             codex::discover_codex_spaces,
+            anyblob::anyblob_status,
+            anyblob::configure_anyblob,
+            anyblob::approve_anyblob,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -1787,6 +1793,7 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                anyblob::dismiss_pending();
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -1824,6 +1831,7 @@ fn main() {
             }
             let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
             hotkey::start(app.handle().clone(), &shortcuts);
+            anyblob::start(app.handle().clone());
             if !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
             }
