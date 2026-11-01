@@ -39,7 +39,6 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.evaluate(()=>window.projectError='Fixture project refresh failed');await page.locator('#projects-reload').click();await page.getByRole('status').filter({hasText:'Fixture project refresh failed'}).waitFor();assert.equal(await projects.count(),2);
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
-    assert.match(await dialog.innerText(),/Saving any source selection pauses all Anyblob reads/);
     const query=sourceRows.filter({has:page.locator('input[aria-label="Select Tasks · Queries · Work"]')});
     assert.equal(await query.locator('.codex-space-top button').isDisabled(),true);
     await query.locator('input[type=checkbox]').first().check();

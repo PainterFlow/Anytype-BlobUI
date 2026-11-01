@@ -6,7 +6,6 @@
   const kindName = kind => kinds.find(item => item.value === kind)?.label || 'Unknown source';
   const identity = source => JSON.stringify([source.spaceId,source.kind,source.id]);
   const fallback = () => ({access:'none',filesEnabled:false,approval:'approveForMe'});
-  const warning = 'Project access is not available yet. Saving any source selection pauses all Anyblob reads until Codex supplies verified chat identity. Remove every project source selection to use global permissions.';
   function normalize(value) {
     const result = Object.create(null);
     if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
@@ -105,8 +104,7 @@
     api=options;
     const toolbar=UI.CatalogBrowser.toolbar('projects','Search projects and folders');toolbar.querySelector('#projects-filter-control').hidden=true;
     status=make('p','input-hint');status.setAttribute('role','status');list=make('div');list.id='codex-project-list';empty=make('p','input-hint');empty.hidden=true;
-    const notice=make('p','input-hint project-permission-notice',warning);
-    api.panel.append(notice,toolbar,status,list,empty);
+    api.panel.append(toolbar,status,list,empty);
     browser=UI.CatalogBrowser.attach({prefix:'projects',toolbar,records:()=>records,empty,onReload:reloadProjects});
     heading=make('h2');heading.id='project-source-title';
     close=C.IconButton({accessibleLabel:'Close project sources',content:['×'],attributes:{class:'neutral-icon-button calendar-modal-close'},onClick:()=>modal.close()}).element;
@@ -114,7 +112,7 @@
     const sourceToolbar=UI.CatalogBrowser.toolbar('project-sources','Search sources');
     sourceStatus=make('p','input-hint');sourceStatus.setAttribute('role','status');sourceList=make('div');sourceList.id='project-source-list';sourceEmpty=make('p','input-hint');sourceEmpty.hidden=true;
     const content=make('div','calendar-modal-content project-source-content');content.append(sourceStatus,sourceList,sourceEmpty);
-    shell=C.DialogShell({attributes:{id:'project-source-backdrop'},dialogAttributes:{id:'project-source-dialog',class:'confirm-dialog calendar-rule-dialog project-source-dialog','aria-labelledby':heading.id},content:[header,make('p','input-hint project-permission-notice',warning),sourceToolbar,content]});
+    shell=C.DialogShell({attributes:{id:'project-source-backdrop'},dialogAttributes:{id:'project-source-dialog',class:'confirm-dialog calendar-rule-dialog project-source-dialog','aria-labelledby':heading.id},content:[header,sourceToolbar,content]});
     doc.body.append(shell.element);
     sourceBrowser=UI.CatalogBrowser.attach({prefix:'project-sources',toolbar:sourceToolbar,records:()=>sourceRecords,empty:sourceEmpty,onReload:reloadSources,categories:kinds});
     scroll=UI.Scrollbar.attach(content);
