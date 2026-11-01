@@ -58,8 +58,10 @@
         owned.push({destroy() { controller.destroy(); if(dialog)shell.menu.remove();scrollContainer?.removeEventListener('scroll',dismiss); for (const event of ['click','keydown']) shell.trigger.removeEventListener(event,place,true); doc.querySelector('.page-content').removeEventListener('scroll',dismiss); root.removeEventListener('resize',dismiss); }});
       }
     if (metadata) top.append(make('p','input-hint project-source-metadata',metadata));
+    if (!selection || view.kind === 'space') {
     const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+description},onChange:()=>change('filesEnabled',toggle.input.checked)});
     toggle.input.checked = permission.filesEnabled; toggle.input.disabled = disabled; bottom.append(toggle.element);
+    }
     picker(bottom,'access',access,'Access');
     picker(bottom,'approval',approvals,'Approval'); item.append(top);
     item.append(bottom);
