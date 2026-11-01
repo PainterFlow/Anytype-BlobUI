@@ -56,11 +56,11 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.locator('#save-button').click();await page.waitForFunction(()=>window.saved?.codexIntegration.spaces['full-space-one']?.approval==='alwaysAsk');
     assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.spaces.absent),{access:'read',filesEnabled:true,approval:'fullAccess'});
     await row.locator('input').uncheck();await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await row.locator('input').isChecked(),true);
-    await approval.click();await row.getByRole('option',{name:'Full Access',exact:true}).click();
+    await approval.click();await row.getByRole('option',{name:'Never Ask',exact:true}).click();
     await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();
     await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').nth(1).click();
     assert.equal(await access.innerText(),'Create-Delete');
-    assert.equal(await approval.innerText(),'Full Access');
+    assert.equal(await approval.innerText(),'Never Ask');
     assert.equal(await page.locator('#codex-nav').getAttribute('aria-expanded'),'true');
     await page.locator('#codex-search').fill('');
     await page.locator('#codex-section-links').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
