@@ -658,11 +658,18 @@ mod tests {
     fn query_search_filters_membership_before_pagination_and_hides_global_totals() {
         use crate::codex_identity::Membership;
         let config=project_config(json!({"kind":"query","id":"query","spaceId":"space","permission":{"access":"read","approval":"fullAccess"}}));
-        let membership=("GET /v2/spaces/space/queries/query/objects?ids=full&limit=100&offset=0 ".into(),
-            json!({"data":[{"id":"allowed"},{"id":"second"}],"total":2,"has_more":false}));
-        let (client,server)=mock(vec![membership.clone(),membership.clone(),
+        let membership=vec![
+            ("GET /v2/spaces/space/queries/query/views?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"first"},{"id":"later"}],"has_more":false})),
+            ("GET /v2/spaces/space/queries/query/objects?ids=full&view=first&limit=100&offset=0 ".into(),json!({"data":[{"id":"allowed"}],"has_more":false})),
+            ("GET /v2/spaces/space/queries/query/objects?ids=full&view=later&limit=100&offset=0 ".into(),json!({"data":[{"id":"allowed"}],"has_more":true})),
+            ("GET /v2/spaces/space/queries/query/objects?ids=full&view=later&limit=100&offset=1 ".into(),json!({"data":[{"id":"second"}],"has_more":false}))];
+        let mut requests=membership.clone();
+        requests.extend(membership.clone());
+        requests.extend(vec![
             ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"hidden","name":"Hidden","type":"page"},{"id":"allowed","name":"First","type":"page"}],"total":3,"has_more":true})),
-            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=2 ".into(),json!({"data":[{"id":"second","name":"Second","type":"page"}],"total":3,"has_more":false})),membership],None);
+            ("POST /v2/spaces/space/search?ids=full&limit=100&offset=2 ".into(),json!({"data":[{"id":"second","name":"Second","type":"page"}],"total":3,"has_more":false}))]);
+        requests.extend(membership);
+        let (client,server)=mock(requests,None);
         let result=dispatch_resolved_with(scoped_request(Operation::SearchObjects{space_id:"space".into(),query:"private fixture query".into(),limit:1,offset:1}),
             ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|_,_|panic!("no approval"),
             ||Ok(Some(Membership::Project("project".into())))).unwrap();

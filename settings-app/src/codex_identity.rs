@@ -40,13 +40,17 @@ pub fn resolve_at(home: &Path, thread: &str) -> Result<Membership, String> {
     )
     .map_err(|_| "Codex chat membership is not valid JSON.")?;
     // A host marker alone does not prove that SQLite has the project assignment.
-    // Conflicting metadata must never broaden a project's access to global rules.
+    // Explicit desktop assignments take precedence over the database fallback.
     let migrated = state["thread-project-membership-host-ids"].get(thread);
     if migrated.is_some_and(|host| host.as_str() != Some("local")) {
         return Err("Anyblob project permissions support local Windows chats only.".into());
     }
-    if migrated.is_none() {
+    {
         if let Some(assignment) = state["thread-project-assignments"].get(thread) {
+            if state["projectless-thread-ids"].as_array()
+                .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread))) {
+                return Err("Codex chat project membership conflicts between local records. Refresh the chat's project assignment and retry.".into());
+            }
             if assignment["projectKind"] != "local" {
                 return Err("Anyblob project permissions support local Windows chats only.".into());
             }
@@ -87,20 +91,6 @@ pub fn resolve_at(home: &Path, thread: &str) -> Result<Membership, String> {
         Some(None) => Membership::Projectless,
         None => return Err("Codex chat identity was not found in local membership metadata. Open the chat in Codex and retry.".into()),
     };
-    if let Some(assignment) = state["thread-project-assignments"].get(thread) {
-        if assignment["projectKind"] != "local" {
-            return Err("Anyblob project permissions support local Windows chats only.".into());
-        }
-        let id = assignment["projectId"].as_str().filter(|id| !id.is_empty())
-            .ok_or("Codex returned invalid chat project membership.")?;
-        if canonical_project(&state, id)? != membership {
-            return Err("Codex chat project membership conflicts between local records. Refresh the chat's project assignment and retry.".into());
-        }
-    }
-    if membership != Membership::Projectless && state["projectless-thread-ids"]
-        .as_array().is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread))) {
-        return Err("Codex chat project membership conflicts between local records. Refresh the chat's project assignment and retry.".into());
-    }
     Ok(membership)
 }
 
@@ -323,11 +313,17 @@ mod tests {
         // A host marker plus a null SQLite project must not enable global reads.
         state["thread-project-assignments"]["no-project"] = json!({"projectKind":"local","projectId":"legacy-a"});
         save(&state);
-        assert!(resolve_at(&home, "no-project").unwrap_err().contains("conflicts"));
+        assert_eq!(resolve_at(&home, "no-project").unwrap(), Membership::Project("legacy-a".into()));
         state["thread-project-assignments"].as_object_mut().unwrap().remove("no-project");
+        save(&state);
+        assert_eq!(resolve_at(&home, "no-project").unwrap(), Membership::Projectless);
+        state["projectless-thread-ids"] = json!(["no-project"]);
+        save(&state);
+        assert_eq!(resolve_at(&home, "no-project").unwrap(), Membership::Projectless);
+        state["projectless-thread-ids"] = json!([]);
         state["thread-project-assignments"]["chat-a"]["projectId"] = "legacy-b".into();
         save(&state);
-        assert!(resolve_at(&home, "chat-a").unwrap_err().contains("conflicts"));
+        assert_eq!(resolve_at(&home, "chat-a").unwrap(), Membership::Project("legacy-b".into()));
         state["thread-project-assignments"]["chat-a"]["projectId"] = "modern-a".into();
         save(&state);
         assert_eq!(resolve_at(&home, "chat-a").unwrap(), Membership::Project("legacy-a".into()));

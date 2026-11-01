@@ -58,15 +58,34 @@ impl Scope {
                 continue;
             }
             let rows = match source.kind.as_str() {
-                "query" | "collection" => {
-                    let kind = if source.kind == "query" {
-                        "queries"
-                    } else {
-                        "collections"
-                    };
+                "query" => {
+                    let path = format!("{base}/queries/{}", encoded(&source.id));
+                    let views = client.pages("GET", &format!("{path}/views?ids=full"), None)?;
+                    let mut objects = BTreeMap::new();
+                    let mut view_ids = std::collections::BTreeSet::new();
+                    for view in views {
+                        check()?;
+                        let id = view["id"].as_str().filter(|id| !id.is_empty())
+                            .ok_or("Anytype returned a query view without an ID.")?;
+                        if !view_ids.insert(id.to_string()) {
+                            return Err("Query views changed during pagination. Retry the request.".into());
+                        }
+                        let mut seen = std::collections::BTreeSet::new();
+                        for row in client.pages("GET", &format!("{path}/objects?ids=full&view={}", encoded(id)), None)? {
+                            let id = row["id"].as_str().filter(|id| !id.is_empty())
+                                .ok_or("Anytype returned project membership without object IDs.")?;
+                            if !seen.insert(id.to_string()) {
+                                return Err("Project membership changed during pagination. Retry the request.".into());
+                            }
+                            objects.insert(id.to_string(), row);
+                        }
+                    }
+                    objects.into_values().collect()
+                }
+                "collection" => {
                     client.pages(
                         "GET",
-                        &format!("{base}/{kind}/{}/objects?ids=full", encoded(&source.id)),
+                        &format!("{base}/collections/{}/objects?ids=full", encoded(&source.id)),
                         None,
                     )?
                 }
