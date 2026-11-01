@@ -7,6 +7,7 @@
   const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
   const sectionIcons = {
     Settings: '<path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/>',
+    Projects: '<path d="M2 5h6l2 2h8v10H2Z"/>',
     Permissions: '<path d="m10 2 7 3v5c0 4-7 8-7 8s-7-4-7-8V5l7-3Z"/><path d="m6 10 3 3 5-6"/>',
     Accent: '<circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3" fill="currentColor"/>',
     Kanban: '<rect x="2" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="14" y="3" width="4" height="12" rx="1"/>',
@@ -59,8 +60,8 @@
       links.hidden = true; button.after(links);
       const inner = make("div", "documentation-children-inner"); inner.dataset.disclosureContent = ""; links.append(inner);
       button.dataset.disclosureToggle = ""; button.setAttribute("aria-controls", links.id); button.setAttribute("aria-expanded", "false");
-      const groups = page === "codex" ? [doc.getElementById("codex-panel-0"), doc.getElementById("codex-panel-1")] : page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
-      const labels = page === "codex" ? ["Settings", "Permissions"] : page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
+      const groups = page === "codex" ? [0,1,2].map(index => doc.getElementById("codex-panel-" + index)) : page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
+      const labels = page === "codex" ? ["Settings", "Permissions", "Projects"] : page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
       groups.forEach((target, tab) => {
         const label = labels[tab];
         const link = UI.Components.NavigationItem({ label, icon: icon(label),

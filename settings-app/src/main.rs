@@ -19,6 +19,7 @@ mod calculator;
 mod kanban;
 mod calendar;
 mod codex;
+mod codex_projects;
 mod anyblob;
 mod marketplace;
 mod kanban_api;
@@ -1744,6 +1745,8 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             codex::discover_codex_spaces,
+            codex::discover_codex_sources,
+            codex_projects::discover_codex_projects,
             anyblob::anyblob_status,
             marketplace::anyblob_installation_status,
             marketplace::install_anyblob_marketplace,

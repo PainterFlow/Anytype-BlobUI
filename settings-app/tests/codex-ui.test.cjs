@@ -34,7 +34,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
     await page.evaluate(()=>{window.holdDiscovery=false;window.resolveDiscovery();});
     await page.locator('.codex-space').first().waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}}});
+    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{}});
     const row=page.locator('.codex-space').first(), access=row.locator('.codex-space-top button[aria-haspopup]'), approval=row.locator('.codex-space-bottom button[aria-haspopup]');
     assert.equal(await access.innerText(),'No Access');assert.equal(await approval.innerText(),'Approve for me');
     assert.equal(await row.locator('input').isChecked(),false);

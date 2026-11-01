@@ -182,6 +182,11 @@ pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> boo
         .is_some_and(|p| matches!(p.access.as_str(), "read" | "readWrite"))
 }
 fn allowed(config: &crate::codex::Configuration, op: &Operation) -> Result<(), String> {
+    // No supported host-owned chat identity reaches this bridge yet. Do not
+    // mistake installation credentials or model arguments for project identity.
+    if config.projects.values().any(|project| !project.sources.is_empty()) {
+        return Err("Anyblob reads are paused because project sources are saved, but Codex has not supplied verified chat identity. Remove every project source selection to use global permissions.".into());
+    }
     if op.space().is_some_and(|space| !readable(config, space)) {
         Err("Access denied by saved BlobUI space permissions. Save Read Only or Read-Write access first.".into())
     } else {
@@ -536,6 +541,17 @@ mod tests {
     }
     fn config(access: &str, approval: &str) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":access,"approval":approval}}}))
+    }
+    #[test]
+    fn unresolved_chat_identity_denies_every_tool_with_any_saved_selection() {
+        let selected=crate::codex::normalize(&json!({"spaces":{"space":{"access":"read"}},"projects":{"missing-project":{"sources":[{"spaceId":"missing-space","kind":"query","id":"missing-source","permission":{"access":"read"}}]}}}));
+        for op in [Operation::ListSpaces{},search(),Operation::ReadObject{space_id:"space".into(),object_id:"direct-id".into()}] {
+            assert!(allowed(&selected,&op).unwrap_err().contains("verified chat identity"));
+            assert!(dispatch_with(request(op),||true,||Ok(enabled()),||Ok(selected.clone()),||panic!("must deny before connecting"),|_,_|panic!("must deny before approval")).is_err());
+        }
+        let empty=crate::codex::normalize(&json!({"spaces":{"space":{"access":"read"}},"projects":{"saved":{"sources":[]}}}));
+        assert!(allowed(&empty,&search()).is_ok());
+        assert!(allowed(&config("read","fullAccess"),&Operation::ListSpaces{}).is_ok());
     }
     fn request(op: Operation) -> Request {
         Request {
