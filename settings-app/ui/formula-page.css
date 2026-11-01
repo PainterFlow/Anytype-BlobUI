@@ -138,6 +138,7 @@
 .calendar-modal-content::-webkit-scrollbar-track, .calendar-property-menu::-webkit-scrollbar-track { background: transparent; }
 .calendar-modal-content::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
 .calendar-property-menu::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; }
+.calendar-property-menu.app-scrollbar::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); }
 .calendar-modal-content::-webkit-scrollbar-button, .calendar-property-menu::-webkit-scrollbar-button { display: none; }
 .calendar-sticky-toolbar { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-top: 6px; }
 

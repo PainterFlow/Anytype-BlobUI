@@ -196,7 +196,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-select-trigger:focus-visible, .kanban-select-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
 .kanban-select-trigger:disabled { color: var(--text-muted); cursor: default; }
 .kanban-select-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out; }
+.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out, --page-scrollbar-color .15s ease; }
 .kanban-select-menu[data-state="open"] { opacity: 1; transform: translateY(0); }
 .kanban-select-menu[data-state="closing"] { opacity: 0; transform: translateY(-4px); transition-duration: 100ms; pointer-events: none; }
 .kanban-select-menu[data-state="closed"] { opacity: 0; transform: translateY(-4px); }

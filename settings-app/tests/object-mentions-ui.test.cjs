@@ -117,6 +117,29 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
       color:getComputedStyle(menu).getPropertyValue('--page-scrollbar-color').trim()
     }));
     assert.equal(scrollbar.width,'12px');assert.equal(scrollbar.radius,'6px');assert.equal(scrollbar.buttons,'none');
+    async function checkScrollbarFade(show) {
+      const colors=await spaceMenu.evaluate(async(menu,show)=>{
+        await Promise.all(menu.getAnimations().map(animation=>animation.finished));
+        menu.classList.toggle('is-scrolling',show);
+        getComputedStyle(menu).getPropertyValue('--page-scrollbar-color');
+        const fade=menu.getAnimations().find(animation=>animation.transitionProperty==='--page-scrollbar-color');
+        if(!fade)return null;
+        fade.pause();
+        const colors=[];
+        for(const time of [0,75,150]) {
+          fade.currentTime=time;
+          colors.push(getComputedStyle(menu,'::-webkit-scrollbar-thumb').backgroundColor);
+        }
+        fade.finish();
+        return colors;
+      },show);
+      assert.ok(colors,'Scrollbar color must have a fade transition');
+      assert.notEqual(colors[0],colors[1],'Thumb must interpolate during the fade');
+      assert.notEqual(colors[1],colors[2],'Thumb must interpolate to its final color');
+      assert.equal(colors[show?0:2],'rgba(0, 0, 0, 0)');
+    }
+    await checkScrollbarFade(false);
+    await checkScrollbarFade(true);
     await page.screenshot({path:path.join(fixture,'picker-dark.png')});
     await page.waitForFunction(()=>!document.querySelector('#object-mentions-group [role=listbox]:not([hidden])').classList.contains('is-scrolling'));
     await page.keyboard.press('Escape');
