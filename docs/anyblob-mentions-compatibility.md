@@ -8,6 +8,8 @@ Object Mentions appears below General with Filtered spaces and Filtered object t
 
 Types use space IDs and full type IDs, and labels include space names. Explicit type selections outside filtered spaces stay saved and appear inactive. Unavailable selections stay visible. Discovery failures preserve saved filters and available options. The existing Save/Undo draft flow applies edits. Unsaved changes never affect searches. Space and type discovery do not load project membership or object documents.
 
+Long picker labels truncate on one line with an ellipsis. Filter Incomplete Tasks sits below the type picker and defaults off. Saved `filterIncompleteTasks` excludes checked Done values before the result limit, including custom task types. Search requests only the Done property in addition to its normal metadata when this option is on. Unset or unchecked values remain eligible, and malformed completion values return an error. Completion data is never included in suggestions. Changing this saved option invalidates in-flight searches through the existing filter comparison.
+
 ## MCP integration
 
 Initialization advertises `openai/mentions` with `searchTool: search_mentions` through extensions and the legacy experimental capability location. The read-only tool is app-visible, accepts `{query: string}` including empty queries and returns structured `{items: ResourceLink[]}` with at most 20 results. This follows the [official extension documentation](https://developers.openai.com/plugins/build/extensions) and linked [composer mention specification](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#composer-at-mentions).

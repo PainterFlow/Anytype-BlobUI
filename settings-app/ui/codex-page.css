@@ -2,6 +2,8 @@
 #object-mentions-section { margin-top: 32px; }
 .object-mention-row .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; }
 .object-mention-row .formula-property-picker { flex: 0 1 auto; min-width: 0; }
+.object-mention-row .kanban-option-copy { min-width: 0; flex: 1; }
+.object-mention-row .kanban-option-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .codex-space:hover { background: var(--active); }
 .codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .codex-space-bottom { margin-top: 6px; }

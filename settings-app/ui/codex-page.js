@@ -19,6 +19,7 @@
       spaces:selection(filters?.spaces,['id','name']),
       types:selection(filters?.types,['spaceId','id','name','space'])
     };
+    objectMentions.filterIncompleteTasks=filters?.filterIncompleteTasks===true;
     return {spaces, projects: UI.ProjectPermissions.normalize(value?.projects), objectMentions};
   }
   const make = UI.CatalogBrowser.node;

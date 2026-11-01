@@ -50,7 +50,13 @@
       root.document.querySelector('.page-content').addEventListener('scroll',()=>controller.close());
       pickers[kind]={shell,controller,scrollbar};
     }
+    const incomplete=C.ToggleSetting({id:'filter-incomplete-tasks',label:'Filter Incomplete Tasks',className:'native-accent-control settings-row kanban-setting-row',
+      inputAttributes:{'aria-label':'Filter Incomplete Tasks'},onChange:()=>{
+        const next=normalize(api.read());next.objectMentions.filterIncompleteTasks=incomplete.input.checked;api.onChange(next);
+      }});
+    group.element.append(incomplete.element);
     function refresh() {
+      incomplete.input.checked=filters().filterIncompleteTasks;
       for (const kind of ['spaces','types']) {
         const selection=filters()[kind], picker=pickers[kind];
         const available=options(kind), signature=JSON.stringify(available);

@@ -28,6 +28,8 @@ pub struct ObjectType {
 pub struct Filters {
     pub spaces: Selection<Space>,
     pub types: Selection<ObjectType>,
+    #[serde(default, rename = "filterIncompleteTasks")]
+    pub filter_incomplete_tasks: bool,
 }
 fn selection<T: for<'de> Deserialize<'de>>(value: Option<&Value>) -> Selection<T> {
     match value {
@@ -48,6 +50,7 @@ impl Filters {
                 // A corrupt present filter fails closed rather than restoring All.
                 spaces: selection(Some(value.get("spaces").unwrap_or(&Value::Null))),
                 types: selection(Some(value.get("types").unwrap_or(&Value::Null))),
+                filter_incomplete_tasks: value["filterIncompleteTasks"].as_bool().unwrap_or(false),
             },
         }
     }
@@ -146,9 +149,11 @@ fn search_with(
         // Enumerate once with an empty API query. Full-text API search has a capped snapshot
         // and overlapping pages, so match titles locally for a complete deterministic order.
         let path = format!("/v2/spaces/{}/search?ids=full", crate::api::encode_segment(sid));
-        for row in pages("POST", &path, Some(&json!({})), check, &mut request)? {
+        let body=if filters.filter_incomplete_tasks {json!({"fields":["done"]})}else{json!({})};
+        for row in pages("POST", &path, Some(&body), check, &mut request)? {
             let oid = text(&row, "id")?;
             valid_id(oid)?;
+            if filters.filter_incomplete_tasks && completed(&row)? {continue;}
             if !filters.types.all {
                 // v2 search rows use type keys; stored filters retain full, space-scoped IDs.
                 let selected=if let Some(type_key)=row["type"].as_str() {type_keys.contains(type_key)}
@@ -181,6 +186,17 @@ fn search_with(
     Ok(json!({"items":items}))
 }
 
+// The built-in Done checkbox also covers custom task types. Unset values are incomplete.
+// Completion is used only for filtering and never returned as suggestion metadata.
+fn completed(row: &Value) -> Result<bool,String> {
+    let done=row.pointer("/properties/done").unwrap_or(&Value::Null);
+    let value=done.get("checkbox").unwrap_or(done);
+    match value {
+        Value::Null=>Ok(false),Value::Bool(done)=>Ok(*done),
+        _=>Err("Anytype returned an invalid Done checkbox. Mention search cannot filter completed tasks.".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +204,7 @@ mod tests {
     #[test]
     fn migration_and_unavailable_selections_never_broaden_filters() {
         assert!(Filters::normalize(None).spaces.all);
+        assert!(!Filters::normalize(None).filter_incomplete_tasks);
         for corrupt in [Value::Null, json!({}), json!({"spaces":false,"types":"broken"})] {
             let saved = Filters::normalize(Some(&corrupt));
             assert!(!saved.spaces.all && !saved.types.all);
@@ -286,5 +303,31 @@ mod tests {
             changed.set(true);Ok(json!({"data":[],"has_more":false}))
         });
         assert_eq!(result.unwrap_err(),"filters changed");
+    }
+    #[test]
+    fn completed_tasks_are_excluded_before_the_limit_without_exposing_properties() {
+        let mut filters=Filters::default();filters.filter_incomplete_tasks=true;
+        assert_eq!(filters,Filters::normalize(Some(&serde_json::to_value(&filters).unwrap())));
+        let result=search_with(&filters,"",&||Ok(()),|method,path,body|{
+            if method=="GET" {return Ok(json!({"data":[{"id":"s","name":"Space"}],"has_more":false}));}
+            assert_eq!(body,Some(&json!({"fields":["done"]})));
+            Ok(if path.ends_with("offset=0") {
+                json!({"data":(0..100).map(|i|json!({"id":format!("done{i}"),"name":"Completed task","type":"custom-task","properties":{"done":true}})).collect::<Vec<_>>(),"has_more":true,"total":125})
+            }else{
+                assert!(path.ends_with("offset=100"));
+                json!({"data":(0..25).map(|i|json!({"id":format!("todo{i:02}"),"name":"Incomplete task","properties":{"done":false}})).collect::<Vec<_>>(),"has_more":false,"total":125})
+            })
+        }).unwrap();
+        assert_eq!(result["items"].as_array().unwrap().len(),20);
+        assert_eq!(result["items"][0]["uri"],"anyblob://objects/s/todo00");
+        assert!(!result.to_string().contains("properties"));
+        for row in [json!({}),json!({"properties":{"done":null}}),json!({"properties":{"done":false}})] {assert!(!completed(&row).unwrap());}
+        assert!(completed(&json!({"properties":{"done":{"checkbox":true}}})).unwrap());
+        assert!(completed(&json!({"properties":{"done":"true"}})).is_err());
+        let off=search_with(&Filters::default(),"",&||Ok(()),|method,_,body|{
+            Ok(if method=="GET"{json!({"data":[{"id":"s","name":"Space"}],"has_more":false})}
+            else{assert_eq!(body,Some(&json!({})));json!({"data":[{"id":"done","name":"Done task","properties":{"done":true}},{"id":"page","name":"Regular page"}],"has_more":false})})
+        }).unwrap();
+        assert_eq!(off["items"].as_array().unwrap().len(),2);
     }
 }

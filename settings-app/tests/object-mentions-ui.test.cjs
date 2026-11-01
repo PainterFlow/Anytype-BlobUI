@@ -35,6 +35,8 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     await page.waitForFunction(()=>window.appReady);await page.locator('#codex-nav').click();
     const spaces=page.getByRole('button',{name:'Filtered spaces',exact:true}),types=page.getByRole('button',{name:'Filtered object types',exact:true});
     const spaceMenu=page.getByRole('listbox',{name:'Filtered spaces',exact:true}),typeMenu=page.getByRole('listbox',{name:'Filtered object types',exact:true});
+    const incomplete=page.getByRole('switch',{name:'Filter Incomplete Tasks',exact:true});
+    assert.equal(await incomplete.isChecked(),false);
     assert.equal(await spaces.isEnabled(),true);assert.equal(await types.isEnabled(),true);
     assert.equal(await spaces.innerText(),'All');assert.equal(await types.innerText(),'All');
     assert.equal(await page.evaluate(()=>{
@@ -60,7 +62,10 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(await typeMenu.getByRole('option',{name:'Task · Personal',exact:true}).count(),1);
     await typeMenu.getByRole('option',{name:'Task · Personal',exact:true}).click();await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(()=>window.saved),null);
+    await incomplete.check();
     await page.locator('#save-button').click();await page.waitForFunction(()=>window.saved?.codexIntegration?.objectMentions.types.items.length===2);
+    assert.equal(await page.evaluate(()=>window.saved.codexIntegration.objectMentions.filterIncompleteTasks),true);
+    await incomplete.uncheck();await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await incomplete.isChecked(),true);
     assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.objectMentions.spaces),{all:false,items:[{id:'b',name:'Personal'}]});
     await types.click();await typeMenu.getByRole('option',{name:'All',exact:true}).click();await page.keyboard.press('Escape');
     assert.equal(await types.innerText(),'All');
@@ -86,13 +91,18 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(await spaces.isVisible(),true);await page.setViewportSize({width:620,height:950});
     await page.screenshot({path:path.join(fixture,'settings-refreshed-dark.png'),fullPage:true});
     assert.equal(await page.evaluate(()=>document.querySelector('.page-content').scrollWidth<=document.querySelector('.page-content').clientWidth),true);
-    await page.evaluate(()=>window.fixtureSpaces.push(...Array.from({length:40},(_,i)=>({id:'private-id-'+i,name:'Space '+String(i).padStart(2,'0')}))));
+    await page.evaluate(()=>{
+      window.fixtureSpaces.push(...Array.from({length:40},(_,i)=>({id:'private-id-'+i,name:'Space '+String(i).padStart(2,'0')})));
+      window.fixtureSpaces.push({id:'long',name:'School Notebook Entry · Private '.repeat(15)});
+    });
     await page.getByRole('button',{name:'Reload options',exact:true}).click();await spaces.click();
     await spaceMenu.getByRole('option',{name:'Space 00',exact:true}).waitFor();
     await page.waitForFunction(()=>document.querySelector('#object-mentions-group [role=listbox]:not([hidden])')?.dataset.state==='open');
     await spaceMenu.evaluate(menu=>Promise.all(menu.getAnimations().map(animation=>animation.finished)));
     assert.doesNotMatch(await spaceMenu.innerText(),/private-id-/);
     assert.equal(await spaceMenu.locator('.kanban-select-option-description').count(),0);
+    const longLabel=spaceMenu.getByRole('option',{name:/School Notebook Entry/}).locator('.kanban-option-label');
+    assert.deepEqual(await longLabel.evaluate(label=>({nowrap:getComputedStyle(label).whiteSpace,overflow:getComputedStyle(label).textOverflow,clipped:label.scrollWidth>label.clientWidth})),{nowrap:'nowrap',overflow:'ellipsis',clipped:true});
     await spaceMenu.evaluate(menu=>{menu.scrollTop=120;menu.dispatchEvent(new Event('scroll'));});
     assert.equal(await spaceMenu.evaluate(menu=>menu.classList.contains('has-overflow')&&menu.classList.contains('is-scrolling')),true);
     const scrollbar=await spaceMenu.evaluate(menu=>({

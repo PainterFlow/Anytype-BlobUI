@@ -24,9 +24,9 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
       }}};
     });
     await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);await page.waitForFunction(()=>window.appReady);await page.locator('#codex-nav').click();
-    const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]'),install=panel.getByRole('button',{name:'Install',exact:true});
+    const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]').first(),install=panel.getByRole('button',{name:'Install',exact:true});
     assert.equal(await page.locator('#codex-nav .nav-label').count() ? await page.locator('#codex-nav .nav-label').innerText() : await page.locator('#codex-nav').innerText(),'Anyblob');
-    assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),4);
+    assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),5);
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
     assert.equal(await toggle.isChecked(),false);await toggle.check();await page.waitForFunction(()=>window.enabled);await toggle.uncheck();await page.waitForFunction(()=>!window.enabled);
     await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);

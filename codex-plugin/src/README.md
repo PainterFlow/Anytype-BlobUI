@@ -23,6 +23,8 @@ The version in codex-plugin/src/.codex-plugin/plugin.json is the Anyblob release
 
 Native object mentions search API-accessible objects using the saved Object Mentions filters in Anyblob Settings. Filtered spaces and Filtered object types default to All, including newly available spaces and types. Save applies edits; Undo restores saved filters. Empty explicit selections match nothing. Unavailable selections remain saved, and types outside selected spaces appear inactive.
 
+Filter Incomplete Tasks excludes objects whose built-in Done checkbox is checked, including custom task types. It defaults off and uses Save/Undo. Unchecked or unset Done values remain eligible. Completion is used only for filtering and is never returned in suggestion metadata.
+
 Suggestions show only object titles and space metadata. They may include objects your current project cannot read. Selecting a suggestion grants no access. Resource reads use existing project/global permissions and Always Ask. Missing host identity retains the existing denial behavior. See the repository's [implementation and validation notes](../../docs/anyblob-mentions-compatibility.md) for the isolated host probe and its limits.
 
 `list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. No files are downloaded, and no objects are modified.
