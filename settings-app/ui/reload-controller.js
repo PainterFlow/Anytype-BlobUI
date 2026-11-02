@@ -28,6 +28,7 @@
           try { onReload?.(); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
           return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(handler))); };
         pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
+          .catch(error => [{ status: "rejected", reason: error }])
           .then(results => {
             const error = results.find(result => result.status === "rejected")?.reason;
             if (!error) return;

@@ -90,9 +90,10 @@
   function calendarsScreen() {
     setScreen("calendars", "Choose calendar view");
     const toolbar = UI.CatalogBrowser.toolbar("calendar-override", "Search calendar views"); controls.append(toolbar); toolbar.classList.add("calendar-sticky-toolbar");
-    const rows = [], saved = entry(active);
+    const rows = [];
     const results = make("div", "calendar-view-results");
     refreshCalendars = () => {
+    const saved = entry(active);
     C.destroyTree(results); results.replaceChildren(); rows.length = 0;
     const views = catalog.views.filter(view => view.target.spaceId === active.spaceId
       && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)));
@@ -179,6 +180,25 @@
       render();
     },
     read: () => copy(state),
+    validateSaved(result) {
+      if (!result || result.version !== 1 || !Array.isArray(result.types)) throw Error("Unsupported saved calendar rules.");
+    },
+    reconcile(value) {
+      const previous = state;
+      state = copy(value); loadFailed = false;
+      if (modal?.isOpen() && active) {
+        const id = key(active);
+        const before = previous.types.find(t => key(t) === id);
+        const after = state.types.find(t => key(t) === id);
+        if (!UI.SavedState.equal(before, after)) {
+          if (before && !after) { screen = "type"; modal.close({ restoreFocus: false }); }
+          else if (screen === "type") typeScreen();
+          else refreshCalendars?.();
+        }
+      }
+      render();
+    },
+    acceptSaved(result) { configurationRevision = result.revision || null; message.textContent = ""; },
     restore(value) { state = copy(value || defaults()); if (modal?.isOpen()) { screen = "type"; modal.close({ restoreFocus: false }); } render(); },
     async load(bridge) {
       invoke = bridge; generation++; discovering = false; discovered = false; hasCatalog = false; discoveryError = false; catalog = { types: [], views: [] }; loading = true; loadFailed = false;

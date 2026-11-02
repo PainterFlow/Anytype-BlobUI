@@ -212,6 +212,25 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
 }
 
 #[tauri::command]
+async fn get_saved_state_snapshot() -> Result<Value, String> {
+    let guard = acquire_save_guard("Wait for the current save before reloading Settings.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        // One save guard keeps configuration and revision tokens from different
+        // publications out of the same frontend baseline.
+        Ok(json!({
+            "app": load_app_state()?,
+            "updater": with_startup_state(updater::get_state(&app_data, &install, &runtime)?)?,
+            "formulas": kanban::load_kanban_formulas()?,
+            "calendar": calendar::load_calendar_rules()?,
+        }))
+    }).await.map_err(|_| "Saved settings reload stopped. Your pending edits are kept.".to_string())?
+}
+
+#[tauri::command]
 fn get_keyboard_shortcuts() -> Vec<hotkey::Shortcut> {
     hotkey::get_shortcuts()
 }
@@ -1773,6 +1792,7 @@ fn main() {
             get_calendar_api_availability,
             configure_connection,
             get_app_state,
+            get_saved_state_snapshot,
             save_settings,
             get_updater_state,
             get_release_notes,

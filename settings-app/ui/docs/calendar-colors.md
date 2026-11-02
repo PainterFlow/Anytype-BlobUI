@@ -38,6 +38,8 @@ Choose **No color** to suppress all BlobUI coloring in that scope. Choose **Use 
 
 Closing a dialog preserves pending edits. Use the sidebar Save to publish them or Undo to restore saved rules. Reloading the list preserves edits, including unavailable saved types, properties, and calendars. Unavailable entries can be removed. Rules are stored with BlobUI settings and included in backup and import.
 
+Ctrl+R in BlobUI reloads saved rules and settings before refreshing Anytype lists. Successful Codex publications update the open BlobUI window automatically, including open color-rule dialogs. Unrelated pending edits stay intact. When a saved rule conflicts with a local edit, the saved rule replaces it and Logs records a warning. Undo restores the latest saved rules. Returning to BlobUI also checks for saved changes. These reloads do not rebuild CSS or refresh color snapshots.
+
 Rules and colors are snapshots. Press Save or Alt+R to rebuild, then Ctrl+R in Anytype to apply. A temporary API failure preserves the last successful snapshot. Calendar day overflow popups use the type default or Calendar Color when their markup does not identify the calendar view. View overrides never apply to an unidentified popup.
 
 Option names match exactly within each space and stable property key. Duplicate names exclude the whole property, including otherwise unique selections. Saved rules remain intact and objects fall through to inheritance or their legacy Calendar Color. Multi-select colors always use the first selected tag in API order. An unresolved first tag falls through without choosing a later tag. Calendar discovery reads API v2 document blocks, which already contain their views.

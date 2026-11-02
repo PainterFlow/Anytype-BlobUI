@@ -115,3 +115,11 @@ test('a failing catalog does not release coalescing while another is loading', a
   assert.equal(controller.run(),active);assert.equal(calls,1);
   finish();await active;
 });
+
+test('failed saved-state preparation reports errors and permits a later retry', async () => {
+  const errors=[];let fail=true,calls=0;
+  const {controller}=harness({beforeRun:()=>{if(fail)throw Error('saved settings unavailable');},onError:error=>errors.push(error.message)});
+  controller.register(()=>calls++);
+  await controller.run();assert.equal(calls,0);assert.deepEqual(errors,['saved settings unavailable']);
+  fail=false;await controller.run();assert.equal(calls,1);
+});

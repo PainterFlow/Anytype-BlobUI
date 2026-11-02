@@ -829,6 +829,58 @@
       render();
     },
     read: () => copy(state),
+    validateSaved(result) {
+      if (!result?.configuration || result.configuration.version !== 2 || !Array.isArray(result.configuration.definitions)
+        || !["balanced", "spacious"].includes(result.configuration.display)) throw Error("Unsupported saved calculations.");
+    },
+    reconcile(saved, baseline, warn) {
+      const equal = UI.SavedState.equal;
+      const previous = persistedState;
+      // Invalid/incomplete source drafts are outside the serializable configuration.
+      for (const [key, pending] of localDrafts) {
+        const before = previous.definitions.find(d => identity(d.target) === key);
+        const after = baseline.definitions.find(d => identity(d.target) === key);
+        if (!equal(before, after)) {
+          const current = state.definitions.find(d => identity(d.target) === key);
+          const incomplete = pending.sourceError || (pending.fraction && (!pending.numerator.length || !pending.denominator.length));
+          // A changed serializable draft already produces a merge warning.
+          if (incomplete && (equal(current, before) || equal(current, after))) warn("Calculations.definitions[" + key + "].tokens");
+          localDrafts.delete(key);
+        }
+      }
+      state = copy(saved);
+      persistedState = copy(baseline);
+      if (activeRecord) {
+        const record = activeRecord, key = identity(record.view.target);
+        const before = previous.definitions.find(d => identity(d.target) === key);
+        const after = baseline.definitions.find(d => identity(d.target) === key);
+        if (!equal(before, after)) {
+          record.generation++;
+          record.propertyPicker?.destroy();
+          UI.Components.destroyTree(modalContent); modalContent.replaceChildren();
+          const definition = state.definitions.find(d => identity(d.target) === key);
+          if (!definition && before) {
+            draftGeneration++;
+            calculatorModal.close({ restoreFocus: false });
+          } else {
+            const tokens = copy(definition?.tokens || []), fraction = parseFraction(tokens);
+            record.numerator = fraction ? fraction.numerator : tokens;
+            record.denominator = fraction ? fraction.denominator : [];
+            record.fraction = !!fraction;
+            record.cursors = { numerator: record.numerator.length, denominator: record.denominator.length };
+            record.source = undefined; record.sourceError = "";
+            if (record.sourceMode) record.source = math.toLatex(tokens, record.view.properties);
+            buildCalculator(record);
+          }
+        }
+      }
+      syncDisplayPicker(); render(); updateRows();
+    },
+    acceptSaved(result) {
+      configurationRevision = result.revision || null;
+      calculatedAt = result.calculatedAt || "";
+      loadError = ""; setMessage(""); updateTimestamp();
+    },
     isPersisted: () => JSON.stringify(state) === JSON.stringify(persistedState),
     restore(value) {
       draftGeneration++;

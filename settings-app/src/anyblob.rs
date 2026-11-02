@@ -593,6 +593,17 @@ fn dispatch(
         |op, check| pipe_prompt(pipe, &operation_id, op, check),
     )
 }
+fn publication_event(operation: &Operation, result: &Result<Value, String>) -> Option<Value> {
+    let Operation::Blobui { blobui } = operation else { return None; };
+    let value = result.as_ref().ok()?;
+    if !blobui.mutates() || blobui.arguments["dry_run"] == true
+        || value["outcome"] != "confirmed" || value["publication_status"] != "published" {
+        return None;
+    }
+    Some(json!({"sections": if blobui.calendar() { vec!["calendarRules"] } else { vec!["formulas"] },
+        "revision":value["revision"], "publishedAt":value["published_at"]}))
+}
+
 pub fn start(_app: tauri::AppHandle) {
     if migrate().is_err() {
         eprintln!("Anyblob credential setup needs attention in Settings.");
@@ -626,6 +637,7 @@ pub fn start(_app: tauri::AppHandle) {
                         }
                         active.fetch_add(1, Ordering::AcqRel);
                         let active = active.clone();
+                        let app = _app.clone();
                         std::thread::spawn(move || {
                             let cancel = AtomicBool::new(false);
                             let deadline = Instant::now() + CALL_TIMEOUT;
@@ -638,9 +650,14 @@ pub fn start(_app: tauri::AppHandle) {
                                     let Ok(request)=serde_json::from_value::<Request>(envelope["request"].clone()) else {active.fetch_sub(1,Ordering::AcqRel);return;};
                                     let operation = request.request.name().to_string();
                                     let id = NEXT.fetch_add(1, Ordering::Relaxed);
+                                    let requested_operation = request.request.clone();
                                     let result = dispatch(&pipe, request, || {
                                         Instant::now() < deadline && pipe.connected()
                                     });
+                                    if let Some(payload) = publication_event(&requested_operation, &result) {
+                                        use tauri::Emitter;
+                                        let _ = app.emit("blobui-saved-state-changed", payload);
+                                    }
                                     eprintln!("anyblob request={id} operation={operation} elapsed_ms={} outcome={}",start.elapsed().as_millis(),if result.is_ok(){"allowed"}else{"denied"});
                                     let response = match result {
                                         Ok(value) => Response {
@@ -667,11 +684,30 @@ pub fn start(_app: tauri::AppHandle) {
         }
     });
     #[cfg(not(windows))]
-    let _ = app;
+    let _ = _app;
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn saved_state_notifications_only_follow_confirmed_blobui_publications() {
+        let confirmed = Ok(json!({"outcome":"confirmed","publication_status":"published","revision":"rev","published_at":"stamp"}));
+        for tool in ["set_kanban_calculation", "remove_kanban_calculation", "refresh_kanban_calculation", "set_calendar_color_rule", "remove_calendar_color_rule", "refresh_calendar_colors"] {
+            let mut operation = Operation::Blobui { blobui: blobui_mcp::blobui::BlobuiRequest { tool: tool.into(), arguments: json!({}) } };
+            let payload = publication_event(&operation, &confirmed).unwrap();
+            assert_eq!(payload["revision"], "rev");
+            assert_eq!(payload["sections"][0], if tool.contains("calendar") { "calendarRules" } else { "formulas" });
+            assert!(publication_event(&operation, &Err("rolled back".into())).is_none());
+            assert!(publication_event(&operation, &Ok(json!({"outcome":"preview","publication_status":"unchanged"}))).is_none());
+            if let Operation::Blobui { blobui } = &mut operation { blobui.arguments["dry_run"] = json!(true); }
+            assert!(publication_event(&operation, &confirmed).is_none());
+        }
+        for tool in ["preview_kanban_calculation", "preview_calendar_color_rule", "get_calendar_color_rule", "list_kanban_views"] {
+            let operation = Operation::Blobui { blobui: blobui_mcp::blobui::BlobuiRequest { tool: tool.into(), arguments: json!({}) } };
+            assert!(publication_event(&operation, &confirmed).is_none());
+        }
+        assert!(publication_event(&Operation::ListSpaces {}, &confirmed).is_none());
+    }
     use std::{
         io::{Read, Write},
         net::TcpListener,

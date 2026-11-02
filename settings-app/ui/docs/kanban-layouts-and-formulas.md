@@ -73,6 +73,8 @@ Arithmetic supports +, -, *, /, powers, square roots, and nth roots. Logic suppo
 
 Calculator Save closes the dialog and keeps the edit in the shared draft. The main Save action publishes valid calculations from fresh API data. Press Ctrl+R in Anytype afterward. Undo restores saved calculations and display choices. Search, filters, and page navigation preserve drafts.
 
+Ctrl+R in BlobUI reloads saved calculations and settings before refreshing Anytype lists. Successful Codex publications update the open calculator automatically. Unrelated pending edits stay intact. When both Codex and a local draft change the same calculation, the saved calculation replaces that draft and Logs records a warning. This includes incomplete LaTeX drafts. Undo restores the latest saved version. Returning to BlobUI also checks for saved changes. Reloading saved settings does not evaluate calculations or publish CSS. Toolbar reload buttons refresh only their view lists.
+
 Display formulas is separate from Board layout. Balanced places results beside category titles and wraps when needed. Spacious places them below titles. With Collapsed Categories enabled, results appear while the category is hovered or focused.
 
 Results are saved snapshots, not live polling. Save again to refresh them. Reload in the view browser discovers views without publishing a new result snapshot. Failed API reads retain the previous published snapshot and your pending edits.

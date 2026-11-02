@@ -16,6 +16,10 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     const cache=new Map([[JSON.stringify(["discover_kanban_views",undefined]),{views:[],info:[]}]]);
     window.__TAURI__={core:{invoke:async(name,args={})=>{
       window.calls.push({name,args});
+      if(name==='get_saved_state_snapshot') {
+        const invoke=window.__TAURI__.core.invoke;
+        return {app:await invoke('get_app_state'),updater:await invoke('get_updater_state'),formulas:await invoke('load_kanban_formulas'),calendar:await invoke('load_calendar_rules')};
+      }
       if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,settings:{codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
       if(name==='load_kanban_formulas')return {configuration:{version:2,display:'balanced',definitions:[]}};
       if(name==='load_calendar_rules')return {version:1,types:[]};
