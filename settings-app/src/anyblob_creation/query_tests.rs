@@ -1,19 +1,320 @@
 use super::{tests::*, *};
 use crate::anyblob_content::tests::fixture;
 
+const PROJECT_KEY: &str = "6ab000000000000000000001";
+fn captured_query() -> Value {
+    json!({"id":"dest","type":"set","query_source":{"properties":[PROJECT_KEY]}})
+}
+fn captured_views(all: bool) -> Value {
+    let mut rows = vec![
+        json!({"id":"tasks","name":"Tasks","filters":[
+        {"property":"project","condition":"in","value":["Anytype"]},
+        {"property":"type","condition":"in","value":["task-object-id"]}]}),
+        json!({"id":"calendar","name":"Calendar","filters":[{"property":"date","condition":"not_empty"}]}),
+    ];
+    if all {
+        rows.push(json!({"id":"default","name":"All","filters":[{"property":"project","condition":"in","value":["Anytype"]}]}));
+    }
+    page(json!(rows))
+}
+fn task_definition() -> Value {
+    json!({"id":"task-object-id","kind":"object_type","type_settings":{"api_key":"task","property_definitions":[
+        {"property":"project","internal_key":PROJECT_KEY,"format":"select"}]}})
+}
+fn captured_type_rows() -> Value {
+    page(json!([{"key":"task","name":"Task"},{"key":"article","name":"Article"}]))
+}
+
 #[test]
-fn derived_type_sources_resolve_and_property_alternatives_do_not_depend_on_them() {
-    let def = json!({"document":{"query_source":{"types":["type-internal-page"]}},"views":[{"id":"all"}]});
+fn normalized_file_type_ids_still_require_file_permission() {
+    let mut request = req("query");
+    request.arguments["body"]["type"] = json!("file-object-id");
+    let (client, capture, server) = fixture(vec![
+        json!({"id":"dest","type":"set","query_source":{"types":["file"]}}),
+        page(json!([{"id":"all"}])),
+        page(json!([{"key":"file","id":"file-object-id"}])),
+        page(json!([])),
+    ]);
+    assert!(dispatch(
+        &client,
+        "file-type",
+        &project(source("query", "createDelete")),
+        &request,
+        &|| Ok(()),
+        &|_, _| Ok(())
+    )
+    .unwrap_err()
+    .contains("permissions"));
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+}
+
+#[test]
+fn canonical_type_changes_before_dispatch_prevent_creation() {
+    let mut responses = vec![captured_query(), captured_views(false)];
+    responses.extend(captured_assessment());
+    responses.push(captured_properties());
+    responses.extend(vec![captured_query(),captured_views(false),page(json!([{"key":"renamed-task","id":"task-object-id"},{"key":"task","id":"other-object-id"}])),captured_properties(),captured_options()]);
+    let mut renamed = task_definition();
+    renamed["type_settings"]["api_key"] = json!("renamed-task");
+    responses.push(renamed);
+    let (client, capture, server) = fixture(responses);
+    assert!(dispatch(
+        &client,
+        "renamed-type",
+        &project(source("query", "createDelete")),
+        &captured_request(),
+        &|| Ok(()),
+        &|_, _| Ok(())
+    )
+    .unwrap_err()
+    .contains("Type identity changed"));
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+}
+fn captured_properties() -> Value {
+    page(json!([
+    {"key":"project","name":"Project","format":"select"},
+    {"key":"type","name":"Object type","format":"objects"},
+    {"key":"date","name":"Date","format":"date"}]))
+}
+fn captured_options() -> Value {
+    page(json!([{"name":"Anytype","color":"ice"},{"name":"Other","color":"blue"}]))
+}
+fn captured_assessment() -> Vec<Value> {
+    vec![
+        captured_type_rows(),
+        task_definition(),
+        json!({"id":"article-object-id","type_settings":{"api_key":"article"}}),
+        captured_properties(),
+        captured_options(),
+    ]
+}
+fn captured_request() -> ContentRequest {
+    let mut request = req("query");
+    request.arguments["body"] = json!({"type":"task-object-id","name":"Codex Test","template":"none","properties":{"project":"Anytype"}});
+    request
+}
+
+#[test]
+fn captured_v2_shape_supports_discovery_without_export_legends() {
+    let mut responses = vec![
+        captured_query(),
+        captured_views(true),
+        captured_properties(),
+        captured_options(),
+    ];
+    responses.extend(captured_assessment().into_iter().take(3));
+    let (client, capture, server) = fixture(responses);
+    let request = ContentRequest {
+        tool: "list_creation_targets".into(),
+        arguments: json!({"space_id":"s"}),
+    };
+    let answer = dispatch(
+        &client,
+        "captured-discovery",
+        &project(source("query", "createDelete")),
+        &request,
+        &|| Ok(()),
+        &|_, _| Ok(()),
+    )
+    .unwrap();
+    let requirements = &answer["targets"][0]["requirements"];
+    assert_eq!(requirements["status"], "supported");
+    assert_eq!(
+        requirements["source"]["properties"][0]["property"],
+        "project"
+    );
+    assert_eq!(requirements["views"][0]["supported"], true);
+    assert_eq!(requirements["views"][1]["supported"], false);
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+}
+
+#[test]
+fn captured_request_creates_once_with_canonical_type_then_uses_normal_access() {
+    let p = project(source("query", "createDelete"));
+    let request = captured_request();
+    let mut responses = vec![captured_query(), captured_views(true)];
+    responses.extend(captured_assessment());
+    responses.push(captured_properties());
+    responses.extend(vec![captured_query(), captured_views(true)]);
+    responses.extend(captured_assessment());
+    responses.push(json!({"valid":true}));
+    for _ in 0..2 {
+        responses.extend(vec![captured_query(), captured_views(true)]);
+        responses.extend(captured_assessment());
+    }
+    responses.push(json!({"id":"created-task"}));
+    responses.extend(vec![
+        captured_query(),
+        page(json!([{"id":"tasks"}])),
+        page(json!([{"id":"created-task"}])),
+    ]);
+    responses.extend(vec![
+        page(json!([{"id":"tasks"}])),
+        page(json!([{"id":"created-task"}])),
+    ]);
+    responses.extend(normal_access_responses("created-task"));
+    let (client, capture, server) = fixture(responses);
+    let answer = dispatch(
+        &client,
+        "captured-create",
+        &p,
+        &request,
+        &|| Ok(()),
+        &|_, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(answer["placement"]["outcome"], "confirmed");
+    assert_eq!(request.arguments["body"]["type"], "task-object-id");
+    let scope = crate::anyblob_scope::Scope::load(&client, &p, &|| Ok(())).unwrap();
+    normal_read_and_edit(&client, &scope, "created-task");
+    server.join().unwrap();
+    let capture = capture.lock().unwrap();
+    let writes = capture
+        .iter()
+        .map(|r| String::from_utf8_lossy(r))
+        .filter(|s| s.starts_with("POST "))
+        .collect::<Vec<_>>();
+    assert_eq!(writes.len(), 2);
+    for write in writes {
+        assert!(write.contains("\"type\":\"task\""));
+        assert!(write.contains("\"project\":\"Anytype\""));
+    }
+}
+
+#[test]
+fn captured_mismatches_request_values_and_type_filters_cannot_be_spoofed() {
+    for case in ["project", "type", "spoof"] {
+        let mut request = captured_request();
+        if case == "project" {
+            request.arguments["body"]["properties"]["project"] = json!("Other");
+        }
+        if case == "type" {
+            request.arguments["body"]["type"] = json!("article-object-id");
+        }
+        if case == "spoof" {
+            request.arguments["body"]["properties"]["type"] = json!("task-object-id");
+            request.arguments["body"]["type"] = json!("article-object-id");
+        }
+        let mut responses = vec![captured_query(), captured_views(false)];
+        responses.extend(captured_assessment());
+        let (client, capture, server) = fixture(responses);
+        let answer = dispatch(
+            &client,
+            "captured-mismatch",
+            &project(source("query", "createDelete")),
+            &request,
+            &|| Ok(()),
+            &|_, _| Ok(()),
+        );
+        if case == "spoof" {
+            assert!(answer.unwrap_err().contains("body.type"));
+        } else {
+            assert_eq!(answer.unwrap()["outcome"], "needs_input");
+        }
+        server.join().unwrap();
+        assert!(capture
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+    }
+}
+
+#[test]
+fn unresolved_or_conflicting_property_definitions_never_infer_identity_from_a_name() {
+    for entry in [
+        json!({"property":"project","internal_key":"different-key"}),
+        json!({"property":"unknown","name":"Project","internal_key":PROJECT_KEY}),
+        json!({"property":"project","internal_key":PROJECT_KEY,"uninstalled":true}),
+    ] {
+        let mut definition = task_definition();
+        definition["type_settings"]["property_definitions"] = json!([entry]);
+        let responses = vec![
+            captured_type_rows(),
+            definition,
+            json!({"id":"article-object-id"}),
+            captured_properties(),
+            captured_options(),
+        ];
+        let (client, _, server) = fixture(responses);
+        let def = json!({"document":captured_query(),"views":[{"id":"tasks","filters":[{"property":"project","condition":"in","value":["Anytype"]}]}]});
+        assert_eq!(
+            query::assess(
+                &client,
+                &source("query", "createDelete"),
+                &def,
+                &captured_request(),
+                &|| Ok(())
+            )
+            .unwrap()
+            .unwrap()["outcome"],
+            "unsupported_query"
+        );
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn in_filters_require_existing_options_and_real_type_metadata() {
+    let props = vec![
+        json!({"key":"project","format":"select"}),
+        json!({"key":"type","format":"objects"}),
+        json!({"key":"relation","format":"objects"}),
+    ];
+    let options = json!({"project":[{"name":"Anytype"},{"name":"Other"}]});
+    let types = vec![
+        json!({"key":"task","id":"task-id"}),
+        json!({"key":"article","id":"article-id"}),
+    ];
+    let ambiguous = vec![
+        json!({"key":"task","id":"task-id"}),
+        json!({"key":"task-id","id":"different-type-id"}),
+    ];
+    assert!(query::resolve_type("task-id", &ambiguous).is_err());
+    let body = json!({"type":"task-id","properties":{"project":"Anytype"}});
+    let filter = json!([{"property":"project","condition":"in","value":["Anytype","Other"]},{"property":"type","condition":"in","value":["task-id"]}]);
+    assert!(prove_with_types(&filter, &body, &props, &options, 0, &types).is_ok());
+    for bad in [
+        json!({"property":"project","condition":"in","value":[]}),
+        json!({"property":"project","condition":"in","value":["New"]}),
+        json!({"property":"type","condition":"in","value":["unknown-id"]}),
+        json!({"property":"relation","condition":"in","value":["task-id"]}),
+        json!({"property":"project","condition":"not_in","value":["Other"]}),
+        json!({"property":"project","condition":"in","value":["_filter_template_2_"]}),
+    ] {
+        assert!(prove_with_types(&bad, &body, &props, &options, 0, &types).is_err());
+    }
+}
+
+#[test]
+fn type_ids_resolve_and_property_alternatives_do_not_depend_on_them() {
+    let def = json!({"document":{"query_source":{"types":["page-type"]}},"views":[{"id":"all"}]});
     let (client, _, server) = fixture(vec![
         page(json!([{"key":"page","id":"page-type"}])),
         page(json!([])),
-        json!({"id":"page-type","type_internal_key":"internal-page"}),
     ]);
+    let mut by_id = req("query");
+    by_id.arguments["body"]["type"] = json!("page-type");
     assert!(query::assess(
         &client,
         &source("query", "createDelete"),
         &def,
-        &req("query"),
+        &by_id,
         &|| Ok(())
     )
     .unwrap()

@@ -1,6 +1,96 @@
 //! Query creation asks for values before writing. No pending object or edit grant exists.
 use super::*;
 
+pub(super) fn resolve_type<'a>(input: &str, types: &'a [Value]) -> Result<&'a Value, String> {
+    let keys = types
+        .iter()
+        .filter(|t| t["key"] == input)
+        .collect::<Vec<_>>();
+    let ids = types
+        .iter()
+        .filter(|t| t["id"] == input)
+        .collect::<Vec<_>>();
+    if keys.len() == 1 && (ids.is_empty() || (ids.len() == 1 && keys[0]["id"] == ids[0]["id"])) {
+        return Ok(keys[0]);
+    }
+    if keys.is_empty() && ids.len() == 1 {
+        return Ok(ids[0]);
+    }
+    Err("Requested type must resolve to one live v2 metadata key or object ID.".into())
+}
+
+pub(super) fn filter_values(
+    node: &Value,
+    prop: &Value,
+    options: &Value,
+    types: &[Value],
+) -> Result<Vec<Value>, String> {
+    let key = prop["key"].as_str().ok_or("Property has no API key.")?;
+    if key == "type" && prop["format"] != "objects" {
+        return Err("Object type metadata has an unsupported format.".into());
+    }
+    if node.as_object().is_none_or(|o| {
+        o.keys()
+            .any(|k| !["property", "condition", "value", "id"].contains(&k.as_str()))
+    }) {
+        return Err(format!("Property {key} has unsupported filter fields."));
+    }
+    let values = match node["condition"].as_str() {
+        Some("equal") => vec![node["value"].clone()],
+        Some("in") if key == "type" || prop["format"] == "select" => node["value"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .cloned()
+            .ok_or("An in filter requires a nonempty list.")?,
+        _ => return Err(format!("Property {key} uses an unsupported condition.")),
+    };
+    values
+        .iter()
+        .map(|value| {
+            if value
+                .as_str()
+                .is_some_and(|s| s.starts_with("_filter_template_"))
+            {
+                return Err(format!(
+                    "Property {key} uses an unsupported dynamic placeholder."
+                ));
+            }
+            if key == "type" && prop["format"] == "objects" {
+                let ty = resolve_type(
+                    value
+                        .as_str()
+                        .ok_or("Type filter requires a type ID or API key.")?,
+                    types,
+                )?;
+                return Ok(ty["id"].clone());
+            }
+            match prop["format"].as_str() {
+                Some("text") if value.is_string() => Ok(value.clone()),
+                Some("number") if value.is_number() => Ok(value.clone()),
+                Some("checkbox") if value.is_boolean() => Ok(value.clone()),
+                Some("select") => {
+                    let name = value
+                        .as_str()
+                        .ok_or("Select filter requires existing option names.")?;
+                    let matches = options[key]
+                        .as_array()
+                        .ok_or("Select metadata unavailable.")?
+                        .iter()
+                        .filter(|o| o["name"] == name || o["id"] == name || o["key"] == name)
+                        .collect::<Vec<_>>();
+                    if matches.len() != 1 {
+                        return Err(format!("Unknown or ambiguous select option {name}."));
+                    }
+                    Ok(matches[0]["name"].clone())
+                }
+                _ => Err(format!(
+                    "Property {key} has an unsupported value or format."
+                )),
+            }
+        })
+        .collect()
+}
+
 pub(super) fn property<'a>(key: &str, properties: &'a [Value]) -> Result<&'a Value, String> {
     let exact = properties
         .iter()
@@ -59,6 +149,14 @@ pub(super) fn supplied<'a>(
             }
         }
     }
+    if canonical == "type" {
+        if !values.is_empty() {
+            return Err(
+                "Object type must be supplied in body.type, never in body.properties.".into(),
+            );
+        }
+        return Ok(body.get("type"));
+    }
     if canonical == "name" {
         if let Some(name) = body.get("name") {
             values.push(name);
@@ -106,15 +204,92 @@ fn valid_definition(def: &Value) -> Result<(), String> {
     Ok(())
 }
 
+fn type_document(
+    client: &Client,
+    source: &SourcePermission,
+    row: &mut Value,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<Value, String> {
+    if row["_document"].is_object() {
+        return Ok(row["_document"].clone());
+    }
+    let key = row["key"]
+        .as_str()
+        .ok_or("Type metadata omitted its API key.")?;
+    let doc = get(
+        client,
+        &format!("{}/types/{}?ids=full", base(&source.space_id), encode(key)),
+        check,
+    )?;
+    let id = doc["id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or("Type document omitted its object ID.")?;
+    if row["id"].as_str().is_some_and(|old| old != id) {
+        return Err("Type identity changed during metadata discovery.".into());
+    }
+    row["id"] = json!(id);
+    row["_document"] = doc.clone();
+    Ok(doc)
+}
+fn load_types(
+    client: &Client,
+    source: &SourcePermission,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<Vec<Value>, String> {
+    check()?;
+    let mut types = client.pages(
+        "GET",
+        &format!("{}/types?ids=full", base(&source.space_id)),
+        None,
+    )?;
+    let mut keys = std::collections::BTreeSet::new();
+    let mut ids = std::collections::BTreeSet::new();
+    for row in &mut types {
+        let key = row["key"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or("Type metadata omitted its API key.")?
+            .to_string();
+        if !keys.insert(key) {
+            return Err("Duplicate type API keys in metadata.".into());
+        }
+        if row["id"].as_str().filter(|s| !s.is_empty()).is_none() {
+            type_document(client, source, row, check)?;
+        }
+        if !ids.insert(
+            row["id"]
+                .as_str()
+                .ok_or("Type omitted its object ID.")?
+                .to_string(),
+        ) {
+            return Err("Ambiguous type object IDs in metadata.".into());
+        }
+    }
+    Ok(types)
+}
+fn contains_type_filter(value: &Value, properties: &[Value]) -> bool {
+    match value {
+        Value::Object(o) => {
+            o.get("property")
+                .and_then(Value::as_str)
+                .is_some_and(|k| property(k, properties).is_ok_and(|p| p["key"] == "type"))
+                || o.values().any(|v| contains_type_filter(v, properties))
+        }
+        Value::Array(a) => a.iter().any(|v| contains_type_filter(v, properties)),
+        _ => false,
+    }
+}
 fn query_metadata(
     client: &Client,
     source: &SourcePermission,
     def: &Value,
+    types: &mut Vec<Value>,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<(Vec<Value>, Value), String> {
     let (mut properties, options) = metadata(client, source, check)?;
-    // The server's AnyBlock legend maps served API spellings to stored keys.
-    // Never trust a caller-supplied legend for membership or file authorization.
+    // Legacy servers may serve this legend, but current v2 deliberately removes it.
+    // All mappings come from server metadata, never a caller-supplied legend.
     if let Some(legend) = def["document"]["property_internal_keys"].as_object() {
         for prop in &mut properties {
             if let Some(internal) = prop["key"]
@@ -123,6 +298,51 @@ fn query_metadata(
                 .and_then(Value::as_str)
             {
                 prop["internal_key"] = json!(internal);
+            }
+        }
+    }
+    let unresolved = |props: &[Value]| -> Result<bool, String> {
+        Ok(source_entries(def, "properties")?
+            .iter()
+            .any(|key| property(key, props).is_err()))
+    };
+    if (unresolved(&properties)? || contains_type_filter(&def["views"], &properties))
+        && types.is_empty()
+    {
+        *types = load_types(client, source, check)?;
+    }
+    if unresolved(&properties)? {
+        for row in types.iter_mut() {
+            let doc = type_document(client, source, row, check)?;
+            if let Some(definitions) = doc
+                .pointer("/type_settings/property_definitions")
+                .and_then(Value::as_array)
+            {
+                for definition in definitions {
+                    if definition["uninstalled"] == true {
+                        continue;
+                    }
+                    let (Some(key), Some(internal)) = (
+                        definition["property"].as_str(),
+                        definition["internal_key"].as_str(),
+                    ) else {
+                        continue;
+                    };
+                    if let Some(prop) = properties.iter_mut().find(|p| p["key"] == key) {
+                        if prop["internal_key"]
+                            .as_str()
+                            .is_some_and(|old| old != internal)
+                        {
+                            return Err(
+                                "Conflicting property identity metadata. Retry discovery.".into()
+                            );
+                        }
+                        prop["internal_key"] = json!(internal);
+                    }
+                }
+            }
+            if !unresolved(&properties)? {
+                break;
             }
         }
     }
@@ -137,6 +357,7 @@ fn filter_requirement(
     properties: &[Value],
     options: &Value,
     depth: usize,
+    types: &[Value],
 ) -> Value {
     if depth > 32 {
         return json!({"supported":false,"reason":"Filter nesting exceeds the supported depth."});
@@ -144,7 +365,7 @@ fn filter_requirement(
     if let Some(nodes) = node.as_array() {
         let children = nodes
             .iter()
-            .map(|n| filter_requirement(n, body, properties, options, depth + 1))
+            .map(|n| filter_requirement(n, body, properties, options, depth + 1, types))
             .collect::<Vec<_>>();
         let supported = children.iter().all(|n| n["supported"] == true);
         return json!({"operator":"and","filters":children,"supported":supported});
@@ -159,7 +380,7 @@ fn filter_requirement(
             .as_array()
             .map(|a| {
                 a.iter()
-                    .map(|n| filter_requirement(n, body, properties, options, depth + 1))
+                    .map(|n| filter_requirement(n, body, properties, options, depth + 1, types))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -179,29 +400,11 @@ fn filter_requirement(
     };
     let canonical = prop["key"].as_str().unwrap_or("");
     let expected = &node["value"];
-    let mut supported = node["condition"] == "equal"
-        && node.as_object().is_some_and(|o| {
-            o.keys()
-                .all(|k| ["property", "condition", "value", "id"].contains(&k.as_str()))
-        });
-    supported &= match prop["format"].as_str() {
-        Some("text") => expected
-            .as_str()
-            .is_some_and(|s| !s.starts_with("_filter_template_")),
-        Some("number") => expected.is_number(),
-        Some("checkbox") => expected.is_boolean(),
-        Some("select") => {
-            expected.is_string()
-                && options[canonical].as_array().is_some_and(|a| {
-                    a.iter().any(|o| {
-                        o["name"] == *expected || o["id"] == *expected || o["key"] == *expected
-                    })
-                })
-        }
-        _ => false,
-    };
+    let allowed = filter_values(node, prop, options, types);
+    let supported = allowed.is_ok();
     json!({"property":canonical,"name":prop["name"],"format":prop["format"],"condition":node["condition"],"required_value":expected,
-        "existing_options":options[canonical],"supported":supported,"satisfied":prove(node, body, properties, options, 0).is_ok()})
+        "allowed_values":allowed.as_ref().ok(),"reason":allowed.as_ref().err(),"value_location":if canonical == "type" {"body.type"} else {"body.properties"},
+        "existing_options":options[canonical],"supported":supported,"satisfied":prove_with_types(node, body, properties, options, 0, types).is_ok()})
 }
 
 fn requirements(
@@ -209,6 +412,7 @@ fn requirements(
     body: &Value,
     properties: &[Value],
     options: &Value,
+    types: &[Value],
 ) -> Result<Value, String> {
     let source_properties = source_entries(def, "properties")?.into_iter().map(|key| {
         match property(key, properties) {
@@ -220,9 +424,9 @@ fn requirements(
     let empty = json!([]);
     let views = def["views"].as_array().ok_or("Query views unavailable.")?.iter().map(|view| {
         let filters = view.get("filters").unwrap_or(&empty);
-        let tree = filter_requirement(filters, body, properties, options, 0);
+        let tree = filter_requirement(filters, body, properties, options, 0, types);
         json!({"id":view["id"],"name":view["name"],"supported":tree["supported"],"filters":tree,
-            "satisfied":prove(filters,body,properties,options,0).is_ok(),"reason":prove(filters,body,properties,options,0).err()})
+            "satisfied":prove_with_types(filters,body,properties,options,0,types).is_ok(),"reason":prove_with_types(filters,body,properties,options,0,types).err()})
     }).collect::<Vec<_>>();
     Ok(
         json!({"template":"none","query_source":def["document"]["query_source"],"source":{"operator":"or","types":source_entries(def,"types")?,"properties":source_properties},"views":views,
@@ -239,8 +443,9 @@ pub(super) fn discovery(
     if let Err(e) = valid_definition(def) {
         return Ok(json!({"status":"unsupported","reason":e}));
     }
-    let (properties, options) = query_metadata(client, source, def, check)?;
-    let mut requirements = requirements(def, &json!({}), &properties, &options)?;
+    let mut types = Vec::new();
+    let (properties, options) = query_metadata(client, source, def, &mut types, check)?;
+    let mut requirements = requirements(def, &json!({}), &properties, &options, &types)?;
     let source_supported = !source_entries(def, "types")?.is_empty()
         || requirements["source"]["properties"]
             .as_array()
@@ -261,13 +466,13 @@ pub(super) fn discovery(
     Ok(requirements)
 }
 
-pub(super) fn assess(
+pub(super) fn assess_with_type(
     client: &Client,
     source: &SourcePermission,
     def: &Value,
     req: &ContentRequest,
     check: &impl Fn() -> Result<(), String>,
-) -> Result<Option<Value>, String> {
+) -> Result<(Option<Value>, String), String> {
     let body = &req.arguments["body"];
     if body["template"] != "none" {
         return Err("Query creation requires template: \"none\".".into());
@@ -282,16 +487,31 @@ pub(super) fn assess(
     }
     valid_definition(def)?;
     check()?;
-    let types = crate::codex::source_types(client, &base(&source.space_id))?;
-    let ty = types
-        .iter()
-        .find(|t| t["key"] == body["type"])
-        .ok_or("Requested type cannot be resolved against v2 metadata.")?;
+    let mut types = load_types(client, source, check)?;
+    let ty = resolve_type(body["type"].as_str().ok_or("Missing body.type.")?, &types)?.clone();
+    let canonical_type = ty["key"]
+        .as_str()
+        .ok_or("Missing type API key.")?
+        .to_string();
+    if [
+        "objectType",
+        "object_type",
+        "property",
+        "relation",
+        "set",
+        "query",
+        "collection",
+        "template",
+    ]
+    .contains(&canonical_type.as_str())
+    {
+        return Err("Scoped creation cannot create source or schema definitions.".into());
+    }
     let source_types = source_entries(def, "types")?;
-    let mut type_matches = source_types
+    let type_matches = source_types
         .iter()
         .any(|key| ty["key"] == *key || ty["id"] == *key);
-    let (properties, options) = query_metadata(client, source, def, check)?;
+    let (properties, options) = query_metadata(client, source, def, &mut types, check)?;
     // Resolve every authored property, including aliases, before returning guidance or
     // proving presence. An unknown/ambiguous spelling cannot stand in for a real property.
     if let Some(fields) = body["properties"].as_object() {
@@ -311,21 +531,7 @@ pub(super) fn assess(
         property(key, &properties)
             .is_ok_and(|p| supplied(p, body, &properties).ok().flatten().is_some())
     });
-    // Query sources can use derived internal type references while creates use API keys.
-    if !type_matches && !property_matches && source_types.iter().any(|s| s.starts_with("type-")) {
-        let key = ty["key"].as_str().ok_or("Type omitted its API key.")?;
-        let doc = get(
-            client,
-            &format!("{}/types/{}?ids=full", base(&source.space_id), encode(key)),
-            check,
-        )?;
-        if let Some(internal) = doc["type_internal_key"].as_str() {
-            type_matches = source_types
-                .iter()
-                .any(|key| *key == internal || *key == format!("type-{internal}"));
-        }
-    }
-    let mut requirements = requirements(def, body, &properties, &options)?;
+    let mut requirements = requirements(def, body, &properties, &options, &types)?;
     requirements["requested_type"] = body["type"].clone();
     requirements["source"]["satisfied"] = json!(type_matches || property_matches);
     let view_matches = requirements["views"]
@@ -335,7 +541,7 @@ pub(super) fn assess(
         .any(|v| v["satisfied"] == true);
     if (type_matches || property_matches) && view_matches {
         check()?;
-        return Ok(None);
+        return Ok((None, canonical_type));
     }
     let source_supported = !source_types.is_empty()
         || requirements["source"]["properties"]
@@ -350,10 +556,24 @@ pub(super) fn assess(
             .iter()
             .any(|v| v["supported"] == true);
     check()?;
-    Ok(Some(
-        json!({"outcome":if actionable {"needs_input"} else {"unsupported_query"},
+    Ok((
+        Some(
+            json!({"outcome":if actionable {"needs_input"} else {"unsupported_query"},
         "message":if actionable {"No object was created. Supply property values or a matching type that satisfy the source and at least one supported view, then resubmit create_object. Ask the user when choices are ambiguous; do not silently replace supplied values."} else {"No object was created. This query has no currently supported, provable creation path; changing values alone may not resolve it."},
         "creation":{"outcome":"not_attempted"},"placement":{"outcome":"not_attempted"},"destination":req.arguments["destination"],
         "idempotency_key":req.arguments["idempotency_key"],"resubmit_tool":"create_object","requirements":requirements}),
+        ),
+        canonical_type,
     ))
+}
+
+#[cfg(test)]
+pub(super) fn assess(
+    client: &Client,
+    source: &SourcePermission,
+    def: &Value,
+    req: &ContentRequest,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<Option<Value>, String> {
+    assess_with_type(client, source, def, req, check).map(|r| r.0)
 }

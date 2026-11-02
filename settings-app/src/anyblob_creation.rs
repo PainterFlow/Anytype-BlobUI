@@ -119,6 +119,7 @@ fn definition(
 }
 
 // Unknown predicates fail closed. OR can prove a different supported branch.
+#[cfg(test)]
 fn prove(
     node: &Value,
     body: &Value,
@@ -126,12 +127,22 @@ fn prove(
     options: &Value,
     depth: usize,
 ) -> Result<(), String> {
+    prove_with_types(node, body, properties, options, depth, &[])
+}
+fn prove_with_types(
+    node: &Value,
+    body: &Value,
+    properties: &[Value],
+    options: &Value,
+    depth: usize,
+    types: &[Value],
+) -> Result<(), String> {
     if depth > 32 {
         return Err("Filter nesting exceeds the supported depth.".into());
     }
     if let Some(nodes) = node.as_array() {
         for n in nodes {
-            prove(n, body, properties, options, depth + 1)?;
+            prove_with_types(n, body, properties, options, depth + 1, types)?;
         }
         return Ok(());
     }
@@ -148,14 +159,14 @@ fn prove(
             .ok_or("Empty or invalid filter group.")?;
         if op == "and" {
             for n in nodes {
-                prove(n, body, properties, options, depth + 1)?;
+                prove_with_types(n, body, properties, options, depth + 1, types)?;
             }
             return Ok(());
         }
         if op == "or" {
             let mut reasons = Vec::new();
             for n in nodes {
-                match prove(n, body, properties, options, depth + 1) {
+                match prove_with_types(n, body, properties, options, depth + 1, types) {
                     Ok(()) => return Ok(()),
                     Err(e) => reasons.push(e),
                 }
@@ -167,21 +178,17 @@ fn prove(
     let key = node["property"]
         .as_str()
         .ok_or("Filter has no property key.")?;
-    if node["condition"] != "equal"
-        || node.get("date_preset").is_some()
-        || node.get("include_time").is_some()
-    {
-        return Err(format!("Property {key} uses an unsupported condition."));
-    }
-    // Extra semantics must never be silently ignored.
-    if node.as_object().is_none_or(|o| {
-        o.keys()
-            .any(|k| !["property", "condition", "value", "id"].contains(&k.as_str()))
-    }) {
-        return Err(format!("Property {key} has unsupported filter fields."));
-    }
     let prop = query::property(key, properties)?;
     let canonical = prop["key"].as_str().ok_or("Property has no API key.")?;
+    let expected = query::filter_values(node, prop, options, types)?;
+    if canonical == "type" {
+        let ty = query::resolve_type(body["type"].as_str().ok_or("Missing body.type.")?, types)?;
+        return if expected.iter().any(|v| v == &ty["id"]) {
+            Ok(())
+        } else {
+            Err("Object type does not match the view's type filter.".into())
+        };
+    }
     if canonical == "name"
         && body.get("name").is_none()
         && body["markdown"]
@@ -192,53 +199,38 @@ fn prove(
     }
     let value = query::supplied(prop, body, properties)?
         .ok_or_else(|| format!("Property {key} must be explicitly supplied exactly once."))?;
-    let expected = &node["value"];
-    if expected
-        .as_str()
-        .is_some_and(|s| s.starts_with("_filter_template_"))
-    {
-        return Err(format!(
-            "Property {key} uses an unsupported dynamic placeholder."
-        ));
-    }
     let matches = match prop["format"].as_str() {
-        Some("text") => value.is_string() && expected.is_string() && value == expected,
+        Some("text" | "checkbox") => expected.iter().any(|v| v == value),
         Some("number") => {
             value.is_number()
-                && expected.is_number()
-                && (value == expected
-                    || (value
-                        .as_f64()
-                        .is_some_and(|n| n.abs() <= 9_007_199_254_740_991.0)
-                        && expected
+                && expected.iter().any(|v| {
+                    v == value
+                        || (value
                             .as_f64()
                             .is_some_and(|n| n.abs() <= 9_007_199_254_740_991.0)
-                        && value.as_f64() == expected.as_f64()))
+                            && v.as_f64()
+                                .is_some_and(|n| n.abs() <= 9_007_199_254_740_991.0)
+                            && value.as_f64() == v.as_f64())
+                })
         }
-        Some("checkbox") => value.is_boolean() && expected.is_boolean() && value == expected,
         Some("select") => {
-            let opts = options[canonical]
-                .as_array()
-                .ok_or_else(|| format!("Select metadata unavailable for {key}."))?;
             let name = value
                 .as_str()
                 .ok_or_else(|| format!("Select {key} requires one option name."))?;
-            let target = expected
-                .as_str()
-                .ok_or_else(|| format!("Select {key} has an unsupported value."))?;
-            let found = opts
-                .iter()
-                .filter(|o| o["name"] == name)
-                .collect::<Vec<_>>();
-            found.len() == 1
-                && (name == target || found[0]["id"] == target || found[0]["key"] == target)
+            let opts = options[canonical]
+                .as_array()
+                .ok_or("Select metadata unavailable.")?;
+            opts.iter().filter(|o| o["name"] == name).count() == 1
+                && expected.iter().any(|v| v == name)
         }
-        _ => return Err(format!("Property {key} has an unsupported format.")),
+        _ => false,
     };
     if matches {
         Ok(())
     } else {
-        Err(format!("Property {key} does not equal {expected}."))
+        Err(format!(
+            "Property {key} does not match the view requirement."
+        ))
     }
 }
 fn metadata(
@@ -276,9 +268,10 @@ fn query_proof(
     def: &Value,
     req: &ContentRequest,
     check: &impl Fn() -> Result<(), String>,
-) -> Result<(), String> {
-    match query::assess(client, source, def, req, check)? {
-        None => Ok(()),
+) -> Result<String, String> {
+    let (response, canonical_type) = query::assess_with_type(client, source, def, req, check)?;
+    match response {
+        None => Ok(canonical_type),
         Some(response) => Err(response["message"]
             .as_str()
             .unwrap_or("Query requirements must be satisfied before creation.")
@@ -1145,7 +1138,12 @@ pub fn dispatch(
     let mut prepared = anyblob_content::prepare(client, req, &config, None, check)?;
     let definition = definition(client, source, check)?;
     if source.kind == "query" {
-        if let Some(response) = query::assess(client, source, &definition, req, check)? {
+        let (response, canonical_type) =
+            query::assess_with_type(client, source, &definition, req, check)?;
+        prepared.request.arguments["body"]["type"] = json!(canonical_type);
+        prepared.files |= anyblob_content::needs_files(&prepared.request.arguments["body"]);
+        anyblob_content::permission(&config, None, &prepared.request, prepared.files)?;
+        if let Some(response) = response {
             // A follow-up can reuse a key only if no earlier creation bound it.
             let path = record_path(project_id, req)?;
             if let Some(record) = load(&path)? {
@@ -1215,6 +1213,7 @@ pub fn dispatch(
         ));
     }
     if record["state"] == "new" {
+        let dispatch_type = prepared.request.arguments["body"]["type"].clone();
         let before_write = || {
             check()?;
             if source.kind == "query" {
@@ -1222,7 +1221,12 @@ pub fn dispatch(
                 if current != definition {
                     return Err("Query definition changed before creation. Retry with current requirements.".into());
                 }
-                query_proof(client, source, &current, req, check)?;
+                if query_proof(client, source, &current, req, check)? != dispatch_type {
+                    return Err(
+                        "Type identity changed before creation. Retry with current metadata."
+                            .into(),
+                    );
+                }
             }
             Ok(())
         };
