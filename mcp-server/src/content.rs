@@ -75,6 +75,18 @@ impl ContentRequest {
     pub fn validate(&self) -> Result<(), String> {
         let spec = self.specification()?;
         validate_schema(&spec["schema"], &self.arguments, "arguments")?;
+        if let Some(destination) = self.arguments.get("destination") {
+            let id = destination["id"].as_str().ok_or("Missing destination ID.")?;
+            if matches!(id, "." | "..") || !id.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)) {
+                return Err("Invalid destination ID.".into());
+            }
+            if self.arguments["idempotency_key"].as_str().is_none() {
+                return Err("Scoped creation requires a caller-supplied idempotency_key.".into());
+            }
+            if self.arguments["create_missing_options"] == true {
+                return Err("Scoped creation cannot create select options.".into());
+            }
+        }
         if self.arguments.to_string().len() > 11 * 1024 * 1024 {
             return Err("Content request exceeds 11 MiB.".into());
         }
@@ -299,7 +311,7 @@ mod tests {
     }
     #[test]
     fn catalog_has_no_arbitrary_routes_or_admin_tools() {
-        assert_eq!(catalog().len(), 40);
+        assert_eq!(catalog().len(), 41);
         for spec in catalog() {
             assert!(spec["route"].as_str().unwrap().starts_with("/v2/"));
             assert!(!spec["name"].as_str().unwrap().contains("space"));
@@ -348,5 +360,21 @@ mod tests {
             json!({"space_id":"s","body":{"type":"page"},"path":"/v1/objects"})
         )
         .is_err());
+    }
+    #[test]
+    fn scoped_creation_requires_valid_destination_and_caller_key() {
+        let valid = json!({"space_id":"s","destination":{"kind":"collection","id":"saved"},"idempotency_key":"caller-key","body":{"type":"page"}});
+        assert!(crate::operation("create_object",valid.clone()).is_ok());
+        for (path,value) in [("/destination/id",json!("../foreign")),("/destination/kind",json!("type")),("/idempotency_key",json!("*"))] {
+            let mut bad = valid.clone(); *bad.pointer_mut(path).unwrap() = value;
+            assert!(crate::operation("create_object",bad).is_err());
+        }
+        let mut missing = valid.clone();missing.as_object_mut().unwrap().remove("idempotency_key");
+        assert!(crate::operation("create_object",missing).is_err());
+        let mut options = valid;options["create_missing_options"] = json!(true);
+        assert!(crate::operation("create_object",options).is_err());
+        let list = crate::operation("list_creation_targets",json!({"space_id":"s"})).unwrap();
+        let crate::Operation::Content {content} = list else {panic!()};
+        assert!(!content.mutates());
     }
 }

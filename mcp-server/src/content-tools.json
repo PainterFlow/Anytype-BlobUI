@@ -1138,6 +1138,28 @@
           "minLength": 1,
           "maxLength": 256,
           "description": "Stable retry key. Reuse only for the identical request; never blindly retry uncertain mutations."
+        },
+        "destination": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "query",
+                "collection"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1146,7 +1168,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Create an object. A select value naming an option the property does not hold is refused unless `create_missing_options=true` is set. An unknown type or property key is rejected either way. The body is a full AnyBlock document or the shortcut {type, name, properties, markdown}; `formatVersion` or `blocks` picks the document form. `template` starts the object from one; absent, the type's `default_template` applies.",
+    "description": "Create an object. A select value naming an option the property does not hold is refused unless `create_missing_options=true` is set. An unknown type or property key is rejected either way. The body is a full AnyBlock document or the shortcut {type, name, properties, markdown}; `formatVersion` or `blocks` picks the document form. `template` starts the object from one; absent, the type's `default_template` applies. Optional destination {kind: query|collection, id} selects a saved Create-Delete source in the verified project. Scoped creation requires a caller idempotency_key. Query destinations require template: none and a payload provably matching a supported view. Collection destinations add only the created object; failed placement retains it. Retry identical confirmed failures to resume placement, never uncertain writes. Use list_creation_targets for requirements.",
     "query": [
       "dry_run",
       "create_missing_options"
@@ -4153,5 +4175,30 @@
       "scope",
       "dry_run"
     ]
+  },
+  {
+    "name": "list_creation_targets",
+    "method": "GET",
+    "route": "/v2/spaces/{space_id}/objects",
+    "scope": "creationTargets",
+    "target": null,
+    "capability": "read",
+    "irreversible": false,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "space_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "space_id"
+      ],
+      "additionalProperties": false
+    },
+    "description": "List only saved query and collection destinations with Create-Delete permission in the verified project and space, including empty sources. Returns IDs, names, and query type/view requirements. Does not grant access to source objects or members.",
+    "query": []
   }
 ]

@@ -57,7 +57,7 @@ The compatibility MCP launcher uses Windows `cmd.exe /d /c` with a fixed plugin-
 
 ## Content tools
 
-Anyblob 0.2.0 adds 40 explicit v2 tools. Each requires a space_id. Their input schemas describe named path/query arguments and a typed body. There is no arbitrary URL, method or header tool.
+Anyblob 0.2.0 adds 41 explicit v2 tools. Each requires a space_id. Their input schemas describe named path/query arguments and a typed body. There is no arbitrary URL, method or header tool.
 
 - Use read_document for editable AnyBlock JSON, full IDs and etag. Existing read_object continues returning properties and Markdown.
 - Use list_schemas, get_schema and get_op_schema to inspect the connected server's document and operation schemas.
@@ -67,7 +67,7 @@ Anyblob 0.2.0 adds 40 explicit v2 tools. Each requires a space_id. Their input s
 - Chat tools include list_chats, create_chat, get_chat_messages, add_chat_message, edit_chat_message, delete_chat_message, toggle_chat_reaction, read_chat and create_discussion. Replies use body.reply_to; attachments use body.attachments. Reading does not mark activity read. Reactions are toggles, so inspect the returned added value.
 - Widget tools list, create, update and delete widgets. They require space-wide permission. No account or space-administration tools are exposed.
 
-Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Project source selections authorize existing members; they do not authorize creating new objects, changing their source definition, or modifying space-wide schemas. Those actions need an effective space-wide grant. File switches are independent additional requirements.
+Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Project source selections authorize existing members. Create-Delete queries and collections also permit create_object with an explicit destination and caller idempotency_key. list_creation_targets lists saved permitted destinations, including empty sources. Query creation requires template: "none", a matching source type and proof that the supplied properties satisfy at least one current view. Collections add only the confirmed newly created object using the current ETag. Source-definition edits, general membership edits and space-wide schemas still require an effective space-wide grant. File switches are independent additional requirements.
 
 API schema discovery is available through any readable project source, including an empty query or collection. This does not grant access to unrelated objects or permit space-wide schema changes.
 
@@ -84,3 +84,5 @@ Upload receipts return the file ID and metadata. Attach that ID with a separate 
 Live validation is restricted to the uniquely resolved Codex Test space and disposable recorded fixtures. Upload files must be named codex-test-{num}, stay below 50,000 bytes, and normally contain 1 KiB. The persistent runner ledger reserves at most 10 total upload attempts, including preflights, retries and uncertain outcomes. Never restart or automate Anytype for validation.
 
 Developers can rerun the explicit live suite with scripts/tests/Test-Anyblob-Live.ps1 -TestExecutable pointing to the compiled Settings test executable. It copies only the connection and encrypted key into a workspace fixture, removes the encrypted copy on exit, and preserves the upload ledger across runs. A read-only Anytype key cannot validate mutations, even when BlobUI grants full access.
+
+Scoped creation returns separate creation and placement outcomes. A failed placement retains the object and grants no creator permission. Reads and edits always use current source membership. Repeating an identical collection request after a confirmed placement refusal resumes placement from the durable operation journal without creating another object. A changed payload with the same key is refused. Uncertain creation or placement outcomes are never retried automatically, including after a restart. Saved project, space, destination, approval and file permissions apply to recovery too. The journal lives beside the Settings executable in `anyblob-creation`; keep it when updating or moving the installation.

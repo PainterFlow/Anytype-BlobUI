@@ -1,8 +1,8 @@
 # Anyblob content tools validation
 
-Anyblob 0.2.0 adds 40 explicit API v2 tools alongside the existing four tools. The allowlisted catalog is in `mcp-server/src/content-tools.json`. The MCP executable forwards typed operations through the authenticated bridge; BlobUI owns HTTP, permission checks, upload snapshots and approvals.
+Anyblob 0.2.0 adds 41 explicit API v2 tools alongside the existing four tools. The allowlisted catalog is in `mcp-server/src/content-tools.json`. The MCP executable forwards typed operations through the authenticated bridge; BlobUI owns HTTP, permission checks, upload snapshots and approvals.
 
-Existing saved permissions do not enable mutations until `mutationsEnabled` is explicitly saved. Create-Delete is cumulative after that opt-in. Scoped member grants cannot create standalone objects, alter source definitions, or modify space-wide schemas. File-valued custom properties, attachment deletion and Markdown images require file access. Nested replacement of view lists requires Create-Delete.
+Create-Delete is cumulative. Scoped member grants cannot create standalone objects, alter source definitions, or modify space-wide schemas. Explicit query and collection destinations have a separate creation authorization path; ordinary operations retain the existing restrictions. File-valued custom properties, attachment deletion and Markdown images require file access. Nested replacement of view lists requires Create-Delete.
 
 ## Automated checks
 
@@ -26,3 +26,15 @@ The live runner reserves preflight and commit attempts before uploading. The per
 The connected server's schemas and dry runs remain authoritative. Property updates currently rename definitions; option creation uses supported create bodies or `create_missing_options`, which requires space-wide Create-Delete. Unsupported option removal or message pinning is not simulated. Object, type and property deletion uses archive routes with server ownership restrictions. Message deletion is irreversible and can destroy attachment content, so it always requires explicit approval.
 
 Document patches require ETags. Confirmed mutations return receipts without a content reread, even if the edit changes source membership. Unknown outcomes preserve the retry key and prohibit automatic retries. Upload and attachment remain separate operations. File downloads and account/space administration are outside this release.
+
+## Creation into a saved source
+
+`list_creation_targets` returns only saved Create-Delete queries and collections in the verified project and requested space, even if they have no members. Each query includes its current source types and all views. `create_object` accepts `destination: {kind: "query" | "collection", id}` and requires a caller-supplied `idempotency_key` for this path. Omitting destination preserves space-wide creation.
+
+Query creation requires `template: "none"` and a shortcut payload. Its type must match a source type resolved through v2 metadata. Unfiltered views and nested AND/OR expressions with positive equal conditions on explicit text, number, checkbox and single-select values can prove membership. Unsupported conditions remain unknown. A supported matching OR branch is sufficient; every AND branch must match. Missing properties, ambiguous names, unsupported property-based query sources and unprovable values fail before creation. No values or options are added or changed to make the object fit. Definitions and metadata are reread before the server dry run and commit. Actual current membership is checked afterward; concurrent changes return the creation receipt with a placement failure and retain the object.
+
+Collections validate and approve creation, then add only the confirmed new ID through the v2 add_items operation with the collection ETag. A flushed append-only journal beside the executable records each operation by verified project, space, destination and caller key. A confirmed refusal can resume placement on the identical request after restart. Different payloads with the same key are refused. Pending or uncertain writes and damaged journal tails block automatic retry. Keep the journal with the installation. A journal entry grants no general object access. Subsequent reads and edits must pass normal membership checks.
+
+Validation uses isolated HTTP fixtures only. Do not operate the running Anytype instance.
+
+The issue #78 handoff passed 19 MCP tests, 62 focused native tests and 12 dark Settings/documentation tests. The live Anytype test remained ignored. The required `scripts/Build-App.ps1 -s -c` build succeeded once with `BLOBUI_BUILD_ONLY=1`. No running Anytype instance was operated, and `Changelogs.md` was left unchanged.

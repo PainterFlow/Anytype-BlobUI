@@ -466,6 +466,16 @@ fn dispatch_resolved_with(
         Ok(())
     };
     check()?;
+    if let Operation::Content { content } = &request.request {
+        if content.tool == "list_creation_targets" || (content.tool == "create_object" && content.arguments.get("destination").is_some()) {
+            let project = project.ok_or("Creation destinations require a saved source in the verified project.")?;
+            let project_id = match &membership {
+                Some(crate::codex_identity::Membership::Project(id)) => id,
+                _ => return Err("Creation destinations require a verified project.".into()),
+            };
+            return crate::anyblob_creation::dispatch(&connect()?, project_id, project, content, &check, &approve);
+        }
+    }
     let client = if project.is_some() { Some(connect()?) } else { None };
     let scope = project.map(|project| crate::anyblob_scope::Scope::load(client.as_ref().unwrap(), project, &check)).transpose()?;
     if let Some(scope) = &scope { effective = scope.configuration(); }
@@ -758,6 +768,24 @@ mod tests {
     }
     fn scoped_request(op: Operation) -> Request {
         let mut request = request(op); request.thread_id = Some("chat-a".into()); request
+    }
+    #[test]
+    fn scoped_creation_requires_verified_project_and_rechecks_saved_permissions() {
+        use crate::codex_identity::Membership;
+        let op = || blobui_mcp::operation("create_object",json!({"space_id":"space","destination":{"kind":"collection","id":"collection"},"idempotency_key":"identity-test","body":{"type":"page","name":"new"}})).unwrap();
+        let config = project_config(json!({"kind":"collection","id":"collection","spaceId":"space","permission":{"access":"createDelete","approval":"fullAccess"}}));
+        for identity in [Some(Membership::Project("other".into())),Some(Membership::Projectless),None] {
+            assert!(dispatch_resolved_with(scoped_request(op()),||true,||Ok(enabled()),||Ok(config.clone()),
+                ||Ok(crate::kanban_api::Client::with_connection("fixture","127.0.0.1",1)),|_,_|panic!("wrong project must not prompt"),||Ok(identity.clone())).is_err());
+        }
+        let changed = Arc::new(AtomicBool::new(false));
+        let (client,server) = mock(vec![("GET /v2/spaces/space/objects/collection?ids=full ".into(),json!({"id":"collection","type":"collection","etag":"e"}))],Some(changed.clone()));
+        let result = dispatch_resolved_with(scoped_request(op()),||true,||Ok(enabled()),||{
+            let mut current = config.clone();
+            if changed.load(Ordering::Acquire) {current.projects.get_mut("project").unwrap().sources[0].permission.access = "read".into();}
+            Ok(current)
+        },||Ok(client.clone_for_fixture()),|_,_|panic!("full access does not prompt"),||Ok(Some(Membership::Project("project".into()))));
+        assert!(result.unwrap_err().contains("permissions"));server.join().unwrap();
     }
     #[test]
     fn chat_mapping_applies_project_grants_and_keeps_other_projects_global() {

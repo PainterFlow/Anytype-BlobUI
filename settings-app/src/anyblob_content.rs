@@ -446,6 +446,14 @@ pub fn execute(
     prepared: &mut Prepared,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
+    execute_committing(client, prepared, check, &|| Ok(()))
+}
+pub fn execute_committing(
+    client: &Client,
+    prepared: &mut Prepared,
+    check: &impl Fn() -> Result<(), String>,
+    before_commit: &impl Fn() -> Result<(), String>,
+) -> Result<Value, String> {
     let req = &prepared.request;
     let spec = req.specification()?;
     let method = spec["method"].as_str().unwrap();
@@ -535,6 +543,8 @@ pub fn execute(
         .file
         .as_mut()
         .map(|f| (f, prepared.size, prepared.name.as_str()));
+    before_commit()?;
+    check()?;
     let result = client.content_request(method, &route(req, false)?, body, etag, Some(&key), file);
     match result {
         Ok(value) if value.get("_http_error").is_some() => {
@@ -549,7 +559,7 @@ pub fn execute(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         net::TcpListener,
@@ -580,7 +590,7 @@ mod tests {
             source_context: json!({}),
         }
     }
-    fn fixture(
+    pub(crate) fn fixture(
         responses: Vec<Value>,
     ) -> (
         Client,
