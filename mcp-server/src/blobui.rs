@@ -100,7 +100,7 @@ pub fn tools() -> Vec<Value> {
             }
             if request.mutates() {props["revision"]=json!({"type":"string","minLength":1,"maxLength":128});required.push("revision");props["dry_run"]=json!({"type":"boolean","default":false});}
         }
-        json!({"name":name,"description":format!("{} in one permitted space. Read current revision, preview changes, then publish. Publication requires a manual Anytype reload. Never retry unknown outcomes.",name.replace('_'," ")),
+        json!({"name":name,"description":format!("{} in one permitted space. Kanban calculations support only single-select and checkbox grouping; multi-select returns unsupported_grouping_multi_select. Each single-select category identifies one option; several separate categories are valid. These tools do not create or edit board categories or grouping. Read current revision, preview changes, then publish. Publication requires a manual Anytype reload. Never retry unknown outcomes.",name.replace('_'," ")),
             "inputSchema":{"type":"object","properties":props,"required":required,"additionalProperties":false},
             "annotations":{"readOnlyHint":!request.mutates(),"destructiveHint":false,"idempotentHint":!request.mutates(),"openWorldHint":false}})
     }).collect()

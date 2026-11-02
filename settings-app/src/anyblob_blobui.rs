@@ -811,7 +811,8 @@ mod tests {
         }
     }
     impl Fixture {
-        fn new() -> Self {
+        fn new() -> Self { Self::with_grouping("direct") }
+        fn with_grouping(mode: &'static str) -> Self {
             let root = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .unwrap()
@@ -885,22 +886,32 @@ mod tests {
                         "unscoped endpoint {path}"
                     );
                     req.fetch_add(1, Ordering::SeqCst);
-                    let view = json!({"id":"view","type":"kanban","name":"Board","group_by":"status","filters":[],"sorts":[],"groups":[{"id":"option-a"},{"id":"empty"}],"columns":[{"property":"estimate"},{"property":"status"}]});
+                    stream.set_nonblocking(false).unwrap();
+                    let mut view = json!({"id":"view","type":"kanban","name":"Board","group_by":"status","filters":[],"sorts":[],"groups":[{"id":"option-a"},{"id":"empty"}],"columns":[{"property":"estimate"},{"property":"status"}]});
+                    if mode == "missing" { view["groups"] = json!([]); }
+                    if mode == "checkbox" { view["group_by"] = json!("done"); }
                     let cal = json!({"id":"calendar","type":"calendar","name":"Calendar","filters":[],"sorts":[]});
                     let page = |v: Value| json!({"data":v,"has_more":false});
                     let value = if path.contains("/properties/status/options") {
-                        page(json!([{"id":"option-a","name":"A","color":"red"}]))
+                        page(json!([if mode == "direct" {json!({"id":"option-a","name":"A","color":"red"})} else {json!({"name":"A","color":"red"})}]))
+                    } else if path.contains("/objects/option-a") {
+                        json!({"id":"option-a","properties":{"name":"A"}})
                     } else if path.contains("/properties") {
-                        page(
+                        if mode == "multi" {
+                            page(json!([{"key":"status","name":"Status","format":"multi_select"},{"key":"estimate","name":"Estimate","format":"number"}]))
+                        } else { page(
                             json!([{"key":"status","name":"Status","format":"select"},{"key":"estimate","name":"Estimate","format":"number"},{"key":"done","name":"Done","format":"checkbox"},{"key":"legacy","name":"Calendar Color","format":"text"}]),
                         )
+                        }
                     } else if path.contains("/types/task") {
                         json!({"id":"type-task","name":"Task","kind":"object_type","internal_key":"task","type_settings":{"api_key":"task","property_definitions":[{"property":"status"},{"property":"done"}]},"blocks":[{"id":"board","properties":[{"property":"estimate","format":"number"},{"property":"status","format":"select"}],"views":[view,cal]}]})
                     } else if path.contains("/types?") {
                         page(json!([{"id":"type-task","key":"task","name":"Task"}]))
                     } else if path.contains("/views") {
+                        if mode == "document" { view["groups"] = json!([]); }
                         page(json!([view, cal]))
                     } else if path.contains("/objects/query") {
+                        if mode == "endpoint" { view["groups"] = json!([]); }
                         json!({"id":"query","name":"Tasks","type":"query","blocks":[{"id":"board","object_id":"query","properties":[{"property":"estimate","format":"number"},{"property":"status","format":"select"}],"views":[view,cal]}]})
                     } else if path.contains("/search") || path.contains("/queries/query/objects") {
                         page(
@@ -975,6 +986,53 @@ mod tests {
             json!({"space_id":"space","type_key":"task","rule":{"mode":"property","key":"done"},"revision":calendar_revision(&d).unwrap()})
         }
     }
+    #[test]
+    fn kanban_connector_identity_sources_and_failures_preserve_files() {
+        for mode in ["direct", "document", "endpoint", "checkbox", "missing", "multi"] {
+            let f = Fixture::with_grouping(mode);
+            if mode == "multi" {
+                let discovery = f.call("list_kanban_views", json!({"space_id":"space","object_id":"query"}), "read", &|| Ok(())).unwrap();
+                assert!(discovery.to_string().contains("unsupported_grouping_multi_select"));
+            }
+            let before = f.files();
+            for tool in ["preview_kanban_calculation", "set_kanban_calculation"] {
+                let mut args = f.kanban_args();
+                if tool == "set_kanban_calculation" { args["dry_run"] = json!(true); }
+                else { args.as_object_mut().unwrap().remove("revision"); }
+                let result = f.call(tool, args, "readWrite", &|| Ok(()));
+                if mode == "missing" || mode == "multi" {
+                    let error = result.unwrap_err();
+                    assert!(error.contains(if mode == "multi" {"unsupported_grouping_multi_select"} else {"unresolved_category_identity"}), "{error}");
+                } else {
+                    let preview = result.unwrap_or_else(|error| panic!("{mode}: {error}"));
+                    let results = preview["results"].as_array().unwrap();
+                    assert!(results.iter().any(|result| result["value"].as_f64() == Some(5.0)));
+                    assert!(results.iter().any(|result| result["categoryId"] == if mode == "checkbox" {"false"} else {"empty"}));
+                }
+                assert_eq!(f.files(), before);
+            }
+            if !["multi", "missing"].contains(&mode) {
+                let mut args = f.kanban_args();
+                args.as_object_mut().unwrap().remove("revision");
+                args["tokens"] = json!([{"kind":"count"}]);
+                let preview = f.call("preview_kanban_calculation", args, "read", &|| Ok(())).unwrap();
+                assert_eq!(preview["results"].as_array().unwrap().len(), 2);
+                assert!(preview["results"].as_array().unwrap().iter().all(|result| result["value"].as_f64() == Some(1.0)));
+                assert_eq!(f.files(), before);
+            }
+            if mode == "multi" || mode == "missing" {
+                let args = f.kanban_args();
+                fs::write(f.root.join("blob/.blobui-kanban-formulas.json"), json!({"version":2,"display":"balanced","definitions":[{"target":args["target"],"tokens":args["tokens"]}]}).to_string()).unwrap();
+                let before = f.files();
+                let mut refresh = f.kanban_args();
+                refresh.as_object_mut().unwrap().remove("tokens");
+                let error = f.call("refresh_kanban_calculation", refresh, "readWrite", &|| Ok(())).unwrap_err();
+                assert!(error.contains(if mode == "multi" {"unsupported_grouping_multi_select"} else {"unresolved_category_identity"}), "{error}");
+                assert_eq!(f.files(), before);
+            }
+        }
+    }
+
     #[test]
     fn isolated_kanban_preview_publish_conflict_and_rollback() {
         let f = Fixture::new();

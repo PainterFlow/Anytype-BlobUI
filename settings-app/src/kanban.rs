@@ -69,6 +69,8 @@ pub struct View {
     pub source_signature: Option<String>,
     pub properties: Vec<Property>,
     pub unsupported: Option<String>,
+    #[serde(default, rename = "unsupportedReason", skip_serializing_if = "Option::is_none")]
+    pub unsupported_reason: Option<String>,
 }
 #[derive(Deserialize, Serialize)]
 pub struct Catalog {

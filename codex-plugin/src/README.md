@@ -99,7 +99,7 @@ Discovery follows the [OpenAI skill packaging format](https://developers.openai.
 
 ## BlobUI calculations and calendar colors
 
-Anyblob 0.2.14 adds twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
+Anyblob 0.2.15 adds twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
 
 Use `list_kanban_views` or `list_calendar_color_targets` to discover permitted targets. An optional `object_id` narrows discovery to one source. Read saved configuration and its revision with `get_kanban_calculation` or `get_calendar_color_rule`. Preview with `preview_kanban_calculation` or `preview_calendar_color_rule`. Kanban uses existing typed calculator tokens and stable property keys. Calendar rules use `inherit`, `none`, or `property` with a stable property key. Only single-select and checkbox properties support property colors.
 

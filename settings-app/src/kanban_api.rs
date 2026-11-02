@@ -16,6 +16,7 @@ use std::sync::{
 };
 
 const DISCOVERY_CONCURRENCY: usize = 4;
+const MULTI_SELECT_UNSUPPORTED: &str = "unsupported_grouping_multi_select: Multi-select grouping is unsupported. Kanban calculations support only single-select and checkbox grouping.";
 
 pub struct Client {
     metadata_revision: String,
@@ -549,6 +550,9 @@ impl Client {
         if api_view["type"] != "kanban" && api_view["layout"] != "kanban" {
             return Err("The source view is no longer a Kanban view.".into());
         }
+        let properties = self.properties(&target.space_id)?;
+        grouping_property(raw, &properties)?;
+        grouping_property(api_view, &properties)?;
         let document_keys = configured_view_keys(raw, Some(block))?;
         let endpoint_keys = configured_view_keys(api_view, None)?;
         let available_keys = match (document_keys, endpoint_keys) {
@@ -563,7 +567,6 @@ impl Client {
                 return Err("The API does not expose which properties are available to this view.".into());
             }
         };
-        let properties = self.properties(&target.space_id)?;
         let keys = calculator.properties();
         let mut boolean_keys = BTreeSet::new();
         if keys.iter().any(|key| {
@@ -582,7 +585,16 @@ impl Client {
         }) {
             return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
-        let mut grouping = self.grouping(target, api_view, &properties, authorize)?;
+        let mut identity_views = vec![raw, api_view];
+        identity_views.extend(source.document["blocks"].as_array().into_iter().flatten()
+            .flat_map(|block| block["views"].as_array().into_iter().flatten())
+            .filter(|view| view["id"] == target.view_id));
+        for view in &identity_views {
+            if grouping_property(view, &properties)? != grouping_property(api_view, &properties)? {
+                return Err("The API returned inconsistent grouping properties for this view.".into());
+            }
+        }
+        let mut grouping = self.grouping(target, &identity_views, &properties, authorize)?;
         let mut fields = keys;
         fields.push(grouping.property.clone());
         fields.sort();
@@ -649,11 +661,11 @@ impl Client {
     fn grouping(
         &self,
         target: &Target,
-        view: &Value,
+        views: &[&Value],
         properties: &[Property],
         authorize: &impl Fn(&str)->Result<(),String>,
     ) -> Result<Grouping, String> {
-        let (property, format) = grouping_property(view, properties)?;
+        let (property, format) = grouping_property(views[0], properties)?;
         let mut grouping = Grouping {
             property,
             format: format.clone(),
@@ -693,32 +705,26 @@ impl Client {
             }
         }
 
-        let select_group_ids = {
-            view.get("groups")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(|group| required(group, "id"))
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        // When v2 option rows omit stable IDs, resolve only groups whose
-        // exact IDs are absent from the option map.
-        let unresolved_group_ids = select_group_ids
-            .iter()
-            .filter(|id| {
-                id.as_str() != "empty" && !resolved.values().any(|known| known == *id)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in &unresolved_group_ids {
+        let select_group_ids = views.iter()
+            .flat_map(|view| view["groups"].as_array().into_iter().flatten())
+            .map(|group| required(group, "id"))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        for id in select_group_ids.iter().filter(|id| id.as_str() != "empty") {
+            crate::kanban::validate_id(id)?;
             authorize(id)?;
             let object = self.document_properties(&target.space_id, id).map_err(|_| {
                 "The API could not resolve a category's exact identity.".to_string()
             })?;
+            if required(&object, "id")? != *id {
+                return Err("The API returned a different category option identity.".into());
+            }
             let name = object
                 .pointer("/properties/name")
                 .and_then(Value::as_str)
                 .ok_or("The API did not return a category option name.")?;
+            if !option_names.contains(name) {
+                return Err(format!("The API returned an inconsistent option {name:?} for property {:?}.", grouping.property));
+            }
             insert_option_id(&mut resolved, name, id)?;
         }
 
@@ -795,8 +801,8 @@ impl DiscoveredView {
             }
             Vec::new()
         });
-        if self.unsupported.is_none() {
-            if let Err(error) = grouping_property(&self.raw, space_properties) {
+        if let Err(error) = grouping_property(&self.raw, space_properties) {
+            if self.unsupported.is_none() || error == MULTI_SELECT_UNSUPPORTED {
                 self.unsupported = Some(error);
             }
         }
@@ -808,6 +814,7 @@ impl DiscoveredView {
             kind: self.kind,
             source_signature: self.source_signature,
             properties,
+            unsupported_reason: self.unsupported.as_ref().filter(|error| error.starts_with("unsupported_grouping_multi_select:")).map(|_| "unsupported_grouping_multi_select".into()),
             unsupported: self.unsupported,
         }
     }
@@ -1017,7 +1024,7 @@ fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, S
         .format
         .clone();
     if format == "multi_select" {
-        return Err("Multi-select grouping is not supported because API v2 does not expose the option identities needed to match its columns.".into());
+        return Err(MULTI_SELECT_UNSUPPORTED.into());
     }
     if !(is_boolean_format(&format) || format == "select") {
         return Err("This grouping format cannot be matched to Anytype headers safely.".into());
@@ -1034,8 +1041,9 @@ fn insert_option_id(
     name: &str,
     id: &str,
 ) -> Result<(), String> {
+    crate::kanban::validate_id(id)?;
     if resolved.get(name).is_some_and(|old| old.as_str() != id) {
-        return Err("Duplicate option names prevent an exact category match.".into());
+        return Err(format!("The API returned conflicting identities for option {name:?}."));
     }
     if resolved
         .iter()
@@ -1223,7 +1231,7 @@ impl Grouping {
             return Ok("empty".into());
         }
         if self.format == "select" && names.len() != 1 {
-            return Err("A select category returned multiple values.".into());
+            return Err("invalid_single_select_category: A single-select category must identify exactly one option. Create separate categories for separate options.".into());
         }
         let mut ids = names
             .iter()
@@ -1231,7 +1239,7 @@ impl Grouping {
                 self.options
                     .get(*name)
                     .cloned()
-                    .ok_or("The API did not expose an exact column identity for an option used by this view. Reload views and refresh results.")
+                    .ok_or_else(|| format!("unresolved_category_identity: API v2 did not expose an exact column identity for option {name:?} of property {:?}. Publication is blocked because the available v2 representations omit the required ID.", self.property))
             })
             .collect::<Result<Vec<_>, _>>()?;
         ids.sort();
@@ -1243,6 +1251,58 @@ impl Grouping {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exact_id_representations_and_conflicts() {
+        use std::{io::{Read, Write}, net::TcpListener};
+        for (direct, document, endpoint, conflict) in [
+            (true, false, false, false), (false, true, false, false),
+            (false, false, true, false), (true, true, true, false),
+            (true, true, false, true), (false, false, false, false),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stopped = stop.clone();
+            let server = std::thread::spawn(move || {
+                while !stopped.load(Ordering::SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(std::time::Duration::from_millis(2)); continue; };
+                    let mut bytes = [0; 8192];
+                    let n = stream.read(&mut bytes).unwrap();
+                    let request = String::from_utf8_lossy(&bytes[..n]);
+                    let value = if request.contains("/options?") {
+                        json!({"data":[if direct {json!({"id":"option-a","name":"A"})} else {json!({"name":"A"})}],"has_more":false})
+                    } else {
+                        assert!(request.contains("/objects/option-a?"));
+                        json!({"id":"option-a","properties":{"name":if conflict {"B"} else {"A"}}})
+                    };
+                    let body = value.to_string();
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                }
+            });
+            let client = Client::with_connection("fixture", "127.0.0.1", port);
+            let host = json!({"group_by":"status","groups":if document {json!([{"id":"option-a"}])} else {json!([])}});
+            let api = json!({"group_by":"status","groups":if endpoint {json!([{"id":"option-a"}])} else {json!([])}});
+            let target = Target {space_id:"space".into(),object_id:"host".into(),block_id:"board".into(),view_id:"view".into()};
+            let properties = vec![Property {key:"status".into(),name:"Status".into(),format:"select".into()}];
+            let authorized = Mutex::new(Vec::new());
+            let result = client.grouping(&target, &[&host, &api], &properties, &|id| {authorized.lock().unwrap().push(id.to_owned()); Ok(())});
+            stop.store(true, Ordering::SeqCst);
+            server.join().unwrap();
+            assert_eq!(authorized.lock().unwrap().len(), usize::from(document || endpoint));
+            if conflict { assert!(result.is_err()); continue; }
+            let grouping = result.unwrap();
+            assert_eq!(grouping.category(&Value::Null).unwrap(), "empty");
+            assert!(grouping.category(&json!(["A","B"])).unwrap_err().contains("invalid_single_select_category"));
+            if direct || document || endpoint {
+                assert_eq!(grouping.category(&json!("A")).unwrap(), "option-a");
+            } else {
+                let error = grouping.category(&json!("A")).unwrap_err();
+                assert!(error.contains("status") && error.contains("A") && error.contains("omit the required ID"));
+            }
+        }
+    }
+
     #[test]
     fn reads_full_filtered_membership_and_preserves_exact_category_ids() {
         use std::{
@@ -1266,6 +1326,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -1724,6 +1785,7 @@ mod tests {
         grouping.format = "select".into();
         assert_eq!(grouping.category(&json!([])).unwrap(), "empty");
         assert_eq!(grouping.category(&json!("A")).unwrap(), "option-a");
+        assert_eq!(grouping.category(&json!("B")).unwrap(), "option-b");
         assert!(grouping.category(&json!(["A", "B"])).is_err());
         assert!(grouping.category(&json!("Missing")).is_err());
         grouping.format = "checkbox".into();
