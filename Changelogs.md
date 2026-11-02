@@ -1,36 +1,5 @@
 # BlobUI v1.4.0 - What's new?
 
-## Anyblob 0.2.5
-
-- Show the Anyblob icon for object mentions in chat.
-
-## Anyblob 0.2.4
-
-- Resolve object names from v2 document properties in deletion approval prompts.
-
-## Anyblob 0.2.3
-
-- Approve for me now asks before creation, deletion, and file uploads, including file deletion. Never Ask retains its existing behavior.
-
-## Anyblob 0.2.2
-
-- Use Codex's Accept button without a duplicate confirmation control.
-- Show concise approval descriptions with object names, types and spaces instead of raw metadata.
-
-## Anyblob 0.2.1
-
-- Detect stale versioned Codex plugin copies and show when a refresh is required.
-- Recover the bridge listener after pipe errors and wait briefly for a restarting bridge before reporting it unavailable.
-- Report incompatible bridge responses as an update requirement.
-
-## Anyblob 0.2.0
-
-- Added explicit v2 tools for objects, properties, types, templates, collections, queries, views, messages, reactions, widgets and file uploads.
-- Existing permissions retain their read behavior until Content changes is enabled and saved. Create-Delete then includes reading and editing.
-- Added ETag checks, dry runs, idempotency keys and explicit uncertain-outcome reporting. Irreversible deletions always require approval.
-- Local uploads use immutable snapshots, a 25 MiB limit and the saved file permission. URL uploads and separate attachment operations are supported.
-
-
 *Insert random ah text.*
 
 # Introducing Anyblob!
@@ -55,7 +24,7 @@ Additionally, you can also configure these things for each project, since you ca
 You can configure the things mentioned above for: queries, spaces and collections.
 *Developers Note: these permissions act as overrides to the global per-space permissions. Unconfigured or projectless chats/projects use the global permissions.*
 
-Anyblob adds global object mention suggestions to the desktop composer. Object Mentions in Settings filters suggestions by space and object type, with dynamic All defaults and Save/Undo. Suggestions can include objects outside a project's read access. Selecting one does not grant access or bypass Always Ask.
+Anyblob adds global object mention suggestions to the desktop composer. Object Mentions in Settings filters suggestions by space and object type, with dynamic All defaults. Suggestions can include objects outside a project's read access. Selecting one does not grant access or bypass Always Ask.
 You can also use it to manage your Anytype space as there are quite a few skills you can use to do so.
 
 ## General
