@@ -29,6 +29,8 @@ BlobUI groups its customization guides under Features. Choose a guide for the se
 
 Settings keeps most edits as drafts until you select Save. Save writes the changes and rebuilds `custom.css`. In Anytype, press Ctrl+R to apply the stylesheet. Select Undo changes to discard unsaved edits after confirmation. API connection setup has a separate validation flow in the [API Guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/api-guide.md).
 
+Ctrl+R inside BlobUI reloads saved settings and refreshes Anytype lists and pickers. Codex publications refresh saved settings automatically, and returning to BlobUI checks for missed changes. Unrelated local edits are preserved. Saved values replace conflicting local edits, with a warning in Logs. No confirmation dialog appears, and Undo uses the newest saved settings. These reloads do not publish CSS.
+
 ## Settings layout
 
 To try the optional refreshed Settings interface, read [Experiment](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/experiment.md). The [Settings UI guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/settings-ui-refresh.md) explains its navigation and how to return to the original layout.

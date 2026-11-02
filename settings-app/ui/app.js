@@ -248,6 +248,70 @@
     restore: restoreEditSnapshot,
     equals: editSnapshotsEqual,
   });
+  let savedRefreshReady = false, savedRefreshQueued = false, savedRefreshPending = null;
+  let savedRefreshEpoch = 0;
+  const refreshBlocked = () => !savedRefreshReady || saveBusy || blobFolderBusy || blobRestoreReloadFailed || bannerReadPending || isInstallingUpdate();
+  function requestSavedRefresh() {
+    savedRefreshQueued = true;
+    if (!refreshBlocked() && !savedRefreshPending) {
+      void refreshSavedState().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error"));
+    }
+  }
+  async function refreshSavedState() {
+    if (refreshBlocked()) { savedRefreshQueued = true; return; }
+    if (savedRefreshPending) return savedRefreshPending;
+    savedRefreshQueued = false;
+    const epoch = savedRefreshEpoch;
+    const directory = initialUpdaterSettings?.installDirectory;
+    savedRefreshPending = (async () => {
+      const { app, updater, formulas, calendar } = await invoke("get_saved_state_snapshot");
+      if (epoch !== savedRefreshEpoch || directory !== initialUpdaterSettings?.installDirectory) { savedRefreshQueued = true; return; }
+      if (refreshBlocked()) { savedRefreshQueued = true; return; }
+      if (!app?.settings) throw Error("Saved settings could not be read.");
+      window.BlobUI.FormulaPage.validateSaved(formulas);
+      window.BlobUI.CalendarPage.validateSaved(calendar);
+      const UI = window.BlobUI, base = editSession.getBaseline(), local = readEditSnapshot();
+      const warnings = new Set(), warn = path => warnings.add(path);
+      const connection = {
+        inputIp: app.apiIp === "127.0.0.1" ? "" : String(app.apiIp || ""),
+        inputPort: !app.apiPort || app.apiPort === 31009 ? "" : String(app.apiPort),
+        apiIp: String(app.apiIp || ""), apiPort: app.apiPort || 31009,
+        hasSavedApiKey: app.hasSavedApiKey === true, keyChanged: false,
+      };
+      const calendarRules = UI.SavedState.copy(calendar); delete calendarRules.revision;
+      const remote = { settings: normalizedSettings(app.settings), updaterSettings: updater ? copyUpdaterSettings(updater) : base.updaterSettings,
+        connection, formulas: formulas.configuration, calendarRules };
+      const merged = {};
+      for (const [section, label] of Object.entries({ settings: "Settings", updaterSettings: "App settings", connection: "Connection", formulas: "Calculations", calendarRules: "Calendar" })) {
+        merged[section] = UI.SavedState.merge(base[section], local[section], remote[section], warn, label);
+      }
+      // Credentials are never included in snapshots or warnings.
+      const keyValue = advancedApiKey.value, keyEdited = advancedKeyEdited;
+      if (!UI.SavedState.equal(local.settings, merged.settings)) assignDraftToForm(merged.settings);
+      initialDraft = remote.settings;
+      if (!UI.SavedState.equal(local.updaterSettings, merged.updaterSettings)) assignUpdaterSettings(merged.updaterSettings);
+      initialUpdaterSettings = remote.updaterSettings;
+      if (updater) mergeUpdaterState(updater);
+      if (!UI.SavedState.equal(local.connection, merged.connection)) {
+        assignAdvancedConnection(app);
+        advancedApiIp.value = merged.connection.inputIp; advancedApiPort.value = merged.connection.inputPort;
+        if (merged.connection.keyChanged) { advancedApiKey.value = keyValue; advancedKeyEdited = keyEdited; }
+      }
+      initialApiDraft = { ip: connection.inputIp, port: connection.inputPort };
+      UI.FormulaPage.reconcile(merged.formulas, remote.formulas, warn);
+      UI.CalendarPage.reconcile(merged.calendarRules, remote.calendarRules);
+      UI.FormulaPage.acceptSaved(formulas); UI.CalendarPage.acceptSaved(calendar);
+      editSession.commit(remote);
+      window.appReady = !!app.ready;
+      defaultBannerPreview = String(app.defaultBannerPreview || "");
+      for (const path of warnings) addLog("Saved settings replaced a conflicting local edit in " + path + ".", "warning");
+      updateSaveButton();
+    })().finally(() => {
+      savedRefreshPending = null;
+      if (savedRefreshQueued && !refreshBlocked()) queueMicrotask(requestSavedRefresh);
+    });
+    return savedRefreshPending;
+  }
 
   window.BlobUI.discardChanges = function discardChanges() {
     if (saveBusy || isInstallingUpdate() || !draft) return;
@@ -275,12 +339,30 @@
     updateConnectionScrollbar();
   });
 
+  let metadataEpoch = 0;
+  const metadataPending = new Set();
+  const metadataRequests = new Map();
   function invoke(name, args) {
     const api = window.__TAURI__ && window.__TAURI__.core;
     if (!api || typeof api.invoke !== "function") {
       return Promise.reject(new Error("The settings app bridge is unavailable. Launch BlobUI Settings using blobui-settings.exe."));
     }
-    return api.invoke(name, args || {});
+    if (name === "configure_connection") metadataEpoch++;
+    const epoch = metadataEpoch;
+    const metadata = ["discover_kanban_views", "discover_calendar_colors", "discover_codex_spaces", "discover_anyblob_types", "discover_codex_sources"].includes(name);
+    const requestKey = JSON.stringify([metadataEpoch, name, args || {}]);
+    if (metadata && metadataRequests.has(requestKey)) return metadataRequests.get(requestKey);
+    const request = api.invoke(name, args || {}).then(result => {
+      if (metadata && epoch !== metadataEpoch) throw Error("The saved Anytype connection changed. Refresh metadata again.");
+      if (metadata && Array.isArray(result?.errors)) result.errors.forEach(error => addLog(String(error.error || error), "error"));
+      return result;
+    });
+    if (metadata) {
+      metadataPending.add(request);
+      metadataRequests.set(requestKey, request);
+      request.then(() => { metadataPending.delete(request); metadataRequests.delete(requestKey); }, error => { metadataPending.delete(request); metadataRequests.delete(requestKey); addLog(String(error.message || error), "error"); });
+    }
+    return request;
   }
 
   function themeSwatch(preset) {
@@ -463,7 +545,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
@@ -902,6 +984,7 @@
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
+    ["refreshMetadata", "Refresh Anytype lists and pickers", { code: "KeyR", ctrl: true }],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
@@ -940,21 +1023,21 @@
     const list = el("keybind-list");
     window.BlobUI.Components.destroyTree(list);
     list.replaceChildren();
-    shortcutActions.forEach(([action, label]) => {
-      const binding = shortcutBindings.find((item) => item.action === action);
+    shortcutActions.forEach(([action, label, fixedBinding]) => {
+      const binding = fixedBinding || shortcutBindings.find((item) => item.action === action);
       const row = document.createElement("div");
       row.className = "keybind-row";
       const name = document.createElement("span");
       name.className = "keybind-label";
       name.id = `keybind-label-${action}`;
       name.textContent = label;
-      const button = window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
+      const button = fixedBinding ? document.createElement("span") : window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
       button.className = "keybind-button";
-      button.type = "button";
-      button.dataset.shortcutAction = action;
+      if (fixedBinding) { button.classList.add("keybind-fixed"); button.setAttribute("role", "img"); button.title = "Fixed shortcut. Available in-app only."; }
+      else { button.type = "button"; button.dataset.shortcutAction = action; }
       button.setAttribute("aria-labelledby", `${name.id} keybind-button-${action}`);
       button.id = `keybind-button-${action}`;
-      button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
+      if (!fixedBinding) button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
       if (shortcutCaptureAction === action || !binding) {
         button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : "Unavailable";
       } else {
@@ -1162,6 +1245,7 @@
   }
 
   function updateSaveButton() {
+    if (savedRefreshQueued && !savedRefreshPending && !refreshBlocked()) queueMicrotask(requestSavedRefresh);
     const dirty = editSession.isDirty();
     const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
@@ -1174,7 +1258,9 @@
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
+    window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
     el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
@@ -1213,9 +1299,10 @@
     root.style.setProperty("--font-code", '"' + codeFamily + '", "Cascadia Code", monospace');
   }
 
-  function assignDraftToForm(settings) {
+  function normalizedSettings(settings) {
     const accent = normalizeForUi(settings);
-    draft = {
+    return {
+      codexIntegration: window.BlobUI.CodexPage.normalize(settings.codexIntegration),
       fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
@@ -1233,6 +1320,11 @@
       settingsV21Enabled: settings.settingsV21Enabled === true,
       sidebarResizeMode: "standard",
     };
+  }
+
+  function assignDraftToForm(settings) {
+    draft = normalizedSettings(settings);
+    window.BlobUI.CodexPage?.render();
     fontFamily.value = draft.fontFamily;
     codeFontFamily.value = draft.codeFontFamily;
     accentValue.value = draft.accentColor;
@@ -1281,7 +1373,7 @@
     updateSaveButton();
   }
 
-  async function loadState() {
+  async function loadState({ refreshMetadata = false } = {}) {
     let state = null;
     let stateError = null;
     try {
@@ -1300,7 +1392,8 @@
     }
 
     await loadUpdaterState();
-    await window.BlobUI.FormulaPage.load(invoke);
+    const refreshOnStart = refreshMetadata && state?.ready && state?.hasSavedApiKey;
+    await window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
     await window.BlobUI.CalendarPage?.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
@@ -1323,10 +1416,12 @@
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
+    if (refreshOnStart) await window.BlobUI.AppReload.run();
     if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
+    savedRefreshEpoch++;
     let state;
     try {
       state = await invoke("get_app_state");
@@ -1469,7 +1564,9 @@
     closeKanbanStyleMenu();
     const isFormulas = page === "formulas";
     const isCalendarColors = page === "calendar-colors";
-    const isBrowser = isFormulas || isCalendarColors;
+    const isCodex = page === "codex";
+    window.BlobUI.CodexPage?.show(isCodex);
+    const isBrowser = isFormulas || isCalendarColors || isCodex;
     const calendarPage = el("calendar-colors-page");
     if (calendarPage) calendarPage.hidden = !isCalendarColors;
     const isAccessibility = page === "accessibility";
@@ -1487,7 +1584,7 @@
     advancedPage.hidden = !isAdvanced;
     if (isAdvanced) advancedTabController.refresh();
     else if (!isAccessibility && !isBrowser) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
+    pageTitle.textContent = isCodex ? "Anyblob" : isCalendarColors ? "Color by Property" : isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
     preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isBrowser);
     accessibilityNav.classList.toggle("active", isAccessibility);
     advancedNav.classList.toggle("active", isAdvanced);
@@ -1702,6 +1799,7 @@
       ip: apiIp || null,
       port: apiPort ? Number(apiPort) : null,
     } : null;
+    savedRefreshEpoch++;
     saveBusy = true;
     updateSaveButton();
     setStatus(updaterSettingsChanged && !settingsChanged && !connectionChanged
@@ -1719,6 +1817,7 @@
       if (submittedConnection) {
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
+        void window.BlobUI.AppReload.run();
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
         window.BlobUI.FormulaPage.reload();
@@ -2473,7 +2572,11 @@
   }
 
   const eventApi = window.__TAURI__ && window.__TAURI__.event;
+  let savedStateSubscription = Promise.resolve();
   if (eventApi && typeof eventApi.listen === "function") {
+    savedStateSubscription = eventApi.listen("blobui-saved-state-changed", () => requestSavedRefresh()).catch(error => {
+      addLog("Could not listen for saved settings changes. " + String(error.message || error), "error");
+    });
     eventApi.listen("blobui-rebuild-custom-css", () => save({ forceRebuild: true })).catch((error) => {
       setStatus(error.message || String(error), "error");
     });
@@ -2482,7 +2585,8 @@
     });
   }
 
-  window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create({ onReload: () => addLog("Reloading app metadata. Refreshing Anytype lists and pickers.", "info"), isCapturing: () => !!shortcutCaptureAction, beforeRun: async () => { await refreshSavedState(); await Promise.allSettled([...metadataPending]); }, onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); } });
+  window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
@@ -2493,7 +2597,13 @@
     markDirty();
   });
     window.appReady = false;
-  loadState();
+  window.addEventListener("focus", requestSavedRefresh);
+  savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
+    addLog("Settings could not be loaded. " + String(error.message || error), "error");
+  }).finally(() => {
+    savedRefreshReady = true;
+    requestSavedRefresh();
+  });
   window.setInterval(refreshTheme, 2000);
   window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);

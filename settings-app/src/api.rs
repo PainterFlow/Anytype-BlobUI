@@ -127,7 +127,7 @@ pub(crate) fn object_property<'a>(object: &'a Value, key: &str, display_name: &s
         .or_else(|| rows.iter().find(|property| property.get("name").and_then(Value::as_str) == Some(display_name)))
 }
 
-fn property_value(raw: &Value) -> Result<Option<Value>, String> {
+pub(crate) fn property_value(raw: &Value) -> Result<Option<Value>, String> {
     if raw.is_string() || raw.is_number() || raw.is_boolean() { return Ok(Some(raw.clone())); }
     let Some(map) = raw.as_object() else { return Ok(None); };
     let format = map.get("format").and_then(Value::as_str).unwrap_or_default();
@@ -210,7 +210,7 @@ pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &s
     let mut response_body = &response[split + 4..];
     if headers.iter().any(|(name, value)| name == "transfer-encoding" && value.contains("chunked")) {
         let decoded = decode_chunked(response_body)?;
-        return parse_json_status(status, &decoded);
+        return parse_json_status(status, &decoded, api_key).map_err(|error| format!("{method} {path}: {}", if api_key.is_empty() { error } else { error.replace(api_key, "[redacted]") }));
     }
     if let Some((_, length)) = headers.iter().find(|(name, _)| name == "content-length") {
         let length = length.parse::<usize>().map_err(|_| "Anytype returned an invalid HTTP response.".to_string())?;
@@ -218,18 +218,35 @@ pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &s
         if response_body.len() < length { return Err("Anytype returned an incomplete HTTP response.".into()); }
         response_body = &response_body[..length];
     }
-    parse_json_status(status, response_body)
+    parse_json_status(status, response_body, api_key).map_err(|error| format!("{method} {path}: {}", if api_key.is_empty() { error } else { error.replace(api_key, "[redacted]") }))
 }
 
-fn parse_json_status(status: u16, body: &[u8]) -> Result<Value, String> {
-    if !(200..300).contains(&status) { return Err(http_error(status)); }
+fn parse_json_status(status: u16, body: &[u8], api_key: &str) -> Result<Value, String> {
+    if !(200..300).contains(&status) {
+        let mut details = Vec::new();
+        if let Ok(value) = serde_json::from_slice::<Value>(body) {
+            for item in [value.get("code"), value.get("message"), value.pointer("/error/code"), value.pointer("/error/message")].into_iter().flatten() {
+                if let Some(text) = item.as_str() { details.push(text.to_string()); }
+            }
+            for issue in value.get("issues").or_else(|| value.pointer("/error/issues")).and_then(Value::as_array).into_iter().flatten().take(10) {
+                if let Some(text) = issue["message"].as_str() { details.push(text.to_string()); }
+            }
+        }
+        let details = details.into_iter().filter(|text| {
+            let lower = text.to_ascii_lowercase();
+            !["authorization", "cookie", "headers", "bearer"].iter().any(|word| lower.contains(word))
+        }).collect::<Vec<_>>().join("; ");
+        let details = if api_key.is_empty() { details } else { details.replace(api_key, "[redacted]") };
+        let details: String = details.chars().filter(|ch| !ch.is_control()).take(1024).collect();
+        return Err(format!("{} {}", http_error(status), details));
+    }
     if body.len() > MAX_RESPONSE_BYTES { return Err("Anytype returned a response that is too large.".into()); }
     serde_json::from_slice(body).map_err(|_| "Anytype returned invalid JSON from its local API.".into())
 }
 
 fn http_error(status: u16) -> String {
     match status {
-        400 => "Anytype rejected the API v2 request (HTTP 400). Check the connection settings.".into(),
+        400 => "Anytype rejected the API v2 request (HTTP 400).".into(),
         401 => "Anytype rejected this key (HTTP 401). Paste a current API v2 key.".into(),
         403 => "Anytype denied API access (HTTP 403). Give this key read access to the spaces you want to use.".into(),
         404 => "This port did not provide the requested Anytype API v2 resource (HTTP 404). Check the port and your Anytype version.".into(),
@@ -329,6 +346,15 @@ mod tests {
     }
 
     #[test]
+    fn v2_validation_details_are_bounded_and_credentials_are_redacted() {
+        let error = parse_json_status(400, br#"{"code":"invalid_include","issues":[{"message":"include must be blocks"},{"message":"fixture-secret"},{"message":"Authorization: Bearer hidden"}]}"#, "fixture-secret").unwrap_err();
+        assert!(error.contains("400") && error.contains("invalid_include") && error.contains("include must be blocks"));
+        assert!(!error.contains("fixture-secret") && !error.contains("Bearer"));
+        assert!(!error.contains("connection settings"));
+        let body = serde_json::to_vec(&json!({"message":"x".repeat(5000)})).unwrap();
+        assert!(parse_json_status(400, &body, "secret").unwrap_err().len() < 1200);
+    }
+    #[test]
     fn authenticates_and_reads_calendar_colors_without_a_shell() {
         let pages = vec![
             json!({"data": [{"id":"space-1"}], "has_more": false}),
@@ -348,4 +374,63 @@ mod tests {
         assert_eq!(encode_segment("a/b c"), "a%2Fb%20c");
         assert_eq!(decode_chunked(b"4\r\ntest\r\n0\r\n\r\n").unwrap(), b"test");
     }
+}
+
+/// HTTP transport for content tools. Never retries. Header values and routes are constructed
+/// by the allowlisted bridge, not accepted as model-controlled HTTP parameters.
+pub(crate) fn content_request(
+    api_key: &str, ip: &str, port: u16, method: &str, path: &str,
+    body: Option<&Value>, etag: Option<&str>, retry_key: Option<&str>,
+    file: Option<(&mut std::fs::File, u64, &str)>,
+) -> Result<Value, String> {
+    let mut sent = false;
+    let result = (|| {
+        if !path.starts_with("/v2/") || path.chars().any(|c| c.is_control() || c==' ') { return Err("Invalid v2 content route.".into()); }
+        for header in [etag,retry_key].into_iter().flatten() { if header.chars().any(char::is_control) {return Err("Invalid content header.".into());} }
+        let socket = SocketAddr::new(ip.parse::<IpAddr>().map_err(|_|"Invalid API address.")?,port);
+        let mut stream=TcpStream::connect_timeout(&socket,TIMEOUT).map_err(|e|network_error(&e))?;
+        stream.set_read_timeout(Some(TIMEOUT)).map_err(|_|"Could not set API timeout.")?;
+        stream.set_write_timeout(Some(TIMEOUT)).map_err(|_|"Could not set API timeout.")?;
+        let payload=body.map(serde_json::to_vec).transpose().map_err(|_|"Could not encode request.")?;
+        let mut header=SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAccept: application/json\r\nConnection: close\r\n"));
+        if let Some(value)=etag {header.0.push_str(&format!("If-Match: {value}\r\n"));}
+        if let Some(value)=retry_key {header.0.push_str(&format!("Idempotency-Key: {value}\r\n"));}
+        const BOUNDARY:&str="blobui-anyblob-upload-v2-7a687fb7";
+        let prefix=file.as_ref().map(|(_,_,name)| {
+            let name=name.replace(['\r','\n','"','\\'],"_");
+            format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+        });
+        let suffix=format!("\r\n--{BOUNDARY}--\r\n");
+        if let Some((_,size,_))=&file {header.0.push_str(&format!("Content-Type: multipart/form-data; boundary={BOUNDARY}\r\nContent-Length: {}\r\n",prefix.as_ref().unwrap().len() as u64+size+suffix.len() as u64));}
+        else if let Some(payload)=&payload {header.0.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n",payload.len()));}
+        header.0.push_str("\r\n");
+        sent=true;
+        stream.write_all(header.as_bytes()).map_err(|e|network_error(&e))?;
+        if let Some((file,size,_))=file {
+            stream.write_all(prefix.as_ref().unwrap().as_bytes()).map_err(|e|network_error(&e))?;
+            let copied=std::io::copy(&mut file.take(size),&mut stream).map_err(|e|network_error(&e))?;
+            if copied!=size {return Err("Staged upload was truncated.".into());}
+            stream.write_all(suffix.as_bytes()).map_err(|e|network_error(&e))?;
+        } else if let Some(payload)=payload {stream.write_all(&payload).map_err(|e|network_error(&e))?;}
+        let mut bytes=Vec::new();stream.take((MAX_RESPONSE_BYTES+64*1024+1) as u64).read_to_end(&mut bytes).map_err(|e|network_error(&e))?;
+        if bytes.len()>MAX_RESPONSE_BYTES+64*1024 {return Err("Content response exceeds limit.".into());}
+        let split=bytes.windows(4).position(|w|w==b"\r\n\r\n").ok_or("Invalid content HTTP response.")?;
+        let header=std::str::from_utf8(&bytes[..split]).map_err(|_|"Invalid content HTTP headers.")?;
+        let status=header.lines().next().and_then(|line|line.split_whitespace().nth(1)).and_then(|n|n.parse::<u16>().ok()).ok_or("Invalid content HTTP status.")?;
+        let headers=header.lines().skip(1).filter_map(|line|line.split_once(':')).map(|(k,v)|(k.to_ascii_lowercase(),v.trim().to_string())).collect::<Vec<_>>();
+        let mut data=bytes[split+4..].to_vec();
+        if headers.iter().any(|(k,v)|k=="transfer-encoding"&&v.eq_ignore_ascii_case("chunked")){data=decode_chunked(&data)?;}
+        else if let Some((_,n))=headers.iter().find(|(k,_)|k=="content-length") {
+            let n=n.parse::<usize>().map_err(|_|"Invalid content length.")?;if n>MAX_RESPONSE_BYTES||n!=data.len(){return Err("Incomplete or oversized content response.".into());}
+        }
+        if !(200..300).contains(&status) {
+            // An explicit HTTP refusal is confirmed. Preserve the server's structured issues.
+            let detail=serde_json::from_slice::<Value>(&data).unwrap_or(json!({"message":"No structured v2 error was returned."}));
+            return Ok(json!({"_http_error":status,"error":detail}));
+        }
+        let mut result:Value=if status==204 {json!({})}else{serde_json::from_slice(&data).map_err(|_|"Invalid content JSON response.")?};
+        if let Some((_,etag))=headers.iter().find(|(k,_)|k=="etag") {if result.is_object()&&result.get("etag").is_none(){result["etag"]=json!(etag);}}
+        Ok(result)
+    })();
+    result.map_err(|error:String|if sent&&method!="GET" {format!("Mutation outcome unknown. Do not retry automatically. {error}")}else{error})
 }

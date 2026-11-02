@@ -217,7 +217,7 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> std::io::Result
     maybe_fail_after_replace(destination, result)
 }
 
-fn replace_credential(source: &Path, destination: &Path) -> std::io::Result<()> {
+pub(crate) fn replace_credential(source: &Path, destination: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     let result = {
         use std::os::windows::ffi::OsStrExt;
@@ -315,7 +315,7 @@ pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn unique_sibling(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn unique_sibling(path: &Path, suffix: &str) -> PathBuf {
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(".{name}.{}-{nonce}.{suffix}", std::process::id()))

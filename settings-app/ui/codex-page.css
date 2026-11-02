@@ -1,0 +1,39 @@
+.codex-space { padding: 12px 14px; border-radius: 12px; }
+#object-mentions-section { margin-top: 32px; }
+.object-mention-row .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; }
+.object-mention-row .formula-property-picker { flex: 0 1 auto; min-width: 0; }
+.object-mention-row .kanban-option-copy { min-width: 0; flex: 1; }
+.object-mention-row .kanban-option-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.codex-space:hover { background: var(--active); }
+.codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.codex-space-bottom { margin-top: 6px; }
+.codex-space-top .formula-view-name { flex: 1 1 140px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.codex-space-bottom .settings-row { padding: 0; border: 0; gap: 12px; flex: 1 1 140px; }
+.codex-space .formula-property-picker { flex: 0 1 auto; }
+.codex-space .kanban-select-menu { position: fixed; overflow-y: auto; z-index: 30; max-width: min(300px, 75vw); }
+#codex-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#codex-nav .nav-icon svg { width: 20px; height: 20px; }
+#sidebar-nav > .nav-group-label:not(:first-child) { margin-top: 16px; }
+.project-source-dialog { width: min(640px, calc(100vw - 32px)); }
+.project-source-content { min-height: 100px; }
+.project-source-dialog .project-source-metadata { margin: 0; line-height: 18px; text-align: right; min-width: 0; overflow-wrap: anywhere; flex: 0 1 auto; }
+.project-source-dialog .codex-space { position: relative; }
+.project-source-dialog .codex-space[data-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.project-source-dialog .codex-space-top input[type="checkbox"] { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.project-source-dialog .codex-space-top .formula-view-name { flex-basis: 120px; cursor: pointer; }
+.project-source-dialog .codex-space:has(:disabled) { opacity: 1; }
+.project-source-dialog .formula-toolbar { flex-shrink: 0; }
+.project-source-dialog > .kanban-select-menu { position: absolute; overflow-y: auto; z-index: 30; }
+#projects-reload svg, #project-sources-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#project-sources-filter-control { position: static; }
+#project-sources-filter-options { left: auto; right: 0; max-width: 100%; }
+#project-sources-filter.is-filtered { color: var(--accent); }
+
+.codex-space .formula-property-picker button:disabled,
+.codex-space .formula-property-picker button:disabled:hover { color: #666; background: #202020; cursor: default; }
+
+.codex-space-top .input-hint { flex: 1 1 100%; margin: 0; }
+
+.anyblob-version { display: block; color: var(--text-secondary); font-size: 11px; line-height: 14px; margin-top: 3px; }
+.anyblob-version-available { color: var(--color-green); }
+.anyblob-version[hidden] { display: none; }

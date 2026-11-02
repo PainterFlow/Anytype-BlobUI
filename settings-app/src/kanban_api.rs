@@ -17,15 +17,28 @@ use std::sync::{
 
 const DISCOVERY_CONCURRENCY: usize = 4;
 
+
 pub struct Client {
+    metadata_revision: String,
     key: crate::SecretString,
     ip: String,
     port: u16,
     info: Mutex<BTreeSet<String>>,
+    excluded_properties: Mutex<BTreeSet<(String, String)>>,
 }
 impl Client {
+    #[cfg(test)]
+    pub(crate) fn clone_for_fixture(&self) -> Self {
+        Self::with_connection(&self.key, &self.ip, self.port)
+    }
     pub(crate) fn with_connection(key: &str, ip: &str, port: u16) -> Self {
-        Self { key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()) }
+        Self { metadata_revision: String::new(), key: crate::SecretString::new(key.to_string()), ip: ip.into(), port, info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()) }
+    }
+    pub(crate) fn excluded_properties(&self) -> BTreeSet<(String, String)> {
+        self.excluded_properties.lock().map(|p| p.clone()).unwrap_or_default()
+    }
+    pub(crate) fn metadata_scope(&self) -> String {
+        format!("{:x}", Sha256::digest(serde_json::to_vec(&(&self.ip, self.port, &*self.key, &self.metadata_revision)).unwrap()))
     }
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
@@ -43,7 +56,8 @@ impl Client {
             );
         }
         Ok(Self {
-            info: Mutex::new(BTreeSet::new()),
+            metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
+            info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new(crate::read_saved_api_key_at(&install)?),
             ip: crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?,
             port: data
@@ -69,7 +83,18 @@ impl Client {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Vec<Value>, String> {
-        complete_pages_with_info(|offset| {
+        let growing_total = method == "POST"
+            && path.split('?').next().is_some_and(|path| path.ends_with("/search"))
+            && body.and_then(|body| body["query"].as_str()).is_some_and(|query| !query.trim().is_empty());
+        if growing_total {
+            return complete_search_snapshot(|limit| {
+                let separator = if path.contains('?') { '&' } else { '?' };
+                self.request(method, &format!("{path}{separator}limit={limit}&offset=0"), body)
+            }, |message| {
+                if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
+            });
+        }
+        complete_pages_with_totals(|offset| {
             let separator = if path.contains('?') { '&' } else { '?' };
             self.request(
                 method,
@@ -78,7 +103,7 @@ impl Client {
             )
         }, |message| {
             if let Ok(mut info) = self.info.lock() { info.insert(message.to_string()); }
-        })
+        }, growing_total)
     }
     pub fn take_info(&self) -> Vec<String> {
         self.info.lock().map(|mut info| std::mem::take(&mut *info).into_iter().collect())
@@ -105,17 +130,6 @@ impl Client {
                 enc(space),
                 enc(object)
             ),
-        )
-    }
-    fn document_properties(&self, space: &str, object: &str) -> Result<Value, String> {
-        self.request(
-            "GET",
-            &format!(
-                "/v2/spaces/{}/objects/{}?ids=full&include=properties",
-                enc(space),
-                enc(object)
-            ),
-            None,
         )
     }
 
@@ -388,6 +402,50 @@ impl Client {
         })
     }
 
+    pub(crate) fn calendar_members(&self,target:&Target,fields:&[String],authorize:&impl Fn(&str)->Result<(),String>) -> Result<Vec<Value>,String> {
+        target.validate()?;authorize(&target.object_id)?;
+        let document=self.calendar_document(&format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks",enc(&target.space_id),enc(&target.object_id)))?;
+        if required(&document,"id")?!=target.object_id {return Err("Anytype returned a different calendar identity.".into());}
+        let block=document["blocks"].as_array().and_then(|b|b.iter().find(|b|b["id"]==target.block_id)).ok_or("Calendar block is unavailable.")?;
+        let view=block["views"].as_array().and_then(|v|v.iter().find(|v|v["id"]==target.view_id)).ok_or("Calendar view is unavailable.")?;
+        if view["type"]!="calendar" && view["layout"]!="calendar" {return Err("The selected view is not a calendar.".into());}
+        if let Some(id)=block["object_id"].as_str(){authorize(id)?;}
+        let source=self.membership_source(&target.space_id,&document,block)?;
+        let exposed=self.source_views(&target.space_id,&source)?;
+        let view=exposed_view(target,&exposed)?;
+        if view["type"]!="calendar" && view["layout"]!="calendar" {return Err("The API view is not a calendar.".into());}
+        let rows=if source.kind=="types" {self.pages("POST",&format!("/v2/spaces/{}/search?ids=full",enc(&target.space_id)),Some(&type_view_search(&source.document,view,fields)?))?}else{
+            self.pages("GET",&format!("/v2/spaces/{}/{}/{}/objects?ids=full&view={}&fields={}",enc(&target.space_id),source.kind,enc(&source.object_id),enc(&required(view,"id")?),enc(&fields.join(","))),None)?
+        };
+        for row in &rows {authorize(&required(row,"id")?)?;} Ok(rows)
+    }
+    pub(crate) fn discover_type_views_in_space(&self,space:&str,authorize:&impl Fn(&str)->Result<(),String>) -> Result<Vec<View>,String> {
+        let properties=self.properties(space)?;
+        let mut views=Vec::new();
+        for row in self.pages("GET",&format!("/v2/spaces/{}/types?ids=full",enc(space)),None)? {
+            let key=required(&row,"key")?;
+            let document=self.board_document(&format!("/v2/spaces/{}/types/{}?ids=full",enc(space),enc(&key)))?;
+            let id=required(&document,"id")?;authorize(&id)?;
+            for block in document["blocks"].as_array().into_iter().flatten() {if let Some(id)=block["object_id"].as_str(){authorize(id)?;}}
+            let found=self.discover_document(space,space,&document,&document)?;
+            if found.unreadable>0{return Err("Incomplete targeted type-view metadata.".into());}
+            views.extend(found.views.into_iter().map(|v|v.into_view(&properties)));
+        } Ok(views)
+    }
+    pub(crate) fn discover_targeted(&self, space: &str, objects: &[String], authorize: &impl Fn(&str) -> Result<(),String>) -> Result<Vec<View>,String> {
+        let properties=self.properties(space)?;
+        let mut views=Vec::new();
+        for id in objects {
+            authorize(id)?;
+            let document=self.document_blocks(space,id)?;
+            if required(&document,"id")?!=*id {return Err("Anytype returned a different discovery target.".into());}
+            for block in document["blocks"].as_array().into_iter().flatten() { if let Some(id)=block["object_id"].as_str() {authorize(id)?;} }
+            let found=self.discover_document(space,space,&document,&document)?;
+            if found.unreadable>0 {return Err("Incomplete targeted Kanban metadata.".into());}
+            views.extend(found.views.into_iter().map(|v|v.into_view(&properties)));
+        }
+        Ok(views)
+    }
     pub fn discover(&self) -> Result<crate::kanban::Catalog, String> {
         let mut views = Vec::new();
         let mut unreadable = 0usize;
@@ -459,8 +517,13 @@ impl Client {
         target: &Target,
         calculator: &Calculator,
     ) -> Result<Vec<CategoryResult>, String> {
+        self.calculate_authorized(target, calculator, &|_| Ok(()))
+    }
+    pub(crate) fn calculate_authorized(&self, target: &Target, calculator: &Calculator, authorize: &impl Fn(&str) -> Result<(),String>) -> Result<Vec<CategoryResult>,String> {
         target.validate()?;
+        authorize(&target.object_id)?;
         let document = self.document_blocks(&target.space_id, &target.object_id)?;
+        if required(&document,"id")?!=target.object_id {return Err("Anytype returned a different board identity.".into());}
         let block = document["blocks"]
             .as_array()
             .and_then(|b| b.iter().find(|b| b["id"] == target.block_id))
@@ -472,6 +535,7 @@ impl Client {
         if raw["type"] != "kanban" && raw["layout"] != "kanban" {
             return Err("This view is no longer a Kanban view.".into());
         }
+        if let Some(id)=block["object_id"].as_str() { authorize(id)?; }
         let source = self.membership_source(&target.space_id, &document, block)?;
         let kind = source.kind;
         let exposed = self.source_views(&target.space_id, &source)?;
@@ -479,6 +543,9 @@ impl Client {
         if api_view["type"] != "kanban" && api_view["layout"] != "kanban" {
             return Err("The source view is no longer a Kanban view.".into());
         }
+        let properties = self.properties(&target.space_id)?;
+        grouping_property(raw, &properties)?;
+        grouping_property(api_view, &properties)?;
         let document_keys = configured_view_keys(raw, Some(block))?;
         let endpoint_keys = configured_view_keys(api_view, None)?;
         let available_keys = match (document_keys, endpoint_keys) {
@@ -493,7 +560,6 @@ impl Client {
                 return Err("The API does not expose which properties are available to this view.".into());
             }
         };
-        let properties = self.properties(&target.space_id)?;
         let keys = calculator.properties();
         let mut boolean_keys = BTreeSet::new();
         if keys.iter().any(|key| {
@@ -512,7 +578,19 @@ impl Client {
         }) {
             return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
-        let mut grouping = self.grouping(target, api_view, &properties)?;
+        let mut identity_views = vec![raw, api_view];
+        identity_views.extend(source.document["blocks"].as_array().into_iter().flatten()
+            .flat_map(|block| block["views"].as_array().into_iter().flatten())
+            .filter(|view| view["id"] == target.view_id));
+        for view in &identity_views {
+            if grouping_property(view, &properties)? != grouping_property(api_view, &properties)? {
+                return Err("The API returned inconsistent grouping properties for this view.".into());
+            }
+        }
+        let mut grouping = match self.grouping(target, &identity_views, &properties, authorize) {
+            Err(error) if error.starts_with("duplicate_option_name:") => return Ok(Vec::new()),
+            other => other?,
+        };
         let mut fields = keys;
         fields.push(grouping.property.clone());
         fields.sort();
@@ -544,6 +622,7 @@ impl Client {
             .collect();
         let mut unique = BTreeSet::new();
         for row in rows {
+            authorize(&required(&row, "id")?)?;
             if !unique.insert(required(&row, "id")?) {
                 return Err(
                     "The board changed during pagination. Refresh results to retry.".into(),
@@ -568,6 +647,10 @@ impl Client {
                 let value = calculator.evaluate_with_boolean_properties(&cards, &boolean_keys)?;
                 Ok(CategoryResult {
                     target: target.clone(),
+                    category_names: if is_boolean_format(&grouping.format) { None } else { Some(serde_json::from_str(&id).map_err(|_| "Invalid category names.")?) },
+                    grouping_property: Some(grouping.property.clone()),
+                    card_ids: cards.iter().map(|card| required(card, "id")).collect::<Result<_,_>>()?,
+                    empty_value: calculator.evaluate_with_boolean_properties(&[], &boolean_keys)?,
                     category_id: id,
                     value,
                 })
@@ -578,10 +661,11 @@ impl Client {
     fn grouping(
         &self,
         target: &Target,
-        view: &Value,
+        views: &[&Value],
         properties: &[Property],
+        _authorize: &impl Fn(&str)->Result<(),String>,
     ) -> Result<Grouping, String> {
-        let (property, format) = grouping_property(view, properties)?;
+        let (property, format) = grouping_property(views[0], properties)?;
         let mut grouping = Grouping {
             property,
             format: format.clone(),
@@ -593,7 +677,7 @@ impl Client {
             grouping.categories.insert("false".into(), String::new());
             return Ok(grouping);
         }
-        if format != "select" {
+        if !matches!(format.as_str(), "select" | "multi_select") {
             return Err("This grouping format cannot be matched to Anytype headers safely.".into());
         }
         let options = self.pages(
@@ -605,70 +689,16 @@ impl Client {
             ),
             None,
         )?;
-        // v2 may omit option IDs. Select group IDs are the option object IDs,
-        // so reading those objects resolves their names.
-        let mut resolved = BTreeMap::new();
-        let mut option_names = BTreeSet::new();
-        for option in &options {
-            if !option_names.insert(required(option, "name")?) {
-                return Err("Duplicate option names prevent an exact category match.".into());
-            }
-            if let (Some(id), Some(name)) = (
-                option.get("id").and_then(Value::as_str),
-                option.get("name").and_then(Value::as_str),
-            ) {
-                insert_option_id(&mut resolved, name, id)?;
-            }
+        if let Err(error) = crate::category_identity::validate_names(&target.space_id, &grouping.property, &options) {
+            if let Ok(mut info) = self.info.lock() { info.insert(error.clone()); }
+            if let Ok(mut excluded) = self.excluded_properties.lock() { excluded.insert((target.space_id.clone(), grouping.property.clone())); }
+            return Err(error);
         }
-
-        let select_group_ids = {
-            view.get("groups")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .map(|group| required(group, "id"))
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        // When v2 option rows omit stable IDs, resolve only groups whose
-        // exact IDs are absent from the option map.
-        let unresolved_group_ids = select_group_ids
-            .iter()
-            .filter(|id| {
-                id.as_str() != "empty" && !resolved.values().any(|known| known == *id)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        for id in &unresolved_group_ids {
-            let object = self.document_properties(&target.space_id, id).map_err(|_| {
-                "The API could not resolve a category's exact identity.".to_string()
-            })?;
-            let name = object
-                .pointer("/properties/name")
-                .and_then(Value::as_str)
-                .ok_or("The API did not return a category option name.")?;
-            insert_option_id(&mut resolved, name, id)?;
-        }
-
         for option in options {
-            let name = required(&option, "name")?;
-            // Unused options need no published result. Any card whose option
-            // remains unresolved is rejected by category() before publishing.
-            let Some(id) = resolved.get(&name) else { continue; };
-            crate::kanban::validate_id(id)?;
-            if grouping.options.insert(name.clone(), id.clone()).is_some() {
-                return Err("Duplicate option names prevent an exact category match.".into());
-            }
-            let category_id = id.clone();
-            if category_id == "empty"
-                || grouping
-                    .categories
-                    .insert(category_id, name)
-                    .is_some()
-            {
-                return Err("The API returned duplicate category identities.".into());
-            }
+            let name = option["name"].as_str().unwrap().to_string();
+            grouping.options.insert(name.clone(), name);
         }
-        grouping.categories.insert("empty".into(), String::new());
+        grouping.categories.insert("[]".into(), String::new());
         Ok(grouping)
     }
 }
@@ -722,8 +752,8 @@ impl DiscoveredView {
             }
             Vec::new()
         });
-        if self.unsupported.is_none() {
-            if let Err(error) = grouping_property(&self.raw, space_properties) {
+        if let Err(error) = grouping_property(&self.raw, space_properties) {
+            if self.unsupported.is_none() {
                 self.unsupported = Some(error);
             }
         }
@@ -735,6 +765,7 @@ impl DiscoveredView {
             kind: self.kind,
             source_signature: self.source_signature,
             properties,
+            unsupported_reason: None,
             unsupported: self.unsupported,
         }
     }
@@ -943,10 +974,7 @@ fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, S
         .ok_or("The grouping property is unavailable.")?
         .format
         .clone();
-    if format == "multi_select" {
-        return Err("Multi-select grouping is not supported because API v2 does not expose the option identities needed to match its columns.".into());
-    }
-    if !(is_boolean_format(&format) || format == "select") {
+    if !(is_boolean_format(&format) || matches!(format.as_str(), "select" | "multi_select")) {
         return Err("This grouping format cannot be matched to Anytype headers safely.".into());
     }
     Ok((property, format))
@@ -954,26 +982,6 @@ fn grouping_property(view: &Value, properties: &[Property]) -> Result<(String, S
 
 fn is_boolean_format(format: &str) -> bool {
     matches!(format, "checkbox" | "boolean")
-}
-
-fn insert_option_id(
-    resolved: &mut BTreeMap<String, String>,
-    name: &str,
-    id: &str,
-) -> Result<(), String> {
-    if resolved.get(name).is_some_and(|old| old.as_str() != id) {
-        return Err("Duplicate option names prevent an exact category match.".into());
-    }
-    if resolved
-        .iter()
-        .any(|(previous_name, previous_id)| {
-            previous_name.as_str() != name && previous_id.as_str() == id
-        })
-    {
-        return Err("The API returned duplicate category identities.".into());
-    }
-    resolved.insert(name.to_string(), id.to_string());
-    Ok(())
 }
 
 fn list_kind(document: &Value) -> Option<&'static str> {
@@ -1020,12 +1028,51 @@ pub(crate) fn complete_pages(
     complete_pages_with_info(fetch, |_| {})
 }
 
+#[cfg(test)]
 fn complete_pages_with_info(
+    fetch: impl FnMut(usize) -> Result<Value, String>,
+    on_info: impl FnMut(&str),
+) -> Result<Vec<Value>, String> {
+    complete_pages_with_totals(fetch, on_info, false)
+}
+
+// Full-text rankings can shift with the candidate budget. Never stitch together
+// offset pages: grow a prefix and use only the final complete response.
+fn complete_search_snapshot(
     mut fetch: impl FnMut(usize) -> Result<Value, String>,
     mut on_info: impl FnMut(&str),
 ) -> Result<Vec<Value>, String> {
+    let mut limit = 100;
+    loop {
+        let response = fetch(limit)?;
+        warnings::check(&response, false, &mut on_info)?;
+        let rows = response["data"].as_array().ok_or("Anytype returned a page without data.")?;
+        let more = response.get("has_more").or_else(|| response.pointer("/pagination/has_more"))
+            .and_then(Value::as_bool).ok_or("Anytype returned a page without completeness metadata.")?;
+        if rows.len() > limit || (more && rows.is_empty()) {
+            return Err("Anytype returned inconsistent search pagination.".into());
+        }
+        if !more {
+            let mut response = Some(response);
+            return complete_pages_with_totals(|_| response.take().ok_or("Anytype returned inconsistent search pagination.".into()), on_info, true);
+        }
+        // API v2 caps a request at 1000 rows. Refuse partial results rather than
+        // silently dropping objects or mixing unstable result pages.
+        if limit == 1000 {
+            return Err("Full-text search exceeds the safe 1000-result snapshot limit. Narrow the search and retry.".into());
+        }
+        limit = (limit * 2).min(1000);
+    }
+}
+
+fn complete_pages_with_totals(
+    mut fetch: impl FnMut(usize) -> Result<Value, String>,
+    mut on_info: impl FnMut(&str),
+    growing_total: bool,
+) -> Result<Vec<Value>, String> {
     let mut all = Vec::new();
     let mut total = None;
+    let mut seen = BTreeSet::new();
     loop {
         let response = fetch(all.len())?;
         warnings::check(&response, false, &mut on_info)?;
@@ -1042,7 +1089,7 @@ fn complete_pages_with_info(
             .or_else(|| response.pointer("/pagination/total"))
             .and_then(Value::as_u64);
         if let (Some(before), Some(now)) = (total, current) {
-            if before != now {
+            if if growing_total { now < before } else { before != now } {
                 return Err(
                     "The board changed during pagination. Refresh results to retry.".into(),
                 );
@@ -1051,6 +1098,18 @@ fn complete_pages_with_info(
         total = current.or(total);
         if more && data.is_empty() {
             return Err("Anytype returned an incomplete page. Refresh to retry.".into());
+        }
+        if growing_total {
+            for row in data {
+                let id = row["id"].as_str().filter(|id| !id.is_empty())
+                    .ok_or("Anytype returned a search result without an object ID.")?;
+                if !seen.insert(id.to_string()) {
+                    return Err("Search results changed during pagination. Retry the request.".into());
+                }
+            }
+            if more && current.is_some_and(|n| n <= (all.len() + data.len()) as u64) {
+                return Err("Anytype returned inconsistent search pagination.".into());
+            }
         }
         all.extend(data.iter().cloned());
         if all.len() > 1_000_000 {
@@ -1080,12 +1139,12 @@ impl Grouping {
                 _ => Err("A checkbox category contains an incompatible value.".into()),
             };
         }
-        if self.format != "select" {
+        if !matches!(self.format.as_str(), "select" | "multi_select") {
             return Err("This grouping format is not supported.".into());
         }
         let names: Vec<&str> = match value {
             Value::Null => Vec::new(),
-            Value::String(name) if self.format == "select" => vec![name],
+            Value::String(name) => vec![name],
             Value::Array(values) => values
                 .iter()
                 .map(|v| {
@@ -1096,10 +1155,10 @@ impl Grouping {
             _ => return Err("A category contains an incompatible value.".into()),
         };
         if names.is_empty() {
-            return Ok("empty".into());
+            return Ok("[]".into());
         }
         if self.format == "select" && names.len() != 1 {
-            return Err("A select category returned multiple values.".into());
+            return Err("invalid_single_select_category: A single-select category must identify exactly one option. Create separate categories for separate options.".into());
         }
         let mut ids = names
             .iter()
@@ -1107,18 +1166,65 @@ impl Grouping {
                 self.options
                     .get(*name)
                     .cloned()
-                    .ok_or("The API did not expose an exact column identity for an option used by this view. Reload views and refresh results.")
+                    .ok_or_else(|| format!("missing_option: Unknown option {name:?} of property {:?}. Refresh metadata before publishing.", self.property))
             })
             .collect::<Result<Vec<_>, _>>()?;
         ids.sort();
         ids.dedup();
-        Ok(ids[0].clone())
+        crate::category_identity::column_id(&self.format, &ids)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exact_id_representations_and_conflicts() {
+        use std::{io::{Read, Write}, net::TcpListener};
+        for (direct, document, endpoint, conflict) in [
+            (true, false, false, false), (false, true, false, false),
+            (false, false, true, false), (true, true, true, false),
+            (true, true, false, true), (false, false, false, false),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stopped = stop.clone();
+            let server = std::thread::spawn(move || {
+                while !stopped.load(Ordering::SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(std::time::Duration::from_millis(2)); continue; };
+                    let mut bytes = [0; 8192];
+                    let n = stream.read(&mut bytes).unwrap();
+                    let request = String::from_utf8_lossy(&bytes[..n]);
+                    let value = if request.contains("/options?") {
+                        json!({"data":[if direct {json!({"id":"option-a","name":"A"})} else {json!({"name":"A"})}],"has_more":false})
+                    } else {
+                        assert!(request.contains("/objects/option-a?"));
+                        json!({"id":"option-a","properties":{"name":if conflict {"B"} else {"A"}}})
+                    };
+                    let body = value.to_string();
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                }
+            });
+            let client = Client::with_connection("fixture", "127.0.0.1", port);
+            let host = json!({"group_by":"status","groups":if document {json!([{"id":"option-a"}])} else {json!([])}});
+            let api = json!({"group_by":"status","groups":if endpoint {json!([{"id":"option-a"}])} else {json!([])}});
+            let target = Target {space_id:"space".into(),object_id:"host".into(),block_id:"board".into(),view_id:"view".into()};
+            let properties = vec![Property {key:"status".into(),name:"Status".into(),format:"select".into()}];
+            let authorized = Mutex::new(Vec::new());
+            let result = client.grouping(&target, &[&host, &api], &properties, &|id| {authorized.lock().unwrap().push(id.to_owned()); Ok(())});
+            stop.store(true, Ordering::SeqCst);
+            server.join().unwrap();
+            assert!(authorized.lock().unwrap().is_empty());
+            let grouping = result.unwrap();
+            assert_eq!(grouping.category(&Value::Null).unwrap(), "[]");
+            assert!(grouping.category(&json!(["A","B"])).unwrap_err().contains("invalid_single_select_category"));
+            assert_eq!(grouping.category(&json!("A")).unwrap(), r#"["A"]"#);
+            assert!(grouping.category(&json!("missing")).is_err());
+        }
+    }
+
     #[test]
     fn reads_full_filtered_membership_and_preserves_exact_category_ids() {
         use std::{
@@ -1142,6 +1248,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(1));
                     continue;
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
@@ -1236,7 +1343,8 @@ mod tests {
             }
         });
         let client = Client {
-            info: Mutex::new(BTreeSet::new()),
+            metadata_revision: String::new(),
+            info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new("fixture-key".into()),
             ip: "127.0.0.1".into(),
             port,
@@ -1269,8 +1377,7 @@ mod tests {
         assert_eq!(inline_view.source_signature, query_view.source_signature);
         let inline_results = client.calculate(&inline_view.target, &calculator).unwrap();
         let notices = client.take_info();
-        assert_eq!(notices.len(), 1, "Repeated metadata notices are logged only once per client operation.");
-        assert!(notices[0].contains("transparent container"));
+        assert!(notices.is_empty(), "No option-object reads are required.");
         assert_eq!(inline_results.len(), results.len());
         for (inline, canonical) in inline_results.iter().zip(&results) {
             assert_eq!(inline.target.object_id, "page-home");
@@ -1283,11 +1390,11 @@ mod tests {
         assert_eq!(type_view.target.object_id, "type-task");
         assert!(type_view.source_signature.is_some());
         let type_results = client.calculate(&type_view.target, &calculator).unwrap();
-        assert_eq!(type_results.iter().find(|result| result.category_id == "option-a").unwrap().value, Some(11.0.into()));
+        assert_eq!(type_results.iter().find(|result| result.category_id == r#"["A"]"#).unwrap().value, Some(11.0.into()));
         assert_eq!(
             results
                 .iter()
-                .find(|r| r.category_id == "option-a")
+                .find(|r| r.category_id == r#"["A"]"#)
                 .unwrap()
                 .value,
             Some((3.0).into())
@@ -1295,7 +1402,7 @@ mod tests {
         assert_eq!(
             results
                 .iter()
-                .find(|r| r.category_id == "empty")
+                .find(|r| r.category_id == "[]")
                 .unwrap()
                 .value,
             Some((7.0).into())
@@ -1312,7 +1419,7 @@ mod tests {
         assert_eq!(
             boolean_results
                 .iter()
-                .find(|result| result.category_id == "option-a")
+                .find(|result| result.category_id == r#"["A"]"#)
                 .unwrap()
                 .value,
             Some((1.0).into())
@@ -1320,7 +1427,7 @@ mod tests {
         assert_eq!(
             boolean_results
                 .iter()
-                .find(|result| result.category_id == "empty")
+                .find(|result| result.category_id == "[]")
                 .unwrap()
                 .value,
             Some((0.0).into())
@@ -1368,6 +1475,44 @@ mod tests {
             .is_err());
         stop.store(true, Ordering::Relaxed);
         worker.join().unwrap();
+    }
+    #[test]
+    fn fulltext_snapshot_discards_shifting_prefixes() {
+        let mut limits = Vec::new();
+        let rows = complete_search_snapshot(|limit| {
+            limits.push(limit);
+            Ok(if limit == 100 {
+                json!({"data":[{"id":"a"},{"id":"b"}],"has_more":true,"total":3})
+            } else {
+                json!({"data":[{"id":"b"},{"id":"c"},{"id":"a"}],"has_more":false,"total":3})
+            })
+        }, |_| {}).unwrap();
+        assert_eq!(limits, vec![100,200]);
+        assert_eq!(rows.iter().map(|row| row["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["b","c","a"]);
+        assert!(complete_search_snapshot(|_| Ok(json!({"data":[{"id":"a"},{"id":"a"}],"has_more":false,"total":2})), |_| {}).is_err());
+        let mut limits = Vec::new();
+        let error = complete_search_snapshot(|limit| {
+            limits.push(limit);
+            Ok(json!({"data":[{"id":"a"}],"has_more":true,"total":1001}))
+        }, |_| {}).unwrap_err();
+        assert!(error.contains("Narrow the search"));
+        assert_eq!(limits, vec![100,200,400,800,1000]);
+    }
+    #[test]
+    fn fulltext_paging_accepts_lower_bounds_and_rejects_incomplete_results() {
+        let first = json!({"data":[{"id":"a"},{"id":"b"}],"has_more":true,"total":3});
+        let last = json!({"data":[{"id":"c"},{"id":"d"}],"has_more":false,"total":4});
+        let fetch = |offset| Ok(if offset == 0 { first.clone() } else { last.clone() });
+        assert_eq!(complete_pages_with_totals(fetch, |_| {}, true).unwrap().len(), 4);
+        assert!(complete_pages_with_info(fetch, |_| {}).is_err());
+        for last in [
+            json!({"data":[],"has_more":false,"total":2}),
+            json!({"data":[{"id":"c"}],"has_more":false,"total":4}),
+            json!({"data":[{"id":"b"},{"id":"c"}],"has_more":false,"total":4}),
+            json!({"data":[],"has_more":true,"total":4}),
+        ] {
+            assert!(complete_pages_with_totals(|offset| Ok(if offset == 0 {first.clone()} else {last.clone()}), |_| {}, true).is_err());
+        }
     }
     #[test]
     fn paging_requires_complete_stable_responses() {
@@ -1538,12 +1683,10 @@ mod tests {
     }
 
     #[test]
-    fn multi_select_is_unavailable_and_duplicate_option_names_remain_ambiguous() {
+    fn multi_select_is_available_and_duplicate_option_names_remain_ambiguous() {
         let properties = vec![Property {key:"tags".into(),name:"Tags".into(),format:"multi_select".into()}];
-        assert!(grouping_property(&json!({"group_by":"tags"}), &properties).unwrap_err().contains("Multi-select"));
-        let mut options = BTreeMap::new();
-        insert_option_id(&mut options, "Done", "option-a").unwrap();
-        assert!(insert_option_id(&mut options, "Done", "option-b").is_err());
+        assert_eq!(grouping_property(&json!({"group_by":"tags"}), &properties).unwrap().1, "multi_select");
+        assert!(crate::category_identity::validate_names("space", "tags", &[json!({"name":"Done"}), json!({"name":"Done"})]).is_err());
     }
 
     #[test]
@@ -1552,19 +1695,26 @@ mod tests {
             property: "tags".into(),
             format: "multi_select".into(),
             options: BTreeMap::from([
-                ("A".into(), "option-a".into()),
-                ("B".into(), "option-b".into()),
+                ("A".into(), "A".into()),
+                ("B".into(), "B".into()),
             ]),
             categories: BTreeMap::new(),
         };
-        assert!(grouping.category(&json!(["B", "A"])).is_err());
+        assert_eq!(grouping.category(&json!(["B", "A"])).unwrap(), crate::category_identity::column_id("multi_select", &["A".into(), "B".into()]).unwrap());
         grouping.format = "select".into();
-        assert_eq!(grouping.category(&json!([])).unwrap(), "empty");
-        assert_eq!(grouping.category(&json!("A")).unwrap(), "option-a");
+        assert_eq!(grouping.category(&json!([])).unwrap(), "[]");
+        assert_eq!(grouping.category(&json!("A")).unwrap(), r#"["A"]"#);
+        assert_eq!(grouping.category(&json!("B")).unwrap(), r#"["B"]"#);
         assert!(grouping.category(&json!(["A", "B"])).is_err());
         assert!(grouping.category(&json!("Missing")).is_err());
         grouping.format = "checkbox".into();
         assert_eq!(grouping.category(&Value::Null).unwrap(), "false");
         assert_eq!(grouping.category(&json!(true)).unwrap(), "true");
+    }
+}
+
+impl Client {
+    pub(crate) fn content_request(&self, method:&str,path:&str,body:Option<&Value>,etag:Option<&str>,retry_key:Option<&str>,file:Option<(&mut std::fs::File,u64,&str)>) -> Result<Value,String> {
+        api::content_request(&self.key,&self.ip,self.port,method,path,body,etag,retry_key,file)
     }
 }

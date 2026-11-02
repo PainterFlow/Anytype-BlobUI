@@ -30,39 +30,42 @@
     element.querySelector(`#${prefix}-filter-options`).replaceChildren();
     return element;
   }
-  function attach({ prefix, toolbar: bar, records, empty, onReload }) {
+  function attach({ prefix, toolbar: bar, records, empty, onReload, categories }) {
     const find = suffix => bar.querySelector(`#${prefix}-${suffix}`);
     const search = find("search"), filter = find("filter"), reload = find("reload");
-    let selectedSpace = "", locked = false;
+    let selectedSpace = "", locked = false, selectedCategories = categories?.map(item => item.value) || [];
     const searchControl = UI.Components.Search({ container: find("search-control"), button: find("search-toggle"), input: search });
-    const filterControl = UI.Components.Picker({ root: find("filter-control"), options: [{ value: "", label: "All spaces" }], value: "", closeOnSelect: false,
-      onChange(value) { selectedSpace = value || ""; apply(); } });
+    const filterControl = UI.Components.Picker({ root: find("filter-control"), options: categories || [{ value: "", label: "All spaces" }], value: categories ? selectedCategories : "", multiple: !!categories, closeOnSelect: false,
+      onChange(value) { if (categories) selectedCategories = value; else selectedSpace = value || ""; apply(); } });
     function apply() {
       const query = search.value.trim().toLocaleLowerCase();
       const rows = records();
       rows.forEach(record => {
         const data = record.view;
-        record.item.hidden = !!selectedSpace && data.target.spaceId !== selectedSpace
+        record.item.hidden = (categories ? categories.some(item=>item.value===data.kind) && !selectedCategories.includes(data.kind) : !!selectedSpace && data.target.spaceId !== selectedSpace)
           || ![data.name, data.space, data.source, data.kind].filter(Boolean).join(" ").toLocaleLowerCase().includes(query);
       });
       if (empty) { empty.textContent = "No matching results."; empty.hidden = !rows.length || rows.some(record => !record.item.hidden); }
-      filter.classList.toggle("is-filtered", !!selectedSpace);
-      filter.dataset.filtered = String(!!selectedSpace);
-      filter.setAttribute("aria-pressed", String(!!selectedSpace));
-      filter.title = selectedSpace ? "Filtered to " + selectedSpace : "Filter by space";
+      const filtered = categories ? selectedCategories.length !== categories.length : !!selectedSpace;
+      filter.classList.toggle("is-filtered", filtered);
+      filter.dataset.filtered = String(filtered);
+      filter.setAttribute("aria-pressed", String(filtered));
+      filter.title = categories ? "Filter source categories" : selectedSpace ? "Filtered to " + selectedSpace : "Filter by space";
+      if (categories) filter.setAttribute('aria-label', 'Filter source categories');
     }
     function refresh() {
+      if (categories) { apply(); return; }
       const spaces = new Map(records().map(record => [record.view.target.spaceId, record.view.space || "Unnamed space"]));
       const counts = new Map(); spaces.forEach(label => counts.set(label, (counts.get(label) || 0) + 1));
-      if (!spaces.has(selectedSpace)) selectedSpace = "";
+      if (selectedSpace && !spaces.has(selectedSpace)) spaces.set(selectedSpace, "Unavailable space");
       filterControl.setOptions([{ value: "", label: "All spaces" }, ...[...spaces].sort((a,b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
-        .map(([value,label]) => ({ value, label: counts.get(label) > 1 ? label + " · " + value.slice(0,6) : label }))]);
+        .map(([value,label]) => ({ value, label: counts.get(label) > 1 ? label + " · " + value.slice(0,6) : label }))], { preserveOpen: true });
       filterControl.setValue(selectedSpace); apply();
     }
     function click() { if (!locked) onReload?.(); }
     search.addEventListener("input", apply); reload.addEventListener("click", click);
     return { refresh, filter: apply,
-      reset() { selectedSpace = ""; search.value = ""; refresh(); },
+      reset() { selectedSpace = ""; selectedCategories = categories?.map(item => item.value) || []; if (categories) filterControl.setValue(selectedCategories); search.value = ""; refresh(); },
       setLocked(value, busy = false) { locked = value; search.disabled = value; filter.disabled = value || busy; reload.disabled = value || busy; reload.setAttribute("aria-busy", String(busy)); },
       destroy() { searchControl.destroy(); filterControl.destroy(); search.removeEventListener("input", apply); reload.removeEventListener("click", click); }
     };

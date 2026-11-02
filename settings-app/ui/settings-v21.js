@@ -6,6 +6,9 @@
   const panels = [], navButtons = [];
   const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
   const sectionIcons = {
+    Settings: '<path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/>',
+    Projects: '<path d="M2 5h6l2 2h8v10H2Z"/>',
+    Permissions: '<path d="m10 2 7 3v5c0 4-7 8-7 8s-7-4-7-8V5l7-3Z"/><path d="m6 10 3 3 5-6"/>',
     Accent: '<circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3" fill="currentColor"/>',
     Kanban: '<rect x="2" y="3" width="4" height="14" rx="1"/><rect x="8" y="3" width="4" height="9" rx="1"/><rect x="14" y="3" width="4" height="12" rx="1"/>',
     Calendar: '<rect x="3" y="4" width="14" height="13" rx="2"/><path d="M6 2v4m8-4v4M3 8h14M6 11h2m4 0h2m-8 3h2"/>',
@@ -32,6 +35,7 @@
     api.showSettingsPage(page);
     navButtons.forEach(button => controller.setExpanded(button, button.dataset.settingsPage === page));
     if (page === "preferences") selectPreference(tab);
+    else if (page === "codex") UI.CodexPage.select(tab);
     else api.selectAdvancedTab(tab);
     const heading = target.querySelector("h2");
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
@@ -50,14 +54,14 @@
     preferenceTabController = UI.Components.Tabs({ container: bar, buttons: preferenceTabs, panels });
     const navigation = doc.getElementById("preferences-nav").parentElement;
     // Use the Docs hierarchy and shared disclosure controller without its chevron.
-    for (const page of ["preferences", "advanced"]) {
+    for (const page of ["preferences", "advanced", "codex"]) {
       const button = doc.getElementById(`${page}-nav`); navButtons.push(button);
       const links = make("div", "documentation-children v21-section-links"); links.id = `${page}-section-links`; links.dataset.disclosurePanel = "";
       links.hidden = true; button.after(links);
       const inner = make("div", "documentation-children-inner"); inner.dataset.disclosureContent = ""; links.append(inner);
       button.dataset.disclosureToggle = ""; button.setAttribute("aria-controls", links.id); button.setAttribute("aria-expanded", "false");
-      const groups = page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
-      const labels = page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
+      const groups = page === "codex" ? [0,1,2].map(index => doc.getElementById("codex-panel-" + index)) : page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
+      const labels = page === "codex" ? ["Settings", "Permissions", "Projects"] : page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
       groups.forEach((target, tab) => {
         const label = labels[tab];
         const link = UI.Components.NavigationItem({ label, icon: icon(label),

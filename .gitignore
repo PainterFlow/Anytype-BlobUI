@@ -12,7 +12,9 @@ data.json
 /.test-run/
 /settings-app/target/
 /settings-app/gen/
-/settings-app/dist/blobui-settings.exe
-/settings-app/dist/.blobui-onboarding-next
+/settings-app/dist/
 /dist/
 /installer/target/
+/mcp-server/target/
+/mcp-server/dist/
+/codex-plugin/dist/

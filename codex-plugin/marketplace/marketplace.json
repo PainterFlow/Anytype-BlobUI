@@ -1,0 +1,10 @@
+{
+  "name": "personal",
+  "interface": { "displayName": "Personal" },
+  "plugins": [{
+    "name": "anyblob",
+    "source": { "source": "local", "path": "./.codex/plugins/anyblob" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Productivity"
+  }]
+}

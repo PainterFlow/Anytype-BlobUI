@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod metadata_cache;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
@@ -18,6 +19,17 @@ mod folder_dialog;
 mod calculator;
 mod kanban;
 mod calendar;
+mod codex;
+mod codex_projects;
+mod codex_identity;
+mod anyblob_scope;
+mod anyblob;
+mod anyblob_blobui;
+mod anyblob_content;
+mod anyblob_creation;
+mod anyblob_mentions;
+mod marketplace;
+mod category_identity;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
@@ -94,6 +106,8 @@ impl Drop for SecretString {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct SettingsDraft {
+    #[serde(default, deserialize_with = "codex::deserialize")]
+    codex_integration: codex::Configuration,
     font_family: String,
     code_font_family: String,
     accent_color: String,
@@ -195,6 +209,25 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
     let state = load_app_state()?;
     apply_native_theme(&app, &state.theme);
     Ok(state)
+}
+
+#[tauri::command]
+async fn get_saved_state_snapshot() -> Result<Value, String> {
+    let guard = acquire_save_guard("Wait for the current save before reloading Settings.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let app_data = app_data_directory();
+        let install = resolve_install_directory(&app_data)?;
+        let runtime = resolve_runtime_directory_for_install(&install)?;
+        // One save guard keeps configuration and revision tokens from different
+        // publications out of the same frontend baseline.
+        Ok(json!({
+            "app": load_app_state()?,
+            "updater": with_startup_state(updater::get_state(&app_data, &install, &runtime)?)?,
+            "formulas": kanban::load_kanban_formulas()?,
+            "calendar": calendar::load_calendar_rules()?,
+        }))
+    }).await.map_err(|_| "Saved settings reload stopped. Your pending edits are kept.".to_string())?
 }
 
 #[tauri::command]
@@ -824,6 +857,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
     }
 
     data["apiConnection"] = json!({
+        "metadataRevision": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos().to_string(),
         "enabled": connection.enabled,
         "ip": ip,
         "port": port,
@@ -835,6 +869,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         None if !connection.enabled => storage::CredentialChange::Remove,
         None => storage::CredentialChange::Keep,
     };
+    anyblob::invalidate();
     storage::commit_settings(
         &css_path,
         &data_path,
@@ -1058,6 +1093,7 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
     if rules.is_some() && calendar_status == "cached" { return Err("Calendar colors could not be refreshed. Your rules and previous snapshot are unchanged.".into()); }
     let css = css::compile(&runtime, &install, &data)?;
     let serialized = serialize_data(&data)?;
+    anyblob::invalidate();
     storage::commit_settings(
         &css_path,
         &data_path,
@@ -1123,6 +1159,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "objectMentionHoverEffect": settings.object_mention_hover_effect,
         "kanbanViewStyle": settings.kanban_view_style,
         "collapsedCategories": settings.collapsed_categories,
+        "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
@@ -1151,7 +1188,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "objectMentionHoverEffect": settings.object_mention_hover_effect,
             "kanbanViewStyle": settings.kanban_view_style,
             "collapsedCategories": settings.collapsed_categories,
-            "calendarColorsEnabled": settings.calendar_colors_enabled,
+            "codexIntegration": settings.codex_integration,
+        "calendarColorsEnabled": settings.calendar_colors_enabled,
         "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
         }
@@ -1294,6 +1332,7 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
     };
 
     SettingsDraft {
+        codex_integration: codex::normalize(local.and_then(|v| v.get("codexIntegration")).or_else(|| normalized.get("codexIntegration")).unwrap_or(&Value::Null)),
         font_family,
         code_font_family,
         accent_color,
@@ -1733,6 +1772,14 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            codex::discover_codex_spaces,
+            codex::discover_anyblob_types,
+            codex::discover_codex_sources,
+            codex_projects::discover_codex_projects,
+            anyblob::anyblob_status,
+            marketplace::anyblob_installation_status,
+            marketplace::install_anyblob_marketplace,
+            anyblob::configure_anyblob,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -1745,6 +1792,7 @@ fn main() {
             get_calendar_api_availability,
             configure_connection,
             get_app_state,
+            get_saved_state_snapshot,
             save_settings,
             get_updater_state,
             get_release_notes,
@@ -1817,6 +1865,7 @@ fn main() {
             }
             let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
             hotkey::start(app.handle().clone(), &shortcuts);
+            anyblob::start(app.handle().clone());
             if !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
             }
@@ -1829,6 +1878,7 @@ fn main() {
 impl Default for SettingsDraft {
     fn default() -> Self {
         Self {
+            codex_integration: codex::Configuration::default(),
             font_family: DEFAULT_FONT.into(),
             code_font_family: DEFAULT_CODE_FONT.into(),
             accent_color: DEFAULT_ACCENT.into(),

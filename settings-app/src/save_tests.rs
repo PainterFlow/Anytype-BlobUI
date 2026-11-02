@@ -252,6 +252,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         ("BLOBUI_SOURCE_DIRECTORY", &runtime),
     ]);
     let draft = SettingsDraft {
+        codex_integration: codex::Configuration::default(),
         font_family: "Inter".into(),
         code_font_family: "Cascadia Code".into(),
         accent_color: "#27A879".into(),

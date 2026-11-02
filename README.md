@@ -63,3 +63,7 @@ requirements. Third-party material retains its own license terms.
 Unless explicitly agreed otherwise, contributions submitted for inclusion in
 BlobUI must be licensed under these same terms. Contributors retain copyright
 in their contributions and must have permission to submit them.
+
+## Anyblob integration
+
+Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrations > Anyblob > Settings > Install to register its personal marketplace, then select Anyblob in the Codex Plugins Directory. Credentials are configured automatically when you enable Anyblob. Follow the [setup and permissions guide](codex-plugin/src/README.md).

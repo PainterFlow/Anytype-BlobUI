@@ -12,7 +12,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
   fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
   process.env.TEMP = process.env.TMP = path.join(root, 'temp');
   const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
-  const page = await browser.newPage({ viewport: { width: 1050, height: 1000 } });
+  const page = await browser.newPage({ viewport: { width: 1050, height: 1000 }, colorScheme: 'dark' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
     const configuration = () => JSON.parse(sessionStorage.getItem('kanban-config') || '{"version":2,"display":"balanced","definitions":[]}');

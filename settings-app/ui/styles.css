@@ -102,13 +102,14 @@ button:focus-visible, input:focus-visible { outline: none; }
   inherits: true;
   initial-value: transparent;
 }
+.app-scrollbar { --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 
 .page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
-.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling, .sidebar-nav.has-overflow.is-scrolling, .keybinds-content.has-overflow.is-scrolling, .formula-display-slot > .is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
-.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .keybinds-content::-webkit-scrollbar, .formula-display-slot > *::-webkit-scrollbar { width: 12px; height: 12px; }
-.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .keybinds-content::-webkit-scrollbar-track, .formula-display-slot > *::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner, .sidebar-nav::-webkit-scrollbar-corner, .keybinds-content::-webkit-scrollbar-corner, .formula-display-slot > *::-webkit-scrollbar-corner { background: transparent; }
-.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .keybinds-content::-webkit-scrollbar-thumb, .formula-display-slot > *::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
-.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button, .sidebar-nav::-webkit-scrollbar-button, .keybinds-content::-webkit-scrollbar-button, .formula-display-slot > *::-webkit-scrollbar-button { display: none; }
+:is(.page-content, .app-scrollbar).has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling, .sidebar-nav.has-overflow.is-scrolling, .keybinds-content.has-overflow.is-scrolling, .formula-display-slot > .is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .keybinds-content::-webkit-scrollbar, .formula-display-slot > *::-webkit-scrollbar { width: 12px; height: 12px; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-track, :is(.page-content, .app-scrollbar)::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .keybinds-content::-webkit-scrollbar-track, .formula-display-slot > *::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner, .sidebar-nav::-webkit-scrollbar-corner, .keybinds-content::-webkit-scrollbar-corner, .formula-display-slot > *::-webkit-scrollbar-corner { background: transparent; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .keybinds-content::-webkit-scrollbar-thumb, .formula-display-slot > *::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button, .sidebar-nav::-webkit-scrollbar-button, .keybinds-content::-webkit-scrollbar-button, .formula-display-slot > *::-webkit-scrollbar-button { display: none; }
 .settings-content { width: calc(100% - 64px); max-width: 640px; margin: 0 auto; padding: 26px 0 36px; }
 .page-heading { margin-bottom: 32px; text-align: left; }
 .page-heading h1 { margin: 0; font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -.56px; }
@@ -129,7 +130,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .advanced-tabs:not(.indicator-ready) [aria-selected="true"] { border-bottom-color: var(--text); }
 :root[data-reduced-motion="true"] .advanced-tabs::after, :root[data-reduced-motion="true"] .advanced-tabs [role="tab"] { transition: none; }
 @media (prefers-reduced-motion: reduce) { .advanced-tabs::after, .advanced-tabs [role="tab"] { transition: none; } }
-.advanced-tabs [role="tab"]:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 4px; }
+.advanced-tabs [role="tab"]:focus-visible { outline: none; }
 
 .color-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: center; padding: 16px; }
 .color-plane { position: relative; height: 164px; border-radius: 8px; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), var(--picker-hue, #ff00ff); touch-action: none; cursor: crosshair; }
@@ -195,7 +196,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-select-trigger:focus-visible, .kanban-select-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
 .kanban-select-trigger:disabled { color: var(--text-muted); cursor: default; }
 .kanban-select-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out; }
+.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out, --page-scrollbar-color .15s ease; }
 .kanban-select-menu[data-state="open"] { opacity: 1; transform: translateY(0); }
 .kanban-select-menu[data-state="closing"] { opacity: 0; transform: translateY(-4px); transition-duration: 100ms; pointer-events: none; }
 .kanban-select-menu[data-state="closed"] { opacity: 0; transform: translateY(-4px); }
@@ -298,10 +299,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .keybinds-content > p:first-child { margin: 0 0 12px; font-size: 13px; line-height: 20px; }
 .keybind-list { display: grid; gap: 2px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; padding: 4px 0; }
+.keybind-button.keybind-fixed { cursor: default; }
 .keybind-label { color: var(--text); font-size: 13.5px; }
 .keybind-button { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; flex: 0 0 auto; min-height: 28px; max-width: 60%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-family: var(--font-interface); font-size: 13px; letter-spacing: 0; text-align: right; overflow-wrap: anywhere; cursor: pointer; }
 .keybind-keycap { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 5px; background: #303030; color: #e1e1e1; font: inherit; line-height: 1; transition: background-color .12s ease; }
-.keybind-button:hover .keybind-keycap { background: #442544; }
+button.keybind-button:hover .keybind-keycap { background: #442544; }
 .keybind-button:focus-visible { outline: none; }
 .keybind-button:focus-visible .keybind-keycap { background: #505050; }
 .keybind-button[aria-pressed="true"] { color: var(--accent); }

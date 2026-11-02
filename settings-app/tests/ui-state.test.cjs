@@ -303,6 +303,10 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.window.BlobUI.SettingsV21.setEnabled = () => {};
   // The formula page has its own browser and storage tests. Keep this form
   // harness independent of its DOM while retaining a stable edit snapshot.
+  context.window.BlobUI.CodexPage = {
+    normalize: value => value || { spaces: {} },
+    init() {}, render() {}, show() {}, setLocked() {},
+  };
   context.window.BlobUI.FormulaPage = {
     read: () => ({ version: 2, display: 'balanced', definitions: [] }),
     restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},
@@ -500,7 +504,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('help-button').attributes['aria-expanded'], 'true');
   assert(element('help-whats-new').focused, 'Opening Help moves focus into the menu.');
   await element('help-keybinds').handlers.click();
-  assert.equal(element('keybind-list').children.length, 5, 'Keybinds lists all five BlobUI shortcuts.');
+  assert.equal(element('keybind-list').children.length, 6, 'Keybinds lists global shortcuts and the in-app refresh shortcut.');
   const shortcutButton = element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]');
   await shortcutButton.handlers.click();
   assert.equal(activeElement, element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]'), 'Shortcut capture keeps focus on the active action.');
