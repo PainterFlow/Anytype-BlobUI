@@ -1,6 +1,10 @@
 # BlobUI v1.4.0 - What's new?
 
-*Insert random ah text.*
+Welcome to v1.4.0 of BlobUI, this update is the biggest update so far, as we are adding the first integration to BlobUI.
+Introducing the all new Anyblob, Anyblob allows Anytype to integrate with codex. For more information on Anyblob read the text below this section.
+Besides the addition of Anyblob, v1.4.0 also brings a variety of other cool new features for those who are not interested in the AI stuff.
+You can now color calendar events by their properties and we also fixed a lot of bugs related to buggy behaviour with kanban calculations.
+Besides that you should also notice some performance improvements and a few other quality of live changes.
 
 # Introducing Anyblob!
 
@@ -28,7 +32,9 @@ Anyblob adds global object mention suggestions to the desktop composer. Object M
 You can also use it to manage your Anytype space as there are quite a few skills you can use to do so.
 
 ## General
-- the sidebar is now resizable.
+
+- The sidebar is now resizable.
+- You can now use `Ctrl+r` in the BlobUI app to reload BlobUI.
 
 ## Color Calendar Events by property
 - Added the ability to color calendar events by property.
@@ -44,8 +50,24 @@ You can also use it to manage your Anytype space as there are quite a few skills
 
 
 ## Bugfixes
+
+*Developers Note: A variety of undocumented bugs related to kanban view calculations where fixed, if you noticed
+any buggy behaviour in v1.3.0, expect it to be fixed now. If not then please report the issue.*
+
 - Issue#71 - In-Object searched text results are unaffected by the accent color setting.
 - Issue#72 - The `/` command preview of checkmarks is unaffected by the accent color setting.
+
+## Developer Changelogs
+
+- Added `Build-MCP.ps1` script which builds the MCP server.
+- Added `Build-Codex.ps1` script which builds Anyblob.
+- Added `Rust-Toolchain.ps1` which is the rust toolchain.
+- The `Build-App.ps1` script now also builds the MCP server.
+- Added a cache to cache Anytype stuff like requested objects, views, properties, etc..
+    - This cache updates when pressing `Ctrl+r` or when restarting the App, it should have no effect on settings etc..
+- The BlobUI app UI now uses React JS, I hope this improves performance and eases development.
+- Updated `AGENTS.md`, the AI will now no longer edit `Changelogs.md` on its own, unless authorized in the prompt.
+- Added `CLAUDE.md` which just forwards to `AGENTS.md`.
 
 ---
 *Developers Note: All changes without explicitly denoted credits are made by User#PainterFlow*
