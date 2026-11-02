@@ -17,7 +17,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
         if(name==='get_calendar_api_availability')return'available';
         if(name==='anyblob_status')return{enabled:window.enabled};
         if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;return{enabled:args.enabled};}
-        if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,bundledVersion:'0.1.1'};
+        if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,bundledVersion:'0.1.1',installedVersion:window.installed?'0.1.0':null};
         if(name==='install_anyblob_marketplace'){window.installCalls++;await new Promise(resolve=>window.finishInstall=resolve);if(window.installError)throw Error('Fixture install failed');window.installed=true;return null;}
         return null;
       }}};
@@ -33,8 +33,10 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await installing.evaluate(el=>el.click());assert.equal(await page.evaluate(()=>window.installCalls),1);await page.evaluate(()=>window.finishInstall());
     const complete=page.getByRole('dialog',{name:'Anyblob marketplace installed'});await complete.waitFor();assert.match(await complete.innerText(),/Plugins Directory/);await page.keyboard.press('Escape');await complete.waitFor({state:'hidden'});
     assert.equal((await panel.getByRole('button',{name:'Installed',exact:true}).boundingBox()).width,original.width);
+    assert.equal(await page.locator('#codex-nav .anyblob-version').innerText(),'v0.1.0');
     await page.locator('#preferences-nav').click();await page.evaluate(()=>window.updateAvailable=true);await page.locator('#codex-nav').click();
-    const update=panel.getByRole('button',{name:'Update',exact:true});await update.waitFor();assert.equal((await update.boundingBox()).width,original.width);
+    const update=panel.getByRole('button',{name:'Update',exact:true});await update.waitFor();
+    assert.equal(await page.locator('#codex-nav .anyblob-version').innerText(),'v0.1.1 available');assert.equal((await update.boundingBox()).width,original.width);
     await update.click();const updating=panel.getByRole('button',{name:'Updating…',exact:true});assert.equal(await updating.isDisabled(),true);
     await page.evaluate(()=>window.finishInstall());const updated=page.getByRole('dialog',{name:'Anyblob marketplace updated'});await updated.waitFor();assert.match(await updated.innerText(),/uninstall and reinstall/);await page.keyboard.press('Escape');await updated.waitFor({state:'hidden'});
     await update.waitFor();await page.evaluate(()=>window.updateAvailable=false);

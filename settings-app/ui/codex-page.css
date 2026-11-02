@@ -33,3 +33,7 @@
 .codex-space .formula-property-picker button:disabled:hover { color: #666; background: #202020; cursor: default; }
 
 .codex-space-top .input-hint { flex: 1 1 100%; margin: 0; }
+
+#codex-nav .documentation-item-label { display: flex; flex-direction: column; }
+#codex-nav .anyblob-version { color: var(--text-secondary); font-size: 11px; line-height: 14px; }
+#codex-nav .anyblob-version[hidden] { display: none; }
