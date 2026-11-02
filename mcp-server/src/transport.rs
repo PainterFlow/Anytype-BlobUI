@@ -310,22 +310,66 @@ mod tests {
     }
 }
 pub fn call(request: &crate::Request, cancel: &AtomicBool) -> Result<crate::Response, String> {
+    call_with_approval(request, cancel, &|_, _| {
+        Err("Update Codex or use a client supporting form elicitation.".into())
+    })
+}
+pub fn call_with_approval(
+    request: &crate::Request,
+    cancel: &AtomicBool,
+    approve: &impl Fn(&str, Duration) -> Result<bool, String>,
+) -> Result<crate::Response, String> {
     #[cfg(windows)]
     {
         let deadline = Instant::now() + CALL_TIMEOUT;
-        let pipe = Pipe::connect_wait(cancel,deadline).map_err(|e| e.to_string())?;
+        let pipe = Pipe::connect_wait(cancel, deadline).map_err(|e| e.to_string())?;
         pipe.send(
-            &serde_json::to_vec(request).map_err(|_| "Invalid bridge request.")?,
+            &serde_json::to_vec(
+                &serde_json::json!({"version":crate::approval::VERSION,"request":request}),
+            )
+            .map_err(|_| "Invalid bridge request.")?,
             cancel,
             deadline,
         )
         .map_err(|e| e.to_string())?;
-        serde_json::from_slice(&pipe.receive(cancel, deadline).map_err(|e| e.to_string())?)
-            .map_err(|_| "Invalid BlobUI response.".into())
+        loop {
+            let frame: crate::approval::Frame =
+                serde_json::from_slice(&pipe.receive(cancel, deadline).map_err(|e| e.to_string())?)
+                    .map_err(|_| crate::approval::UPDATE)?;
+            match frame {
+                crate::approval::Frame::Response { version, response }
+                    if version == crate::approval::VERSION =>
+                {
+                    return Ok(response)
+                }
+                crate::approval::Frame::ApprovalRequest {
+                    version,
+                    operation_id,
+                    approval_id,
+                    message,
+                } if version == crate::approval::VERSION && operation_id == request.id => {
+                    let accepted =
+                        approve(&message, deadline.saturating_duration_since(Instant::now()))?;
+                    let decision = crate::approval::Frame::ApprovalDecision {
+                        version,
+                        operation_id,
+                        approval_id,
+                        accepted,
+                    };
+                    pipe.send(
+                        &serde_json::to_vec(&decision).map_err(|_| "Invalid decision")?,
+                        cancel,
+                        deadline,
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                _ => return Err(crate::approval::UPDATE.into()),
+            }
+        }
     }
     #[cfg(not(windows))]
     {
-        let _ = (request, cancel);
+        let _ = (request, cancel, approve);
         Err("Anyblob requires local Windows execution alongside BlobUI.".into())
     }
 }

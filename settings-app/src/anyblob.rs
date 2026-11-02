@@ -10,22 +10,12 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::Emitter;
+
 static PROMPT: Mutex<()> = Mutex::new(());
-static DECISION: Mutex<Option<(String, Option<bool>)>> = Mutex::new(None);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static REVISION: AtomicU64 = AtomicU64::new(0);
 pub fn invalidate() {
     REVISION.fetch_add(1, Ordering::AcqRel);
-}
-pub fn dismiss_pending() {
-    if let Ok(mut pending) = DECISION.lock() {
-        if let Some((_, decision)) = pending.as_mut() {
-            if decision.is_none() {
-                *decision = Some(false);
-            }
-        }
-    }
 }
 fn install() -> Result<PathBuf, String> {
     crate::resolve_install_directory(&crate::app_data_directory())
@@ -159,17 +149,6 @@ pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
     configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
     Ok(json!({"enabled":enabled}))
-}
-#[tauri::command]
-pub fn approve_anyblob(id: String, allow: bool) -> Result<(), String> {
-    let mut pending = DECISION.lock().map_err(|_| "Approval unavailable.")?;
-    match pending.as_mut() {
-        Some((active, decision)) if *active == id && decision.is_none() => {
-            *decision = Some(allow);
-            Ok(())
-        }
-        _ => Err("This request is no longer awaiting approval.".into()),
-    }
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
     let data = crate::read_json_file(&install()?.join("blob/data.json"))?;
@@ -326,6 +305,7 @@ fn execute_scoped(
         }
     }
 }
+#[cfg(test)]
 fn approve_with(
     check: impl Fn() -> Result<(), String>,
     timeout: Duration,
@@ -355,37 +335,47 @@ fn guarded_read(
     check()?;
     Ok(result)
 }
-fn show_prompt(
-    app: &tauri::AppHandle,
+#[cfg(windows)]
+fn pipe_prompt(
+    pipe: &blobui_mcp::transport::Pipe,
+    operation_id: &str,
     op: &Operation,
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<(), String> {
+    use blobui_mcp::approval::{Frame, VERSION};
     let deadline = Instant::now() + Duration::from_secs(120);
     let _prompt = acquire_prompt(check, deadline)?;
     check()?;
-    let id = format!("anyblob-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    *DECISION.lock().map_err(|_| "Approval unavailable.")? = Some((id.clone(), None));
-    crate::show_settings_window(app);
-    let emitted = app.emit("anyblob-approval", json!({"id":id,"request":op}));
-    let result = if emitted.is_err() {
-        Err("Could not show BlobUI approval. Retry the read.".into())
-    } else {
-        approve_with(
-            &check,
-            deadline.saturating_duration_since(Instant::now()),
-            || {
-                DECISION
-                    .lock()
-                    .ok()
-                    .and_then(|v| v.as_ref().and_then(|(_, d)| *d))
-            },
-        )
+    let approval_id = format!("approval-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    let cancel = AtomicBool::new(false);
+    let frame = Frame::ApprovalRequest {
+        version: VERSION,
+        operation_id: operation_id.into(),
+        approval_id: approval_id.clone(),
+        message: blobui_mcp::approval::describe(op),
     };
-    *DECISION.lock().map_err(|_| "Approval unavailable.")? = None;
-    let _ = app.emit("anyblob-approval-closed", json!({"id":id}));
-    result?;
+    pipe.send(
+        &serde_json::to_vec(&frame).map_err(|_| "Invalid approval")?,
+        &cancel,
+        deadline,
+    )
+    .map_err(|e| e.to_string())?;
+    let frame: Frame =
+        serde_json::from_slice(&pipe.receive(&cancel, deadline).map_err(|e| e.to_string())?)
+            .map_err(|_| "Invalid approval decision")?;
     check()?;
-    Ok(())
+    if Instant::now() >= deadline {
+        return Err("Anyblob approval timed out.".into());
+    }
+    match frame {
+        Frame::ApprovalDecision {
+            version,
+            operation_id: id,
+            approval_id: aid,
+            accepted: true,
+        } if version == VERSION && id == operation_id && aid == approval_id => Ok(()),
+        _ => Err("Anyblob approval denied or invalid.".into()),
+    }
 }
 fn acquire_prompt(
     check: &dyn Fn() -> Result<(), String>,
@@ -548,11 +538,13 @@ fn dispatch_resolved_with(
         guarded_read(&connect()?, &effective, &request.request, &check)
     }
 }
+#[cfg(windows)]
 fn dispatch(
-    app: &tauri::AppHandle,
+    pipe: &blobui_mcp::transport::Pipe,
     request: Request,
     connected: impl Fn() -> bool,
 ) -> Result<Value, String> {
+    let operation_id=request.id.clone();
     dispatch_with(
         request,
         connected,
@@ -563,10 +555,10 @@ fn dispatch(
                 "Configure the saved Anytype API v2 connection in BlobUI Advanced Settings.".into()
             })
         },
-        |op, check| show_prompt(app, op, check),
+        |op, check| pipe_prompt(pipe, &operation_id, op, check),
     )
 }
-pub fn start(app: tauri::AppHandle) {
+pub fn start(_app: tauri::AppHandle) {
     if migrate().is_err() {
         eprintln!("Anyblob credential setup needs attention in Settings.");
     }
@@ -597,7 +589,6 @@ pub fn start(app: tauri::AppHandle) {
                     }
                     active.fetch_add(1, Ordering::AcqRel);
                     let active = active.clone();
-                    let app = app.clone();
                     std::thread::spawn(move || {
                         let cancel = AtomicBool::new(false);
                         let deadline = Instant::now() + CALL_TIMEOUT;
@@ -605,10 +596,12 @@ pub fn start(app: tauri::AppHandle) {
                         if let Ok(bytes) =
                             pipe.receive(&cancel, Instant::now() + Duration::from_secs(5))
                         {
-                            if let Ok(request) = serde_json::from_slice::<Request>(&bytes) {
+                            if let Ok(envelope) = serde_json::from_slice::<Value>(&bytes) {
+                                if envelope["version"]!=blobui_mcp::approval::VERSION {let response=Response{result:None,error:Some(blobui_mcp::approval::UPDATE.into())};let _=pipe.send(&serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}).unwrap(),&cancel,deadline);active.fetch_sub(1,Ordering::AcqRel);return;}
+                                let Ok(request)=serde_json::from_value::<Request>(envelope["request"].clone()) else {active.fetch_sub(1,Ordering::AcqRel);return;};
                                 let operation = request.request.name().to_string();
                                 let id = NEXT.fetch_add(1, Ordering::Relaxed);
-                                let result = dispatch(&app, request, || {
+                                let result = dispatch(&pipe, request, || {
                                     Instant::now() < deadline && pipe.connected()
                                 });
                                 eprintln!("anyblob request={id} operation={operation} elapsed_ms={} outcome={}",start.elapsed().as_millis(),if result.is_ok(){"allowed"}else{"denied"});
@@ -622,7 +615,7 @@ pub fn start(app: tauri::AppHandle) {
                                         error: Some(error),
                                     },
                                 };
-                                if let Ok(bytes) = serde_json::to_vec(&response) {
+                                if let Ok(bytes) = serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}) {
                                     let _ = pipe.send(&bytes, &cancel, deadline);
                                 }
                             }
@@ -1178,8 +1171,9 @@ mod tests {
                 let pipe = std::mem::replace(&mut listener, Pipe::listen(false).unwrap());
                 let cancel = AtomicBool::new(false);
                 let request: Request =
-                    serde_json::from_slice(&pipe.receive(&cancel, deadline).unwrap()).unwrap();
+                    serde_json::from_value(serde_json::from_slice::<Value>(&pipe.receive(&cancel, deadline).unwrap()).unwrap()["request"].clone()).unwrap();
                 if index < 3 || index==4 { assert_eq!(request.thread_id.as_deref(),Some("fixture-chat")); }
+                let operation_id=request.id.clone();
                 let prompted=std::cell::Cell::new(false);
                 let result = dispatch_with(
                     request,
@@ -1187,13 +1181,13 @@ mod tests {
                     || Ok(enabled()),
                     || Ok(saved.lock().unwrap().clone()),
                     || Ok(client.clone_for_fixture()),
-                    |_, check| {
+                    |op, check| {
                         prompted.set(true);
                         assert_ne!(index,3,"Metadata must not request read approval");
                         if index == 7 {
                             approve_with(check, Duration::from_secs(5), || None)
                         } else {
-                            check()
+                            pipe_prompt(&pipe,&operation_id,op,check)
                         }
                     },
                 );
@@ -1210,7 +1204,7 @@ mod tests {
                     },
                 };
                 let _ = pipe.send(
-                    &serde_json::to_vec(&response).unwrap(),
+                    &serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}).unwrap(),
                     &cancel,
                     Instant::now() + CALL_TIMEOUT,
                 );
@@ -1261,7 +1255,7 @@ mod tests {
             &mut input,
             1,
             "initialize",
-            json!({"protocolVersion":"2025-03-26"}),
+            json!({"protocolVersion":"2025-06-18","capabilities":{"elicitation":{"form":{}}}}),
         );
         assert_eq!(
             receive(&mut output)["result"]["serverInfo"]["name"],
@@ -1286,7 +1280,12 @@ mod tests {
                 "tools/call",
                 json!({"name":name,"arguments":args,"_meta":{"threadId":"fixture-chat"}}),
             );
-            let response = receive(&mut output);
+            let mut response = receive(&mut output);
+            if response["method"]=="elicitation/create" {
+                assert_eq!(response["params"]["requestedSchema"]["properties"]["confirm"]["default"],false);
+                writeln!(input,"{}",json!({"jsonrpc":"2.0","id":response["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
+                response=receive(&mut output);
+            }
             assert_eq!(response["result"]["isError"], false, "{response}");
             assert!(response["result"]["structuredContent"].is_object());
         }
@@ -1294,6 +1293,8 @@ mod tests {
         let mentions=receive(&mut output);
         assert_eq!(mentions["result"]["structuredContent"]["items"][0]["uri"],"anyblob://objects/space/object");
         send(&mut input,8,"resources/read",json!({"uri":"anyblob://objects/space/object","_meta":{"threadId":"fixture-chat"}}));
+        let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");
+        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
         let resource=receive(&mut output);
         assert_eq!(resource["result"]["contents"][0]["uri"],"anyblob://objects/space/object");
         let document:Value=serde_json::from_str(resource["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
@@ -1329,6 +1330,8 @@ mod tests {
         assert_eq!(receive(&mut output)["error"]["code"], -32800);
         let writable=config("createDelete","alwaysAsk");*saved_config.lock().unwrap()=writable;
         send(&mut input,10,"tools/call",json!({"name":"create_object","arguments":{"space_id":"space","body":{"type":"page","name":"fixture-created"}},"_meta":{"threadId":"fixture-chat"}}));
+        let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");assert!(question["params"]["message"].as_str().unwrap().contains("fixture-created"));
+        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         drop(input);
         assert!(child.wait().unwrap().success());
@@ -1372,7 +1375,7 @@ mod tests {
                 approve_with(|| Err(reason.into()), Duration::from_secs(1), || Some(true)).is_err()
             );
         }
-        assert!(approve_anyblob("stale".into(), true).is_err());
+
     }
 }
 

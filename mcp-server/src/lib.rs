@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub mod transport;
+pub mod approval;
 pub mod credential;
 pub mod content;
 

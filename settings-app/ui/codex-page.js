@@ -135,28 +135,7 @@
     }
     panel.refreshIntegration=()=>{void refresh();void refreshInstallation();mentions.show();};
     void refresh();void refreshInstallation();
-    const eventApi=root.__TAURI__?.event;
-    if(!eventApi)return;
-    let current=null,closing=null;
-    function cleanup(previous){if(previous.timer)root.clearTimeout(previous.timer);previous.modal.destroy();previous.shell.destroy();previous.shell.element.remove();if(closing===previous)closing=null;}
-    function close(){if(!current)return;const previous=current;current=null;previous.modal.close();closing=previous;previous.timer=root.setTimeout(()=>cleanup(previous),180);}
-    eventApi.listen('anyblob-approval',({payload})=>{
-      close();if(closing)cleanup(closing);
-      const request=payload.request;
-      const changing=request.operation==='content' && !['list_schemas','get_schema','get_op_schema','list_chats','get_chat_messages','list_objects','read_document','list_properties','list_property_options','list_types','get_type','list_templates','get_collection_objects','get_collection_views','get_query_objects','get_query_views','list_widgets'].includes(request.content?.tool);
-      const title=make('h2','',changing?'Allow Anyblob content change?':'Allow Anyblob read?');
-      const text=make('p','');text.style.whiteSpace='pre-wrap';text.style.overflowWrap='anywhere';text.style.maxHeight='40vh';text.style.overflow='auto';
-      text.textContent=request.operation==='content' ? JSON.stringify({operation:request.content.tool,...request.content.arguments},null,2) : (request.operation==='search_objects'?'Search objects':'Read object')+'\nSpace ID: '+request.space_id+'\n'+(request.operation==='search_objects'?'Query: '+request.query+'\nLimit: '+request.limit+' | Offset: '+request.offset:'Object ID: '+request.object_id);
-      const decide=async allow=>{if(current?.id!==payload.id)return;try{await api.invoke('approve_anyblob',{id:payload.id,allow});}catch{}finally{if(current?.id===payload.id)close();}};
-      const deny=C.Button({label:'Deny',attributes:{class:'confirm-cancel'},onClick:()=>void decide(false)});
-      const allow=C.Button({label:'Allow once',attributes:{class:'confirm-save'},onClick:()=>void decide(true)});
-      const actions=make('div','confirm-actions');actions.append(deny.element,allow.element);
-      const shell=C.DialogShell({dialogAttributes:{'aria-label':changing?'Anyblob content change approval':'Anyblob read approval'},content:[title,text,actions]});doc.body.append(shell.element);
-      const modal=C.Modal({backdrop:shell.element,dialog:shell.dialog,initialFocus:deny.element,inertTargets:[...doc.body.children].filter(node=>node!==shell.element&&node.tagName!=='SCRIPT'),onClose:()=>{if(current?.id===payload.id)void decide(false);}});
-      current={id:payload.id,modal,shell};modal.open();
-    }).catch(()=>{});
-    eventApi.listen('anyblob-approval-closed',({payload})=>{if(current?.id===payload.id)close();}).catch(()=>{});
-    root.addEventListener('pagehide',()=>{if(current)void api.invoke('approve_anyblob',{id:current.id,allow:false}).catch(()=>{});});
+
   }
 
   function init(options) {

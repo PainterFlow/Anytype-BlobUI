@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-test('Anyblob setup and request-bound approvals in a dark isolated fixture',async()=>{
+test('Anyblob setup has no approval listeners in a dark isolated fixture',async()=>{
   const workspace=path.resolve(__dirname,'../..'),fixture=path.join(workspace,'.test-run/anyblob-ui');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
   try {
@@ -19,7 +19,6 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
         if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;return{enabled:args.enabled};}
         if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,bundledVersion:'0.1.1'};
         if(name==='install_anyblob_marketplace'){window.installCalls++;await new Promise(resolve=>window.finishInstall=resolve);if(window.installError)throw Error('Fixture install failed');window.installed=true;return null;}
-        if(name==='approve_anyblob'){window.decisions.push(args);return null;}
         return null;
       }}};
     });
@@ -48,24 +47,7 @@ test('Anyblob setup and request-bound approvals in a dark isolated fixture',asyn
     await page.setViewportSize({width:800,height:750});await page.screenshot({path:path.join(fixture,'settings-refreshed-narrow-dark.png')});
     const box=await install.boundingBox();assert(box.x+box.width<=800);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.setViewportSize({width:1100,height:900});
-    const send=async(id,operation='search_objects')=>page.evaluate(({id,operation})=>window.events['anyblob-approval']({payload:{id,request:{operation,space_id:'space-exact',object_id:'object-exact',query:'<script>not executable</script>',limit:20,offset:0}}}),{id,operation});
-    await send('request-one');const dialog=page.getByRole('dialog',{name:'Anyblob read approval'});await dialog.waitFor();assert.match(await dialog.innerText(),/space-exact/);assert.match(await dialog.innerText(),/<script>not executable<\/script>/);assert.equal(await dialog.locator('script').count(),0);
-    await dialog.evaluate(el=>Promise.all(el.closest('.confirm-backdrop').getAnimations({subtree:true}).map(animation=>animation.finished)));
-    await page.screenshot({path:path.join(fixture,'approval-dark.png')});
-    await page.getByRole('button',{name:'Allow once'}).click();await page.waitForFunction(()=>decisions.length===1);assert.deepEqual(await page.evaluate(()=>decisions[0]),{id:'request-one',allow:true});
-    await dialog.waitFor({state:'hidden'});await send('request-two','read_object');await dialog.waitFor();assert.match(await dialog.innerText(),/object-exact/);await page.keyboard.press('Escape');await page.waitForFunction(()=>decisions.length===2);assert.deepEqual(await page.evaluate(()=>decisions[1]),{id:'request-two',allow:false});
-    await dialog.waitFor({state:'hidden'});await send('request-three');await dialog.waitFor();await page.evaluate(()=>events['anyblob-approval-closed']({payload:{id:'request-three'}}));await dialog.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>decisions.length),2);
-    await send('request-four');await dialog.waitFor();
-    await page.evaluate(()=>{events['anyblob-approval-closed']({payload:{id:'request-four'}});events['anyblob-approval']({payload:{id:'request-five',request:{operation:'read_object',space_id:'space-exact',object_id:'next-object'}}});});
-    await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,240)));
-    assert.equal(await page.locator('#codex-page').evaluate(el=>!!el.closest('[inert]')),true);
-    assert.equal(await dialog.count(),1);assert.match(await dialog.innerText(),/next-object/);
-    await page.getByRole('button',{name:'Deny',exact:true}).click();
-    await page.getByRole('dialog',{name:'Anyblob read approval'}).waitFor({state:'hidden'});
-    await page.evaluate(()=>events['anyblob-approval']({payload:{id:'content-request',request:{operation:'content',content:{tool:'delete_chat_message',arguments:{space_id:'Codex-Test-id',chat_id:'fixture-chat',message_id:'fixture-message',irreversible_effect:'This cannot be restored from Bin.',body:{text:'<script>untrusted</script>'}}}}}}));
-    const contentDialog=page.getByRole('dialog',{name:'Anyblob content change approval'});await contentDialog.waitFor();
-    assert.match(await contentDialog.innerText(),/delete_chat_message/);assert.match(await contentDialog.innerText(),/cannot be restored/);assert.equal(await contentDialog.locator('script').count(),0);
-    await page.screenshot({path:path.join(fixture,'content-approval-dark.png')});await contentDialog.getByRole('button',{name:'Deny',exact:true}).click();
+    assert.equal(await page.evaluate(()=>Boolean(events['anyblob-approval']||events['anyblob-approval-closed'])),false);
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
 });

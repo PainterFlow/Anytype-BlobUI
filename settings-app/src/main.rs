@@ -1758,7 +1758,6 @@ fn main() {
             marketplace::anyblob_installation_status,
             marketplace::install_anyblob_marketplace,
             anyblob::configure_anyblob,
-            anyblob::approve_anyblob,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -1806,7 +1805,6 @@ fn main() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                anyblob::dismiss_pending();
                 api.prevent_close();
                 let _ = window.hide();
             }
