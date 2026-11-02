@@ -42,8 +42,11 @@ You can also use it to manage your Anytype space as there are quite a few skills
     - Per-calendar view overrides.
     - Automatically grabs the color of your property option directly from Anytype.
     - The old "Calendar Color" property is still supported, but might get deprecated soon.
-    - Single Select & Checkmark property types are supported.
-*Developers Note: due to Anytype API v2 limitations, multi-selection is not possible.*
+
+## Kanban View Calculations
+- Now support multi-selections
+- If options of a single or multi-selection property contain duplicate names, the property will be excluded and a hard error will be shown.
+*Developers Note: We've decided that it's better to restrict duplicate names then to restrict multi-selection properties.*
 
 ## Advanced Settings -> App Settings
 - organized and modernized the UI of "App Settings".
