@@ -113,7 +113,7 @@ test('real settings tabs keep their width and open panels at the top across heig
       await page.setViewportSize(size);
       for (const [nav, ids] of [
         ['preferences', ['preference-tab-0', 'preference-tab-4', 'preference-tab-0', 'preference-tab-4']],
-        ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-experiments-tab', 'advanced-app-tab', 'advanced-experiments-tab', 'advanced-api-tab']],
+        ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-app-tab', 'advanced-api-tab']],
       ]) {
         await page.locator(`#${nav}-nav`).click();
         const states = [];
@@ -145,7 +145,7 @@ test('real settings tabs keep their width and open panels at the top across heig
     await page.evaluate(() => document.querySelectorAll('.settings-page > section').forEach(panel => { panel.style.minHeight = '1400px'; }));
     for (const [nav, ids] of [
       ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2', 'preference-tab-3', 'preference-tab-4']],
-      ['advanced', ['advanced-api-tab', 'advanced-app-tab', 'advanced-experiments-tab']],
+      ['advanced', ['advanced-api-tab', 'advanced-app-tab']],
     ]) {
       await page.locator('#' + nav + '-nav').click();
       for (const from of ids) {

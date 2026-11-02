@@ -33,7 +33,6 @@ test('sidebar row geometry stays stable with expandable sections', async () => {
 
     const geometry = () => page.locator('.nav-item:visible').evaluateAll(nodes => nodes.map(n => ({ width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height })));
     const baseline = (await geometry())[0];
-    await page.evaluate(() => window.BlobUI.SettingsV21.setEnabled(true));
     for (const id of ['preferences', 'advanced', 'codex']) {
       for (const expanded of [true, false]) {
         await page.locator('#'+id+'-nav').click();

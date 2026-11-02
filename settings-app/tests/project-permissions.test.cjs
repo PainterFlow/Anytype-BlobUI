@@ -134,7 +134,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.screenshot({path:path.join(fixture,'sources-narrow-dark.png'),fullPage:true});
     await page.locator('button[aria-label="Close project sources"]').click();
     await page.evaluate(()=>window.projects=[]);await page.locator('#projects-reload').click();await page.locator('#codex-project-list').getByText('Unavailable project. Saved selections are retained.').waitFor();
-    await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();await page.locator('#codex-nav').click();
+    if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();
     await page.locator('#codex-section-links .v21-section-link').nth(2).click();assert.equal(await page.locator('#codex-panel-2').isVisible(),true);
     await page.screenshot({path:path.join(fixture,'projects-refreshed-dark.png'),fullPage:true});assert.deepEqual(errors,[]);
   } finally {await browser.close();}

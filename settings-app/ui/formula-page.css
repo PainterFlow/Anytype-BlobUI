@@ -1,7 +1,6 @@
 /* Shared Anytype settings tokens. Toolbar uses 20px icons inside 32px circular controls. */
-:root[data-settings-v21="true"] #formulas-nav { display: none; }
-#open-formulas { display: none; margin-top: 16px; }
-:root[data-settings-v21="true"] #open-formulas { display: inline-flex; }
+#formulas-nav { display: none; }
+#open-formulas { display: inline-flex; margin-top: 16px; }
 #formulas-page { max-width: 640px; }
 #formula-storage-message[data-status="success"] { color: var(--color-teal); }
 #formulas-page, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
@@ -89,9 +88,9 @@
 .formula-property-picker .kanban-select-option:has(.kanban-select-option-description) .kanban-option-label { display: block; }
 .formula-key svg { display: block; width: 20px; height: 20px; margin: auto; }
 /* Navigation animation runs when the page leaves the hidden state. */
-:root[data-settings-v21="true"] #formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+#formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
 @keyframes formula-page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-:root[data-settings-v21="true"][data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
+:root[data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
 @media (prefers-reduced-motion: reduce) { #formulas-page { animation: none !important; } }
 
 /* Rendered calculations never expose an editing caret or pointer. */
@@ -129,7 +128,7 @@
 .calendar-modal-close { font-size: 24px; }
 .calendar-view-results { min-width: 0; }
 #calendar-colors-page button:focus-visible, .confirm-dialog:focus-visible, .confirm-dialog button:focus-visible { outline: none !important; box-shadow: none !important; }
-:root[data-settings-v21="true"] #calendar-colors-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+#calendar-colors-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
 :root[data-reduced-motion="true"] #calendar-colors-page { animation: none !important; }
 @media (prefers-reduced-motion: reduce) { #calendar-colors-page { animation: none !important; } }
 

@@ -12,7 +12,7 @@ v1.3.0 adds Board layout, Collapsed Categories, and custom calculations for Kanb
 
 ## Choose a board layout
 
-Open Preferences > Kanban in the refreshed layout, or the Kanban section of Preferences in the original layout. Board layout applies to both inline and full-page boards.
+Open Preferences > Kanban. Board layout applies to both inline and full-page boards.
 
 | Layout | Result |
 | --- | --- |
@@ -35,7 +35,7 @@ The recording shows Compact spacing with Collapsed Categories enabled.
 ## Find a view
 
 1. Configure the connection in Advanced Settings > API key.
-2. Open Kanban View Formulas from the sidebar. With Settings Future Proof UI Refresh enabled, use Preferences > Kanban > Kanban View Formulas.
+2. Open Preferences > Kanban > Kanban View Formulas.
 3. Use the magnifier to search, the filter to choose a space, or Reload to discover available views.
 4. Select a view. Its space, source name, and source kind help distinguish duplicate names.
 

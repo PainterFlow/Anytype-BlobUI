@@ -713,11 +713,9 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .advanced-tabs::-webkit-scrollbar { height: 4px; }
 .advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
 .advanced-tabs::-webkit-scrollbar-button { display: none; }
-:root[data-settings-v21="true"] .sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; }
+.sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; }
 .v21-section-link { font: inherit; }
 
-.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
-.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .markdown-video, .markdown-video * { border: 0; outline: 0; box-shadow: none; }
 .markdown-video { display: block; position: relative; width: 100%; margin: 12px 0 18px; overflow: hidden; border-radius: 10px; background: #111; color: #fff; line-height: 1; }
 .markdown-video video { display: block; width: 100%; max-height: 520px; min-height: 160px; object-fit: contain; }
@@ -767,7 +765,7 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 #advanced-app-panel .blob-backup-button { flex-shrink: 0; }
 #advanced-app-panel .blob-backup-status:empty { margin: 0; }
 
-/* Shared Settings and Docs sidebar experiment. */
+/* Shared Settings and Docs sidebar. */
 .sidebar, .documentation-layout { position: relative; }
 .sidebar { min-width: 0; }
 .sidebar-resizer { position: absolute; z-index: 1; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
@@ -776,7 +774,6 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 .sidebar-resizer[hidden] { display: none; }
 .sidebar-resizer:focus-visible { outline: none; }
 .sidebar-resizing, .sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
-.sidebar-experiment-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 :root[data-sidebar-collapsed="true"] .sidebar .nav-item > span,
 :root[data-sidebar-collapsed="true"] .sidebar .documentation-item-label,
@@ -813,5 +810,3 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 
 .kanban-select-option-description { color: var(--text-secondary); font-size: 12px; line-height: 16px; }
 .kanban-select-option:has(.kanban-select-option-description) { height: auto; min-height: 52px; padding-block: 6px; }
-
-#advanced-experiments-panel .settings-list { overflow: visible; }

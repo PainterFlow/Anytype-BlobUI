@@ -6,7 +6,7 @@ const source = path.resolve(__dirname, '../ui');
 
 // This suite creates its own browser and a mocked bridge. It never attaches to
 // a running Settings instance and cannot change a native API connection.
-test('settings experiment uses Docs disclosures, section icons and full-width tabs without search', async () => {
+test('standard settings uses Docs disclosures, section icons and full-width tabs without search', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
@@ -23,7 +23,7 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
       window.mockCalls = [];
       window.__TAURI__ = { core: { invoke: async (command, args) => {
         window.mockCalls.push(command);
-        if (command === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: {}, hasSavedApiKey: true, apiIp: '127.0.0.1', apiPort: 31009 };
+        if (command === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: { settingsV21Enabled: false }, hasSavedApiKey: true, apiIp: '127.0.0.1', apiPort: 31009 };
         if (command === 'get_updater_state') return { installDirectory: 'C:/fixture', automaticChecksEnabled: false };
         if (command === 'get_calendar_api_availability') return 'available';
         if (command === 'save_settings') {
@@ -39,20 +39,10 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
       await page.addScriptTag({ path: path.join(source, name[1]) });
     }
     await page.waitForFunction(() => window.appReady);
-    await page.locator('#advanced-nav').click();
-    await page.locator('#advanced-experiments-tab').click();
-    await page.locator('#settings-v21-enabled').check();
-    await page.locator('#save-button').click();
-    await page.waitForFunction(() => window.saved?.settingsV21Enabled === true);
-    await page.locator('#settings-v21-enabled').uncheck();
-    await page.evaluate(() => window.BlobUI.discardChanges());
-    assert.equal(await page.locator('html').getAttribute('data-settings-v21'), 'true');
-    await page.locator('#settings-v21-enabled').uncheck();
-    await page.evaluate(() => { window.failSave = true; });
-    await page.locator('#save-button').click();
-    await page.waitForFunction(() => document.getElementById('status-message').textContent.includes('fixture save failed'));
-    await page.evaluate(() => { window.failSave = false; window.BlobUI.discardChanges(); });
-    assert.equal(await page.locator('input[type="search"]:not(#formula-search):not(#calendar-search):not(#codex-search), .v21-search').count(), 0);
+    assert.equal(await page.locator('#settings-v21-enabled, #advanced-experiments-tab').count(), 0);
+    assert.equal(await page.locator('.preference-tabs').isVisible(), true);
+    assert.equal(await page.locator('#save-button').isVisible(), false);
+    assert.equal(await page.locator('#preferences-page input[type="search"], #advanced-page input[type="search"], #accessibility-page input[type="search"], .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
     assert.equal(await page.locator('.v21-section-link svg').count(), 10);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);
@@ -89,19 +79,17 @@ test('settings experiment uses Docs disclosures, section icons and full-width ta
     assert.equal(await page.locator('.app-backup-box #create-blob-backup-button').count(), 1);
     await page.locator('#advanced-api-tab').click();
     await page.locator('#advanced-api-key').fill('fixture-pending-key');
-    await page.locator('#advanced-experiments-tab').click(); await page.locator('#settings-v21-enabled').uncheck();
     await page.locator('#preferences-nav').click();
+    await page.locator('#preference-tab-3').click();
     assert.equal(await page.locator('#font-family').inputValue(), 'Arial');
     assert.equal(await page.locator('#advanced-api-key').inputValue(), 'fixture-pending-key');
-    assert.equal(await page.locator('.preference-tabs').isVisible(), false);
-    await page.locator('#advanced-nav').click(); await page.locator('#advanced-experiments-tab').click();
-    await page.locator('#settings-v21-enabled').check();
-    await page.locator('#preferences-nav').click(); await page.locator('#preference-tab-0').click();
+    assert.equal(await page.locator('.preference-tabs').isVisible(), true);
+    await page.locator('#preference-tab-0').click();
     await page.waitForFunction(() => {
       const panel = document.getElementById('preferences-section-links');
       return panel.getBoundingClientRect().height >= panel.firstElementChild.scrollHeight;
     });
-    for (const theme of ['dark', 'light']) {
+    for (const theme of ['dark']) {
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
       await page.screenshot({ path: path.resolve(__dirname, `../../.test-run/settings-v21-revised-${theme}.png`) });
     }

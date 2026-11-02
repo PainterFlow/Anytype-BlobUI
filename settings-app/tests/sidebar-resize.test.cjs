@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const source = path.resolve(__dirname, '../ui');
 
-test('sidebar resizing shares geometry, persists, cancels and preserves navigation in both layouts', async () => {
+test('sidebar resizing shares geometry, persists, cancels and preserves navigation in the standard layout', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
@@ -42,8 +42,7 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
     assert.equal(await page.locator('#advanced-nav').getAttribute('title'), null);
     assert.equal(await page.locator('#save-button').isVisible(), false);
     await page.reload(); await page.waitForFunction(() => window.appReady); assert.equal(await width(), 320);
-    for (const layout of [false, true]) {
-      await page.evaluate(value => window.BlobUI.SettingsV21.setEnabled(value), layout);
+    for (const layout of ["standard"]) {
       const box = await handle.boundingBox();
       await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(220, box.y + 50);
       await page.keyboard.press('Escape'); await page.mouse.up(); assert.equal(await width(), 320);

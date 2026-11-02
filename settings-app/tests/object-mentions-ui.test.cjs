@@ -86,8 +86,8 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(await page.evaluate(()=>window.saved.codexIntegration.objectMentions.spaces.all),false);
     await page.evaluate(()=>window.BlobUI.discardChanges());
     await page.screenshot({path:path.join(fixture,'settings-dark.png'),fullPage:true});
-    await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();
-    await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();
+
+    if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();
     assert.equal(await spaces.isVisible(),true);await page.setViewportSize({width:620,height:950});
     await page.screenshot({path:path.join(fixture,'settings-refreshed-dark.png'),fullPage:true});
     assert.equal(await page.evaluate(()=>document.querySelector('.page-content').scrollWidth<=document.querySelector('.page-content').clientWidth),true);

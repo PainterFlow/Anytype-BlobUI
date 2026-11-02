@@ -2,7 +2,7 @@
   "use strict";
   const UI = root.BlobUI = root.BlobUI || {};
   const doc = root.document;
-  let enabled = false, controller, api, preferenceTabs, preferenceTabController;
+  let controller, api, preferenceTabs, preferenceTabController;
   const panels = [], navButtons = [];
   const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
   const sectionIcons = {
@@ -16,7 +16,6 @@
     "Space banner": '<rect x="2" y="4" width="16" height="12" rx="2"/><circle cx="7" cy="8" r="1"/><path d="m3 15 5-5 3 3 3-4 4 6"/>',
     "API key": '<circle cx="7" cy="7" r="4"/><path d="m10 10 7 7m-3-3 2-2m-4 0 2-2"/>',
     "App Settings": '<path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2" fill="var(--sidebar)"/><circle cx="13" cy="10" r="2" fill="var(--sidebar)"/><circle cx="8" cy="15" r="2" fill="var(--sidebar)"/>',
-    Experiments: '<path d="M7 2h6M8 2v6l-5 8a1 1 0 0 0 1 2h12a1 1 0 0 0 1-2l-5-8V2M6 12h8"/>',
   };
   function make(tag, className, text) {
     const node = doc.createElement(tag);
@@ -60,8 +59,8 @@
       links.hidden = true; button.after(links);
       const inner = make("div", "documentation-children-inner"); inner.dataset.disclosureContent = ""; links.append(inner);
       button.dataset.disclosureToggle = ""; button.setAttribute("aria-controls", links.id); button.setAttribute("aria-expanded", "false");
-      const groups = page === "codex" ? [0,1,2].map(index => doc.getElementById("codex-panel-" + index)) : page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel"), doc.getElementById("advanced-experiments-panel")];
-      const labels = page === "codex" ? ["Settings", "Permissions", "Projects"] : page === "preferences" ? preferenceLabels : ["API key", "App Settings", "Experiments"];
+      const groups = page === "codex" ? [0,1,2].map(index => doc.getElementById("codex-panel-" + index)) : page === "preferences" ? panels : [doc.getElementById("advanced-api-panel"), doc.getElementById("advanced-app-panel")];
+      const labels = page === "codex" ? ["Settings", "Permissions", "Projects"] : page === "preferences" ? preferenceLabels : ["API key", "App Settings"];
       groups.forEach((target, tab) => {
         const label = labels[tab];
         const link = UI.Components.NavigationItem({ label, icon: icon(label),
@@ -72,27 +71,14 @@
       });
     }
     controller = UI.Components.Disclosure({ container: navigation, onToggle({ toggle, expanded }) {
-      if (!enabled) { if (expanded) controller.setExpanded(toggle, false); return; }
       if (expanded) navButtons.forEach(button => { if (button !== toggle) controller.setExpanded(button, false); });
     } });
     doc.getElementById("accessibility-nav").addEventListener("click", () => navButtons.forEach(button => controller.setExpanded(button, false)));
-    setEnabled(false);
-  }
-  function setEnabled(value) {
-    enabled = value === true;
-    if (!api) return;
-    const active = doc.activeElement;
-    doc.documentElement.dataset.settingsV21 = String(enabled);
-    doc.querySelector(".preference-tabs").hidden = !enabled;
+    bar.hidden = false;
     panels.forEach((panel, index) => {
-      if (enabled) { panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", preferenceTabs[index].id); }
-      else { panel.removeAttribute("role"); panel.setAttribute("aria-labelledby", panel.querySelector("h2").id); }
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", preferenceTabs[index].id);
     });
-    preferenceTabController.setEnabled(enabled);
-    if (!enabled) {
-      navButtons.forEach(button => controller.setExpanded(button, false));
-      if (active?.closest(".preference-tabs,.v21-section-links")) doc.querySelector('.nav-item.active').focus();
-    }
   }
-  UI.SettingsV21 = { init, setEnabled, refreshTabs() { preferenceTabController?.refresh(); } };
+  UI.SettingsV21 = { init, refreshTabs() { preferenceTabController?.refresh(); } };
 })(window);

@@ -19,7 +19,7 @@ test('mounted screens retain accessible controls, ordering and initial state', a
       const get = id => document.getElementById(id);
       const before = (a, b) => Boolean(get(a).compareDocumentPosition(get(b)) & Node.DOCUMENT_POSITION_FOLLOWING);
       const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
-      const switches = ['include-selections', 'native-accent', 'collapsed-categories', 'calendar-colors-enabled', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'settings-v21-enabled', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled'];
+      const switches = ['include-selections', 'native-accent', 'collapsed-categories', 'calendar-colors-enabled', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled'];
       const fields = ['connection-key', 'connection-port', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'];
       const problems = [];
       for (const node of document.querySelectorAll('[aria-controls], [aria-labelledby], [aria-describedby]')) {

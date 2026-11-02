@@ -300,7 +300,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/settings-v21.js'), 'utf8'), context);
   // Layout is covered by the real-browser suite. Keep the shared tab controller in this form harness.
   context.window.BlobUI.SettingsV21.init = () => {};
-  context.window.BlobUI.SettingsV21.setEnabled = () => {};
   // The formula page has its own browser and storage tests. Keep this form
   // harness independent of its DOM while retaining a stable edit snapshot.
   context.window.BlobUI.CodexPage = {
