@@ -86,9 +86,19 @@ pub fn thread_id(params: &Value) -> Result<Option<String>, String> {
     }
 }
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Response {
     pub result: Option<Value>,
     pub error: Option<String>,
+}
+#[cfg(test)]
+#[test]
+fn bridge_response_rejects_unrecognized_envelopes() {
+    assert!(serde_json::from_value::<Response>(json!({
+        "frame":"response", "version":2, "response":{"result":{"items":[]},"error":null}
+    })).is_err());
+    let response: Response = serde_json::from_value(json!({"result":{"items":[]},"error":null})).unwrap();
+    assert_eq!(response.result.unwrap(), json!({"items":[]}));
 }
 pub fn capabilities() -> Value {
     json!({"tools":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},

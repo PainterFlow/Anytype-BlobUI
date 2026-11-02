@@ -1,5 +1,11 @@
 # BlobUI v1.4.0 - What's new?
 
+## Anyblob 0.2.1
+
+- Detect stale versioned Codex plugin copies and show when a refresh is required.
+- Recover the bridge listener after pipe errors and wait briefly for a restarting bridge before reporting it unavailable.
+- Report incompatible bridge responses as an update requirement.
+
 ## Anyblob 0.2.0
 
 - Added explicit v2 tools for objects, properties, types, templates, collections, queries, views, messages, reactions, widgets and file uploads.

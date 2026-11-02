@@ -565,65 +565,70 @@ pub fn start(_app: tauri::AppHandle) {
     #[cfg(windows)]
     std::thread::spawn(move || {
         use blobui_mcp::transport::{Pipe, CALL_TIMEOUT};
-        let mut listener = match Pipe::listen(true) {
-            Ok(p) => p,
-            Err(_) => {
-                eprintln!("Anyblob bridge could not start.");
-                return;
-            }
-        };
         let active = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         loop {
-            match listener.accept() {
-                Ok(false) => std::thread::sleep(Duration::from_millis(30)),
-                Err(_) => break,
-                Ok(true) => {
-                    let next = match Pipe::listen(false) {
-                        Ok(p) => p,
-                        Err(_) => break,
-                    };
-                    let pipe = std::mem::replace(&mut listener, next);
-                    if active.load(Ordering::Acquire) >= 15 {
-                        drop(pipe);
-                        continue;
-                    }
-                    active.fetch_add(1, Ordering::AcqRel);
-                    let active = active.clone();
-                    std::thread::spawn(move || {
-                        let cancel = AtomicBool::new(false);
-                        let deadline = Instant::now() + CALL_TIMEOUT;
-                        let start = Instant::now();
-                        if let Ok(bytes) =
-                            pipe.receive(&cancel, Instant::now() + Duration::from_secs(5))
-                        {
-                            if let Ok(envelope) = serde_json::from_slice::<Value>(&bytes) {
-                                if envelope["version"]!=blobui_mcp::approval::VERSION {let response=Response{result:None,error:Some(blobui_mcp::approval::UPDATE.into())};let _=pipe.send(&serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}).unwrap(),&cancel,deadline);active.fetch_sub(1,Ordering::AcqRel);return;}
-                                let Ok(request)=serde_json::from_value::<Request>(envelope["request"].clone()) else {active.fetch_sub(1,Ordering::AcqRel);return;};
-                                let operation = request.request.name().to_string();
-                                let id = NEXT.fetch_add(1, Ordering::Relaxed);
-                                let result = dispatch(&pipe, request, || {
-                                    Instant::now() < deadline && pipe.connected()
-                                });
-                                eprintln!("anyblob request={id} operation={operation} elapsed_ms={} outcome={}",start.elapsed().as_millis(),if result.is_ok(){"allowed"}else{"denied"});
-                                let response = match result {
-                                    Ok(value) => Response {
-                                        result: Some(value),
-                                        error: None,
-                                    },
-                                    Err(error) => Response {
-                                        result: None,
-                                        error: Some(error),
-                                    },
-                                };
-                                if let Ok(bytes) = serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}) {
-                                    let _ = pipe.send(&bytes, &cancel, deadline);
+            let mut listener = match Pipe::listen(active.load(Ordering::Acquire) == 0) {
+                Ok(p) => p,
+                Err(error) => {
+                    eprintln!("Anyblob bridge could not start: {error}");
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            };
+            loop {
+                match listener.accept() {
+                    Ok(false) => std::thread::sleep(Duration::from_millis(30)),
+                    Err(error) => { eprintln!("Anyblob bridge accept failed: {error}"); break; },
+                    Ok(true) => {
+                        let next = match Pipe::listen(false) {
+                            Ok(p) => p,
+                            Err(error) => { eprintln!("Anyblob bridge listener failed: {error}"); break; },
+                        };
+                        let pipe = std::mem::replace(&mut listener, next);
+                        if active.load(Ordering::Acquire) >= 15 {
+                            drop(pipe);
+                            continue;
+                        }
+                        active.fetch_add(1, Ordering::AcqRel);
+                        let active = active.clone();
+                        std::thread::spawn(move || {
+                            let cancel = AtomicBool::new(false);
+                            let deadline = Instant::now() + CALL_TIMEOUT;
+                            let start = Instant::now();
+                            if let Ok(bytes) =
+                                pipe.receive(&cancel, Instant::now() + Duration::from_secs(5))
+                            {
+                                if let Ok(envelope) = serde_json::from_slice::<Value>(&bytes) {
+                                    if envelope["version"]!=blobui_mcp::approval::VERSION {let response=Response{result:None,error:Some(blobui_mcp::approval::UPDATE.into())};let _=pipe.send(&serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}).unwrap(),&cancel,deadline);active.fetch_sub(1,Ordering::AcqRel);return;}
+                                    let Ok(request)=serde_json::from_value::<Request>(envelope["request"].clone()) else {active.fetch_sub(1,Ordering::AcqRel);return;};
+                                    let operation = request.request.name().to_string();
+                                    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+                                    let result = dispatch(&pipe, request, || {
+                                        Instant::now() < deadline && pipe.connected()
+                                    });
+                                    eprintln!("anyblob request={id} operation={operation} elapsed_ms={} outcome={}",start.elapsed().as_millis(),if result.is_ok(){"allowed"}else{"denied"});
+                                    let response = match result {
+                                        Ok(value) => Response {
+                                            result: Some(value),
+                                            error: None,
+                                        },
+                                        Err(error) => Response {
+                                            result: None,
+                                            error: Some(error),
+                                        },
+                                    };
+                                    if let Ok(bytes) = serde_json::to_vec(&blobui_mcp::approval::Frame::Response{version:blobui_mcp::approval::VERSION,response}) {
+                                        let _ = pipe.send(&bytes, &cancel, deadline);
+                                    }
                                 }
                             }
-                        }
-                        active.fetch_sub(1, Ordering::AcqRel);
-                    });
+                            active.fetch_sub(1, Ordering::AcqRel);
+                        });
+                    }
                 }
             }
+            drop(listener);
+            std::thread::sleep(Duration::from_secs(1));
         }
     });
     #[cfg(not(windows))]

@@ -181,10 +181,25 @@ fn installation_status(root: &Path, bytes: &[u8]) -> Result<Value, String> {
     if let Some(name) = catalog["name"].as_str() {
         // A catalog name must be a single directory component before resolving cache paths.
         if !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_".contains(&c)) {
-            let cache = root.join(".codex/plugins/cache").join(name).join("anyblob/local");
-            if package_version(&cache)?.is_some() {
-                tree(&cache)?;
-                refresh = files.iter().any(|(path, data)| fs::read(cache.join(path)).ok().as_deref() != Some(data.as_slice()));
+            let cache_root = root.join(".codex/plugins/cache").join(name).join("anyblob");
+            storage::reject_reparse_path(&cache_root)?;
+            let latest = if cache_root.is_dir() {
+                fs::read_dir(&cache_root).map_err(|_| "Could not inspect the Anyblob cache.")?
+                    .map(|entry| entry.map_err(|_| "Could not inspect the Anyblob cache."))
+                    .collect::<Result<Vec<_>, _>>()?.into_iter()
+                    .filter_map(|entry| entry.file_name().to_str().and_then(|name|
+                        semver::Version::parse(name).ok().map(|version| (version, name.to_owned()))))
+                    .max_by(|a,b| a.0.cmp(&b.0)).map(|(_,name)| name)
+            } else { None };
+            // Codex uses both local and versioned cache directories. Inspect only
+            // relevant releases, since older historical caches may remain on disk.
+            for release in [Some("local"), latest.as_deref()].into_iter().flatten() {
+                let cache = cache_root.join(release);
+                storage::reject_reparse_path(&cache)?;
+                if package_version(&cache)?.is_some() {
+                    tree(&cache)?;
+                    refresh |= files.iter().any(|(path, data)| fs::read(cache.join(path)).ok().as_deref() != Some(data.as_slice()));
+                }
             }
         }
     }
@@ -318,6 +333,19 @@ mod tests {
         assert_eq!(stale["codexRefreshRequired"], true);
         install_at(&root, PAYLOAD).unwrap();
         assert_eq!(fs::read(cache.join("README.md")).unwrap(), b"old release content");
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], true);
+        let old_cache = cache.with_file_name("0.0.1");
+        fs::rename(&cache, &old_cache).unwrap();
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], true);
+        let latest_cache = cache.with_file_name(current["bundledVersion"].as_str().unwrap());
+        let (_, files) = payload(PAYLOAD).unwrap();
+        for (relative, bytes) in files {
+            let path = latest_cache.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], false);
+        fs::write(latest_cache.join("README.md"), b"stale versioned copy").unwrap();
         assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], true);
         fs::remove_dir_all(root).unwrap();
     }

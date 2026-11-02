@@ -179,12 +179,17 @@ mod windows {
             }
         }
         pub fn connect_wait(cancel:&AtomicBool, deadline:Instant)->io::Result<Self> {
+            let startup_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
             loop {
                 stopped(cancel,deadline)?;
                 match Self::connect() {
                     Ok(pipe)=>return Ok(pipe),
                     Err(error) if error.raw_os_error()==Some(ERROR_PIPE_BUSY as i32)=>{
                         // The listener creates another instance after accepting the previous one.
+                        std::thread::sleep(Duration::from_millis(10));
+                    },
+                    Err(error) if error.raw_os_error()==Some(ERROR_FILE_NOT_FOUND as i32)
+                        && Instant::now() < startup_deadline => {
                         std::thread::sleep(Duration::from_millis(10));
                     },
                     Err(_)=>return Err(io::Error::new(io::ErrorKind::NotConnected,"BlobUI is unavailable. Start BlobUI and enable Anyblob in Integrations > Anyblob.")),
@@ -307,6 +312,14 @@ mod tests {
         cancel.store(true,Ordering::Release);
         assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_secs(5)).err().unwrap().kind(),io::ErrorKind::TimedOut);
         drop((second,next,client,listener));
+        // A temporarily absent listener may recover without replaying a request.
+        let waiting = std::thread::spawn(|| Pipe::connect_wait(
+            &AtomicBool::new(false), Instant::now() + Duration::from_secs(3)));
+        std::thread::sleep(Duration::from_millis(50));
+        let recovered = Pipe::listen(true).unwrap();
+        let client = waiting.join().unwrap().expect("Wait for a restarting bridge");
+        assert!(recovered.accept().unwrap());
+        drop((client, recovered));
     }
 }
 pub fn call(request: &crate::Request, cancel: &AtomicBool) -> Result<crate::Response, String> {
@@ -340,6 +353,9 @@ pub fn call_with_approval(
                 crate::approval::Frame::Response { version, response }
                     if version == crate::approval::VERSION =>
                 {
+                    if response.result.is_none() && response.error.is_none() {
+                        return Err(crate::approval::UPDATE.into());
+                    }
                     return Ok(response)
                 }
                 crate::approval::Frame::ApprovalRequest {
