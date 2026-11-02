@@ -43,6 +43,15 @@ fn get(
 fn base(space: &str) -> String {
     format!("/v2/spaces/{}", encode(space))
 }
+fn creation_prompt(req: &ContentRequest, source: &SourcePermission) -> Operation {
+    let mut content = req.clone();
+    content.arguments["_approval_context"] = json!({
+        "space": if source.space.trim().is_empty() { &source.space_id } else { &source.space },
+        "destination": if source.name.trim().is_empty() { &source.id } else { &source.name },
+        "destination_kind": source.kind,
+    });
+    Operation::Content { content }
+}
 fn source_path(source: &SourcePermission) -> String {
     format!(
         "{}/{}/{}",
@@ -873,6 +882,23 @@ mod tests {
         }
     }
     #[test]
+    fn creation_approval_uses_saved_destination_and_space_names() {
+        for kind in ["query", "collection"] {
+            let mut p = project(source(kind, "createDelete"));
+            p.sources[0].permission.approval = "alwaysAsk".into();
+            let responses = if kind == "query" { query_reads() } else { vec![doc(kind)] };
+            let (client, capture, server) = fixture(responses);
+            let error = dispatch(&client, "project", &p, &req(kind), &|| Ok(()), &|op, _| {
+                assert_eq!(blobui_mcp::approval::describe(op), format!(
+                    "An agent wants to create object 'Created' in {kind} 'Destination' in Work."));
+                Err("denied".into())
+            }).unwrap_err();
+            assert!(error.contains("denied"));
+            server.join().unwrap();
+            assert!(capture.lock().unwrap().iter().all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+        }
+    }
+    #[test]
     fn approval_denial_cancellation_files_and_schema_payloads_do_not_write() {
         let request = req("collection");
         let mut p = project(source("collection", "createDelete"));
@@ -1157,9 +1183,7 @@ pub fn dispatch(
             }
             if source.permission.approval == "alwaysAsk" {
                 approve(
-                    &Operation::Content {
-                        content: req.clone(),
-                    },
+                    &creation_prompt(req, source),
                     check,
                 )?;
             }
@@ -1169,9 +1193,7 @@ pub fn dispatch(
     }
     if req.requires_confirmation(&source.permission.approval) {
         approve(
-            &Operation::Content {
-                content: req.clone(),
-            },
+            &creation_prompt(req, source),
             check,
         )?;
     }

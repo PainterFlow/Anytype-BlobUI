@@ -81,6 +81,11 @@ pub fn describe(op: &crate::Operation) -> String {
                 .or_else(|| args.pointer("/body/name").and_then(Value::as_str))
                 .or_else(|| content.target());
             let kind = context["type"].as_str();
+            let location = match (context["destination_kind"].as_str(), context["destination"].as_str()) {
+                (Some(kind @ ("query" | "collection")), Some(name)) =>
+                    format!("{} '{}' in {}", kind, preview(name), preview(space)),
+                _ => preview(space),
+            };
             let mut text = format!(
                 "An agent wants to {}{}{} in {}.",
                 content.tool.replace('_', " "),
@@ -88,7 +93,7 @@ pub fn describe(op: &crate::Operation) -> String {
                     .unwrap_or_default(),
                 kind.map(|t| format!(" of the type '{}'", preview(t)))
                     .unwrap_or_default(),
-                preview(space)
+                location
             );
             if content.irreversible() {
                 text.push_str(" This action cannot be restored from Bin. Deleting a message can also delete its attachments.");
