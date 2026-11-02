@@ -1,5 +1,13 @@
 # BlobUI v1.4.0 - What's new?
 
+## Anyblob 0.2.4
+
+- Resolve object names from v2 document properties in deletion approval prompts.
+
+## Anyblob 0.2.3
+
+- Approve for me now asks before creation, deletion, and file uploads, including file deletion. Never Ask retains its existing behavior.
+
 ## Anyblob 0.2.2
 
 - Use Codex's Accept button without a duplicate confirmation control.

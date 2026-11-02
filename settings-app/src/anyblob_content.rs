@@ -143,7 +143,10 @@ impl Prepared {
         if let Some(id) = self.request.target() {
             let path = format!("/v2/spaces/{}/objects/{}?ids=full", crate::api::encode_segment(space), crate::api::encode_segment(id));
             if let Ok(row) = client.request("GET", &path, None) {
-                context["name"] = row["name"].clone();
+                context["name"] = row.pointer("/properties/name")
+                    .and_then(Value::as_str).filter(|name| !name.trim().is_empty())
+                    .or_else(|| row["name"].as_str().filter(|name| !name.trim().is_empty()))
+                    .map(|name| json!(name)).unwrap_or(Value::Null);
                 context["type"] = row["type"].get("name").unwrap_or(&row["type"]).clone();
             }
         }
@@ -625,6 +628,26 @@ mod tests {
             requests,
             server,
         )
+    }
+    #[test]
+    fn deletion_prompt_uses_document_property_name() {
+        for document in [
+            json!({"id":"o","type":"page","properties":{"name":"Approval prompt test"}}),
+            json!({"id":"o","type":"page","name":"Approval prompt test"}),
+        ] {
+            let (client, requests, server) = fixture(vec![
+                json!({"data":[{"id":"s","name":"Codex Test"}],"has_more":false}),
+                document,
+            ]);
+            let prepared = prepared(content("delete_object", json!({"space_id":"s","object_id":"o"})));
+            let prompt = prepared.approval_prompt(&client, &|| Ok(())).unwrap();
+            assert_eq!(blobui_mcp::approval::describe(&prompt),
+                "An agent wants to delete object 'Approval prompt test' of the type 'page' in Codex Test.");
+            server.join().unwrap();
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(String::from_utf8_lossy(&requests[1]).starts_with("GET /v2/spaces/s/objects/o?ids=full "));
+        }
     }
     #[test]
     fn access_levels_work_without_content_opt_in() {

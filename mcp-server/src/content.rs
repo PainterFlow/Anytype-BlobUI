@@ -40,6 +40,11 @@ impl ContentRequest {
         self.specification()
             .is_ok_and(|s| s["irreversible"] == true)
     }
+    /// Creation, deletion and uploads always need one-shot confirmation.
+    pub fn requires_confirmation(&self, approval: &str) -> bool {
+        approval == "alwaysAsk" || self.irreversible()
+            || (approval == "approveForMe" && self.capability() == "createDelete")
+    }
     pub fn capability(&self) -> &str {
         fn contains_views(value: &Value) -> bool {
             match value {
@@ -271,6 +276,27 @@ pub fn validate_schema(schema: &Value, value: &Value, path: &str) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn creation_deletion_and_uploads_always_require_confirmation() {
+        for spec in catalog() {
+            let request = ContentRequest {
+                tool: spec["name"].as_str().unwrap().into(),
+                arguments: json!({}),
+            };
+            assert_eq!(request.requires_confirmation("approveForMe"),
+                spec["capability"] == "createDelete" || spec["irreversible"] == true,
+                "{}", request.tool);
+            assert_eq!(request.requires_confirmation("fullAccess"), spec["irreversible"] == true);
+            assert!(request.requires_confirmation("alwaysAsk"));
+        }
+        for op in ["insert_view", "delete_view"] {
+            let request = ContentRequest {
+                tool: "patch_object".into(),
+                arguments: json!({"body":{"ops":[{"op":op}]}}),
+            };
+            assert!(request.requires_confirmation("approveForMe"));
+        }
+    }
     #[test]
     fn catalog_has_no_arbitrary_routes_or_admin_tools() {
         assert_eq!(catalog().len(), 40);

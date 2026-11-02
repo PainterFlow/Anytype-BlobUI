@@ -483,7 +483,7 @@ fn dispatch_resolved_with(
         }
         let mut prepared=crate::anyblob_content::prepare(&client,content,&effective,scope.as_ref(),&check)?;
         let permission=crate::anyblob_content::permission(&effective,scope.as_ref(),content,prepared.files)?;
-        if permission.approval=="alwaysAsk" || content.irreversible() {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
+        if content.requires_confirmation(&permission.approval) {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
         let initial_files=prepared.files;
         let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,initial_files)?;}Ok(())};
         crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
@@ -672,10 +672,12 @@ mod tests {
             let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|_,_|panic!("Denied requests must not prompt"),||Ok(None));
             assert!(result.unwrap_err().contains("Access denied"));
         }
-        let config=config("createDelete","alwaysAsk");
+        for approval in ["alwaysAsk", "approveForMe"] {
+        let config=config("createDelete",approval);
         let prompted=std::cell::Cell::new(false);
         let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|op,_|{prompted.set(true);assert_eq!(op.name(),"create_object");Err("User denied mutation".into())},||Ok(None));
         assert!(prompted.get());assert!(result.unwrap_err().contains("User denied mutation"));
+        }
     }
     fn config(access: &str, approval: &str) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":access,"approval":approval}}}))
