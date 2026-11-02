@@ -31,6 +31,8 @@ for ($i=0; $i -lt [BitConverter]::ToUInt16($ico,4); $i++) {
 $frame=$frames | Sort-Object { $_.area } -Descending | Select-Object -First 1
 if (-not $frame) { throw 'The existing app icon has no PNG frame.' }
 [IO.File]::WriteAllBytes((Join-Path $package 'assets/icon.png'),[byte[]]$ico[$frame.offset..($frame.offset+$frame.size-1)])
+& node (Join-Path $workspaceRoot 'codex-plugin/tests/skills.cjs') $package
+if ($LASTEXITCODE -ne 0) { throw 'Anyblob skill validation failed.' }
 & node (Join-Path $workspaceRoot 'codex-plugin/tests/validate.cjs') $package
 if ($LASTEXITCODE -ne 0) { throw 'Anyblob package validation failed.' }
 $zip=Join-Path $dist 'anyblob.zip'
@@ -38,7 +40,32 @@ if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $package '*') -DestinationPath $zip
 $archive=[IO.Compression.ZipFile]::OpenRead($zip)
 try {
-    $expected=@('.codex-plugin/plugin.json','.mcp.json','README.md','assets/icon.png','bin/blobui-mcp.exe')
+    $expected=@(
+        '.codex-plugin/plugin.json',
+        '.mcp.json',
+        'README.md',
+        'assets/icon.png',
+        'bin/blobui-mcp.exe',
+        'references/workflow-rules.md',
+        'skills/search-and-answer/SKILL.md',
+        'skills/search-and-answer/agents/openai.yaml',
+        'skills/capture-and-organize/SKILL.md',
+        'skills/capture-and-organize/agents/openai.yaml',
+        'skills/maintain-pages/SKILL.md',
+        'skills/maintain-pages/agents/openai.yaml',
+        'skills/plan-projects/SKILL.md',
+        'skills/plan-projects/agents/openai.yaml',
+        'skills/review-project-progress/SKILL.md',
+        'skills/review-project-progress/agents/openai.yaml',
+        'skills/process-meeting-notes/SKILL.md',
+        'skills/process-meeting-notes/agents/openai.yaml',
+        'skills/manage-types-and-templates/SKILL.md',
+        'skills/manage-types-and-templates/agents/openai.yaml',
+        'skills/build-queries-and-views/SKILL.md',
+        'skills/build-queries-and-views/agents/openai.yaml',
+        'skills/audit-organization/SKILL.md',
+        'skills/audit-organization/agents/openai.yaml'
+    )
     $actual=@($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') } | ForEach-Object { $_.FullName.Replace('\','/') })
     if(@(Compare-Object $expected $actual).Count -ne 0){throw 'The ZIP does not contain the exact validated plugin files.'}
 } finally {$archive.Dispose()}

@@ -1,0 +1,9 @@
+interface:
+  display_name: "Search and answer"
+  short_description: "Search and answer with permitted Anytype content"
+  default_prompt: "Use $search-and-answer to help with my Anytype content."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "anyblob"
+      description: "Anytype content through the local BlobUI bridge"

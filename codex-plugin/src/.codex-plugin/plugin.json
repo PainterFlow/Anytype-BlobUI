@@ -1,8 +1,9 @@
 {
   "name": "anyblob",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Read and manage permitted Anytype content through BlobUI on Windows.",
   "requires_local_executor": true,
+  "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Anyblob",

@@ -14,7 +14,7 @@ assert(ico.includes(png), 'Mention icon must match the existing app logo');
 const main = fs.readFileSync(path.join(root, 'mcp-server/src/main.rs'), 'utf8');
 assert(main.includes('"icons":[{"src":include_str!("icon-data-uri.txt"),"mimeType":"image/png","sizes":["256x256"]}]'), 'Initialization must advertise the embedded server icon');
 const plugin = JSON.parse(fs.readFileSync(path.join(root, 'codex-plugin/src/.codex-plugin/plugin.json')));
-assert.equal(plugin.version, '0.2.12');
+assert.equal(plugin.version, '0.2.13');
 for (const relative of ['mcp-server/Cargo.toml', 'mcp-server/Cargo.lock', 'settings-app/Cargo.lock']) {
   const source = fs.readFileSync(path.join(root, relative), 'utf8');
   assert(source.includes('name = "blobui-mcp"\nversion = "0.2.12"'), relative);

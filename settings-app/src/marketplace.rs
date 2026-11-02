@@ -9,12 +9,31 @@ use std::{
 };
 static INSTALL: Mutex<()> = Mutex::new(());
 const PAYLOAD: &[u8] = include_bytes!("../../codex-plugin/dist/marketplace-payload.json");
-const FILES: [&str; 5] = [
+const FILES: [&str; 24] = [
     ".codex-plugin/plugin.json",
     ".mcp.json",
     "README.md",
     "assets/icon.png",
     "bin/blobui-mcp.exe",
+    "references/workflow-rules.md",
+    "skills/search-and-answer/SKILL.md",
+    "skills/search-and-answer/agents/openai.yaml",
+    "skills/capture-and-organize/SKILL.md",
+    "skills/capture-and-organize/agents/openai.yaml",
+    "skills/maintain-pages/SKILL.md",
+    "skills/maintain-pages/agents/openai.yaml",
+    "skills/plan-projects/SKILL.md",
+    "skills/plan-projects/agents/openai.yaml",
+    "skills/review-project-progress/SKILL.md",
+    "skills/review-project-progress/agents/openai.yaml",
+    "skills/process-meeting-notes/SKILL.md",
+    "skills/process-meeting-notes/agents/openai.yaml",
+    "skills/manage-types-and-templates/SKILL.md",
+    "skills/manage-types-and-templates/agents/openai.yaml",
+    "skills/build-queries-and-views/SKILL.md",
+    "skills/build-queries-and-views/agents/openai.yaml",
+    "skills/audit-organization/SKILL.md",
+    "skills/audit-organization/agents/openai.yaml",
 ];
 fn profile() -> Result<PathBuf, String> {
     if cfg!(test) {
@@ -385,6 +404,24 @@ mod tests {
         let after: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         assert_eq!(after, v);
         assert!(installed(&root, PAYLOAD).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn skills_are_installed_and_missing_files_require_update() {
+        let root = root();
+        install_at(&root, PAYLOAD).unwrap();
+        let package = root.join(".codex/plugins/anyblob");
+        for relative in FILES.iter().filter(|p| p.starts_with("skills/") || p.starts_with("references/")) {
+            assert!(!fs::read(package.join(relative)).unwrap().is_empty());
+        }
+        let skill = package.join("skills/maintain-pages/SKILL.md");
+        fs::remove_file(&skill).unwrap();
+        assert!(!installed(&root, PAYLOAD).unwrap());
+        install_at(&root, PAYLOAD).unwrap();
+        assert!(installed(&root, PAYLOAD).unwrap());
+        let mut incomplete: Value = serde_json::from_slice(PAYLOAD).unwrap();
+        incomplete["files"].as_object_mut().unwrap().remove("skills/maintain-pages/SKILL.md");
+        assert!(payload(&serde_json::to_vec(&incomplete).unwrap()).is_err());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
