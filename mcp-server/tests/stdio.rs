@@ -33,7 +33,7 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         "anyblob"
     );
     let tools = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
-    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 45);
+    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 57);
     let mentions=&tools["result"]["tools"][0];
     assert_eq!(mentions["name"],"search_mentions");
     assert_eq!(mentions["_meta"]["ui"]["visibility"],json!(["app"]));

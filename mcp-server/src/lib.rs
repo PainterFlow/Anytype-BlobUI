@@ -6,10 +6,12 @@ pub mod approval;
 pub mod credential;
 pub mod content;
 pub mod sources;
+pub mod blobui;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    Blobui { blobui: blobui::BlobuiRequest },
     Content { content: content::ContentRequest },
     SearchMentions { query: String },
     ListSpaces {},
@@ -41,6 +43,7 @@ impl Operation {
                 && ![".", ".."].contains(&value)
         }
         match self {
+            Self::Blobui { blobui } => blobui.validate(),
             Self::Content { content } => content.validate(),
             Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
             Self::ListSpaces{} => Ok(()),
@@ -51,6 +54,7 @@ impl Operation {
     }
     pub fn name(&self) -> &str {
         match self {
+            Self::Blobui { blobui } => &blobui.tool,
             Self::Content { content } => &content.tool,
             Self::SearchMentions { .. } => "search_mentions",
             Self::ListSpaces {} => "list_spaces",
@@ -60,6 +64,7 @@ impl Operation {
     }
     pub fn space(&self) -> Option<&str> {
         match self {
+            Self::Blobui { blobui } => blobui.arguments["space_id"].as_str(),
             Self::Content { content } => content.arguments["space_id"].as_str(),
             Self::ListSpaces {} | Self::SearchMentions { .. } => None,
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
@@ -133,9 +138,15 @@ pub fn tools() -> Value {
         {"name":"read_object","description":"Read an explicit object as properties and Markdown. Attachments remain references.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"annotations":annotations}
     ]);
     tools.as_array_mut().unwrap().extend(content::tools());
+    tools.as_array_mut().unwrap().extend(blobui::tools());
     tools
 }
 pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
+    if blobui::NAMES.contains(&name) {
+        let blobui = blobui::BlobuiRequest {tool:name.into(), arguments};
+        blobui.validate()?;
+        return Ok(Operation::Blobui {blobui});
+    }
     if content::spec(name).is_some() {
         let content = content::ContentRequest { tool: name.into(), arguments };
         content.validate()?;

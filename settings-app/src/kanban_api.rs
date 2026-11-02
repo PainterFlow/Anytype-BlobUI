@@ -408,6 +408,50 @@ impl Client {
         })
     }
 
+    pub(crate) fn calendar_members(&self,target:&Target,fields:&[String],authorize:&impl Fn(&str)->Result<(),String>) -> Result<Vec<Value>,String> {
+        target.validate()?;authorize(&target.object_id)?;
+        let document=self.calendar_document(&format!("/v2/spaces/{}/objects/{}?ids=full&include=blocks,views",enc(&target.space_id),enc(&target.object_id)))?;
+        if required(&document,"id")?!=target.object_id {return Err("Anytype returned a different calendar identity.".into());}
+        let block=document["blocks"].as_array().and_then(|b|b.iter().find(|b|b["id"]==target.block_id)).ok_or("Calendar block is unavailable.")?;
+        let view=block["views"].as_array().and_then(|v|v.iter().find(|v|v["id"]==target.view_id)).ok_or("Calendar view is unavailable.")?;
+        if view["type"]!="calendar" && view["layout"]!="calendar" {return Err("The selected view is not a calendar.".into());}
+        if let Some(id)=block["object_id"].as_str(){authorize(id)?;}
+        let source=self.membership_source(&target.space_id,&document,block)?;
+        let exposed=self.source_views(&target.space_id,&source)?;
+        let view=exposed_view(target,&exposed)?;
+        if view["type"]!="calendar" && view["layout"]!="calendar" {return Err("The API view is not a calendar.".into());}
+        let rows=if source.kind=="types" {self.pages("POST",&format!("/v2/spaces/{}/search?ids=full",enc(&target.space_id)),Some(&type_view_search(&source.document,view,fields)?))?}else{
+            self.pages("GET",&format!("/v2/spaces/{}/{}/{}/objects?ids=full&view={}&fields={}",enc(&target.space_id),source.kind,enc(&source.object_id),enc(&required(view,"id")?),enc(&fields.join(","))),None)?
+        };
+        for row in &rows {authorize(&required(row,"id")?)?;} Ok(rows)
+    }
+    pub(crate) fn discover_type_views_in_space(&self,space:&str,authorize:&impl Fn(&str)->Result<(),String>) -> Result<Vec<View>,String> {
+        let properties=self.properties(space)?;
+        let mut views=Vec::new();
+        for row in self.pages("GET",&format!("/v2/spaces/{}/types?ids=full",enc(space)),None)? {
+            let key=required(&row,"key")?;
+            let document=self.board_document(&format!("/v2/spaces/{}/types/{}?ids=full",enc(space),enc(&key)))?;
+            let id=required(&document,"id")?;authorize(&id)?;
+            for block in document["blocks"].as_array().into_iter().flatten() {if let Some(id)=block["object_id"].as_str(){authorize(id)?;}}
+            let found=self.discover_document(space,space,&document,&document)?;
+            if found.unreadable>0{return Err("Incomplete targeted type-view metadata.".into());}
+            views.extend(found.views.into_iter().map(|v|v.into_view(&properties)));
+        } Ok(views)
+    }
+    pub(crate) fn discover_targeted(&self, space: &str, objects: &[String], authorize: &impl Fn(&str) -> Result<(),String>) -> Result<Vec<View>,String> {
+        let properties=self.properties(space)?;
+        let mut views=Vec::new();
+        for id in objects {
+            authorize(id)?;
+            let document=self.document_blocks(space,id)?;
+            if required(&document,"id")?!=*id {return Err("Anytype returned a different discovery target.".into());}
+            for block in document["blocks"].as_array().into_iter().flatten() { if let Some(id)=block["object_id"].as_str() {authorize(id)?;} }
+            let found=self.discover_document(space,space,&document,&document)?;
+            if found.unreadable>0 {return Err("Incomplete targeted Kanban metadata.".into());}
+            views.extend(found.views.into_iter().map(|v|v.into_view(&properties)));
+        }
+        Ok(views)
+    }
     pub fn discover(&self) -> Result<crate::kanban::Catalog, String> {
         let mut views = Vec::new();
         let mut unreadable = 0usize;
@@ -479,8 +523,13 @@ impl Client {
         target: &Target,
         calculator: &Calculator,
     ) -> Result<Vec<CategoryResult>, String> {
+        self.calculate_authorized(target, calculator, &|_| Ok(()))
+    }
+    pub(crate) fn calculate_authorized(&self, target: &Target, calculator: &Calculator, authorize: &impl Fn(&str) -> Result<(),String>) -> Result<Vec<CategoryResult>,String> {
         target.validate()?;
+        authorize(&target.object_id)?;
         let document = self.document_blocks(&target.space_id, &target.object_id)?;
+        if required(&document,"id")?!=target.object_id {return Err("Anytype returned a different board identity.".into());}
         let block = document["blocks"]
             .as_array()
             .and_then(|b| b.iter().find(|b| b["id"] == target.block_id))
@@ -492,6 +541,7 @@ impl Client {
         if raw["type"] != "kanban" && raw["layout"] != "kanban" {
             return Err("This view is no longer a Kanban view.".into());
         }
+        if let Some(id)=block["object_id"].as_str() { authorize(id)?; }
         let source = self.membership_source(&target.space_id, &document, block)?;
         let kind = source.kind;
         let exposed = self.source_views(&target.space_id, &source)?;
@@ -532,7 +582,7 @@ impl Client {
         }) {
             return Err("A calculation property is no longer numeric or boolean, or is unavailable to this view. Choose a replacement property.".into());
         }
-        let mut grouping = self.grouping(target, api_view, &properties)?;
+        let mut grouping = self.grouping(target, api_view, &properties, authorize)?;
         let mut fields = keys;
         fields.push(grouping.property.clone());
         fields.sort();
@@ -564,6 +614,7 @@ impl Client {
             .collect();
         let mut unique = BTreeSet::new();
         for row in rows {
+            authorize(&required(&row, "id")?)?;
             if !unique.insert(required(&row, "id")?) {
                 return Err(
                     "The board changed during pagination. Refresh results to retry.".into(),
@@ -600,6 +651,7 @@ impl Client {
         target: &Target,
         view: &Value,
         properties: &[Property],
+        authorize: &impl Fn(&str)->Result<(),String>,
     ) -> Result<Grouping, String> {
         let (property, format) = grouping_property(view, properties)?;
         let mut grouping = Grouping {
@@ -659,6 +711,7 @@ impl Client {
             .cloned()
             .collect::<Vec<_>>();
         for id in &unresolved_group_ids {
+            authorize(id)?;
             let object = self.document_properties(&target.space_id, id).map_err(|_| {
                 "The API could not resolve a category's exact identity.".to_string()
             })?;

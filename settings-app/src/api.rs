@@ -127,7 +127,7 @@ pub(crate) fn object_property<'a>(object: &'a Value, key: &str, display_name: &s
         .or_else(|| rows.iter().find(|property| property.get("name").and_then(Value::as_str) == Some(display_name)))
 }
 
-fn property_value(raw: &Value) -> Result<Option<Value>, String> {
+pub(crate) fn property_value(raw: &Value) -> Result<Option<Value>, String> {
     if raw.is_string() || raw.is_number() || raw.is_boolean() { return Ok(Some(raw.clone())); }
     let Some(map) = raw.as_object() else { return Ok(None); };
     let format = map.get("format").and_then(Value::as_str).unwrap_or_default();

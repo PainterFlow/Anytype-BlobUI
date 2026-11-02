@@ -150,6 +150,13 @@ impl Scope {
         effective.approval=if contributors.iter().any(|p|p.approval=="alwaysAsk") {"alwaysAsk"} else {"approveForMe"}.into();
         Some(effective)
     }
+    pub(crate) fn whole_space_permission(&self, space: &str, write: bool) -> Option<Permission> {
+        let grants=self.spaces.get(space)?.all_grants.iter().filter(|p|p.permits(if write {"write"}else{"read"})).collect::<Vec<_>>();
+        let mut result=(*grants.first()?).clone();
+        if grants.iter().any(|p|p.approval=="alwaysAsk"){result.approval="alwaysAsk".into();}Some(result)
+    }
+    pub(crate) fn object_ids(&self, space: &str) -> Vec<String> {self.spaces.get(space).map(|s|s.objects.iter().filter(|(_,p)|p.permits("read")).map(|(id,_)|id.clone()).collect()).unwrap_or_default()}
+    pub(crate) fn has_whole_space(&self, space: &str) -> bool {self.spaces.get(space).is_some_and(|s|s.all_grants.iter().any(|p|p.permits("read")))}
     pub fn readable(&self, space: &str, object: &str) -> bool {
         self.permission(space, object).is_some_and(reads)
     }

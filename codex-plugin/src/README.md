@@ -93,6 +93,20 @@ Anyblob 0.2.12 resolves query creation types by either live API key or object ID
 
 ## Bundled skills
 
-Anyblob includes nine skills for search and answers, capture and organization, page maintenance, project planning, progress reviews, meeting notes, types and templates, queries and views, and organization audits. Codex can select matching skills automatically or you can invoke one explicitly, such as $maintain-pages. Each uses the connected tools and saved permissions. BlobUI configuration skills are planned for later.
+Anyblob includes eleven skills for search and answers, capture and organization, page maintenance, project planning, progress reviews, meeting notes, types and templates, queries and views, and organization audits. Codex can select matching skills automatically or you can invoke one explicitly, such as $maintain-pages. Each uses the connected tools and saved permissions. Use $configure-kanban-calculations for category calculations and $configure-calendar-colors for type defaults or view color rules. Both discover permitted targets, inspect saved configuration, preview results, publish, and verify the result.
 
 Discovery follows the [OpenAI skill packaging format](https://developers.openai.com/plugins/build/skills). Shared rules ship in references/workflow-rules.md. Update the marketplace package and refresh the installed plugin to receive the skills.
+
+## BlobUI calculations and calendar colors
+
+Anyblob 0.2.14 adds twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
+
+Use `list_kanban_views` or `list_calendar_color_targets` to discover permitted targets. An optional `object_id` narrows discovery to one source. Read saved configuration and its revision with `get_kanban_calculation` or `get_calendar_color_rule`. Preview with `preview_kanban_calculation` or `preview_calendar_color_rule`. Kanban uses existing typed calculator tokens and stable property keys. Calendar rules use `inherit`, `none`, or `property` with a stable property key. Only single-select and checkbox properties support property colors.
+
+Publish through `set_kanban_calculation` or `set_calendar_color_rule`. Remove through `remove_kanban_calculation` or `remove_calendar_color_rule`. Refresh saved results through `refresh_kanban_calculation` or `refresh_calendar_colors`. These operations require the revision from the last read and support `dry_run`. A conflict requires a new read and preview. Never automatically retry an unknown mutation outcome.
+
+Configuration changes need Read-Write access. Type defaults need a whole-space Read-Write grant. View rules can use eligible project source grants, but every required result object must be readable. Incomplete or inaccessible membership fails the request instead of publishing a partial aggregate. API failures and publication failures retain previous configuration and results. Reads, previews, and dry runs do not migrate files or publish CSS.
+
+Publication updates the selected saved rule and snapshot transactionally. Unrelated settings and rules remain intact. Results include publication status, warnings, revision, and whether a manual reload is needed. Cached timestamps describe saved publication, not a new live calculation. Press Ctrl+R in Anytype after a successful publication. Anyblob never reloads Anytype. Open Settings drafts detect conflicting configuration edits and require reloading Settings before saving.
+
+Board layout, collapsed categories, formula placement, and the Calendar Colors switch remain Settings controls.

@@ -34,7 +34,7 @@ impl Default for Configuration {
     }
 }
 impl Configuration {
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.version != 2
             || !matches!(self.display.as_str(), "balanced" | "spacious")
             || self.definitions.len() > 100
@@ -79,18 +79,22 @@ pub struct Catalog {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Loaded {
+    revision: String,
     configuration: Configuration,
     calculated_at: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Published {
+    revision: String,
     calculated_at: String,
     categories: usize,
     info: Vec<String>,
 }
 #[derive(Serialize)]
 pub struct Evaluation {
+    results: Vec<CategoryResult>,
+    warnings: Vec<String>,
     categories: usize,
 }
 
@@ -102,7 +106,9 @@ fn workspace() -> &'static Path {
 fn path_for_install(install: &Path) -> PathBuf {
     install.join("blob/.blobui-kanban-formulas.json")
 }
-pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {
+pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,true)}
+pub(crate) fn read_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,false)}
+fn load_at_mode(path: &Path, legacy: &Path, prototype: &Path, persist: bool) -> Result<Configuration, String> {
     crate::storage::reject_reparse_path(path)?;
     match fs::metadata(path) {
         Ok(metadata) => {
@@ -114,7 +120,7 @@ pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Co
                 Ok(configuration) => configuration,
                 Err(_) => {
                     let configuration = migrate_legacy_configuration(&bytes)?;
-                    persist_migrated_configuration(path, &configuration)?;
+                    if persist {persist_migrated_configuration(path, &configuration)?;}
                     return Ok(configuration);
                 }
             };
@@ -130,7 +136,7 @@ pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Co
                 Ok(metadata) if metadata.is_file() && metadata.len() <= 1024 * 1024 => {
                     let bytes = fs::read(legacy).map_err(|_| "Could not read the legacy Kanban formula file. It has been left unchanged.".to_string())?;
                     let configuration = migrate_legacy_configuration(&bytes)?;
-                    persist_migrated_configuration(path, &configuration)?;
+                    if persist {persist_migrated_configuration(path, &configuration)?;}
                     return Ok(configuration);
                 }
                 Ok(_) => return Err("The legacy Kanban formula file is unsupported or too large. It has been left unchanged.".into()),
@@ -155,7 +161,7 @@ pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Co
                 }
             }
             if configuration.display != "balanced" {
-                persist_migrated_configuration(path, &configuration)?;
+                if persist {persist_migrated_configuration(path, &configuration)?;}
             }
             Ok(configuration)
         }
@@ -243,6 +249,7 @@ fn publish_at(
     calculate: impl Fn(&Definition) -> Result<Vec<CategoryResult>, String>,
 ) -> Result<Published, String> {
     configuration.validate()?;
+    let revision = crate::anyblob_blobui::revision(&json!(configuration));
     let (_, data_path, css_path, _) = crate::save_paths(install)?;
     let runtime = crate::resolve_runtime_directory_for_install(install)?;
     let mut data = crate::read_json_file(&data_path)?;
@@ -289,6 +296,7 @@ fn publish_at(
         },
     ])?;
     Ok(Published {
+        revision,
         calculated_at,
         categories,
         info: Vec::new(),
@@ -324,6 +332,7 @@ pub fn load_kanban_formulas() -> Result<Loaded, String> {
                 .map(String::from)
         });
     Ok(Loaded {
+        revision: crate::anyblob_blobui::revision(&json!(configuration)),
         configuration,
         calculated_at,
     })
@@ -341,19 +350,24 @@ pub async fn evaluate_kanban_formula(
 ) -> Result<Evaluation, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let calculator = Calculator::parse(&tokens)?;
-        let results = Client::connect()?.calculate(&target, &calculator)?;
+        let client=Client::connect()?;
+        let results = client.calculate(&target, &calculator)?;
         Ok(Evaluation {
             categories: results.len(),
+            results,
+            warnings: client.take_info(),
         })
     })
     .await
     .map_err(|_| "The calculator task stopped. Try again.".to_string())?
 }
 #[tauri::command]
-pub async fn save_kanban_formulas(configuration: Configuration) -> Result<Published, String> {
+pub async fn save_kanban_formulas(configuration: Configuration, revision: Option<String>) -> Result<Published, String> {
     let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
+        let current=load()?;
+        if revision.as_deref()!=Some(crate::anyblob_blobui::revision(&json!(current)).as_str()) {return Err("Saved formulas changed. Reload Settings before saving your draft.".into());}
         publish(configuration)
     })
     .await

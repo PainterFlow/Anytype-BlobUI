@@ -3,7 +3,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(process.argv[2] || 'codex-plugin/src');
 const skills = fs.readdirSync(path.join(root, 'skills')).sort();
-assert.equal(skills.length, 9);
+assert.equal(skills.length, 11);
 for (const name of skills) {
   assert.match(name, /^[a-z0-9-]{1,63}$/);
   const folder = path.join(root, 'skills', name);
@@ -22,4 +22,4 @@ for (const name of skills) {
   assert(metadata.includes('$' + name));
   assert(!metadata.includes('allow_implicit_invocation: false'));
 }
-console.log('Nine skill entrypoints, metadata and packaged references passed.');
+console.log('Eleven skill entrypoints, metadata and packaged references passed.');

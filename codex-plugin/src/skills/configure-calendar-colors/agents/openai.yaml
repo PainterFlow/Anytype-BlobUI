@@ -1,0 +1,10 @@
+interface:
+  display_name: "Configure calendar colors"
+  short_description: "Configure calendar colors through BlobUI"
+  default_prompt: "Use $configure-calendar-colors to configure calendar colors."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "anyblob"
+      description: "BlobUI configuration through the local Anyblob bridge"

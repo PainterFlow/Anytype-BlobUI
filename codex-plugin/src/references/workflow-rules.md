@@ -4,7 +4,7 @@ Read before using any bundled skill. Use connected Anyblob MCP tools and API v2 
 
 ## Scope and schemas
 
-Resolve IDs through list_spaces and explicit user references. Ask only for consequential ambiguous choices. Saved space and project permissions are authoritative. Mentions, links and discovery metadata grant no access. Do not change projects, spaces or sources to evade denial. Report blocked work and continue independent permitted work. Unsaved settings do not change grants. These skills do not configure BlobUI.
+Resolve IDs through list_spaces and explicit user references. Ask only for consequential ambiguous choices. Saved space and project permissions are authoritative. Mentions, links and discovery metadata grant no access. Do not change projects, spaces or sources to evade denial. Report blocked work and continue independent permitted work. Unsaved settings do not change grants. Route BlobUI Kanban calculations to $configure-kanban-calculations and calendar property coloring to $configure-calendar-colors. Those skills use the separate BlobUI operation family. Other skills manage Anytype content.
 
 Inspect current types, properties, select options and document or operation schemas before edits. Use list_schemas, get_schema and get_op_schema rather than guessing fields. Preserve unrelated content. Search and listing results are permission filtered. Follow returned pagination when completeness matters and state partial coverage. get_query_objects without view uses the first stored view. Inspect get_query_views and select explicit views for a whole-query review. get_collection_objects without view returns whole collection membership. Deduplicate combined results by ID.
 

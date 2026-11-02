@@ -1,5 +1,6 @@
 (function (root) {
   "use strict";
+  let configurationRevision = null;
   const UI = root.BlobUI, doc = root.document, C = UI.Components;
   const copy = value => JSON.parse(JSON.stringify(value));
   const defaults = () => ({ version: 1, types: [] });
@@ -185,12 +186,14 @@
       try {
         const result = await bridge("load_calendar_rules");
           if (result && (result.version !== 1 || !Array.isArray(result.types))) throw Error("Unsupported calendar rules.");
-        state = copy(result || defaults()); message.textContent = "";
+        configurationRevision = result?.revision || null;
+        state = copy(result || defaults()); delete state.revision; message.textContent = "";
       } catch (error) { loadFailed = true; message.textContent = "Could not load calendar rules. Reload Settings to retry. " + String(error.message || error); }
       loading = false; render(); return !loadFailed;
     },
     async save(bridge, configuration, settings) {
-      const result = await bridge("save_calendar_rules", { configuration, settings });
+      const result = await bridge("save_calendar_rules", { configuration, settings, revision: configurationRevision });
+      configurationRevision = result?.revision || configurationRevision;
       UI.CatalogBrowser.status(message, "Calendar rules saved. Press Ctrl+R in Anytype to apply.", true);
       (result?.info || []).forEach(text => api.onInfo?.(text)); return result;
     },

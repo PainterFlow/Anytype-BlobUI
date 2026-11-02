@@ -71,7 +71,7 @@ fn required(value: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Calendar discovery received a missing {key}."))
 }
 
-fn type_properties(document: &Value, properties: &[Value]) -> Vec<Value> {
+pub(crate) fn type_properties(document: &Value, properties: &[Value]) -> Vec<Value> {
     let definitions = document.get("property_definitions")
         .or_else(|| document.pointer("/type_settings/property_definitions"));
     let keys: BTreeSet<&str> = definitions.and_then(Value::as_array).into_iter().flatten()
@@ -79,7 +79,7 @@ fn type_properties(document: &Value, properties: &[Value]) -> Vec<Value> {
     properties.iter().filter(|p| matches!(p["format"].as_str(), Some("select" | "checkbox"))
         && p["key"].as_str().is_some_and(|key| keys.contains(key))).cloned().collect()
 }
-fn calendar_views(space: &str, space_name: &str, document: &Value) -> Vec<Value> {
+pub(crate) fn calendar_views(space: &str, space_name: &str, document: &Value) -> Vec<Value> {
     let Some(object_id) = document["id"].as_str() else { return Vec::new(); };
     let mut views = Vec::new();
     for block in document["blocks"].as_array().into_iter().flatten() {
@@ -160,7 +160,7 @@ pub fn discover(client: &Client) -> Result<Value, String> {
 }
 
 // None means fall through. Some(None) explicitly suppresses coloring.
-fn resolve(rule: &Rule, object: &Value, eligible: &[Value], options: &BTreeMap<String, Vec<Value>>) -> Option<Option<String>> {
+pub(crate) fn resolve(rule: &Rule, object: &Value, eligible: &[Value], options: &BTreeMap<String, Vec<Value>>) -> Option<Option<String>> {
     match rule {
         Rule::Inherit => None,
         Rule::None => Some(None),
@@ -256,9 +256,10 @@ pub fn snapshot(key: &str, ip: &str, port: u16, config: &Configuration) -> Resul
 }
 
 #[tauri::command]
-pub fn load_calendar_rules() -> Result<Configuration, String> {
+pub fn load_calendar_rules() -> Result<Value, String> {
     let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-    configuration(&crate::read_json_file(&install.join("blob/data.json"))?)
+    let config=configuration(&crate::read_json_file(&install.join("blob/data.json"))?)?;
+    let mut value=json!(config);value["revision"]=json!(crate::anyblob_blobui::revision(&json!(config)));Ok(value)
 }
 #[tauri::command]
 pub async fn discover_calendar_colors(force_refresh: Option<bool>) -> Result<Value, String> {
@@ -266,14 +267,17 @@ pub async fn discover_calendar_colors(force_refresh: Option<bool>) -> Result<Val
         .map_err(|_| "Calendar discovery stopped. Reload to retry.".to_string())?
 }
 #[tauri::command]
-pub async fn save_calendar_rules(configuration: Configuration, settings: Option<crate::SettingsDraft>) -> Result<crate::SaveResult, String> {
+pub async fn save_calendar_rules(configuration: Configuration, settings: Option<crate::SettingsDraft>, revision: Option<String>) -> Result<Value, String> {
     configuration.validate()?;
     let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
         let data = crate::read_json_file(&install.join("blob/data.json"))?;
-        crate::save_settings_with_calendar_rules(settings.unwrap_or_else(|| crate::settings_from_data(&data)), Some(configuration))
+        if revision.as_deref()!=Some(crate::anyblob_blobui::calendar_revision(&data)?.as_str()) {return Err("Saved calendar rules changed. Reload Settings before saving your draft.".into());}
+        let revision=crate::anyblob_blobui::revision(&json!(configuration));
+        let result=crate::save_settings_with_calendar_rules(settings.unwrap_or_else(|| crate::settings_from_data(&data)), Some(configuration))?;
+        let mut result=json!(result);result["revision"]=json!(revision);Ok(result)
     }).await.map_err(|_| "Calendar save stopped. Your pending edits are kept.".to_string())?
 }
 

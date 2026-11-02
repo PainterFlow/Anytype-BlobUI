@@ -214,6 +214,7 @@ fn execute_scoped(
         "Anytype API v2 could not complete this read. Check the saved API connection, object ID and Anytype availability.".to_string()
     };
     match op {
+        Operation::Blobui { .. } => Err("BlobUI configuration requires the authorized publication path.".into()),
         Operation::Content { .. } => Err("Content operations require the authorized mutation path.".into()),
         Operation::SearchMentions { .. } => Err("Metadata searches require the authenticated global search path.".into()),
         Operation::ListSpaces {} => {
@@ -479,6 +480,15 @@ fn dispatch_resolved_with(
     let client = if project.is_some() { Some(connect()?) } else { None };
     let scope = project.map(|project| crate::anyblob_scope::Scope::load(client.as_ref().unwrap(), project, &check)).transpose()?;
     if let Some(scope) = &scope { effective = scope.configuration(); }
+    if let Operation::Blobui { blobui } = &request.request {
+        let client=match client {Some(client)=>client,None=>connect()?};
+        let before_commit=|| {
+            check()?;
+            if let Some(project)=project {if crate::anyblob_scope::Scope::load(&client,project,&check)? != *scope.as_ref().unwrap() {return Err("Project source membership changed. Reread before retrying.".into());}}
+            Ok(())
+        };
+        return crate::anyblob_blobui::execute_at(&install()?,&client,&effective,scope.as_ref(),project,blobui,&before_commit,&approve);
+    }
     if let Operation::Content { content } = &request.request {
         let client=match client {Some(client)=>client,None=>connect()?};
         crate::anyblob_content::permission(&effective,scope.as_ref(),content,false)?;

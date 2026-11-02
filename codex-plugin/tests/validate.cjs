@@ -45,6 +45,10 @@ const allowed = new Set([
   "skills/manage-types-and-templates/agents/openai.yaml",
   "skills/build-queries-and-views/SKILL.md",
   "skills/build-queries-and-views/agents/openai.yaml",
+  "skills/configure-kanban-calculations/SKILL.md",
+  "skills/configure-kanban-calculations/agents/openai.yaml",
+  "skills/configure-calendar-colors/SKILL.md",
+  "skills/configure-calendar-colors/agents/openai.yaml",
   "skills/audit-organization/SKILL.md",
   "skills/audit-organization/agents/openai.yaml"
 ]);

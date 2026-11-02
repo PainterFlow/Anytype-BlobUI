@@ -1,5 +1,6 @@
 (function (root) {
   "use strict";
+  let configurationRevision = null;
   const UI = root.BlobUI = root.BlobUI || {}, doc = root.document;
   const defaults = () => ({ version: 2, display: "balanced", definitions: [] });
   const copy = value => JSON.parse(JSON.stringify(value));
@@ -855,6 +856,7 @@
         if (result) {
           if (!result.configuration || result.configuration.version !== 2 || !Array.isArray(result.configuration.definitions)
             || !["balanced", "spacious"].includes(result.configuration.display)) throw Error("Unsupported configuration");
+          configurationRevision = result.revision || null;
           state = copy(result.configuration);
           persistedState = copy(state);
           calculatedAt = result.calculatedAt || "";
@@ -875,8 +877,9 @@
     },
     async save(bridge, submitted) {
       try {
-        const result = await bridge("save_kanban_formulas", { configuration: submitted });
+        const result = await bridge("save_kanban_formulas", { configuration: submitted, revision: configurationRevision });
         (result?.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+        configurationRevision = result?.revision || configurationRevision;
         persistedState = copy(submitted);
         calculatedAt = result && result.calculatedAt || calculatedAt;
         loadError = "";

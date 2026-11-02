@@ -69,6 +69,7 @@ pub fn describe(op: &crate::Operation) -> String {
             preview(object_id),
             preview(space_id)
         ),
+        Operation::Blobui { blobui } => format!("An agent wants to {} in {}.", preview(&blobui.tool.replace('_', " ")), preview(blobui.arguments["space_id"].as_str().unwrap_or_default())),
         Operation::Content { content } => {
             let args = &content.arguments;
             let context = &args["_approval_context"];
