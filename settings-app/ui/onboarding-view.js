@@ -2,9 +2,9 @@
   "use strict";
   const UI = root.BlobUI;
   const C = UI.Components;
-  const featureLabels = ["Custom Accent Color", "Custom Font", "Custom Space Banner", "Animated Text Effects", "UI fixes",
-    "Calendar Colors", "Read and use your data for BlobUI features", "Corrupt/Modify your Data", "Sell/Collect your Data"];
-  const features = useApi => featureLabels.map((label, index) => ({ label, included: index < (useApi ? 7 : 5) }));
+  const featureLabels = ["Custom Accent Color", "Custom Font", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Codex Integration",
+    "Colored Calendar Events", "Read and use your data for BlobUI features", "Corrupt your Data", "Sell/Collect your Data"];
+  const features = useApi => featureLabels.map((label, index) => ({ label, included: index < (useApi ? 8 : 5) }));
   UI.ScreenDefinitions = Object.assign(UI.ScreenDefinitions || {}, {
     "onboarding-welcome": content => C.Button({
       attributes: {
