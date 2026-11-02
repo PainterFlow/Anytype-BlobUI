@@ -99,7 +99,7 @@ Discovery follows the [OpenAI skill packaging format](https://developers.openai.
 
 ## BlobUI calculations and calendar colors
 
-Anyblob 0.2.21 supports multi-select Kanban calculations and calendar property colors across its twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
+Anyblob 0.2.22 supports multi-select Kanban calculations and calendar property colors across its twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
 
 
 Publish through `set_kanban_calculation` or `set_calendar_color_rule`. Remove through `remove_kanban_calculation` or `remove_calendar_color_rule`. Refresh saved results through `refresh_kanban_calculation` or `refresh_calendar_colors`. These operations require the revision from the last read and support `dry_run`. A conflict requires a new read and preview. Never automatically retry an unknown mutation outcome.

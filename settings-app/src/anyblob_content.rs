@@ -74,6 +74,21 @@ fn normalize_property(value: &str) -> String {
 }
 fn response(value: Value) -> Result<Value, String> {
     if value.get("_http_error").is_some() {
+        if value["_http_error"] == 404 {
+            if let Some(message) = value.pointer("/error/message").and_then(Value::as_str) {
+                for (prefix, label, guidance) in [
+                    ("unknown schema kind ", "schema kind", "Use list_schemas and choose an advertised kind. For block edits, use get_op_schema with an operation such as insert_blocks or update_block."),
+                    ("unknown operation ", "operation", "Use the connected API's advertised operations and get_op_schema to inspect a supported operation."),
+                    ("unknown op ", "operation", "Use the connected API's advertised operations and get_op_schema to inspect a supported operation."),
+                ] {
+                    if let Some(rest) = message.strip_prefix(prefix) {
+                        if let Some(name) = rest.strip_prefix('"').and_then(|s| s.split_once('"').map(|(name, _)| name)) {
+                            return Err(format!("HTTP 404. Connected Anytype does not advertise {label} {name:?}. {guidance} Server response. {value}"));
+                        }
+                    }
+                }
+            }
+        }
         Err(format!("Anytype confirmed refusal. {}", value))
     } else {
         Ok(value)
@@ -561,6 +576,26 @@ pub fn execute_committing(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test]
+    fn unsupported_schema_errors_explain_discovery_without_mislabeling_missing_objects() {
+        for (message, expected) in [
+            ("unknown schema kind \"block\" — available kinds: object, document", "Use list_schemas"),
+            ("unknown operation \"blob\"", "get_op_schema"),
+            ("unknown op \"blob\"", "get_op_schema"),
+        ] {
+            let value = json!({"_http_error":404,"error":{"code":"not_found","message":message,"issues":[]}});
+            let error = response(value.clone()).unwrap_err();
+            assert!(error.starts_with("HTTP 404. Connected Anytype does not advertise"));
+            assert!(error.contains(expected));
+            assert!(error.contains(&value.to_string()));
+        }
+        for (status, message) in [(404, "Object not found"), (403, "unknown schema kind \"block\"")] {
+            let value = json!({"_http_error":status,"error":{"message":message}});
+            assert_eq!(response(value.clone()).unwrap_err(), format!("Anytype confirmed refusal. {value}"));
+        }
+        let success = json!({"schema":{"type":"object"}});
+        assert_eq!(response(success.clone()).unwrap(), success);
+    }
     use std::{
         net::TcpListener,
         sync::{Arc, Mutex},

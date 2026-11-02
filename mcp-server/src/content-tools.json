@@ -42,7 +42,7 @@
         },
         "kind": {
           "type": "string",
-          "description": "Schema kind, as listed by list_schemas"
+          "description": "Schema kind returned by list_schemas on the connected Anytype. Do not guess kinds. Blocks are part of documents; inspect block edit operations with get_op_schema."
         }
       },
       "required": [
@@ -51,7 +51,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Get a schema. ",
+    "description": "Get a schema advertised by the connected Anytype. Choose kind from list_schemas; an unadvertised kind returns HTTP 404. For block edits use get_op_schema with the operation name.",
     "query": []
   },
   {
