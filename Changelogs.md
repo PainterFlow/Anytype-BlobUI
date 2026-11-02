@@ -37,6 +37,7 @@ You can also use it to manage your Anytype space as there are quite a few skills
 - You can now use `Ctrl+r` in the BlobUI app to reload BlobUI.
 
 ## Color Calendar Events by property
+
 - Added the ability to color calendar events by property.
     - You can color each object type individually.
     - Per-calendar view overrides.
@@ -44,12 +45,18 @@ You can also use it to manage your Anytype space as there are quite a few skills
     - The old "Calendar Color" property is still supported, but might get deprecated soon.
 
 ## Kanban View Calculations
+
 - Now support multi-selections
 - If options of a single or multi-selection property contain duplicate names, the property will be excluded and a hard error will be shown.
 *Developers Note: We've decided that it's better to restrict duplicate names then to restrict multi-selection properties.*
 
 ## Advanced Settings -> App Settings
+
 - organized and modernized the UI of "App Settings".
+
+## Advanced Settings -> Experiments
+
+- Implement the `Settings Future Proof UI Refresh` experiment.
 
 
 ## Bugfixes
@@ -59,6 +66,7 @@ any buggy behaviour in v1.3.0, expect it to be fixed now. If not then please rep
 
 - Issue#71 - In-Object searched text results are unaffected by the accent color setting.
 - Issue#72 - The `/` command preview of checkmarks is unaffected by the accent color setting.
+- Issue#75 - Uncollapsed settings tabs have a thinner selected box then normal.
 
 ## Developer Changelogs
 
