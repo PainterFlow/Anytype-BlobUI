@@ -1,0 +1,1 @@
+All guidelines are in `AGENTS.md`, always read that file before doing anything, regardless of if the prompt requests it or not.
