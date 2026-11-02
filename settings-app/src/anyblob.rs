@@ -522,7 +522,14 @@ fn dispatch_resolved_with(
         };
         // Every preflight and commit rechecks live authorization. Mutation receipts survive
         // membership changes caused by this edit, and are never followed by implicit reads.
-        let mut result=crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)?;
+        let mut result=if content.tool == "list_properties" && scope.as_ref().is_some_and(|s| !s.has_whole_space(content.arguments["space_id"].as_str().unwrap())) {
+            let scope = scope.as_ref().unwrap();
+            let result = scope.list_properties(&client, project.unwrap(), content, &before_dispatch)?;
+            if crate::anyblob_scope::Scope::load(&client, project.unwrap(), &check)? != *scope {
+                return Err("Project source membership changed. Reread before retrying.".into());
+            }
+            result
+        } else { crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)? };
         if !content.mutates() {
             check()?;
             if let Some(project)=project {

@@ -1477,7 +1477,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List properties. ",
+    "description": "List property definitions. With saved project sources, returns only properties referenced by permitted queries, collections, their members and object types. Pagination applies after filtering. Creating, updating or deleting property definitions still requires whole-space permission.",
     "query": [
       "offset",
       "limit"
