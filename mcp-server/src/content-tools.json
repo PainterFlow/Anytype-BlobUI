@@ -1477,7 +1477,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List property definitions. With saved project sources, returns only properties referenced by permitted queries, collections, their members and object types. Pagination applies after filtering. Creating, updating or deleting property definitions still requires whole-space permission.",
+    "description": "List property definitions available through saved permissions. With query, collection or object-type access, returns only properties referenced by those accessible sources, their members and object types, not every property in the space. Missing properties may be outside the permitted scope. Pagination applies after filtering. Use an integer limit from 1 through 100, or omit it for 25; use offset to fetch further pages. Creating, updating or deleting property definitions still requires whole-space permission.",
     "query": [
       "offset",
       "limit"

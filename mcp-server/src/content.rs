@@ -74,6 +74,19 @@ impl ContentRequest {
     }
     pub fn validate(&self) -> Result<(), String> {
         let spec = self.specification()?;
+        // Explain pagination errors before generic schema validation hides the bounds.
+        for (key, minimum, maximum, default) in [
+            ("limit", 1, 100, 25),
+            ("offset", 0, i32::MAX as u64, 0),
+        ] {
+            if let Some(value) = self.arguments.get(key) {
+                if !value.as_u64().is_some_and(|n| (minimum..=maximum).contains(&n)) {
+                    return Err(format!(
+                        "Invalid arguments/{key}: expected an integer from {minimum} through {maximum}; received {value}. Omit {key} to use the default ({default})."
+                    ));
+                }
+            }
+        }
         validate_schema(&spec["schema"], &self.arguments, "arguments")?;
         if let Some(destination) = self.arguments.get("destination") {
             let id = destination["id"].as_str().ok_or("Missing destination ID.")?;
@@ -120,16 +133,6 @@ impl ContentRequest {
                     || value == "*"
                 {
                     return Err(format!("Invalid {key}."));
-                }
-            }
-        }
-        for key in ["limit", "offset"] {
-            if let Some(value) = self.arguments.get(key) {
-                let n = value
-                    .as_u64()
-                    .ok_or("Pagination must be nonnegative integers.")?;
-                if (key == "limit" && !(1..=100).contains(&n)) || n > i32::MAX as u64 {
-                    return Err("Use a limit of 1–100 and a nonnegative 32-bit offset.".into());
                 }
             }
         }
@@ -315,6 +318,17 @@ mod tests {
         for args in [json!({"space_id":"s","limit":101}), json!({"space_id":"s","limit":0}), json!({"space_id":"s","offset":-1}), json!({"space_id":"s","offset":2147483648_i64})] {
             assert!(crate::operation("list_properties", args).is_err());
         }
+    }
+    #[test]
+    fn pagination_errors_explain_how_to_correct_the_request() {
+        for value in [json!(0), json!(101), json!(1.5), json!("100"), Value::Null] {
+            let error = crate::operation("list_properties", json!({"space_id":"s", "limit":value})).unwrap_err();
+            assert!(error.contains("arguments/limit"), "{error}");
+            assert!(error.contains("integer from 1 through 100"), "{error}");
+            assert!(error.contains("Omit limit to use the default (25)"), "{error}");
+        }
+        let error = crate::operation("list_properties", json!({"space_id":"s", "offset":-1})).unwrap_err();
+        assert!(error.contains("integer from 0 through 2147483647"), "{error}");
     }
     #[test]
     fn creation_deletion_and_uploads_always_require_confirmation() {

@@ -8,6 +8,8 @@ Resolve IDs through list_spaces and explicit user references. Ask only for conse
 
 Inspect current types, properties, select options and document or operation schemas before edits. Use list_schemas, get_schema and get_op_schema rather than guessing fields. Preserve unrelated content. Search and listing results are permission filtered. Follow returned pagination when completeness matters and state partial coverage. get_query_objects without view uses the first stored view. Inspect get_query_views and select explicit views for a whole-query review. get_collection_objects without view returns whole collection membership. Deduplicate combined results by ID.
 
+list_properties returns only property definitions referenced by accessible queries, collections, their members and object types when access is scoped to saved project sources. It lists all space properties only with whole-space read permission. An absent property may be outside the permitted scope; do not assume it does not exist or create a duplicate. Use an integer limit from 1 through 100, or omit it for the default of 25. Follow pagination with offset rather than requesting a larger limit.
+
 ## Creation and placement
 
 Creation requires an effective space-wide Create-Delete grant or an eligible saved query or collection destination. Use list_creation_targets for scoped destinations, including empty sources. An edit grant alone does not allow creation. Schema and selected-source definition changes need appropriate space-wide grants.
