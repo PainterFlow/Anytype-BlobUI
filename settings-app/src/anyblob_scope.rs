@@ -147,7 +147,7 @@ impl Scope {
         let contributors=grants.iter().filter(|p|p.permits(request.capability()) && (!files || p.files_enabled)).collect::<Vec<_>>();
         let first=contributors.first()?;
         let mut effective=(*first).clone();
-        effective.approval=if contributors.iter().any(|p|p.approval=="alwaysAsk") {"alwaysAsk"} else {"approveForMe"}.into();
+        effective.approval=if contributors.iter().any(|p|p.approval=="alwaysAsk") {"alwaysAsk"} else if contributors.iter().any(|p|p.approval=="approveForMe") {"approveForMe"} else {"fullAccess"}.into();
         Some(effective)
     }
     pub(crate) fn whole_space_permission(&self, space: &str, write: bool) -> Option<Permission> {
@@ -318,9 +318,30 @@ mod mutation_permission_tests {
         let scope=Scope{spaces:BTreeMap::from([("s".into(),space)])};
         let read=req("read_document",json!({"space_id":"s","object_id":"o"}));assert_eq!(scope.content_permission(&read,false).unwrap().approval,"alwaysAsk");
         let edit=req("patch_object",json!({"space_id":"s","object_id":"o","etag":"e","body":{"ops":[{"op":"set_properties","set":{"name":"new"}}]}}));
-        assert_eq!(scope.content_permission(&edit,false).unwrap().approval,"approveForMe");assert!(scope.content_permission(&edit,true).is_none());
+        assert_eq!(scope.content_permission(&edit,false).unwrap().approval,"fullAccess");assert!(scope.content_permission(&edit,true).is_none());
         let delete=req("delete_object",json!({"space_id":"s","object_id":"o"}));assert!(scope.content_permission(&delete,false).is_none());
         let create=req("create_object",json!({"space_id":"s","body":{"type":"page"}}));assert!(scope.content_permission(&create,false).is_some());
+    }
+    #[test] fn creation_preserves_never_ask_and_stricter_contributing_approvals() {
+        for (approvals, expected) in [
+            (vec!["fullAccess"], "fullAccess"),
+            (vec!["fullAccess", "fullAccess"], "fullAccess"),
+            (vec!["fullAccess", "approveForMe"], "approveForMe"),
+            (vec!["approveForMe", "fullAccess"], "approveForMe"),
+            (vec!["fullAccess", "alwaysAsk"], "alwaysAsk"),
+        ] {
+            let mut space = Space::default();
+            space.all_grants = approvals.iter().map(|approval| grant("createDelete", approval, false)).collect();
+            // A read-only grant must not add confirmation to creation.
+            space.all_grants.push(grant("read", "alwaysAsk", false));
+            let scope = Scope { spaces: BTreeMap::from([("s".into(), space)]) };
+            let create = req("create_object", json!({"space_id":"s","body":{"type":"page"}}));
+            let permission = scope.content_permission(&create, false).unwrap();
+            assert_eq!(permission.approval, expected, "{approvals:?}");
+            assert_eq!(create.requires_confirmation(&permission.approval), expected != "fullAccess", "{approvals:?}");
+            let irreversible = req("delete_chat_message", json!({"space_id":"s","chat_id":"chat","message_id":"message"}));
+            assert!(irreversible.requires_confirmation(&permission.approval));
+        }
     }
     #[test] fn member_grants_cannot_create_objects_or_mutate_schema() {
         let mut space=Space::default();space.object_grants.insert("o".into(),vec![grant("createDelete","fullAccess",true)]);
