@@ -1,42 +1,48 @@
-# Anyblob chat navigation compatibility
+# Anyblob Sources integration
 
-Anyblob 0.2.6 adds canonical object resource links to eligible successful tool responses. The requested individual Sources entries and linked task integration are blocked on Codex host interfaces. This release does not provide those navigation features.
+Anyblob 0.2.7 adds individual object references to the existing Codex Sources section through `result._meta["openai/resourceActivities"]`. Ordinary MCP resource links remain in tool content for MCP clients and mentions. Task-row integration is outside this change.
 
-## Completed result links
+## Why 0.2.6 did not change the panel
 
-Successful `read_object` and `read_document` results include `anyblob://objects/{space_id}/{object_id}` links. Confirmed object, chat, collection, query and template creation uses the returned ID. Confirmed object patches and discussion creation link the object. Adding or editing a chat message, toggling its reaction or marking its chat read links the parent chat. Child receipts never supply the parent's title.
+The previous version emitted `content[].resource_link` entries only. The installed Sources collector does not collect arbitrary MCP resource links. It falls back to one generic Anyblob tool entry. Its resource activity URL schema rejects `anyblob://` and accepts only HTTP(S). The earlier passing compatibility probe reproduced this failure; it did not verify a working Sources feature.
 
-Links use the returned title when available, followed by the returned space name or explicit space ID. Missing titles fall back to the object ID. The description includes Anyblob identity and the read access requirement. Creation IDs must pass the existing canonical resource validation. No extra reads or permission grants occur.
+## Object entries
 
-Searches, member listings, schema discovery, property/type/widget operations, deletions, dry runs, errors and unknown outcomes produce no object links. Text, structured results, receipts, warnings, etags and error classification remain intact. Resource reads retain their existing contents envelope and permission checks.
+Each eligible result now includes version 1 resource activity metadata with a stable ID containing the canonical space/object URI, a title and a real Anytype HTTPS universal link. The format `https://object.any.coop/{object_id}?spaceId={space_id}` comes from [Anytype's own link builder](https://github.com/anyproto/anytype-ts/blob/develop/src/ts/lib/util/object.ts). Its [URL parser](https://github.com/anyproto/anytype-ts/blob/develop/src/ts/lib/util/common.ts) recognizes the object and space IDs. No invite ID, invite key, sharing operation or access grant is included.
 
-## Installed host evidence
+Successful object and document reads, confirmed object/chat/collection/query/template creation and confirmed edits return source references. Chat message activity links its parent chat; child receipt titles never rename the parent. Document titles also resolve from `properties.name`. Names include the returned space name when present, otherwise the explicit space ID, so duplicate titles remain distinguishable without fetching unrelated metadata.
 
-The read-only probe targets Codex package `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0`. It extracts code from `app.asar` into isolated VM contexts. It never registers plugins, creates chats, reads personal chat state, patches the installed app or contacts Anytype.
+Source attribution uses the host's `read` activity for the returned object identity or mutation receipt. This does not claim an additional Anytype API read or change permissions. The original mutation outcome and receipt remain authoritative in structured content. Using `created` as the activity would put creation-only references outside Sources in the installed host.
 
-- The actual local external resource collector `L` ignores ordinary MCP resource links. Repeated synthetic results and serialized/reloaded fixture turns produce no object entries.
-- The actual shared `openai/resourceActivities` URL refinement `Wut` rejects `anyblob://` and accepts an HTTPS control. The schema requires version 1, an array of resources with ID, URL and activities, and optional title and MIME type. Its URL field uses this refinement. The external resource constructor `K` independently rejects non-HTTP(S) URLs.
-- The actual local tool collector `K` collapses calls to `mcp-server:anyblob`. It does not interpret Anyblob's confirmed/unknown outcome values. Separate fixture chats do not share collected results.
-- The actual navigation functions `fk`, `pk`, `mk` and `gk` render one generic Anyblob row. That row has no resource-open callback. A plugin app ID can open an app, which does not establish object resource opening.
+Search hits, member listings, schemas, property/type/widget operations, deletions, dry runs, denied or failed requests and unknown mutation outcomes emit no activity metadata. The existing text, structured results, receipts, warnings and etags remain intact. Canonical IDs are validated before building either link.
 
-Discovery, metadata envelope parsing, React's element factory, hooks and transport are isolated dependencies. The resourceActivities schema wiring and its actual URL predicate are checked independently; the complete schema parser is not executed. Synthetic JSON reloads establish deterministic collection only, not durable host persistence. No full desktop transport or dark UI session was exercised. Existing resource-reader fixtures check permission-checked opening separately from navigation.
+The host deduplicates by the space/object identity, uses later titles from chronological fixture turns and suppresses the generic Anyblob tool row when individual entries represent that provider. Unrelated tool sources remain. Codex controls ordering and truncation; its collector scans recent activity first, so first-use ordering is not supplied by this integration.
 
-The [official extension documentation](https://developers.openai.com/plugins/build/extensions), checked on 2026-11-02, describes conversation panels, composer mentions and extended context. It does not establish a supported registration API for this Codex navigation task row, durable associations keyed by host chat identity or selected-task goal injection. A separate panel would not satisfy this integration.
+## Opening and permissions
 
-## Required Codex host interfaces
+Clicking a Sources row dispatches the HTTPS universal link through Codex's external-link handler. Anytype handles opening and its own current account access. This replaces the original proposal to open Sources through the BlobUI MCP resource reader. No fake HTTPS proxy or installed-app patch is used.
 
-Individual Sources require host support for canonical MCP resource URIs in persisted activity metadata, a server-bound `resources/read` open action with trusted parent chat identity, and a collector that deduplicates by space/object while preserving first-use order and authorized title updates. It must replace the generic connector row only for represented activity and preserve unrelated sources. The current HTTP-only metadata cannot meet this requirement. No fabricated HTTPS resource URLs or provider identities are emitted as substitutes.
+MCP reads and mutations retain all BlobUI approvals and project restrictions. The canonical `anyblob://objects/{space_id}/{object_id}` resource still resolves through the existing permission-checked reader when used through MCP. Neither kind of link grants access. Historical titles and identities already stored in a chat can remain visible after permission changes; Codex does not offer a verified callback to revoke historical source metadata.
 
-The linked task requires a supported row registration above Sources, a searchable picker and unavailable state, a trusted host chat identity for picker and MCP actions, atomic versioned persistence of one association per chat, and an explicit goal-context update interface that does not submit a message or begin work. The host must preserve identity across reloads and expose project/permission changes for revalidation. The existing read and approval path must remain authoritative, including when opening from navigation.
+## Host verification
 
-Until these contracts are available and verified, task operations `get_chat_task`, `set_chat_task` and `clear_chat_task` are deliberately not advertised. There is no alternate association store, model-supplied identity, task selection UI or goal injection. No task status changes occur. Task selection, replacement, removal, custom task layouts, association concurrency, persistence, permission revocation and picker keyboard/focus/dark-layout tests remain blocked together with the feature.
+The probe reads Codex `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0` without launching or modifying it. Synthetic results come from the production Rust `tool_result` serializer through `mcp-server/examples/source-fixtures.rs`.
 
-## Reproduce
+It executes the installed host's actual resourceActivities parser and bundled Zod schema, external resource collector, tool source collector, navigation components and source-row click handler in isolated VMs. The parser accepts the generated HTTPS metadata and rejects an `anyblob://` control. Tests cover repeated reads, duplicate titles in separate spaces, later authorized titles, confirmed creation, search/dry/unknown exclusions, failed and denied calls, separate chats, JSON reloads, generic-row replacement, connected-app identity, unrelated sources and external-link dispatch.
 
-Validation on 2026-11-02 passed 17 MCP tests and 35 isolated native Anyblob tests. The live test remained ignored. The executable-to-pipe fixture verified read and creation links, search exclusions, denied reads and permission-checked resource resolution. The combined installed-host probe and icon checks passed. `scripts/Build-App.ps1 -s -c` completed once with `BLOBUI_BUILD_ONLY=1`, including plugin packaging. No running app was automated or restarted. No UI was added while its host requirements remain blocked.
+App discovery, React hooks and element creation, title queries and the final external-open operation are isolated. No network, personal chat state, host filesystem, timers or actual app transport is supplied to those VMs. The shared bundle's import declarations and exports are removed, import metadata is replaced with an empty object, and only its schema initializer is called. No installed files are patched. JSON reloads verify collector reconstruction, not durable desktop persistence. A live Sources panel and OS link handoff have not been automated or verified.
+
+## Reproduce and install
+
+After packaging the current executable, run `scripts/tests/Test-Anyblob.ps1 -SkipBuild` to generate `.test-run/navigation/source-fixtures.json` through the production serializer and run the isolated native tests. Without `-SkipBuild`, the test script packages the current executable itself. The native transport fixture intentionally launches that package, so a stale package tests stale behavior. Then run the host checks.
 
 ```powershell
 node codex-plugin/tests/navigation-host-compatibility.cjs 'C:/Program Files/WindowsApps/OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0/app/resources/app.asar'
+node codex-plugin/tests/mentions-host-compatibility.cjs 'C:/Program Files/WindowsApps/OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0/app/resources/app.asar'
 ```
 
-The existing `mentions-host-compatibility.cjs` also invokes this probe. A successful process exit with `decision: BLOCKED` means the current incompatibility was reproduced. It does not mean navigation support passed. Changed host function or schema signatures fail the probe and require inspection.
+The navigation probe must report `decision: PASS` with individual sources and actual metadata parsing. A changed host schema or function signature fails the probe and requires inspection.
+
+Validation on 2026-11-02 passed 17 MCP tests and 46 isolated native tests, including packaged read/create metadata, exclusions and permission-checked resource reads. One live test remained ignored. Host Sources, mention and icon checks passed. `scripts/Build-App.ps1 -s -c` completed once with `BLOBUI_BUILD_ONLY=1`. No live Anytype instance was automated or restarted.
+
+Build with `BLOBUI_BUILD_ONLY=1` and `scripts/Build-App.ps1 -s -c`. The resulting workspace package is `codex-plugin/dist/anyblob.zip`. Existing installed copies do not update merely because workspace files were built. Update Anyblob through the rebuilt Settings app and refresh its Codex connection before testing new reads. Existing responses without activity metadata are not backfilled. This work does not modify installed plugin files or restart a running app.

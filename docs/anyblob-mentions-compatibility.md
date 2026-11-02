@@ -1,6 +1,6 @@
 # Anyblob global object mentions
 
-Anyblob 0.2.6 adds completed-activity resource links. See [chat navigation compatibility](anyblob-navigation-compatibility.md) for the isolated collector evidence and blocked host requirements. Mention support does not establish Sources or linked-task support.
+Anyblob 0.2.7 adds individual Sources entries through HTTPS resource activity metadata while retaining canonical MCP resource links. See [Sources integration](anyblob-navigation-compatibility.md) for the production-fixture host checks, installation steps and opening behavior. Task-row integration is outside this change.
 
 Implemented on 2026-11-01 for Anyblob 0.1.3 and Settings 2.0.1. The earlier project-specific suggestions and message-scoped approval exceptions are superseded.
 

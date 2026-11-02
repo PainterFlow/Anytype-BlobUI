@@ -4,11 +4,23 @@ use serde_json::{json, Value};
 
 pub fn tool_result(operation: &Operation, value: Value) -> Value {
     let mut content = vec![json!({"type":"text","text":value.to_string()})];
+    let mut resources = Vec::new();
     if let Some(link) = object_link(operation, &value) {
+        let Operation::ReadObject { space_id, object_id } = resource_operation(&json!({"uri":link["uri"]})).expect("validated object link") else { unreachable!() };
+        // This is source attribution for the returned object/receipt. Mutation
+        // outcomes stay in structuredContent. The host hides `created` activities
+        // from Sources, so attribute the returned reference as `read` here.
+        resources.push(json!({"id":object_uri(&space_id,&object_id),
+            "url":format!("https://object.any.coop/{object_id}?spaceId={space_id}"),
+            "title":link["title"],"mimeType":"application/json","activities":["read"]}));
         content.push(link);
     }
-    json!({"content":content,"structuredContent":value,
-        "isError":matches!(value["outcome"].as_str(),Some("rejected"|"unknown"))})
+    let mut result = json!({"content":content,"structuredContent":value,
+        "isError":matches!(value["outcome"].as_str(),Some("rejected"|"unknown"))});
+    if !resources.is_empty() {
+        result["_meta"] = json!({"openai/resourceActivities":{"version":1,"resources":resources}});
+    }
+    result
 }
 
 fn object_link(operation: &Operation, value: &Value) -> Option<Value> {
@@ -39,6 +51,7 @@ fn object_link(operation: &Operation, value: &Value) -> Option<Value> {
     let uri = object_uri(space, object);
     resource_operation(&json!({"uri":uri})).ok()?;
     let title = document["name"].as_str().or_else(|| document["title"].as_str())
+        .or_else(|| document.pointer("/properties/name").and_then(Value::as_str))
         .filter(|title| !title.trim().is_empty()).unwrap_or(object);
     let space_name = value["space_name"].as_str().filter(|name| !name.trim().is_empty()).unwrap_or(space);
     Some(json!({"type":"resource_link","uri":uri,"name":format!("{title} · {space_name}"),
@@ -58,6 +71,7 @@ mod tests {
             assert_eq!(result["structuredContent"], value);
             assert_eq!(result["content"][0]["text"], value.to_string());
             assert_eq!(result["content"].as_array().unwrap().len(), if outcome=="confirmed" {2} else {1});
+            assert_eq!(result.get("_meta").is_some(), outcome=="confirmed");
         }
     }
     #[test]
@@ -79,6 +93,7 @@ mod tests {
             let result = tool_result(&op,json!({"name":"Same title","space_name":format!("Space {space}")}));
             assert_eq!(result["content"][1]["uri"],object_uri(space,"o"));
             assert_eq!(result["content"][1]["title"],format!("Same title · Space {space}"));
+            assert_eq!(result["_meta"]["openai/resourceActivities"]["resources"][0]["url"],format!("https://object.any.coop/o?spaceId={space}"));
         }
         for name in ["list_objects","get_collection_objects","get_query_objects","list_schemas","get_chat_messages"] {
             let op = Operation::Content { content: crate::content::ContentRequest { tool:name.into(), arguments:json!({"space_id":"s","object_id":"o"}) }};

@@ -1300,7 +1300,8 @@ mod tests {
             if name=="read_object" {
                 assert_eq!(links.len(),1);
                 assert_eq!(links[0]["uri"],"anyblob://objects/space/object");
-            } else { assert!(links.is_empty()); }
+                assert_eq!(response["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],"https://object.any.coop/object?spaceId=space");
+            } else { assert!(links.is_empty()); assert!(response["result"].get("_meta").is_none()); }
         }
         send(&mut input,7,"tools/call",json!({"name":"search_mentions","arguments":{"query":""}}));
         let mentions=receive(&mut output);
@@ -1348,6 +1349,7 @@ mod tests {
         writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         assert_eq!(created["result"]["content"][1]["uri"],"anyblob://objects/space/created-object");
+        assert_eq!(created["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],"https://object.any.coop/created-object?spaceId=space");
         drop(input);
         assert!(child.wait().unwrap().success());
         assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false, true]);

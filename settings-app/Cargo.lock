@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "blobui-mcp"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "serde",
  "serde_json",
