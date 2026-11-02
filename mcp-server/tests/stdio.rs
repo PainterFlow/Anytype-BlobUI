@@ -39,6 +39,10 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(mentions["_meta"]["ui"]["visibility"],json!(["app"]));
     assert_eq!(mentions["outputSchema"]["properties"]["items"]["maxItems"],20);
     let initialized=call(json!({"jsonrpc":"2.0","id":30,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}));
+    let icon = &initialized["result"]["serverInfo"]["icons"][0];
+    assert_eq!(icon["src"], include_str!("../src/icon-data-uri.txt"));
+    assert_eq!(icon["mimeType"], "image/png");
+    assert_eq!(icon["sizes"], json!(["256x256"]));
     assert_eq!(initialized["result"]["capabilities"]["extensions"]["openai/mentions"]["searchTool"],"search_mentions");
     assert_eq!(call(json!({"jsonrpc":"2.0","id":31,"method":"resources/list"}))["result"]["resources"],json!([]));
     assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);

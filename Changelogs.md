@@ -1,5 +1,9 @@
 # BlobUI v1.4.0 - What's new?
 
+## Anyblob 0.2.5
+
+- Show the Anyblob icon for object mentions in chat.
+
 ## Anyblob 0.2.4
 
 - Resolve object names from v2 document properties in deletion approval prompts.

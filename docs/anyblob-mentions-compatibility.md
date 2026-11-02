@@ -45,3 +45,9 @@ node codex-plugin/tests/mentions-host-compatibility.cjs 'C:/Program Files/Window
 ```
 
 Build with `scripts/Build-App.ps1 -s -c` and `BLOBUI_BUILD_ONLY=1`. Use the isolated environment in `scripts/tests/Test-Anyblob.ps1` for native tests, never the production pipe or personal credentials.
+
+## Anyblob 0.2.5 mention icons
+
+Initialization now advertises the existing 256px app PNG through `serverInfo.icons` as a data URI. The plugin manifest logo alone does not supply the installed host's MCP resource mention fallback. Its provider selector reads server icons and forwards the selected URL when inserting resource mentions. No object search fields or permissions changed.
+
+The icon is embedded in `mcp-server/src/icon-data-uri.txt`, extracted byte for byte from `settings-app/icons/icon.ico`. Run `node codex-plugin/tests/mention-icons.cjs <installed-app.asar>` to check logo identity, version consistency, initialization wiring and the installed host's actual icon selector without launching apps. This check passed against Codex 26.1027.3384.0. The stdio regression also asserts initialization icon metadata, but was not run for this change because compilation was explicitly deferred. No build or live smoke test was run.
