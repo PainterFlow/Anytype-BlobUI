@@ -713,7 +713,7 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .advanced-tabs::-webkit-scrollbar { height: 4px; }
 .advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
 .advanced-tabs::-webkit-scrollbar-button { display: none; }
-:root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+:root[data-settings-v21="true"] .sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; }
 .v21-section-link { font: inherit; }
 
 .section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
