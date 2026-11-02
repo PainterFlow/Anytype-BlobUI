@@ -289,6 +289,34 @@ pub fn validate_schema(schema: &Value, value: &Value, path: &str) -> Result<(), 
 mod tests {
     use super::*;
     #[test]
+    fn pagination_schema_matches_runtime_bounds() {
+        let advertised = tools();
+        for spec in catalog() {
+            let tool = spec["name"].as_str().unwrap();
+            let schema = &advertised.iter().find(|s| s["name"] == tool).unwrap()["inputSchema"];
+            for (key, minimum, maximum) in [("limit", 1, 100), ("offset", 0, i32::MAX as i64)] {
+                if spec["schema"]["properties"].get(key).is_none() {
+                    continue;
+                }
+                let property = &schema["properties"][key];
+                assert_eq!(property["minimum"], minimum, "{tool}/{key}");
+                assert_eq!(property["maximum"], maximum, "{tool}/{key}");
+                for n in [minimum, maximum] {
+                    assert!(validate_schema(property, &json!(n), key).is_ok());
+                }
+                for value in [json!(minimum - 1), json!(maximum + 1), json!(1.5), json!("25"), Value::Null] {
+                    assert!(validate_schema(property, &value, key).is_err(), "{tool}/{key}: {value}");
+                }
+            }
+        }
+        for args in [json!({"space_id":"s"}), json!({"space_id":"s","limit":1,"offset":0}), json!({"space_id":"s","limit":100,"offset":2147483647})] {
+            assert!(crate::operation("list_properties", args).is_ok());
+        }
+        for args in [json!({"space_id":"s","limit":101}), json!({"space_id":"s","limit":0}), json!({"space_id":"s","offset":-1}), json!({"space_id":"s","offset":2147483648_i64})] {
+            assert!(crate::operation("list_properties", args).is_err());
+        }
+    }
+    #[test]
     fn creation_deletion_and_uploads_always_require_confirmation() {
         for spec in catalog() {
             let request = ContentRequest {

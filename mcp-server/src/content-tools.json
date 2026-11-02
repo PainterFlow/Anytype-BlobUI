@@ -103,12 +103,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Rows to skip"
+          "description": "Rows to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Rows to return"
+          "description": "Rows to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -200,7 +204,9 @@
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Messages to return"
+          "description": "Messages to return",
+          "minimum": 1,
+          "maximum": 100
         },
         "reactions": {
           "type": "string",
@@ -594,12 +600,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -639,12 +649,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -725,12 +739,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -1442,12 +1460,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -1685,12 +1707,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -2784,12 +2810,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -2829,12 +2859,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -2872,12 +2906,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -2958,12 +2996,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
@@ -3858,12 +3900,16 @@
         "offset": {
           "default": 0,
           "type": "integer",
-          "description": "Items to skip"
+          "description": "Items to skip",
+          "minimum": 0,
+          "maximum": 2147483647
         },
         "limit": {
           "default": 25,
           "type": "integer",
-          "description": "Items to return"
+          "description": "Items to return",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": [
