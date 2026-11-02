@@ -1,5 +1,10 @@
 # BlobUI v1.4.0 - What's new?
 
+## Anyblob 0.2.2
+
+- Use Codex's Accept button without a duplicate confirmation control.
+- Show concise approval descriptions with object names, types and spaces instead of raw metadata.
+
 ## Anyblob 0.2.1
 
 - Detect stale versioned Codex plugin copies and show when a refresh is required.
