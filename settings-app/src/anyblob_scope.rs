@@ -14,6 +14,7 @@ pub struct Scope {
 struct Space {
     all: Option<Permission>,
     all_grants: Vec<Permission>,
+    schema_grants: Vec<Permission>,
     object_grants: BTreeMap<String, Vec<Permission>>,
     objects: BTreeMap<String, Permission>,
 }
@@ -48,6 +49,8 @@ impl Scope {
             .validate()?;
             let base = format!("/v2/spaces/{}", encoded(&source.space_id));
             let space = scope.spaces.entry(source.space_id.clone()).or_default();
+            // API schemas contain no source members. Keep grants for empty sources too.
+            space.schema_grants.push(source.permission.clone());
             if source.kind == "space" {
                 space.all_grants.push(source.permission.clone());
                 if source.id != source.space_id {
@@ -136,7 +139,9 @@ impl Scope {
     }
     pub fn content_permission(&self, request: &blobui_mcp::content::ContentRequest, files: bool) -> Option<Permission> {
         let space=self.spaces.get(request.arguments["space_id"].as_str()?)?;
-        let grants=if request.space_wide() { &space.all_grants } else {
+        let grants=if matches!(request.tool.as_str(), "list_schemas" | "get_schema" | "get_op_schema") {
+            &space.schema_grants
+        } else if request.space_wide() { &space.all_grants } else {
             request.target().and_then(|id|space.object_grants.get(id)).unwrap_or(&space.all_grants)
         };
         let contributors=grants.iter().filter(|p|p.permits(request.capability()) && (!files || p.files_enabled)).collect::<Vec<_>>();
@@ -271,6 +276,33 @@ mod tests {
 #[cfg(test)]
 mod mutation_permission_tests {
     use super::*;
+    #[test]
+    fn empty_sources_allow_schema_discovery_without_widening_content_access() {
+        for access in ["none", "read", "readWrite", "createDelete"] {
+            let space = Space { schema_grants: vec![grant(access,"alwaysAsk",false)], ..Space::default() };
+            let scope = Scope { spaces: BTreeMap::from([("s".into(),space)]) };
+            for (name,args) in [
+                ("list_schemas",json!({"space_id":"s"})),
+                ("get_schema",json!({"space_id":"s","kind":"object"})),
+                ("get_op_schema",json!({"space_id":"s","op":"insert_blocks"})),
+            ] {
+                let request = req(name,args);
+                let permission = scope.content_permission(&request,false);
+                assert_eq!(permission.is_some(),access != "none");
+                if let Some(permission) = permission { assert_eq!(permission.approval,"alwaysAsk"); }
+                let mut other = request.clone(); other.arguments["space_id"] = json!("other");
+                assert!(scope.content_permission(&other,false).is_none());
+            }
+            for (name,args) in [
+                ("read_document",json!({"space_id":"s","object_id":"outside"})),
+                ("list_types",json!({"space_id":"s"})),
+                ("create_object",json!({"space_id":"s","body":{"type":"page"}})),
+                ("update_property",json!({"space_id":"s","key":"p","body":{"name":"new"}})),
+            ] {
+                assert!(scope.content_permission(&req(name,args),false).is_none());
+            }
+        }
+    }
     fn grant(access:&str,approval:&str,files:bool)->Permission {Permission{access:access.into(),approval:approval.into(),files_enabled:files,}}
     fn req(name:&str,args:Value)->blobui_mcp::content::ContentRequest {let blobui_mcp::Operation::Content{content}=blobui_mcp::operation(name,args).unwrap()else{panic!()};content}
     #[test] fn capabilities_and_approvals_are_combined_independently() {
