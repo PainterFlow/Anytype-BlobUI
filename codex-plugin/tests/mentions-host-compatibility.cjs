@@ -27,6 +27,7 @@ if (process.argv[2] === '--fixture') {
 async function main() {
   const archive = process.argv[2];
   assert(archive, 'Pass the installed desktop app.asar path.');
+  require('./navigation-host-compatibility.cjs')(archive);
   const file = fs.openSync(archive, 'r');
   let source;
   let asset;

@@ -5,6 +5,7 @@ pub mod transport;
 pub mod approval;
 pub mod credential;
 pub mod content;
+pub mod sources;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]

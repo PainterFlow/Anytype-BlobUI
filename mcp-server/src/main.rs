@@ -212,7 +212,7 @@ fn main() {
                                 id: key.clone(),
                                 token,
                                 thread_id,
-                                request: op,
+                                request: op.clone(),
                             },
                             &cancel,
                             &|message, remaining| {
@@ -234,7 +234,7 @@ fn main() {
                             ),
                             Ok(value) => reply(
                                 id,
-                                json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":matches!(value["outcome"].as_str(),Some("rejected"|"unknown"))}),
+                                blobui_mcp::sources::tool_result(&op, value),
                             ),
                             Err(e) if resource_uri.is_some() => error(id, -32000, &e),
                             Err(e) => reply(

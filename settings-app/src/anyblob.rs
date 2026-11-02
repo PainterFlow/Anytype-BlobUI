@@ -1296,6 +1296,11 @@ mod tests {
             }
             assert_eq!(response["result"]["isError"], false, "{response}");
             assert!(response["result"]["structuredContent"].is_object());
+            let links:Vec<_>=response["result"]["content"].as_array().unwrap().iter().filter(|item| item["type"]=="resource_link").collect();
+            if name=="read_object" {
+                assert_eq!(links.len(),1);
+                assert_eq!(links[0]["uri"],"anyblob://objects/space/object");
+            } else { assert!(links.is_empty()); }
         }
         send(&mut input,7,"tools/call",json!({"name":"search_mentions","arguments":{"query":""}}));
         let mentions=receive(&mut output);
@@ -1317,6 +1322,7 @@ mod tests {
         let denied = receive(&mut output);
         assert_eq!(denied["result"]["isError"], true);
         assert!(denied["result"].get("structuredContent").is_none());
+        assert!(denied["result"]["content"].as_array().unwrap().iter().all(|item| item["type"] != "resource_link"));
         send(&mut input,9,"resources/read",json!({"uri":"anyblob://objects/space/object"}));
         let denied=receive(&mut output);
         assert_eq!(denied["error"]["code"],-32000);assert!(denied.get("result").is_none());
@@ -1341,6 +1347,7 @@ mod tests {
         let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");assert!(question["params"]["message"].as_str().unwrap().contains("fixture-created"));
         writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
+        assert_eq!(created["result"]["content"][1]["uri"],"anyblob://objects/space/created-object");
         drop(input);
         assert!(child.wait().unwrap().success());
         assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false, true]);
