@@ -2,6 +2,16 @@
 use crate::{object_uri, resource_operation, Operation};
 use serde_json::{json, Value};
 
+pub fn needs_display_context(operation: &Operation) -> bool {
+    match operation {
+        Operation::ReadObject { .. } => true,
+        Operation::Content { content } => content.arguments["dry_run"] != true && matches!(content.tool.as_str(),
+            "read_document" | "patch_object" | "create_discussion" | "add_chat_message" | "edit_chat_message" |
+            "toggle_chat_reaction" | "read_chat" | "create_object" | "create_chat" | "create_collection" | "create_query" | "create_template"),
+        _ => false,
+    }
+}
+
 pub fn tool_result(operation: &Operation, value: Value) -> Value {
     let mut content = vec![json!({"type":"text","text":value.to_string()})];
     let mut resources = Vec::new();
@@ -50,13 +60,35 @@ fn object_link(operation: &Operation, value: &Value) -> Option<Value> {
     // Validate even server-supplied creation IDs before constructing an openable URI.
     let uri = object_uri(space, object);
     resource_operation(&json!({"uri":uri})).ok()?;
-    let title = document["name"].as_str().or_else(|| document["title"].as_str())
-        .or_else(|| document.pointer("/properties/name").and_then(Value::as_str))
-        .filter(|title| !title.trim().is_empty()).unwrap_or(object);
-    let space_name = value["space_name"].as_str().filter(|name| !name.trim().is_empty()).unwrap_or(space);
+    fn label(value: &Value) -> Option<&str> { value.as_str().map(str::trim).filter(|s| !s.is_empty()) }
+    // Confirmed requested names may be omitted from mutation receipts. Never use
+    // a chat message's body as the parent chat title.
+    let mut confirmed_name = None;
+    if let Operation::Content { content } = operation {
+        if value["outcome"] == "confirmed" {
+            if matches!(content.tool.as_str(), "create_object" | "create_chat" | "create_collection" | "create_query" | "create_template") {
+                confirmed_name = label(&content.arguments["body"]["name"]).or_else(|| label(&content.arguments["body"]["properties"]["name"]));
+            } else if content.tool == "patch_object" {
+                for op in content.arguments["body"]["ops"].as_array().into_iter().flatten() {
+                    if op["op"] == "set_properties" {
+                        if let Some(name) = op["set"].get("name") { confirmed_name = Some(label(name).unwrap_or("Untitled object")); }
+                        if op["unset"].as_array().is_some_and(|keys| keys.iter().any(|key| key == "name")) { confirmed_name = Some("Untitled object"); }
+                    }
+                }
+            }
+        }
+    }
+    let title = label(&document["name"])
+        .or_else(|| label(&document["title"]))
+        .or_else(|| document.pointer("/properties/name").and_then(label))
+        .or(confirmed_name)
+        .or_else(|| label(&value["_anyblob_source"]["name"]))
+        .unwrap_or("Untitled object");
+    let space_name = label(&value["space_name"]).or_else(|| label(&value["_anyblob_source"]["space"]))
+        .unwrap_or("Unknown space");
     Some(json!({"type":"resource_link","uri":uri,"name":format!("{title} · {space_name}"),
         "title":format!("{title} · {space_name}"),"mimeType":"application/json",
-        "description":format!("Anyblob object {object} in space {space}. Opening requires current read access.")}))
+        "description":format!("{title} in {space_name}. Opening requires current read access.")}))
 }
 
 #[cfg(test)]
@@ -99,5 +131,19 @@ mod tests {
             let op = Operation::Content { content: crate::content::ContentRequest { tool:name.into(), arguments:json!({"space_id":"s","object_id":"o"}) }};
             assert_eq!(tool_result(&op,json!({"id":"o","name":"Hit"}))["content"].as_array().unwrap().len(),1);
         }
+    }
+    #[test]
+    fn display_names_cover_projected_reads_and_sparse_receipts_without_ids() {
+        let make = |tool:&str, args:Value| Operation::Content { content:crate::content::ContentRequest {tool:tool.into(),arguments:args} };
+        let display = |op:&Operation,value:Value| tool_result(op,value)["_meta"]["openai/resourceActivities"]["resources"][0]["title"].clone();
+        let read=make("read_document",json!({"space_id":"s","object_id":"o","include":"blocks"}));
+        assert_eq!(display(&read,json!({"id":"o","blocks":[],"_anyblob_source":{"name":"Project plan","space":"Work"}})),"Project plan · Work");
+        assert_eq!(display(&read,json!({"id":"o"})),"Untitled object · Unknown space");
+        let create=make("create_object",json!({"space_id":"s","body":{"properties":{"name":"New plan"}}}));
+        assert_eq!(display(&create,json!({"outcome":"confirmed","receipt":{"id":"new"},"_anyblob_source":{"space":"Work"}})),"New plan · Work");
+        let patch=make("patch_object",json!({"space_id":"s","object_id":"o","body":{"ops":[{"op":"set_properties","set":{"name":"Renamed"}}]}}));
+        assert_eq!(display(&patch,json!({"outcome":"confirmed","receipt":{"etag":"kept"},"_anyblob_source":{"name":"Old name","space":"Work"}})),"Renamed · Work");
+        let message=make("edit_chat_message",json!({"space_id":"s","chat_id":"parent","body":{"name":"Child"}}));
+        assert_eq!(display(&message,json!({"outcome":"confirmed","receipt":{"name":"Child"},"_anyblob_source":{"name":"Team chat","space":"Work"}})),"Team chat · Work");
     }
 }

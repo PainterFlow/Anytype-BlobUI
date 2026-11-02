@@ -486,6 +486,9 @@ fn dispatch_resolved_with(
         if content.requires_confirmation(&permission.approval) {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
         let initial_files=prepared.files;
         let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,initial_files)?;}Ok(())};
+        if blobui_mcp::sources::needs_display_context(&request.request) && !content.requires_confirmation(&permission.approval) {
+            let _ = prepared.approval_prompt(&client,&inspect_check)?;
+        }
         crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
         let files=prepared.files;
         let before_dispatch=|| {
@@ -499,13 +502,16 @@ fn dispatch_resolved_with(
         };
         // Every preflight and commit rechecks live authorization. Mutation receipts survive
         // membership changes caused by this edit, and are never followed by implicit reads.
-        let result=crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)?;
+        let mut result=crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)?;
         if !content.mutates() {
             check()?;
             if let Some(project)=project {
                 let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;
                 crate::anyblob_content::permission(&effective,Some(&current),content,false)?;
             }
+        }
+        if blobui_mcp::sources::needs_display_context(&request.request) {
+            result["_anyblob_source"] = json!({"name":prepared.source_context["name"],"space":prepared.source_context["space"]});
         }
         return Ok(result);
     }
@@ -528,14 +534,23 @@ fn dispatch_resolved_with(
         if crate::anyblob_scope::Scope::load(client, project, &check)? != *scope {
             return Err("Project source membership changed. Retry the request.".into());
         }
-        let result = execute_scoped(client, &effective, &request.request, &check, Some(scope))?;
+        let mut result = execute_scoped(client, &effective, &request.request, &check, Some(scope))?;
+        if let Operation::ReadObject { space_id, .. } = &request.request {
+            result["_anyblob_source"] = crate::anyblob_content::display_context(client,space_id,None,&check)?;
+        }
         if crate::anyblob_scope::Scope::load(client, project, &check)? != *scope {
             return Err("Project source membership changed. Retry the request.".into());
         }
         check()?;
         Ok(result)
     } else {
-        guarded_read(&connect()?, &effective, &request.request, &check)
+        let client = connect()?;
+        let mut result = guarded_read(&client, &effective, &request.request, &check)?;
+        if let Operation::ReadObject { space_id, .. } = &request.request {
+            result["_anyblob_source"] = crate::anyblob_content::display_context(&client,space_id,None,&check)?;
+        }
+        check()?;
+        Ok(result)
     }
 }
 #[cfg(windows)]
@@ -827,6 +842,7 @@ mod tests {
         let (client,server)=mock(vec![member.clone(),member,
             ("GET /v2/spaces/space/objects/allowed?ids=full ".into(),json!({"id":"allowed","name":"Note","type":"page","properties":{}})),
             ("GET /v2/spaces/space/objects/allowed?ids=full&format=md ".into(),json!({"id":"allowed","markdown":"withheld"})),
+            ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
             ("GET /v2/spaces/space/collections/collection/objects?ids=full&limit=100&offset=0 ".into(),json!({"data":[],"total":0,"has_more":false}))],None);
         assert!(dispatch_resolved_with(scoped_request(Operation::ReadObject{space_id:"space".into(),object_id:"allowed".into()}),
             ||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|_,check|check(),
@@ -1156,12 +1172,17 @@ mod tests {
                     json!({"id":"object","markdown":"fixture content"}),
                 ),
                 ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
                 ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Note"}],"has_more":false})),
                 ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Note","properties":{}})),
                 ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"resource content"})),
                 ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
                 ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true})),
                 ("POST /v2/spaces/space/objects ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"id":"created-object","etag":"created-etag"})),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+                ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","properties":{"name":"Project plan","private":"not display metadata"}})),
+                ("GET /v2/spaces/space/objects/object?include=blocks&ids=full ".into(),json!({"id":"object","blocks":[]})),
             ],
             None,
         );
@@ -1170,7 +1191,7 @@ mod tests {
         let mut listener = Pipe::listen(true).unwrap();
         let bridge = std::thread::spawn(move || {
             let mut outcomes = Vec::new();
-            for index in 0..9 {
+            for index in 0..10 {
                 let deadline = Instant::now() + Duration::from_secs(15);
                 while !listener.accept().unwrap() {
                     assert!(Instant::now() < deadline);
@@ -1301,6 +1322,7 @@ mod tests {
                 assert_eq!(links.len(),1);
                 assert_eq!(links[0]["uri"],"anyblob://objects/space/object");
                 assert_eq!(response["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],"https://object.any.coop/object?spaceId=space");
+                assert_eq!(response["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["title"],"Note · Work");
             } else { assert!(links.is_empty()); assert!(response["result"].get("_meta").is_none()); }
         }
         send(&mut input,7,"tools/call",json!({"name":"search_mentions","arguments":{"query":""}}));
@@ -1350,9 +1372,16 @@ mod tests {
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         assert_eq!(created["result"]["content"][1]["uri"],"anyblob://objects/space/created-object");
         assert_eq!(created["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],"https://object.any.coop/created-object?spaceId=space");
+        assert_eq!(created["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["title"],"fixture-created · Work");
+        send(&mut input,11,"tools/call",json!({"name":"read_document","arguments":{"space_id":"space","object_id":"object","include":"blocks","ids":"full"},"_meta":{"threadId":"fixture-chat"}}));
+        let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");
+        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
+        let projected=receive(&mut output);
+        assert_eq!(projected["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["title"],"Project plan · Work");
+        assert!(!projected.to_string().contains("not display metadata"));
         drop(input);
         assert!(child.wait().unwrap().success());
-        assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false, true]);
+        assert_eq!(bridge.join().unwrap(), vec![true, true, true, true, true, false, false, false, true, true]);
         api.join().unwrap();
     }
     #[test]

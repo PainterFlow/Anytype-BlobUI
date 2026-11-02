@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const readHost = require('./host-archive.cjs');
 function probe(archive, fixturePath = path.resolve(__dirname, '../../.test-run/navigation/source-fixtures.json')) {
-  const assets = readHost(archive, /^(rolldown-runtime-428|app-shared-|local-conversation-(external-resources|summary-panel-sources-model|thread)-|use-local-conversation-sources-).*\.js$/);
+  const assets = readHost(archive, /^(rolldown-runtime-428|app-shared-|local-conversation-(external-resource-icon|external-resources|summary-panel-sources-model|thread)-|use-local-conversation-sources-).*\.js$/);
   function asset(prefix) {
     const match = [...assets].find(([name]) => name.startsWith(prefix));
     assert(match, `Host changed. Missing ${prefix}`);
@@ -27,6 +27,9 @@ function probe(archive, fixturePath = path.resolve(__dirname, '../../.test-run/n
   vm.runInContext('Yut()', schema, { timeout: 1000 });
   const fixtures = JSON.parse(fs.readFileSync(fixturePath, 'utf8').replace(/^\uFEFF/, ''));
   assert.equal(schema.Uut(fixtures.read._meta).status, 'valid');
+  const iconAttempt = structuredClone(fixtures.read._meta);
+  iconAttempt['openai/resourceActivities'].resources[0].icons = [{ src: 'data:image/png;base64,fixture' }];
+  assert.equal(schema.Uut(iconAttempt).resources[0].icons, undefined, 'Resource schema has no icon override');
   const invalid = structuredClone(fixtures.read._meta);
   invalid['openai/resourceActivities'].resources[0].url = fixtures.read.content[1].uri;
   assert.equal(schema.Uut(invalid).status, 'invalid');
@@ -53,6 +56,7 @@ function probe(archive, fixturePath = path.resolve(__dirname, '../../.test-run/n
   assert.equal(collect([]).length, 0, 'Separate chats must not inherit sources');
   assert.equal(JSON.stringify(collect(JSON.parse(JSON.stringify(calls)))), JSON.stringify(sources));
   assert.equal(collect([call('renamed', fixtures.renamed)])[0].title, 'Renamed · Space a');
+  assert.equal(collect([call('projected', fixtures.projected)])[0].title, 'Project plan · Work');
   const tools = vm.createContext({ Set, Map,
     V: () => new Map(), j: items => items, h: () => null, d: () => false, U: name => name,
     m: () => false, A: (_turn, item) => ({ callId: item.id, result: item.result, completed: true }),
@@ -70,6 +74,16 @@ function probe(archive, fixturePath = path.resolve(__dirname, '../../.test-run/n
   assert.equal(tools.K(turns([connectedCall]), [], {}, new Set(), [], new Set(['connector-anyblob']), false, []).length, 0);
   const jsx = (type, props) => ({ type, props });
   const cache = n => Array(n).fill(Symbol.for('react.memo_cache_sentinel'));
+  const icons = vm.createContext({ Symbol, E: { c: cache }, D: { jsx }, o: () => false, m: {}, a: () => null,
+    g: () => null, d: () => null, p: 'Favicon', h: 'ProviderLogo', n: () => null });
+  const iconSource = asset('local-conversation-external-resource-icon-');
+  load(icons, iconSource, 'function C(', 'function w(');
+  load(icons, iconSource, 'function T(', 'var E,D;');
+  const icon = icons.T({ resource: sources[0] });
+  assert.equal(icon.type, 'ProviderLogo');
+  assert.equal(icon.props.logoUrl, null, 'Local external sources do not use serverInfo.icons');
+  assert.equal(icon.props.fallback.type, 'Favicon');
+  assert.equal(icon.props.fallback.props.href, sources[0].url);
   const nav = vm.createContext({ Set, Symbol, _k: { c: cache }, vk: { jsx },
     I: () => ({ formatMessage: () => 'Sources' }), bv: () => null,
     $: { Sources: 'Sources', SourceRow: 'SourceRow' }, rx: 'ExternalResource',
@@ -98,6 +112,8 @@ function probe(archive, fixturePath = path.resolve(__dirname, '../../.test-run/n
   console.log(JSON.stringify({ decision: 'PASS', individualSources: sources.length,
     productionSerializer: true, actualMetadataParser: true, deduplication: true,
     unrelatedSourcesPreserved: true, resourceOpenDispatch: opened,
+    sourceTitle: collect([call('projected', fixtures.projected)])[0].title,
+    localSourceIcon: 'Host uses website favicon; no local MCP icon override',
     reload: 'Serialized synthetic turns; durable desktop persistence remains unverified',
     limitations: 'Host controls ordering and title precedence. Click opens Anytype, not the MCP reader. No live app automated.' }, null, 2));
 }

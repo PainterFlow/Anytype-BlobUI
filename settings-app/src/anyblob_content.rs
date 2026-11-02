@@ -17,6 +17,7 @@ pub struct Prepared {
     name: String,
     hash: String,
     pub files: bool,
+    pub source_context: Value,
 }
 impl Drop for Prepared {
     fn drop(&mut self) {
@@ -131,26 +132,11 @@ fn route(req: &ContentRequest, dry: bool) -> Result<String, String> {
     Ok(route)
 }
 impl Prepared {
-    pub fn approval_prompt(&self, client: &Client, check: &impl Fn() -> Result<(), String>) -> Result<blobui_mcp::Operation, String> {
+    pub fn approval_prompt(&mut self, client: &Client, check: &impl Fn() -> Result<(), String>) -> Result<blobui_mcp::Operation, String> {
         let mut op = self.prompt();
         let space = self.request.arguments["space_id"].as_str().unwrap_or("");
-        let mut context = json!({});
-        check()?;
-        if let Ok(spaces) = client.pages("GET", "/v2/spaces?ids=full", None) {
-            if let Some(row) = spaces.iter().find(|row| row["id"] == space) { context["space"] = row["name"].clone(); }
-        }
-        check()?;
-        if let Some(id) = self.request.target() {
-            let path = format!("/v2/spaces/{}/objects/{}?ids=full", crate::api::encode_segment(space), crate::api::encode_segment(id));
-            if let Ok(row) = client.request("GET", &path, None) {
-                context["name"] = row.pointer("/properties/name")
-                    .and_then(Value::as_str).filter(|name| !name.trim().is_empty())
-                    .or_else(|| row["name"].as_str().filter(|name| !name.trim().is_empty()))
-                    .map(|name| json!(name)).unwrap_or(Value::Null);
-                context["type"] = row["type"].get("name").unwrap_or(&row["type"]).clone();
-            }
-        }
-        check()?;
+        let context = display_context(client, space, self.request.target(), check)?;
+        self.source_context = context.clone();
         if let blobui_mcp::Operation::Content { content } = &mut op { content.arguments["_approval_context"] = context; }
         Ok(op)
     }
@@ -165,6 +151,31 @@ impl Prepared {
         }
         blobui_mcp::Operation::Content { content }
     }
+}
+/// Internal display metadata only. Never return the fetched document or invite data.
+pub fn display_context(client: &Client, space: &str, object: Option<&str>, check: &impl Fn() -> Result<(), String>) -> Result<Value, String> {
+        let mut context = json!({});
+        check()?;
+        if let Ok(spaces) = client.pages("GET", "/v2/spaces?ids=full", None) {
+            if let Some(name) = spaces.iter().find(|row| row["id"] == space)
+                .and_then(|row| row["name"].as_str()).filter(|name| !name.trim().is_empty()) {
+                context["space"] = json!(name);
+            }
+        }
+        check()?;
+        if let Some(id) = object {
+            let path = format!("/v2/spaces/{}/objects/{}?ids=full", crate::api::encode_segment(space), crate::api::encode_segment(id));
+            if let Ok(row) = client.request("GET", &path, None) {
+                if row["id"] != id { check()?; return Ok(context); }
+                context["name"] = row.pointer("/properties/name")
+                    .and_then(Value::as_str).filter(|name| !name.trim().is_empty())
+                    .or_else(|| row["name"].as_str().filter(|name| !name.trim().is_empty()))
+                    .map(|name| json!(name)).unwrap_or(Value::Null);
+                context["type"] = row["type"].get("name").unwrap_or(&row["type"]).clone();
+            }
+        }
+        check()?;
+        Ok(context)
 }
 pub fn prepare(
     _client: &Client,
@@ -185,6 +196,7 @@ pub fn prepare(
         name: String::new(),
         hash: String::new(),
         files,
+        source_context: json!({}),
     };
     if let Some(local) = req.arguments["local_path"].as_str() {
         let path = PathBuf::from(local);
@@ -565,6 +577,7 @@ mod tests {
             name: String::new(),
             hash: String::new(),
             files: false,
+            source_context: json!({}),
         }
     }
     fn fixture(
@@ -639,7 +652,7 @@ mod tests {
                 json!({"data":[{"id":"s","name":"Codex Test"}],"has_more":false}),
                 document,
             ]);
-            let prepared = prepared(content("delete_object", json!({"space_id":"s","object_id":"o"})));
+            let mut prepared = prepared(content("delete_object", json!({"space_id":"s","object_id":"o"})));
             let prompt = prepared.approval_prompt(&client, &|| Ok(())).unwrap();
             assert_eq!(blobui_mcp::approval::describe(&prompt),
                 "An agent wants to delete object 'Approval prompt test' of the type 'page' in Codex Test.");
@@ -675,6 +688,21 @@ mod tests {
         );
         assert!(permission(&config("createDelete", true, false), None, &upload, true).is_err());
         assert!(permission(&full, None, &upload, true).is_ok());
+    }
+    #[test]
+    fn source_display_metadata_is_narrow_and_checks_identity() {
+        for id in ["o", "different-object"] {
+            let (client, _, server) = fixture(vec![
+                json!({"data":[{"id":"s","name":"Work","inviteKey":"do-not-return"},{"id":"other","name":"Other"}],"has_more":false}),
+                json!({"id":id,"properties":{"name":"Project plan","secret":"do-not-return"},"blocks":[{"text":"do-not-return"}]}),
+            ]);
+            let context=display_context(&client,"s",Some("o"),&||Ok(())).unwrap();
+            assert_eq!(context["space"],"Work");
+            assert_eq!(context["name"],if id=="o" {json!("Project plan")} else {Value::Null});
+            assert!(!context.to_string().contains("do-not-return"));
+            assert!(!context.to_string().contains("Other"));
+            server.join().unwrap();
+        }
     }
     #[test]
     fn edits_preserve_etags_preflight_and_receipts() {

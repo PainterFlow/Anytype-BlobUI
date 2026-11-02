@@ -1,6 +1,6 @@
 # Anyblob Sources integration
 
-Anyblob 0.2.7 adds individual object references to the existing Codex Sources section through `result._meta["openai/resourceActivities"]`. Ordinary MCP resource links remain in tool content for MCP clients and mentions. Task-row integration is outside this change.
+Anyblob 0.2.8 adds readable object and space names to individual entries in the existing Codex Sources section. Entries use `result._meta["openai/resourceActivities"]`. Ordinary MCP resource links remain in tool content for MCP clients and mentions. Task-row integration is outside this change.
 
 ## Why 0.2.6 did not change the panel
 
@@ -10,13 +10,21 @@ The previous version emitted `content[].resource_link` entries only. The install
 
 Each eligible result now includes version 1 resource activity metadata with a stable ID containing the canonical space/object URI, a title and a real Anytype HTTPS universal link. The format `https://object.any.coop/{object_id}?spaceId={space_id}` comes from [Anytype's own link builder](https://github.com/anyproto/anytype-ts/blob/develop/src/ts/lib/util/object.ts). Its [URL parser](https://github.com/anyproto/anytype-ts/blob/develop/src/ts/lib/util/common.ts) recognizes the object and space IDs. No invite ID, invite key, sharing operation or access grant is included.
 
-Successful object and document reads, confirmed object/chat/collection/query/template creation and confirmed edits return source references. Chat message activity links its parent chat; child receipt titles never rename the parent. Document titles also resolve from `properties.name`. Names include the returned space name when present, otherwise the explicit space ID, so duplicate titles remain distinguishable without fetching unrelated metadata.
+Successful object and document reads, confirmed object/chat/collection/query/template creation and confirmed edits return source references. Chat message activity links its parent chat; child receipt titles never rename the parent. Document titles also resolve from `properties.name`. Names display as `Object title · Space name`.
+
+The bridge resolves display metadata through its saved API v2 connection after permission validation. Content operations reuse existing approval context when available; otherwise they load that context before dispatch with the existing cancellation and permission checks. This supplies names even for projected reads, outlines and Markdown responses that omit properties. Object reads resolve the space name and retain their already-read object title. Only the matching space and target object's display names leave these internal requests, never other spaces, properties, blocks or invite data. Wrong object IDs cannot supply titles. Mutations never trigger a follow-up object read. Confirmed creation and rename requests supply names when receipts omit them, while returned names take precedence. Missing metadata uses `Untitled object` and `Unknown space`, never raw IDs. Metadata lookup failures do not change a confirmed mutation receipt or cause a retry.
 
 Source attribution uses the host's `read` activity for the returned object identity or mutation receipt. This does not claim an additional Anytype API read or change permissions. The original mutation outcome and receipt remain authoritative in structured content. Using `created` as the activity would put creation-only references outside Sources in the installed host.
 
 Search hits, member listings, schemas, property/type/widget operations, deletions, dry runs, denied or failed requests and unknown mutation outcomes emit no activity metadata. The existing text, structured results, receipts, warnings and etags remain intact. Canonical IDs are validated before building either link.
 
 The host deduplicates by the space/object identity, uses later titles from chronological fixture turns and suppresses the generic Anyblob tool row when individual entries represent that provider. Unrelated tool sources remain. Codex controls ordering and truncation; its collector scans recent activity first, so first-use ordering is not supplied by this integration.
+
+## Icon and URL display limits
+
+The installed external-source icon component takes its provider logo from connected-app discovery or falls back to the resource website favicon. Its local MCP fallback does not read `serverInfo.icons` or the plugin's manifest logo. The actual component probe confirms a favicon fallback for `object.any.coop`. Anyblob already advertises the existing custom app icon for mentions and its plugin listing, but there is no verified supported per-resource icon override for these local MCP HTTPS Sources. No fake connected-app identity, unrelated hosted icon or installed-host patch is used.
+
+The host also renders the actual HTTPS resource URL in its source-details subtitle. The object and space IDs must stay in that link for correct opening. Its subtitle format has no verified local plugin override. Source titles and descriptions no longer use IDs; the host-controlled URL line can still contain them.
 
 ## Opening and permissions
 
@@ -43,6 +51,6 @@ node codex-plugin/tests/mentions-host-compatibility.cjs 'C:/Program Files/Window
 
 The navigation probe must report `decision: PASS` with individual sources and actual metadata parsing. A changed host schema or function signature fails the probe and requires inspection.
 
-Validation on 2026-11-02 passed 17 MCP tests and 46 isolated native tests, including packaged read/create metadata, exclusions and permission-checked resource reads. One live test remained ignored. Host Sources, mention and icon checks passed. `scripts/Build-App.ps1 -s -c` completed once with `BLOBUI_BUILD_ONLY=1`. No live Anytype instance was automated or restarted.
+Validation on 2026-11-02 passed 18 MCP tests and 47 isolated native tests, including packaged `Note · Work`, creation names from sparse receipts, projected-read `Project plan · Work`, metadata privacy, exclusions and permission revocation. One live test remained ignored. Host Sources, source-icon limitation, mention and custom mention-icon checks passed. `scripts/Build-App.ps1 -s -c` completed once with `BLOBUI_BUILD_ONLY=1`. No live Anytype instance was automated or restarted.
 
 Build with `BLOBUI_BUILD_ONLY=1` and `scripts/Build-App.ps1 -s -c`. The resulting workspace package is `codex-plugin/dist/anyblob.zip`. Existing installed copies do not update merely because workspace files were built. Update Anyblob through the rebuilt Settings app and refresh its Codex connection before testing new reads. Existing responses without activity metadata are not backfilled. This work does not modify installed plugin files or restart a running app.
