@@ -43,8 +43,9 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     await page.evaluate(()=>window.projectError='Fixture project refresh failed');await page.locator('#projects-reload').click();await page.getByRole('status').filter({hasText:'Fixture project refresh failed'}).waitFor();assert.equal(await projects.count(),2);
     await projects.first().click();const dialog=page.locator('#project-source-dialog');await dialog.waitFor();
     const sourceRows=page.locator('#project-source-list .codex-space');await sourceRows.nth(4).waitFor();
+    assert.equal(await dialog.getByText('Enable content changes',{exact:true}).count(),0);
     for (const kind of ['Object types','Collections','Queries']) {
-      assert.equal(await sourceRows.filter({has:page.locator('input[aria-label*=" · '+kind+' · "]')}).locator('input[role=switch]').count(),kind==='Queries'?4:2);
+      assert.equal(await sourceRows.filter({has:page.locator('input[aria-label*=" · '+kind+' · "]')}).locator('input[role=switch]').count(),kind==='Queries'?2:1);
     }
     const space=sourceRows.filter({has:page.locator('input[aria-label="Select Work · Spaces · Work"]')});
     const accessX = row => row.locator('.codex-space-bottom button[aria-label^="Access"]').evaluate(node=>node.getBoundingClientRect().x);
@@ -76,14 +77,14 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
     assert.deepEqual(await disabledAccess.evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor})),disabledStyle);
     assert.equal(disabledStyle.color,'rgb(102, 102, 102)');
     await query.locator('.formula-view-name').click();
-    assert.equal(await query.locator('input[role=switch]').count(),2);
+    assert.equal(await query.locator('input[role=switch]').count(),1);
     assert.equal(await query.locator('input[type=checkbox]').first().isChecked(),true);
     await query.locator('.formula-view-name').click();
     assert.equal(await page.locator('#save-button').isVisible(),false);
     await query.locator('.formula-view-name').click();
     assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Access"]').innerText(),'Read Only');
     assert.equal(await query.locator('.codex-space-bottom button[aria-label^="Approval"]').innerText(),'Always Ask');
-    assert.equal(await query.locator('input[role=switch]').count(),2);
+    assert.equal(await query.locator('input[role=switch]').count(),1);
     assert.equal(await sourceRows.first().getAttribute('data-selected'),'true');
     assert.equal(await query.evaluate(node=>getComputedStyle(node).outlineWidth),'2px');
     assert.equal(await query.locator('.project-source-metadata').innerText(),'Queries · Work');

@@ -44,7 +44,7 @@ pub fn permission(
             )
             .cloned()
     };
-    permission.filter(|p|p.permits(request.capability())&&(!files||p.files_enabled)).ok_or_else(||"Access denied by saved BlobUI content permissions. Enable content changes and Save; file actions also require the file switch.".into())
+    permission.filter(|p|p.permits(request.capability())&&(!files||p.files_enabled)).ok_or_else(||"Access denied by saved BlobUI content permissions. Save the required access level; file actions also require the file switch.".into())
 }
 pub fn needs_files(value: &Value) -> bool {
     match value {
@@ -607,14 +607,14 @@ mod tests {
         )
     }
     #[test]
-    fn legacy_grants_never_enable_mutations() {
+    fn access_levels_work_without_content_opt_in() {
         for access in ["none", "read", "readWrite", "createDelete"] {
             let old = config(access, false, true);
-            assert!(!old.spaces["s"].permits("write"));
-            assert!(!old.spaces["s"].permits("createDelete"));
+            assert_eq!(old.spaces["s"].permits("write"), matches!(access, "readWrite" | "createDelete"));
+            assert_eq!(old.spaces["s"].permits("createDelete"), access == "createDelete");
             assert_eq!(
                 old.spaces["s"].permits("read"),
-                matches!(access, "read" | "readWrite")
+                matches!(access, "read" | "readWrite" | "createDelete")
             );
         }
         let read = config("read", true, true);

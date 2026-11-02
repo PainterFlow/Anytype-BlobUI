@@ -9,7 +9,6 @@
     for (const [id, entry] of Object.entries(entries)) spaces[id] = {
       access: access.some(o => o.value === entry?.access) ? entry.access : 'none',
       filesEnabled: entry?.filesEnabled === true,
-      mutationsEnabled: entry?.mutationsEnabled === true,
       approval: approvals.some(o => o.value === entry?.approval) ? entry.approval : 'approveForMe'
     };
     const filters = value?.objectMentions;
@@ -70,9 +69,6 @@
     if (metadata) top.append(make('p','input-hint project-source-metadata',metadata));
     const toggle = C.ToggleSetting({label:'Upload/delete files',inputAttributes:{'aria-label':'Upload/delete files for '+description},onChange:()=>change('filesEnabled',toggle.input.checked)});
     toggle.input.checked = permission.filesEnabled; toggle.input.disabled = disabled; bottom.append(toggle.element);
-    const mutation=C.ToggleSetting({label:'Enable content changes',inputAttributes:{'aria-label':'Enable content changes for '+description},onChange:()=>change('mutationsEnabled',mutation.input.checked)});
-    mutation.input.checked=permission.mutationsEnabled===true;mutation.input.disabled=disabled;mutation.element.classList.add('codex-mutation-opt-in');top.append(mutation.element);
-    if(permission.mutationsEnabled!==true && ['readWrite','createDelete'].includes(permission.access)) top.append(make('p','input-hint','Content changes require this switch and Save. Read-Write adds edits; Create-Delete also adds reading, creation and deletion.'));
     picker(bottom,'access',access,'Access');
     picker(bottom,'approval',approvals,'Approval'); item.append(top);
     item.append(bottom);

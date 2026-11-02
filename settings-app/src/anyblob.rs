@@ -667,14 +667,14 @@ mod tests {
         assert!(entered.load(Ordering::Acquire));
     }
     #[test]
-    fn content_migration_denials_and_approval_denial_dispatch_no_http() {
+    fn content_access_and_approval_denial_dispatch_no_http() {
         let operation=||blobui_mcp::operation("create_object",json!({"space_id":"space","body":{"type":"page","name":"fixture"}})).unwrap();
-        for (access,opt_in) in [("read",true),("readWrite",true),("createDelete",false)] {
-            let mut config=config(access,"fullAccess");config.spaces.get_mut("space").unwrap().mutations_enabled=opt_in;
+        for access in ["none","read","readWrite"] {
+            let config=config(access,"fullAccess");
             let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|_,_|panic!("Denied requests must not prompt"),||Ok(None));
             assert!(result.unwrap_err().contains("Access denied"));
         }
-        let mut config=config("createDelete","alwaysAsk");config.spaces.get_mut("space").unwrap().mutations_enabled=true;
+        let config=config("createDelete","alwaysAsk");
         let prompted=std::cell::Cell::new(false);
         let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|op,_|{prompted.set(true);assert_eq!(op.name(),"create_object");Err("User denied mutation".into())},||Ok(None));
         assert!(prompted.get());assert!(result.unwrap_err().contains("User denied mutation"));
@@ -797,7 +797,7 @@ mod tests {
     fn identified_unconfigured_and_projectless_chats_keep_global_reads() {
         use crate::codex_identity::Membership;
         let mut config=project_config(json!({"kind":"space","id":"other","spaceId":"other","permission":{"access":"read"}}));
-        config.spaces.insert("space".into(),crate::codex::Permission{mutations_enabled:false,access:"read".into(),approval:"fullAccess".into(),files_enabled:false});
+        config.spaces.insert("space".into(),crate::codex::Permission{access:"read".into(),approval:"fullAccess".into(),files_enabled:false});
         let page=("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Global"},{"id":"other","name":"Other project"}],"has_more":false}));
         let (client,server)=mock(vec![page.clone(),page],None);
         for membership in [Membership::Project("unconfigured".into()),Membership::Projectless] {
@@ -1327,7 +1327,7 @@ mod tests {
         .unwrap();
         input.flush().unwrap();
         assert_eq!(receive(&mut output)["error"]["code"], -32800);
-        let mut writable=config("createDelete","alwaysAsk");writable.spaces.get_mut("space").unwrap().mutations_enabled=true;*saved_config.lock().unwrap()=writable;
+        let writable=config("createDelete","alwaysAsk");*saved_config.lock().unwrap()=writable;
         send(&mut input,10,"tools/call",json!({"name":"create_object","arguments":{"space_id":"space","body":{"type":"page","name":"fixture-created"}},"_meta":{"threadId":"fixture-chat"}}));
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         drop(input);
@@ -1344,7 +1344,7 @@ mod tests {
                 );
                 assert_eq!(
                     readable(&config, "space"),
-                    ["read", "readWrite"].contains(&access)
+                    ["read", "readWrite", "createDelete"].contains(&access)
                 );
                 assert!(allowed(
                     &config,

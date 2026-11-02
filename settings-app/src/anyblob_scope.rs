@@ -162,7 +162,7 @@ impl Scope {
                     id.clone(),
                     Permission {
                         access: "read".into(),
-                        mutations_enabled: false,
+
                         files_enabled: false,
                         approval: if permissions.iter().any(|p| p.approval == "alwaysAsk") {
                             "alwaysAsk"
@@ -211,7 +211,7 @@ mod tests {
     fn p(access: &str, approval: &str) -> Permission {
         Permission {
             access: access.into(),
-            mutations_enabled: false,
+
             approval: approval.into(),
             files_enabled: false,
         }
@@ -271,7 +271,7 @@ mod tests {
 #[cfg(test)]
 mod mutation_permission_tests {
     use super::*;
-    fn grant(access:&str,approval:&str,files:bool)->Permission {Permission{access:access.into(),approval:approval.into(),files_enabled:files,mutations_enabled:true}}
+    fn grant(access:&str,approval:&str,files:bool)->Permission {Permission{access:access.into(),approval:approval.into(),files_enabled:files,}}
     fn req(name:&str,args:Value)->blobui_mcp::content::ContentRequest {let blobui_mcp::Operation::Content{content}=blobui_mcp::operation(name,args).unwrap()else{panic!()};content}
     #[test] fn capabilities_and_approvals_are_combined_independently() {
         let mut space=Space::default();space.all_grants=vec![grant("createDelete","fullAccess",true)];

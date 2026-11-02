@@ -32,5 +32,4 @@
 .codex-space .formula-property-picker button:disabled,
 .codex-space .formula-property-picker button:disabled:hover { color: #666; background: #202020; cursor: default; }
 
-.codex-space-top .codex-mutation-opt-in { flex: 1 1 100%; padding: 8px 0; border: 0; }
 .codex-space-top .input-hint { flex: 1 1 100%; margin: 0; }

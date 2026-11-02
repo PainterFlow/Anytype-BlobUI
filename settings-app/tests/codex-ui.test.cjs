@@ -16,7 +16,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
       window.calls=[];window.holdDiscovery=true;window.spaces=[{id:'full-space-one',name:'Work'},{id:'full-space-two',name:'Work'},{id:'long-space',name:'A very long space name '.repeat(12)},...Array.from({length:25},(_,i)=>({id:'many-'+i,name:'Space '+i}))];
       window.__TAURI__={core:{invoke:async(name,args)=>{
         window.calls.push(name);
-        if(name==='get_app_state')return {ready:true,onboardingComplete:true,theme:'dark',hasSavedApiKey:true,settings:{codexIntegration:{spaces:{absent:{access:'read',filesEnabled:true,mutationsEnabled:false,approval:'fullAccess'}}}}};
+        if(name==='get_app_state')return {ready:true,onboardingComplete:true,theme:'dark',hasSavedApiKey:true,settings:{codexIntegration:{spaces:{absent:{access:'read',filesEnabled:true,approval:'fullAccess'}}}}};
         if(name==='get_updater_state')return {automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return 'available';
         if(name==='discover_codex_spaces'){if(window.holdDiscovery)await new Promise(resolve=>{(window.pendingDiscovery||=[]).push(resolve);window.resolveDiscovery=()=>window.pendingDiscovery.splice(0).forEach(done=>done());});if(window.discoveryError)throw Error(window.discoveryError);return window.spaces;}
@@ -35,7 +35,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.locator('#codex-panel-1').getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
     await page.evaluate(()=>{window.holdDiscovery=false;window.resolveDiscovery();});
     await page.locator('.codex-space').first().waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,mutationsEnabled:false,approval:'approveForMe'}},projects:{},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false}});
+    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false}});
     assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({objectMentions:null}).objectMentions),{spaces:{all:false,items:[]},types:{all:false,items:[]},filterIncompleteTasks:false});
     const filters={spaces:{all:false,items:[{id:'unavailable',name:'Saved'}]},types:{all:false,items:[{spaceId:'other',id:'missing',name:'Task',space:'Old'}]},filterIncompleteTasks:true};
     assert.deepEqual(await page.evaluate(filters=>window.BlobUI.CodexPage.normalize({objectMentions:filters}).objectMentions,filters),filters);
@@ -43,8 +43,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     assert.equal(await access.innerText(),'No Access');assert.equal(await approval.innerText(),'Approve for me');
     assert.equal(await row.locator('input[aria-label^="Upload/delete"]').isChecked(),false);
     await row.locator('input[aria-label^="Upload/delete"]').check();
-    const mutation=row.locator('input[aria-label^="Enable content changes"]');
-    assert.equal(await mutation.isChecked(),false);await mutation.check();
+    assert.equal(await page.getByText('Enable content changes',{exact:true}).count(),0);
     await access.focus();await page.keyboard.press('ArrowDown');await page.keyboard.press('End');await page.keyboard.press('Enter');
     assert.equal(await access.innerText(),'Create-Delete');
     await approval.click();await row.getByRole('option',{name:'Always Ask',exact:true}).click();
@@ -60,7 +59,7 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     await page.waitForFunction(()=>document.getElementById('status-message').textContent.includes('Save failed'));
     assert.equal(await row.locator('input[aria-label^="Upload/delete"]').isChecked(),true);await page.evaluate(()=>window.saveError=false);
     await page.locator('#save-button').click();await page.waitForFunction(()=>window.saved?.codexIntegration.spaces['full-space-one']?.approval==='alwaysAsk');
-    assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.spaces.absent),{access:'read',filesEnabled:true,mutationsEnabled:false,approval:'fullAccess'});
+    assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.spaces.absent),{access:'read',filesEnabled:true,approval:'fullAccess'});
     await row.locator('input[aria-label^="Upload/delete"]').uncheck();await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await row.locator('input[aria-label^="Upload/delete"]').isChecked(),true);
     await approval.click();await row.getByRole('option',{name:'Never Ask',exact:true}).click();
     await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();

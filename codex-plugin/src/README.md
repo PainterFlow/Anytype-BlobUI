@@ -7,7 +7,7 @@ Anyblob reads and manages Anytype content through the running BlobUI Settings ap
 1. Configure and save an Anytype API v2 connection in BlobUI Advanced Settings.
 2. Open Integrations > Anyblob > Settings and click Install beside Install Marketplace. This registers Anyblob in your personal marketplace for all projects, even while Anyblob is disabled.
 3. Open the Plugins Directory in Codex, select your personal marketplace, and choose Anyblob to install and enable it. Reopen Codex if the marketplace is not visible yet. BlobUI never launches or restarts either app.
-4. Under BlobUI Permissions, grant Read Only or Read-Write for each space you want to use, then Save. Create-Delete includes reads, edits, creation and deletion after you enable Content changes and Save. Existing installations retain their effective read access until this opt-in. Uploads, file deletion and attachments also require the file switch.
+4. Under BlobUI Permissions, grant Read Only or Read-Write for each space you want to use, then Save. Create-Delete includes reads, edits, creation and deletion after you Save. Uploads, file deletion and attachments also require the file switch.
 5. Enable Anyblob in Settings. This saves immediately and creates a current-user-only, Windows DPAPI encrypted bridge credential under %LOCALAPPDATA%\BlobUI\Anyblob. The MCP executable reads it automatically. Disabling removes the credential and invalidates pending reads. Existing enabled installations migrate automatically without changing space permissions.
 6. Keep BlobUI running, either visible or in its existing background mode. Ask Anyblob to list spaces, search one returned space ID, then read an object ID.
 
@@ -67,7 +67,7 @@ Anyblob 0.2.0 adds 40 explicit v2 tools. Each requires a space_id. Their input s
 - Chat tools include list_chats, create_chat, get_chat_messages, add_chat_message, edit_chat_message, delete_chat_message, toggle_chat_reaction, read_chat and create_discussion. Replies use body.reply_to; attachments use body.attachments. Reading does not mark activity read. Reactions are toggles, so inspect the returned added value.
 - Widget tools list, create, update and delete widgets. They require space-wide permission. No account or space-administration tools are exposed.
 
-Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Content changes require the saved opt-in switch. Project source selections authorize existing members; they do not authorize creating new objects, changing their source definition, or modifying space-wide schemas. Those actions need an effective space-wide grant. File switches are independent additional requirements.
+Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Project source selections authorize existing members; they do not authorize creating new objects, changing their source definition, or modifying space-wide schemas. Those actions need an effective space-wide grant. File switches are independent additional requirements.
 
 Always Ask displays the exact request. Approve for me and Never Ask retain their existing behavior within saved grants. Irreversible deletion always needs separate approval, including chat-message deletion that may permanently erase attachment content. Objects, types and properties use the server's archive operations. Creator and system-object restrictions remain authoritative.
 
