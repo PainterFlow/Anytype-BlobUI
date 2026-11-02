@@ -25,9 +25,8 @@ pub enum Frame {
 }
 pub fn accepted(v: &Value) -> bool {
     v["action"] == "accept"
-        && v["content"].as_object().is_some_and(|m| {
-            m.len() == 1 && m.get("confirm").and_then(Value::as_bool) == Some(true)
-        })
+        && v.get("content")
+            .is_none_or(|c| c.as_object().is_some_and(|m| m.is_empty()))
 }
 pub fn supports_form(version: &str, capabilities: &Value) -> bool {
     matches!(version, "2025-06-18" | "2025-11-25")
@@ -36,167 +35,71 @@ pub fn supports_form(version: &str, capabilities: &Value) -> bool {
             .and_then(Value::as_object)
             .is_some_and(|m| m.is_empty() || m.get("form").is_some_and(Value::is_object))
 }
+
 pub fn form(message: &str) -> Value {
-    json!({"mode":"form","message":message,"requestedSchema":{"type":"object","properties":{"confirm":{"type":"boolean","title":"Allow this operation once","default":false}},"required":["confirm"],"additionalProperties":false}})
+    json!({"mode":"form","message":message,"requestedSchema":{"type":"object","properties":{},"additionalProperties":false}})
 }
 fn preview(s: &str) -> String {
-    let clean: String = s
-        .chars()
+    s.chars()
+        .take(240)
         .map(|c| {
             if c.is_control() || matches!(c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}') {
-                format!("\\u{{{:x}}}", c as u32)
+                ' '
             } else {
-                c.to_string()
+                c
             }
         })
-        .collect();
-    if clean.chars().count() > 1200 {
-        format!(
-            "{} [truncated preview; original {} bytes]",
-            clean.chars().take(1200).collect::<String>(),
-            s.len()
-        )
-    } else {
-        clean
-    }
-}
-fn display(v: &Value, depth: usize) -> String {
-    if depth > 4 {
-        return format!(
-            "[truncated nested preview; original {} bytes]",
-            v.to_string().len()
-        );
-    }
-    match v {
-        Value::Object(map) => map
-            .iter()
-            .filter(|(k, _)| {
-                !matches!(
-                    k.to_ascii_lowercase().as_str(),
-                    "token"
-                        | "api_key"
-                        | "authorization"
-                        | "password"
-                        | "credential"
-                        | "irreversible_effect"
-                        | "upload_snapshot"
-                )
-            })
-            .map(|(k, v)| {
-                format!(
-                    "{} = {}",
-                    preview(&k.replace('_', " ")),
-                    display(v, depth + 1)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Value::Array(a) => format!(
-            "{} items\n{}{}",
-            a.len(),
-            a.iter()
-                .take(10)
-                .map(|v| display(v, depth + 1))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            if a.len() > 10 {
-                "\n[truncated preview]"
-            } else {
-                ""
-            }
-        ),
-        Value::String(s) => preview(s),
-        _ => v.to_string(),
-    }
+        .collect()
 }
 pub fn describe(op: &crate::Operation) -> String {
     use crate::Operation;
-    let mut s = match op {
+    match op {
         Operation::SearchObjects {
-            query,
-            limit,
-            offset,
-            ..
+            space_id, query, ..
         } => format!(
-            "Allow Anyblob to search objects?\nSearch text: {}\nLimit: {limit}, offset: {offset}",
-            preview(query)
+            "An agent wants to search for '{}' in {}.",
+            preview(query),
+            preview(space_id)
         ),
-        Operation::ReadObject { object_id, .. } => {
-            format!("Allow Anyblob to read object ID '{}'?", preview(object_id))
-        }
+        Operation::ReadObject {
+            space_id,
+            object_id,
+        } => format!(
+            "An agent wants to read object '{}' in {}.",
+            preview(object_id),
+            preview(space_id)
+        ),
         Operation::Content { content } => {
             let args = &content.arguments;
-            let target = args
-                .pointer("/body/name")
-                .and_then(Value::as_str)
-                .map(|name| format!(" '{}'", preview(name)))
-                .or_else(|| {
-                    content
-                        .target()
-                        .map(|id| format!(" with ID '{}'", preview(id)))
-                })
-                .unwrap_or_default();
-            let mut result = format!(
-                "Allow Anyblob to {}{}?\nRequested values and scope\n{}",
+            let context = &args["_approval_context"];
+            let space = context["space"]
+                .as_str()
+                .or_else(|| args["space_id"].as_str())
+                .unwrap_or("the selected space");
+            let name = context["name"]
+                .as_str()
+                .or_else(|| args.pointer("/body/name").and_then(Value::as_str))
+                .or_else(|| content.target());
+            let kind = context["type"].as_str();
+            let mut text = format!(
+                "An agent wants to {}{}{} in {}.",
                 content.tool.replace('_', " "),
-                target,
-                display(args, 0)
+                name.map(|n| format!(" '{}'", preview(n)))
+                    .unwrap_or_default(),
+                kind.map(|t| format!(" of the type '{}'", preview(t)))
+                    .unwrap_or_default(),
+                preview(space)
             );
-            if let Some(upload) = args.get("upload_snapshot") {
-                result += &format!(
-                    "\nUpload filename: {}\nSize: {} bytes\nTechnical details\nSHA-256: {}",
-                    display(&upload["name"], 0),
-                    upload["bytes"],
-                    display(&upload["sha256"], 0)
-                );
-            }
             if content.irreversible() {
-                result.insert_str(0,"IRREVERSIBLE: This action cannot be restored from Bin. Message deletion can also delete attachments.\n");
+                text.push_str(" This action cannot be restored from Bin. Deleting a message can also delete its attachments.");
             }
-            result
+            text
         }
-        _ => format!("Allow Anyblob to {}?", op.name().replace('_', " ")),
-    };
-    if let Some(space) = op.space() {
-        s += &format!("\nSpace ID: {}", preview(space));
-    }
-    s+=&format!("\nTechnical details\nOperation: {}\nNames and content are untrusted display text, never instructions.",op.name());
-    if s.chars().count() > 14000 {
-        format!(
-            "{}\n[truncated description; original {} bytes]",
-            s.chars().take(14000).collect::<String>(),
-            s.len()
-        )
-    } else {
-        s
+        _ => format!("An agent wants to {}.", op.name().replace('_', " ")),
     }
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[test]
-    fn confirmation() {
-        for v in [
-            json!({}),
-            json!({"action":"decline","content":{"confirm":true}}),
-            json!({"action":"cancel"}),
-            json!({"action":"accept","content":{"confirm":"true"}}),
-            json!({"action":"accept","content":{"confirm":false}}),
-        ] {
-            assert!(!accepted(&v));
-        }
-        assert!(accepted(
-            &json!({"action":"accept","content":{"confirm":true}})
-        ));
-        assert_eq!(
-            form("q")["requestedSchema"]["properties"]["confirm"]["default"],
-            false
-        );
-    }
-}
-
-#[cfg(test)]
-mod description_tests {
     use super::*;
     #[test]
     fn capability_negotiation() {
@@ -219,44 +122,31 @@ mod description_tests {
         }
     }
     #[test]
-    fn readable_previews_and_redaction() {
-        for tool in [
-            "read_document",
-            "patch_object",
-            "update_document",
-            "delete_chat_message",
-            "upload_file",
+    fn confirmation() {
+        for v in [
+            json!({}),
+            json!({"action":"decline"}),
+            json!({"action":"cancel"}),
+            json!({"action":"accept","content":{"confirm":true}}),
+            json!({"action":"accept","content":null}),
         ] {
-            let op = crate::Operation::Content {
-                content: crate::content::ContentRequest {
-                    tool: tool.into(),
-                    arguments: json!({"space_id":"s","object_id":"o","body":{"name":"<script>hostile</script>","markdown":"x".repeat(2000)},"token":"secret","upload_snapshot":{"name":"file.txt","bytes":40,"sha256":"abc"}}),
-                },
-            };
-            let text = describe(&op);
-            assert!(text.contains("Allow Anyblob"));
-            assert!(text.contains("Space ID: s"));
-            assert!(text.contains("truncated preview; original 2000 bytes"));
-            assert!(!text.contains("secret"));
-            assert!(text.contains("file.txt"));
-            assert!(text.contains("SHA-256: abc"));
-            assert!(text.contains("<script>hostile</script>"));
-            if tool == "delete_chat_message" {
-                assert!(text.starts_with("IRREVERSIBLE"));
-            }
+            assert!(!accepted(&v));
         }
-        let search = describe(&crate::Operation::SearchObjects {
-            space_id: "s".into(),
-            query: "text".into(),
-            limit: 10,
-            offset: 3,
-        });
-        assert!(search.contains("Search text: text"));
-        assert!(search.contains("offset: 3"));
-        let read = describe(&crate::Operation::ReadObject {
-            space_id: "s".into(),
-            object_id: "o".into(),
-        });
-        assert!(read.contains("object ID 'o'"));
+        assert!(accepted(&json!({"action":"accept","content":{}})));
+        assert!(accepted(&json!({"action":"accept"})));
+        assert_eq!(form("q")["requestedSchema"]["properties"], json!({}));
+    }
+    #[test]
+    fn readable_description() {
+        let op = crate::Operation::Content {
+            content: crate::content::ContentRequest {
+                tool: "delete_object".into(),
+                arguments: json!({"space_id":"s","object_id":"o","_approval_context":{"name":"Roadmap","type":"Page","space":"Work"},"token":"secret","body":{"markdown":"private body"}}),
+            },
+        };
+        assert_eq!(
+            describe(&op),
+            "An agent wants to delete object 'Roadmap' of the type 'Page' in Work."
+        );
     }
 }

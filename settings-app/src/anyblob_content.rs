@@ -131,6 +131,26 @@ fn route(req: &ContentRequest, dry: bool) -> Result<String, String> {
     Ok(route)
 }
 impl Prepared {
+    pub fn approval_prompt(&self, client: &Client, check: &impl Fn() -> Result<(), String>) -> Result<blobui_mcp::Operation, String> {
+        let mut op = self.prompt();
+        let space = self.request.arguments["space_id"].as_str().unwrap_or("");
+        let mut context = json!({});
+        check()?;
+        if let Ok(spaces) = client.pages("GET", "/v2/spaces?ids=full", None) {
+            if let Some(row) = spaces.iter().find(|row| row["id"] == space) { context["space"] = row["name"].clone(); }
+        }
+        check()?;
+        if let Some(id) = self.request.target() {
+            let path = format!("/v2/spaces/{}/objects/{}?ids=full", crate::api::encode_segment(space), crate::api::encode_segment(id));
+            if let Ok(row) = client.request("GET", &path, None) {
+                context["name"] = row["name"].clone();
+                context["type"] = row["type"].get("name").unwrap_or(&row["type"]).clone();
+            }
+        }
+        check()?;
+        if let blobui_mcp::Operation::Content { content } = &mut op { content.arguments["_approval_context"] = context; }
+        Ok(op)
+    }
     pub fn prompt(&self) -> blobui_mcp::Operation {
         let mut content = self.request.clone();
         if self.request.irreversible() {

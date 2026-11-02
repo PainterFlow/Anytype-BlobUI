@@ -73,7 +73,7 @@ fn native_forms_fail_closed_and_correlate_concurrent_calls() {
     );
     receive(&mut out);
     for (i, result) in [
-        json!({"action":"accept","content":{"confirm":true}}),
+        json!({"action":"accept","content":{}}),
         json!({"action":"accept","content":{"confirm":false}}),
         json!({"action":"decline","content":{"confirm":true}}),
         json!({"action":"cancel"}),
@@ -90,8 +90,8 @@ fn native_forms_fail_closed_and_correlate_concurrent_calls() {
         let question = receive(&mut out);
         assert_eq!(question["method"], "elicitation/create");
         assert_eq!(
-            question["params"]["requestedSchema"]["properties"]["confirm"]["default"],
-            false
+            question["params"]["requestedSchema"]["properties"],
+            json!({})
         );
         // An unrelated response cannot answer the pending question.
         send(
@@ -110,7 +110,7 @@ fn native_forms_fail_closed_and_correlate_concurrent_calls() {
         );
         send(
             &mut input,
-            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}}),
+            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}}),
         );
     }
     // Two simultaneous calls have independent server request IDs. Answer in reverse order.
@@ -126,7 +126,7 @@ fn native_forms_fail_closed_and_correlate_concurrent_calls() {
     for question in [second, first] {
         send(
             &mut input,
-            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}}),
+            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}}),
         );
     }
     for _ in 0..2 {

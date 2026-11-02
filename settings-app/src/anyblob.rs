@@ -483,7 +483,7 @@ fn dispatch_resolved_with(
         }
         let mut prepared=crate::anyblob_content::prepare(&client,content,&effective,scope.as_ref(),&check)?;
         let permission=crate::anyblob_content::permission(&effective,scope.as_ref(),content,prepared.files)?;
-        if permission.approval=="alwaysAsk" || content.irreversible() {approve(&prepared.prompt(),&check)?;}
+        if permission.approval=="alwaysAsk" || content.irreversible() {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
         let initial_files=prepared.files;
         let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,initial_files)?;}Ok(())};
         crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
@@ -1157,6 +1157,7 @@ mod tests {
                 ("POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Note"}],"has_more":false})),
                 ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Note","properties":{}})),
                 ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"resource content"})),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
                 ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true})),
                 ("POST /v2/spaces/space/objects ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"id":"created-object","etag":"created-etag"})),
             ],
@@ -1287,8 +1288,8 @@ mod tests {
             );
             let mut response = receive(&mut output);
             if response["method"]=="elicitation/create" {
-                assert_eq!(response["params"]["requestedSchema"]["properties"]["confirm"]["default"],false);
-                writeln!(input,"{}",json!({"jsonrpc":"2.0","id":response["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
+                assert_eq!(response["params"]["requestedSchema"]["properties"],json!({}));
+                writeln!(input,"{}",json!({"jsonrpc":"2.0","id":response["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
                 response=receive(&mut output);
             }
             assert_eq!(response["result"]["isError"], false, "{response}");
@@ -1299,7 +1300,7 @@ mod tests {
         assert_eq!(mentions["result"]["structuredContent"]["items"][0]["uri"],"anyblob://objects/space/object");
         send(&mut input,8,"resources/read",json!({"uri":"anyblob://objects/space/object","_meta":{"threadId":"fixture-chat"}}));
         let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");
-        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
+        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
         let resource=receive(&mut output);
         assert_eq!(resource["result"]["contents"][0]["uri"],"anyblob://objects/space/object");
         let document:Value=serde_json::from_str(resource["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
@@ -1336,7 +1337,7 @@ mod tests {
         let writable=config("createDelete","alwaysAsk");*saved_config.lock().unwrap()=writable;
         send(&mut input,10,"tools/call",json!({"name":"create_object","arguments":{"space_id":"space","body":{"type":"page","name":"fixture-created"}},"_meta":{"threadId":"fixture-chat"}}));
         let question=receive(&mut output);assert_eq!(question["method"],"elicitation/create");assert!(question["params"]["message"].as_str().unwrap().contains("fixture-created"));
-        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{"confirm":true}}})).unwrap();input.flush().unwrap();
+        writeln!(input,"{}",json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})).unwrap();input.flush().unwrap();
         let created=receive(&mut output);assert_eq!(created["result"]["isError"],false,"{created}");assert_eq!(created["result"]["structuredContent"]["outcome"],"confirmed");assert_eq!(created["result"]["structuredContent"]["receipt"]["id"],"created-object");
         drop(input);
         assert!(child.wait().unwrap().success());
