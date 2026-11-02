@@ -28,7 +28,6 @@ The same articles are bundled in Settings under Help > Documentation for offline
   - [Calendar Colors](settings-app/ui/docs/calendar-colors.md)
   - [QoL Features](settings-app/ui/docs/text-effects-and-previews.md)
 - [API Guide](settings-app/ui/docs/api-guide.md)
-- [Experiment](settings-app/ui/docs/experiment.md)
   - [Settings UI](settings-app/ui/docs/settings-ui-refresh.md)
 - [Updating](settings-app/ui/docs/updating.md)
 

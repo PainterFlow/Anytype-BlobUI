@@ -363,42 +363,6 @@
       },
       content
     }),
-    "advanced-experiments-tab": content => C.Button({
-      attributes: {
-        id: "advanced-experiments-tab",
-        role: "tab",
-        "aria-selected": "false",
-        "aria-controls": "advanced-experiments-panel",
-        tabindex: "-1"
-      },
-      content
-    }),
-    "advanced-experiments-panel": content => C.Section({
-      attributes: {
-        id: "advanced-experiments-panel",
-        role: "tabpanel",
-        "aria-labelledby": "advanced-experiments-tab",
-        hidden: ""
-      },
-      content
-    }),
-    "experiments-heading": content => C.Group({
-      attributes: {
-        class: "section-heading"
-      },
-      content
-    }),
-    "advanced-experiments-tab-list": content => C.Group({
-      content
-    }),
-    "settings-v21-enabled": () => C.ToggleSetting({
-      id: "settings-v21-enabled",
-      label: "Settings Future Proof UI Refresh",
-      className: "native-accent-control settings-row accessibility-row",
-      inputAttributes: {
-        "aria-describedby": "experiments-warning"
-      }
-    }),
     "advanced-api-panel": content => C.Section({
       attributes: {
         id: "advanced-api-panel",

@@ -55,11 +55,11 @@
     kanbanPicker.setValue(selected);
     return selected;
   }
-  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
+  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab")];
   const advancedTabController = window.BlobUI.Components.Tabs({
     container: el("advanced-tabs"),
     buttons: advancedTabs,
-    panels: [el("advanced-api-panel"), el("advanced-app-panel"), el("advanced-experiments-panel")],
+    panels: [el("advanced-api-panel"), el("advanced-app-panel")],
     onSelect(index) { if (index !== 0) resetAdvancedVisibility(); },
   });
   function selectAdvancedTab(index) { advancedTabController.select(index); }
@@ -545,7 +545,7 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled && left.sidebarResizeMode === right.sidebarResizeMode && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1261,7 +1261,6 @@
     window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
-    el("settings-v21-enabled").disabled = settingsLocked || !draft;
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
     kanbanViewStyle.disabled = settingsLocked || !draft;
     if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
@@ -1317,7 +1316,6 @@
       kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
-      settingsV21Enabled: settings.settingsV21Enabled === true,
       sidebarResizeMode: "standard",
     };
   }
@@ -1339,9 +1337,7 @@
     syncKanbanStyleSelection(draft.kanbanViewStyle);
     collapsedCategories.checked = draft.collapsedCategories;
     calendarColorsEnabled.checked = draft.calendarColorsEnabled;
-    el("settings-v21-enabled").checked = draft.settingsV21Enabled;
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
-    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
@@ -1781,7 +1777,7 @@
       return;
     }
 
-    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && el("advanced-experiments-panel").hidden && settingsChanged);
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
       openKeyRemovalConfirmation();
@@ -2590,12 +2586,6 @@
   window.BlobUI.CalendarPage?.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info") });
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
-  el("settings-v21-enabled").addEventListener("change", () => {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
-    draft.settingsV21Enabled = el("settings-v21-enabled").checked;
-    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
-    markDirty();
-  });
     window.appReady = false;
   window.addEventListener("focus", requestSavedRefresh);
   savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {

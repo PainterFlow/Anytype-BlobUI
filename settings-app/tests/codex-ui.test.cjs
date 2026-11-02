@@ -5,7 +5,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname, '../..');
-test('Codex permissions preserve drafts, save and undo in both layouts', async () => {
+test('Codex permissions preserve drafts, save and undo in the standard layout', async () => {
   const root = path.join(workspace,'.test-run/codex-ui'); fs.mkdirSync(root,{recursive:true});
   process.env.TEMP=process.env.TMP=root;
   const browser = await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
@@ -62,8 +62,8 @@ test('Codex permissions preserve drafts, save and undo in both layouts', async (
     assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.spaces.absent),{access:'read',filesEnabled:true,approval:'fullAccess'});
     await row.locator('input[aria-label^="Upload/delete"]').uncheck();await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await row.locator('input[aria-label^="Upload/delete"]').isChecked(),true);
     await approval.click();await row.getByRole('option',{name:'Never Ask',exact:true}).click();
-    await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();
-    await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').nth(1).click();
+
+    if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').nth(1).click();
     assert.equal(await access.innerText(),'Create-Delete');
     assert.equal(await approval.innerText(),'Never Ask');
     assert.equal(await page.locator('#codex-nav').getAttribute('aria-expanded'),'true');

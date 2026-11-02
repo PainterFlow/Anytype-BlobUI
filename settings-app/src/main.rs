@@ -127,8 +127,6 @@ struct SettingsDraft {
     collapsed_categories: bool,
     #[serde(default = "default_calendar_colors_enabled")]
     calendar_colors_enabled: bool,
-    #[serde(default)]
-    settings_v21_enabled: bool,
     #[serde(default, deserialize_with = "deserialize_sidebar_resize_mode")]
     sidebar_resize_mode: SidebarResizeMode,
 }
@@ -1161,7 +1159,6 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "collapsedCategories": settings.collapsed_categories,
         "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
-        "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
@@ -1190,7 +1187,6 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "collapsedCategories": settings.collapsed_categories,
             "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
-        "settingsV21Enabled": settings.settings_v21_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
         }
     });
@@ -1353,9 +1349,6 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
             Some("pro") => SidebarResizeMode::Pro,
             _ => SidebarResizeMode::Off,
         },
-        settings_v21_enabled: read_bool(local, "settingsV21Enabled")
-            .or_else(|| read_bool(Some(normalized), "settingsV21Enabled"))
-            .unwrap_or(false),
         calendar_colors_enabled: read_bool(local, "calendarColorsEnabled")
             .or_else(|| read_bool(Some(normalized), "calendarColorsEnabled"))
             .unwrap_or(true),
@@ -1893,7 +1886,6 @@ impl Default for SettingsDraft {
             kanban_view_style: default_kanban_style(),
             collapsed_categories: false,
             calendar_colors_enabled: true,
-            settings_v21_enabled: false,
             sidebar_resize_mode: SidebarResizeMode::Off,
         }
     }
@@ -1933,26 +1925,6 @@ mod tests {
             assert_eq!(settings_from_data(&json!({"settings": {"sidebarResizeMode": invalid}})).sidebar_resize_mode, SidebarResizeMode::Off);
         }
         assert_eq!(settings_from_data(&json!({"settings": {}})).sidebar_resize_mode, SidebarResizeMode::Off);
-    }
-
-    #[test]
-    fn settings_v21_defaults_and_round_trip() {
-        assert!(!SettingsDraft::default().settings_v21_enabled);
-        assert!(!settings_from_data(&json!({"settings": {}})).settings_v21_enabled);
-        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
-        legacy.as_object_mut().unwrap().remove("settingsV21Enabled");
-        assert!(!serde_json::from_value::<SettingsDraft>(legacy).unwrap().settings_v21_enabled);
-        for enabled in [false, true] {
-            let settings = SettingsDraft { settings_v21_enabled: enabled, ..SettingsDraft::default() };
-            let mut data = json!({"unrelated": "keep"});
-            apply_settings(&mut data, Path::new("fixture"), &settings);
-            assert_eq!(settings_from_data(&data).settings_v21_enabled, enabled);
-            assert_eq!(data["settings"]["settingsV21Enabled"], enabled);
-            assert_eq!(data["settingsV2"]["settings"]["settingsV21Enabled"], enabled);
-            assert_eq!(data["unrelated"], "keep");
-        }
-        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":"invalid"}})).settings_v21_enabled);
-        assert!(!settings_from_data(&json!({"settings":{"settingsV21Enabled":true},"settingsV2":{"settings":{"settingsV21Enabled":false}}})).settings_v21_enabled);
     }
 
     #[test]

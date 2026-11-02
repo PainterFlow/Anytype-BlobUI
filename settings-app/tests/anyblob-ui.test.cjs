@@ -46,7 +46,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('[role=status]').first().innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('End');assert.equal(await page.locator('#codex-tab-2').getAttribute('aria-selected'),'true');await page.keyboard.press('Home');assert.equal(await page.locator('#codex-tab-0').getAttribute('aria-selected'),'true');
     await page.screenshot({path:path.join(fixture,'settings-original-dark.png')});
-    await page.locator('#advanced-nav').click();await page.locator('#advanced-experiments-tab').click();await page.locator('#settings-v21-enabled').check();await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();
+    if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();
     assert.equal(await panel.isVisible(),true);assert.equal(await page.locator('#codex-nav').innerText(),'Anyblob');
     await page.setViewportSize({width:800,height:750});await page.screenshot({path:path.join(fixture,'settings-refreshed-narrow-dark.png')});
     const box=await install.boundingBox();assert(box.x+box.width<=800);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

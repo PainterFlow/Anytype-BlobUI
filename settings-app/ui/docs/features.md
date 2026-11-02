@@ -33,4 +33,4 @@ Ctrl+R inside BlobUI reloads saved settings and refreshes Anytype lists and pick
 
 ## Settings layout
 
-To try the optional refreshed Settings interface, read [Experiment](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/experiment.md). The [Settings UI guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/settings-ui-refresh.md) explains its navigation and how to return to the original layout.
+The [Settings UI guide](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/settings-ui-refresh.md) explains category tabs and sidebar navigation.

@@ -244,15 +244,13 @@ test('all bundled articles and feature children render offline in dark mode', {
 
     assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
     assert.equal(await page.locator('#documentation-article h1').textContent(), 'Introduction');
-    assert.equal(await page.locator('.documentation-child').count(), 5);
+    assert.equal(await page.locator('.documentation-child').count(), 4);
     assert.equal(await page.locator('[data-article-id="features"]').getAttribute('aria-expanded'), 'false');
-    assert.equal(await page.locator('[data-article-id="experiment"]').getAttribute('aria-expanded'), 'false');
     assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
     const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'experiment', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
     assert.equal(await page.locator('.documentation-item-icon svg').count(), ids.length);
     const iconPath = async id => page.locator('[data-article-id="' + id + '"] .documentation-item-icon svg').innerHTML();
-    assert.notEqual(await iconPath('experiment'), await iconPath('settings-ui-refresh'));
     assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
     const externalRequests = [];
     page.on('request', request => {
