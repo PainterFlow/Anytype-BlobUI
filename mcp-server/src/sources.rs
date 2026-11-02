@@ -26,7 +26,7 @@ pub fn tool_result(operation: &Operation, value: Value) -> Value {
         content.push(link);
     }
     let mut result = json!({"content":content,"structuredContent":value,
-        "isError":matches!(value["outcome"].as_str(),Some("rejected"|"unknown"))});
+        "isError":matches!(value["outcome"].as_str(),Some("rejected"|"unknown"|"unsupported_query"))});
     if !resources.is_empty() {
         result["_meta"] = json!({"openai/resourceActivities":{"version":1,"resources":resources}});
     }
@@ -94,6 +94,18 @@ fn object_link(operation: &Operation, value: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn query_guidance_is_not_reported_as_creation_or_a_resource() {
+        let op = Operation::Content { content: crate::content::ContentRequest { tool:"create_object".into(), arguments:json!({"space_id":"s"}) }};
+        for outcome in ["needs_input", "unsupported_query"] {
+            let value = json!({"outcome":outcome,"creation":{"outcome":"not_attempted"},"requirements":{"source":{"properties":["status"]}}});
+            let result = tool_result(&op,value.clone());
+            assert_eq!(result["structuredContent"],value);
+            assert_eq!(result["isError"],outcome == "unsupported_query");
+            assert_eq!(result["content"].as_array().unwrap().len(),1);
+            assert!(result.get("_meta").is_none());
+        }
+    }
     #[test]
     fn links_preserve_results_and_exclude_unconfirmed_activity() {
         let op = Operation::Content { content: crate::content::ContentRequest { tool:"patch_object".into(), arguments:json!({"space_id":"s","object_id":"o"}) }};

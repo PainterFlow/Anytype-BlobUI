@@ -14,6 +14,10 @@ use std::{
     sync::Mutex,
 };
 
+mod query;
+#[cfg(test)]
+mod query_tests;
+
 static OPERATIONS: Mutex<()> = Mutex::new(());
 fn normalize(key: &str) -> String {
     key.chars()
@@ -176,20 +180,7 @@ fn prove(
     }) {
         return Err(format!("Property {key} has unsupported filter fields."));
     }
-    let candidates = properties
-        .iter()
-        .filter(|p| {
-            ["key", "name"].iter().any(|k| {
-                p[*k]
-                    .as_str()
-                    .is_some_and(|s| normalize(s) == normalize(key))
-            })
-        })
-        .collect::<Vec<_>>();
-    if candidates.len() != 1 {
-        return Err(format!("Unknown or ambiguous property key {key}."));
-    }
-    let prop = candidates[0];
+    let prop = query::property(key, properties)?;
     let canonical = prop["key"].as_str().ok_or("Property has no API key.")?;
     if canonical == "name"
         && body.get("name").is_none()
@@ -199,38 +190,8 @@ fn prove(
     {
         return Err("A name filter with Markdown requires an explicit top-level name to avoid heading-derived changes.".into());
     }
-    let mut values = Vec::new();
-    if let Some(fields) = body["properties"].as_object() {
-        for (supplied, value) in fields {
-            let matching = properties
-                .iter()
-                .filter(|p| {
-                    ["key", "name"].iter().any(|k| {
-                        p[*k]
-                            .as_str()
-                            .is_some_and(|s| normalize(s) == normalize(supplied))
-                    })
-                })
-                .collect::<Vec<_>>();
-            if matching.iter().any(|p| p["key"] == canonical) {
-                if matching.len() != 1 {
-                    return Err(format!("Ambiguous supplied property {supplied}."));
-                }
-                values.push(value);
-            }
-        }
-    }
-    if canonical == "name" {
-        if let Some(name) = body.get("name") {
-            values.push(name);
-        }
-    }
-    if values.len() != 1 {
-        return Err(format!(
-            "Property {key} must be explicitly supplied exactly once."
-        ));
-    }
-    let value = values[0];
+    let value = query::supplied(prop, body, properties)?
+        .ok_or_else(|| format!("Property {key} must be explicitly supplied exactly once."))?;
     let expected = &node["value"];
     if expected
         .as_str()
@@ -316,77 +277,15 @@ fn query_proof(
     req: &ContentRequest,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
-    let body = &req.arguments["body"];
-    if body["template"] != "none" {
-        return Err("Query creation requires template: \"none\".".into());
+    match query::assess(client, source, def, req, check)? {
+        None => Ok(()),
+        Some(response) => Err(response["message"]
+            .as_str()
+            .unwrap_or("Query requirements must be satisfied before creation.")
+            .into()),
     }
-    if body.get("blocks").is_some() || body.get("formatVersion").is_some() {
-        return Err(
-            "Scoped query creation initially requires the shortcut creation payload.".into(),
-        );
-    }
-    let query = &def["document"]["query_source"];
-    if def["document"]["warnings"]
-        .as_array()
-        .is_some_and(|a| !a.is_empty())
-    {
-        return Err("Query definition has export warnings; membership cannot be proven.".into());
-    }
-    if query.as_object().is_none_or(|o| {
-        o.keys()
-            .any(|k| !["types", "properties"].contains(&k.as_str()))
-    }) {
-        return Err("Unsupported query source definition.".into());
-    }
-    if query["properties"]
-        .as_array()
-        .is_some_and(|a| !a.is_empty())
-        || query.get("properties").is_some_and(|p| !p.is_array())
-    {
-        return Err("Property-based query sources cannot yet prove creation membership.".into());
-    }
-    let source_types = query["types"]
-        .as_array()
-        .filter(|a| !a.is_empty())
-        .ok_or("Query has no supported type source.")?;
-    check()?;
-    let types = crate::codex::source_types(client, &base(&source.space_id))?;
-    let ty = types
-        .iter()
-        .find(|t| t["key"] == body["type"])
-        .ok_or("Requested type cannot be resolved against v2 metadata.")?;
-    if !source_types
-        .iter()
-        .any(|s| s == &ty["key"] || (ty["id"].is_string() && s == &ty["id"]))
-    {
-        return Err("Requested type must match a query source type API key or ID.".into());
-    }
-    let (properties, options) = metadata(client, source, check)?;
-    let views = def["views"].as_array().ok_or("Query views unavailable.")?;
-    let mut reasons = Vec::new();
-    for view in views {
-        // AnyBlock omits empty view fields. Explicit null is not an empty filter list.
-        let empty = json!([]);
-        match prove(
-            view.get("filters").unwrap_or(&empty),
-            body,
-            &properties,
-            &options,
-            0,
-        ) {
-            Ok(()) => return Ok(()),
-            Err(e) => reasons.push(format!("View {}: {e}", view["id"])),
-        }
-    }
-    Err(format!(
-        "Creation cannot prove query membership. {}",
-        if reasons.is_empty() {
-            "Query has no views.".into()
-        } else {
-            reasons.join("; ")
-        }
-    ))
 }
+
 fn member(
     client: &Client,
     source: &SourcePermission,
@@ -480,10 +379,10 @@ fn result(record: &Value, placement: &str, error: Option<String>) -> Value {
 mod tests {
     use super::*;
     use crate::anyblob_content::tests::fixture;
-    fn page(rows: Value) -> Value {
+    pub(super) fn page(rows: Value) -> Value {
         json!({"data":rows,"has_more":false})
     }
-    fn source(kind: &str, access: &str) -> SourcePermission {
+    pub(super) fn source(kind: &str, access: &str) -> SourcePermission {
         SourcePermission {
             space_id: "s".into(),
             kind: kind.into(),
@@ -497,13 +396,13 @@ mod tests {
             },
         }
     }
-    fn project(source: SourcePermission) -> ProjectConfiguration {
+    pub(super) fn project(source: SourcePermission) -> ProjectConfiguration {
         ProjectConfiguration {
             sources: vec![source],
             ..Default::default()
         }
     }
-    fn req(kind: &str) -> ContentRequest {
+    pub(super) fn req(kind: &str) -> ContentRequest {
         let key = format!(
             "fixture-{}-{}",
             std::process::id(),
@@ -517,7 +416,7 @@ mod tests {
             arguments: json!({"space_id":"s","destination":{"kind":kind,"id":"dest"},"idempotency_key":key,"body":{"type":"page","template":"none","name":"Created"}}),
         }
     }
-    fn doc(kind: &str) -> Value {
+    pub(super) fn doc(kind: &str) -> Value {
         if kind == "query" {
             json!({"id":"dest","type":"set","query_source":{"types":["page"]}})
         } else {
@@ -537,7 +436,7 @@ mod tests {
     fn schema() -> Value {
         json!({"schema":{"type":"object","properties":{"op":{"const":"add_items"},"items":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":1}},"required":["op","items"],"additionalProperties":false}})
     }
-    fn normal_access_responses(id: &str) -> Vec<Value> {
+    pub(super) fn normal_access_responses(id: &str) -> Vec<Value> {
         let document =
             json!({"id":id,"type":"page","properties":{"name":"Created"},"etag":"object-etag"});
         vec![
@@ -549,7 +448,11 @@ mod tests {
             json!({"applied":true}),
         ]
     }
-    fn normal_read_and_edit(client: &Client, scope: &crate::anyblob_scope::Scope, id: &str) {
+    pub(super) fn normal_read_and_edit(
+        client: &Client,
+        scope: &crate::anyblob_scope::Scope,
+        id: &str,
+    ) {
         let config = scope.configuration();
         let read = ContentRequest {
             tool: "read_document".into(),
@@ -668,7 +571,11 @@ mod tests {
             ],
             ..Default::default()
         };
-        let (client, capture, server) = fixture(vec![doc("query"), page(json!([{"id":"all"}]))]);
+        let (client, capture, server) = fixture(vec![
+            doc("query"),
+            page(json!([{"id":"all"}])),
+            page(json!([])),
+        ]);
         let request = ContentRequest {
             tool: "list_creation_targets".into(),
             arguments: json!({"space_id":"s"}),
@@ -683,7 +590,7 @@ mod tests {
             "page"
         );
         server.join().unwrap();
-        assert_eq!(capture.lock().unwrap().len(), 2);
+        assert_eq!(capture.lock().unwrap().len(), 3);
     }
     #[test]
     fn query_creation_uses_union_and_subsequent_membership_permissions() {
@@ -756,19 +663,30 @@ mod tests {
                     json!([{"id":"type-page","key":"page"},{"id":"type-task","key":"task"}]),
                 ));
             }
-            if matches!(case, "missing" | "unknown") {
+            if case != "template" {
                 responses.push(page(json!([{"key":"title","format":"text"}])));
             }
             let (client, capture, server) = fixture(responses);
-            assert!(dispatch(
+            let response = dispatch(
                 &client,
                 "project",
                 &project(source("query", "createDelete")),
                 &request,
                 &|| Ok(()),
-                &|_, _| panic!("no approval before proof")
-            )
-            .is_err());
+                &|_, _| panic!("no approval before proof"),
+            );
+            if case == "template" {
+                assert!(response.is_err());
+            } else {
+                assert_eq!(
+                    response.unwrap()["outcome"],
+                    if case == "unknown" {
+                        "unsupported_query"
+                    } else {
+                        "needs_input"
+                    }
+                );
+            }
             server.join().unwrap();
             assert!(capture
                 .lock()
@@ -1180,7 +1098,13 @@ pub fn dispatch(
                 )?;
             }
             let def = definition(client, s, check)?;
-            targets.push(json!({"kind":s.kind,"id":s.id,"name":s.name,"requirements":if s.kind == "query" {json!({"query_source":def["document"]["query_source"],"views":def["views"],"template":"none","supported":"Unfiltered views or nested AND/OR of positive equal on explicit text, number, checkbox and single-select properties. At least one view must be provable."})} else {Value::Null}}));
+            let requirements = if s.kind == "query" {
+                query::discovery(client, s, &def, check)?
+            } else {
+                Value::Null
+            };
+            targets
+                .push(json!({"kind":s.kind,"id":s.id,"name":s.name,"requirements":requirements}));
         }
         check()?;
         return Ok(json!({"targets":targets}));
@@ -1221,7 +1145,29 @@ pub fn dispatch(
     let mut prepared = anyblob_content::prepare(client, req, &config, None, check)?;
     let definition = definition(client, source, check)?;
     if source.kind == "query" {
-        query_proof(client, source, &definition, req, check)?;
+        if let Some(response) = query::assess(client, source, &definition, req, check)? {
+            // A follow-up can reuse a key only if no earlier creation bound it.
+            let path = record_path(project_id, req)?;
+            if let Some(record) = load(&path)? {
+                let mut payload = req.arguments.clone();
+                payload.as_object_mut().unwrap().remove("dry_run");
+                let fingerprint = format!("{:x}", Sha256::digest(payload.to_string().as_bytes()));
+                if record["fingerprint"] != fingerprint {
+                    return Err("Idempotency key was already used with a different payload.".into());
+                }
+                return Ok(result(&record, "unknown", Some("An earlier creation attempt exists. Requirements cannot authorize a new payload or an automatic retry.".into())));
+            }
+            if source.permission.approval == "alwaysAsk" {
+                approve(
+                    &Operation::Content {
+                        content: req.clone(),
+                    },
+                    check,
+                )?;
+            }
+            check()?;
+            return Ok(response);
+        }
     }
     if req.requires_confirmation(&source.permission.approval) {
         approve(
