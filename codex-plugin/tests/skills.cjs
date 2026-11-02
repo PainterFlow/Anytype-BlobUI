@@ -7,7 +7,7 @@ assert.equal(skills.length, 11);
 for (const name of skills) {
   assert.match(name, /^[a-z0-9-]{1,63}$/);
   const folder = path.join(root, 'skills', name);
-  const text = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
+  const text = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
   assert(text.startsWith(`---\nname: ${name}\ndescription: `));
   assert.match(text, /\n---\n\n/);
   assert(!/TODO|TBD|\[insert|\[placeholder/i.test(text));
