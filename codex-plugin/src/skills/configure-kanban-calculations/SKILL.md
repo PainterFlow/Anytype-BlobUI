@@ -19,6 +19,10 @@ Inspect outcome, revision, publication_status, published_at, warnings and manual
 
 Preserve unrelated configurations and preferences. Board layouts, collapsed categories and formula placement are outside this skill.
 
-Calculations support only single-select and checkbox grouping. Treat unsupported_grouping_multi_select as unsupported in discovery, preview, creation, editing and refresh. Existing multi-select content remains readable and generic multi-select property edits remain available. Never convert the property or choose its first option. A single-select category must identify exactly one option. Several separate categories, each identifying one option, are valid. These calculation tools do not create or edit board categories or grouping. Do not invent category payloads.
+Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
 
-If unresolved_category_identity blocks an occupied option, report the named property and option and explain that available API v2 representations omit the required ID. Preserve the saved calculation and published snapshot. Reloading is not a guaranteed fix.
+Multi-select calculations use the complete sorted, deduplicated combination, stored as a serialized name array. Checkbox categories use true and false. Missing options, incomplete membership and conflicting metadata block publication.
+
+Version 3 results match every saved card object ID inside the column body, scoped to the host object, block and active view. Empty or unmatched columns show the formula evaluated on an empty card list. A populated column without any matching rendered card also shows that fallback for as long as no anchor is rendered.
+
+Card moves, option renames and membership changes require refresh. Legacy version 1 and 2 results remain readable.

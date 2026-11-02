@@ -30,7 +30,7 @@ Turning Calendar Colors off preserves its saved cache but removes those colors f
 
 Open Preferences > Calendar and choose **Color by Property**. The object-type list supports search, reload, and filtering by space. Select a type to edit its default or add an override for a calendar view in the same space. Types without eligible properties still appear.
 
-Choose a single-select property to use its selected option's Anytype color. Choose a checkbox property to use green for checked and gray for unchecked. Multi-select properties are unavailable because API v2 does not expose the option identities required by this feature.
+Choose a single-select property to use its selected option's Anytype color. Choose a checkbox property to use green for checked and gray for unchecked. Choose a multi-select property to use the first selected tag's color in the order returned by Anytype. Reordering selections can change the color. Empty selections or an unresolved first tag fall through to the next color rule.
 
 An object's calendar override takes priority, followed by its type default, then its existing Calendar Color value. Missing values and unavailable properties fall through to the next choice. A missing checkbox value is different from an unchecked checkbox.
 
@@ -39,3 +39,5 @@ Choose **No color** to suppress all BlobUI coloring in that scope. Choose **Use 
 Closing a dialog preserves pending edits. Use the sidebar Save to publish them or Undo to restore saved rules. Reloading the list preserves edits, including unavailable saved types, properties, and calendars. Unavailable entries can be removed. Rules are stored with BlobUI settings and included in backup and import.
 
 Rules and colors are snapshots. Press Save or Alt+R to rebuild, then Ctrl+R in Anytype to apply. A temporary API failure preserves the last successful snapshot. Calendar day overflow popups use the type default or Calendar Color when their markup does not identify the calendar view. View overrides never apply to an unidentified popup.
+
+Option names match exactly within each space and stable property key. Duplicate names exclude the whole property, including otherwise unique selections. Saved rules remain intact and objects fall through to inheritance or their legacy Calendar Color. Multi-select colors always use the first selected tag in API order. An unresolved first tag falls through without choosing a later tag. Calendar discovery reads API v2 document blocks, which already contain their views.

@@ -210,7 +210,7 @@ pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &s
     let mut response_body = &response[split + 4..];
     if headers.iter().any(|(name, value)| name == "transfer-encoding" && value.contains("chunked")) {
         let decoded = decode_chunked(response_body)?;
-        return parse_json_status(status, &decoded);
+        return parse_json_status(status, &decoded, api_key).map_err(|error| format!("{method} {path}: {}", if api_key.is_empty() { error } else { error.replace(api_key, "[redacted]") }));
     }
     if let Some((_, length)) = headers.iter().find(|(name, _)| name == "content-length") {
         let length = length.parse::<usize>().map_err(|_| "Anytype returned an invalid HTTP response.".to_string())?;
@@ -218,18 +218,35 @@ pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &s
         if response_body.len() < length { return Err("Anytype returned an incomplete HTTP response.".into()); }
         response_body = &response_body[..length];
     }
-    parse_json_status(status, response_body)
+    parse_json_status(status, response_body, api_key).map_err(|error| format!("{method} {path}: {}", if api_key.is_empty() { error } else { error.replace(api_key, "[redacted]") }))
 }
 
-fn parse_json_status(status: u16, body: &[u8]) -> Result<Value, String> {
-    if !(200..300).contains(&status) { return Err(http_error(status)); }
+fn parse_json_status(status: u16, body: &[u8], api_key: &str) -> Result<Value, String> {
+    if !(200..300).contains(&status) {
+        let mut details = Vec::new();
+        if let Ok(value) = serde_json::from_slice::<Value>(body) {
+            for item in [value.get("code"), value.get("message"), value.pointer("/error/code"), value.pointer("/error/message")].into_iter().flatten() {
+                if let Some(text) = item.as_str() { details.push(text.to_string()); }
+            }
+            for issue in value.get("issues").or_else(|| value.pointer("/error/issues")).and_then(Value::as_array).into_iter().flatten().take(10) {
+                if let Some(text) = issue["message"].as_str() { details.push(text.to_string()); }
+            }
+        }
+        let details = details.into_iter().filter(|text| {
+            let lower = text.to_ascii_lowercase();
+            !["authorization", "cookie", "headers", "bearer"].iter().any(|word| lower.contains(word))
+        }).collect::<Vec<_>>().join("; ");
+        let details = if api_key.is_empty() { details } else { details.replace(api_key, "[redacted]") };
+        let details: String = details.chars().filter(|ch| !ch.is_control()).take(1024).collect();
+        return Err(format!("{} {}", http_error(status), details));
+    }
     if body.len() > MAX_RESPONSE_BYTES { return Err("Anytype returned a response that is too large.".into()); }
     serde_json::from_slice(body).map_err(|_| "Anytype returned invalid JSON from its local API.".into())
 }
 
 fn http_error(status: u16) -> String {
     match status {
-        400 => "Anytype rejected the API v2 request (HTTP 400). Check the connection settings.".into(),
+        400 => "Anytype rejected the API v2 request (HTTP 400).".into(),
         401 => "Anytype rejected this key (HTTP 401). Paste a current API v2 key.".into(),
         403 => "Anytype denied API access (HTTP 403). Give this key read access to the spaces you want to use.".into(),
         404 => "This port did not provide the requested Anytype API v2 resource (HTTP 404). Check the port and your Anytype version.".into(),
@@ -328,6 +345,15 @@ mod tests {
         (port, handle)
     }
 
+    #[test]
+    fn v2_validation_details_are_bounded_and_credentials_are_redacted() {
+        let error = parse_json_status(400, br#"{"code":"invalid_include","issues":[{"message":"include must be blocks"},{"message":"fixture-secret"},{"message":"Authorization: Bearer hidden"}]}"#, "fixture-secret").unwrap_err();
+        assert!(error.contains("400") && error.contains("invalid_include") && error.contains("include must be blocks"));
+        assert!(!error.contains("fixture-secret") && !error.contains("Bearer"));
+        assert!(!error.contains("connection settings"));
+        let body = serde_json::to_vec(&json!({"message":"x".repeat(5000)})).unwrap();
+        assert!(parse_json_status(400, &body, "secret").unwrap_err().len() < 1200);
+    }
     #[test]
     fn authenticates_and_reads_calendar_colors_without_a_shell() {
         let pages = vec![

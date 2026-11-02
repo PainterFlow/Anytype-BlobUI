@@ -41,7 +41,7 @@ The recording shows Compact spacing with Collapsed Categories enabled.
 
 Unsupported views are hidden from the list. Each exclusion is recorded as an info entry in Logs with the view's name, source, and reason. Saved calculations for hidden views are preserved. BlobUI does not estimate results from incomplete data.
 
-Views opened from a Type are included alongside query and collection views. Calculations support single-select and checkbox grouping. Multi-select grouping is unavailable. Duplicate option names or unresolved identities on options used by cards prevent publication.
+Views opened from a Type are included alongside query and collection views. Calculations support single-select, multi-select and checkbox grouping. Multi-select cards are grouped by their exact selected-option combination. Original option IDs are required to reproduce Anytype column IDs; missing IDs prevent publication. Duplicate option names or unresolved identities on options used by cards prevent publication.
 
 ## Use the calculator
 
@@ -78,3 +78,11 @@ Display formulas is separate from Board layout. Balanced places results beside c
 Results are saved snapshots, not live polling. Save again to refresh them. Reload in the view browser discovers views without publishing a new result snapshot. Failed API reads retain the previous published snapshot and your pending edits.
 
 For expression rules and storage details, read the [formula reference](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/docs/kanban-formulas.md).
+
+Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
+
+Multi-select calculations use the complete sorted, deduplicated combination, stored as a serialized name array. Checkbox categories use true and false. Missing options, incomplete membership and conflicting metadata block publication.
+
+Version 3 results match every saved card object ID inside the column body, scoped to the host object, block and active view. Empty or unmatched columns show the formula evaluated on an empty card list. A populated column without any matching rendered card also shows that fallback for as long as no anchor is rendered.
+
+Card moves, option renames and membership changes require refresh. Legacy version 1 and 2 results remain readable.

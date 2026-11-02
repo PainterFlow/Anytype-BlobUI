@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use crate::kanban_snapshot::{validate_id, CategoryResult, Snapshot, Target};
+pub use crate::kanban_snapshot::{CategoryResult, Snapshot, Target};
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -268,9 +268,10 @@ fn publish_at(
     let calculated_at = chrono::Utc::now().to_rfc3339();
     let categories = results.len();
     data["kanbanFormulaResults"] = json!(Snapshot {
-        version: 2,
+        version: 3,
         display: configuration.display.clone(),
         calculated_at: calculated_at.clone(),
+        empty_results: crate::kanban_snapshot::empty_results(&results),
         results
     });
     let css = crate::css::compile(&runtime, install, &data)?;
@@ -422,6 +423,7 @@ mod tests {
         };
         let published = publish_at(configuration.clone(), &root, &config, |_| {
             Ok(vec![CategoryResult {
+                grouping_property: None, category_names: None, card_ids: Vec::new(), empty_value: None,
                 target: target.clone(),
                 category_id: "empty".into(),
                 value: Some(crate::calculator::CalculationValue::Boolean(true)),
@@ -430,7 +432,7 @@ mod tests {
         .unwrap();
         assert_eq!(published.categories, 1);
         let saved: Value = serde_json::from_slice(&fs::read(&data).unwrap()).unwrap();
-        assert_eq!(saved["kanbanFormulaResults"]["version"], json!(2));
+        assert_eq!(saved["kanbanFormulaResults"]["version"], json!(3));
         assert_eq!(saved["kanbanFormulaResults"]["results"][0]["value"], json!(true));
         let before = [
             fs::read(&config).unwrap(),
@@ -444,6 +446,7 @@ mod tests {
         crate::storage::FAIL_AFTER_REPLACE.with(|fail| *fail.borrow_mut() = Some(css.clone()));
         assert!(publish_at(configuration, &root, &config, |_| Ok(vec![
             CategoryResult {
+                grouping_property: None, category_names: None, card_ids: Vec::new(), empty_value: None,
                 target: target.clone(),
                 category_id: "empty".into(),
                 value: Some((9.0).into())

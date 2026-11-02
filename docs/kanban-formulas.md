@@ -38,11 +38,10 @@ Display formulas under Preferences > Kanban shares the grouped settings list and
 
 This uses the official Anytype app and its local API. It does not patch Anytype, inject JavaScript, enable debugging access, or poll in the background. The sample-data prototype is removed.
 
-Results require an exact object, block, active-view, and category identity. Single-select grouping uses exact option IDs from API v2 property options and stored groups in both the full board document and the matching views endpoint. Inline boards also inspect their referenced source while preserving the host's CSS target. Checkbox grouping uses true and false. Multi-select grouping is unsupported. Calculations support only single-select and checkbox grouping. Duplicate option names or conflicting identities prevent publication. If an occupied option has no exact ID in any available v2 representation, preview and publication fail with the property and option named. Saved configuration and published results remain unchanged. Reloading is not a guaranteed fix.
 
 Views opened from a Type are discovered through API v2's type documents. Their cards are read through type-scoped search with the stored view's filters and sorts. Query and collection views use their view membership endpoints. Inline boards follow their referenced query, collection, or Type for membership and category identities while keeping their host page and block IDs for CSS targeting. Unreadable or unsupported sources remain unavailable.
 
-Unused single-select options without known IDs do not block publication. A card using an unresolved option still prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save. Incomplete pagination prevents publication independently of API notices.
+Option IDs are not needed. A card naming an option absent from its property metadata prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save. Incomplete pagination prevents publication independently of API notices.
 
 ### API warning handling
 
@@ -68,3 +67,15 @@ Result snapshots use version 2 with number, boolean, or null values. Version 1 n
 The version 2 configuration is `.blobui-kanban-formulas.json` at the source workspace root and is ignored by Git. Definitions retain full space, object, block, and view IDs. A previous `.blobui-formula-prototype.json` stays unchanged; only its display choice migrates when no live configuration exists. A malformed live file stays unchanged until an explicit successful save replaces it.
 
 Implementation and automated validation use workspace-local fixtures. A read-only live probe verifies discovery and calculation without publishing to the user's installed files.
+
+Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Scoped Anyblob grants can use option mappings already supplied by permitted property metadata without requiring separate object access to those options.
+
+Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
+
+Multi-select calculations use the complete sorted, deduplicated combination, stored as a serialized name array. Checkbox categories use true and false. Missing options, incomplete membership and conflicting metadata block publication.
+
+Version 3 results match every saved card object ID inside the column body, scoped to the host object, block and active view. Empty or unmatched columns show the formula evaluated on an empty card list. A populated column without any matching rendered card also shows that fallback for as long as no anchor is rendered.
+
+Card moves, option renames and membership changes require refresh. Legacy version 1 and 2 results remain readable.
+
+Isolated fixtures verify API v2 calculations and CSS matching. Actual Anytype rendering and the originally reported HTTP 400 remain unverified live.

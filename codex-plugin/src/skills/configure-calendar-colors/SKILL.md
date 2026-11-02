@@ -9,7 +9,7 @@ Read [Anyblob workflow rules](../../references/workflow-rules.md) before using t
 
 Resolve the permitted space and explicit target with list_calendar_color_targets. Supply space_id on every request. Use object_id to narrow discovery when the user identifies a source. Ask only when names or requested behavior remain ambiguous.
 
-Read get_calendar_color_rule and retain its revision and publication time. Identify type_key and omit target only for a type default. Type defaults require a whole-space Read-Write grant. A view override uses its full space, object, block and view IDs. Inspect eligible properties and use inherit, none, or property with a stable key. Multi-select is unsupported. Inherit uses the type default for a view and Calendar Color for the type default. Missing values retain fallback behavior.
+Read get_calendar_color_rule and retain its revision and publication time. Identify type_key and omit target only for a type default. Type defaults require a whole-space Read-Write grant. A view override uses its full space, object, block and view IDs. Inspect eligible properties and use inherit, none, or property with a stable key. Multi-select uses the first selected tag in API order. Inherit uses the type default for a view and Calendar Color for the type default. Missing values retain fallback behavior.
 
 Call preview_calendar_color_rule with the proposed rule. Review category values or object colors and warnings. Never accept a result calculated from an inaccessible subset. Do not change permissions to bypass a denial.
 
@@ -18,3 +18,7 @@ Use set_calendar_color_rule with the current revision to publish the requested c
 Inspect outcome, revision, publication_status, published_at, warnings and manual_reload_needed. Verify with get_calendar_color_rule. On conflict reread and preview again. Never automatically retry an unknown outcome. Tell the user when Ctrl+R in Anytype is needed; never reload or automate Anytype.
 
 Preserve unrelated configurations and preferences. Do not change the Calendar Colors switch.
+
+Multi-select properties are supported. Their color comes from the first selected tag in API order. An empty selection or unresolved first tag falls through to the next color rule. Do not sort tags or choose a later tag to obtain a color.
+
+Option names match exactly within each space and stable property key. Duplicate names exclude the whole property, including otherwise unique selections. Saved rules remain intact and objects fall through to inheritance or their legacy Calendar Color. Multi-select colors always use the first selected tag in API order. An unresolved first tag falls through without choosing a later tag. Calendar discovery reads API v2 document blocks, which already contain their views.

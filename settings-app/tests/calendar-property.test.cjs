@@ -73,7 +73,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     assert.equal(await modal.locator('.calendar-property-picker .formula-insert-property').count(), 1);
     assert.equal(await modal.locator('.calendar-picker-chevron').count(), 0);
     await modal.getByRole('button', { name: 'Default color property', exact: true }).click();
-    assert.deepEqual(await modal.getByRole('option').allTextContents().then(text => text.map(t => t.trim())), ['Use Calendar Color', 'No color', 'Done', 'Status']);
+    assert.deepEqual(await modal.getByRole('option').allTextContents().then(text => text.map(t => t.trim())), ['Use Calendar Color', 'No color', 'Done', 'Status', "TagsUses the first selected tag's color"]);
     await modal.getByRole('option', { name: 'Status', exact: true }).click();
     await modal.getByRole('button', { name: 'Add override', exact: true }).click();
     await modal.getByRole('button', { name: /Month/ }).click();

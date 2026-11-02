@@ -217,19 +217,11 @@ fn evaluate_calendar(
                 .iter()
                 .find(|p| p["key"] == *key)
                 .ok_or("The calendar property is missing or has an unsupported format.")?;
-            if property["format"] == "select" && !options.contains_key(key) {
-                options.insert(
-                    key.clone(),
-                    client.pages(
-                        "GET",
-                        &format!(
-                            "/v2/spaces/{}/properties/{}/options?ids=full",
-                            enc(space),
-                            enc(key)
-                        ),
-                        None,
-                    )?,
-                );
+            if matches!(property["format"].as_str(), Some("select" | "multi_select")) && !options.contains_key(key) {
+                let values = client.pages("GET", &format!("/v2/spaces/{}/properties/{}/options?ids=full", enc(space), enc(key)), None)?;
+                if let Err(error) = crate::category_identity::validate_names(space, key, &values) {
+                    warnings.push(error);
+                } else { options.insert(key.clone(), values); }
             }
         }
     }
@@ -450,7 +442,7 @@ pub(crate) fn execute_at(
             for id in &ids {
                 authorize(id)?;
                 let doc = client.calendar_document(&format!(
-                    "/v2/spaces/{}/objects/{}?ids=full&include=blocks,views",
+                    "/v2/spaces/{}/objects/{}?ids=full&include=blocks",
                     enc(space),
                     enc(id)
                 ))?;
@@ -712,13 +704,17 @@ pub(crate) fn execute_at(
                 display: kanban.display.clone(),
                 calculated_at: now.clone(),
                 results: Vec::new(),
+                empty_results: Vec::new(),
             }
         } else {
             serde_json::from_value(data["kanbanFormulaResults"].clone())
                 .map_err(|_| "Saved Kanban snapshot is malformed.")?
         };
-        snapshot.results.retain(|r| r.target != *t);
+        snapshot.version = 3;
+        let excluded = client.excluded_properties();
+        snapshot.results.retain(|r| r.target != *t && !r.grouping_property.as_ref().is_some_and(|p| excluded.contains(&(r.target.space_id.clone(), p.clone()))));
         snapshot.results.extend(results.clone());
+        snapshot.empty_results = crate::kanban_snapshot::empty_results(&snapshot.results);
         snapshot.calculated_at = now.clone();
         data["kanbanFormulaResults"] = json!(snapshot);
         (json!(results), client.take_info())
@@ -827,6 +823,7 @@ mod tests {
             fs::create_dir_all(root.join("blob")).unwrap();
             let mut data = json!({"installDirectory":root,"unrelated":{"preserve":true},"calendarColorRules":{"version":1,"types":[]},"calendarObjectColors":{"unrelated":"Pink"},"calendarViewColors":[{"target":{"spaceId":"other","objectId":"other","blockId":"other","viewId":"other"},"objectId":"other","color":"Blue"}]});
             crate::apply_settings(&mut data, &root, &crate::SettingsDraft::default());
+            if mode == "multi" { data["apiConnection"]["enabled"] = json!(true); }
             fs::write(
                 root.join("blob/data.json"),
                 serde_json::to_vec(&data).unwrap(),
@@ -886,18 +883,28 @@ mod tests {
                         "unscoped endpoint {path}"
                     );
                     req.fetch_add(1, Ordering::SeqCst);
+                if path.split_once("include=").is_some_and(|(_, rest)| rest.split('&').next() != Some("blocks")) {
+                    let body = r#"{"code":"validation_error","issues":[{"message":"include must be blocks"}]}"#;
+                    write!(stream, "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                    continue;
+                }
+
                     stream.set_nonblocking(false).unwrap();
                     let mut view = json!({"id":"view","type":"kanban","name":"Board","group_by":"status","filters":[],"sorts":[],"groups":[{"id":"option-a"},{"id":"empty"}],"columns":[{"property":"estimate"},{"property":"status"}]});
-                    if mode == "missing" { view["groups"] = json!([]); }
+                    if mode == "missing" || mode == "multi_missing" { view["groups"] = json!([]); }
+                    if mode == "multi" || mode == "multi_group" { view["groups"] = json!([{ "id":"e4b561258d263ba43d0b08b3fc50cafb" }, {"id":"empty"}]); }
+                    if mode == "multi_group" { view["groups"][0]["tag"] = json!({"ids":["bafyreigewcqburuhgzmjna4suettp6ngkgzfssqkd43tfs7fyoxyaiypty"]}); }
                     if mode == "checkbox" { view["group_by"] = json!("done"); }
                     let cal = json!({"id":"calendar","type":"calendar","name":"Calendar","filters":[],"sorts":[]});
                     let page = |v: Value| json!({"data":v,"has_more":false});
-                    let value = if path.contains("/properties/status/options") {
-                        page(json!([if mode == "direct" {json!({"id":"option-a","name":"A","color":"red"})} else {json!({"name":"A","color":"red"})}]))
+                    let value = if path.contains("/properties/status/options") && mode == "duplicate" { page(json!([{"name":"A","color":"red"},{"name":"A","color":"blue"},{"name":"Unique","color":"green"}])) } else if path.contains("/properties/status/options") && mode == "combination" { page(json!([{"name":"A","color":"red"},{"name":"B","color":"blue"}])) } else if path.contains("/properties/status/options") {
+                        page(json!([if mode == "direct" || mode == "multi" {json!({"id":if mode == "multi" {"bafyreigewcqburuhgzmjna4suettp6ngkgzfssqkd43tfs7fyoxyaiypty"} else {"option-a"},"name":"A","color":"red"})} else {json!({"name":"A","color":"red"})}]))
+                    } else if path.contains("/objects/bafyreigewcqburuhgzmjna4suettp6ngkgzfssqkd43tfs7fyoxyaiypty") {
+                        json!({"id":"bafyreigewcqburuhgzmjna4suettp6ngkgzfssqkd43tfs7fyoxyaiypty","properties":{"name":"A"}})
                     } else if path.contains("/objects/option-a") {
                         json!({"id":"option-a","properties":{"name":"A"}})
                     } else if path.contains("/properties") {
-                        if mode == "multi" {
+                        if mode == "multi" || mode == "multi_group" || mode == "multi_missing" || mode == "combination" {
                             page(json!([{"key":"status","name":"Status","format":"multi_select"},{"key":"estimate","name":"Estimate","format":"number"}]))
                         } else { page(
                             json!([{"key":"status","name":"Status","format":"select"},{"key":"estimate","name":"Estimate","format":"number"},{"key":"done","name":"Done","format":"checkbox"},{"key":"legacy","name":"Calendar Color","format":"text"}]),
@@ -920,6 +927,8 @@ mod tests {
                     } else {
                         panic!("Unexpected fixture endpoint {path}")
                     };
+                    let mut value = value;
+                    if mode == "combination" && (path.contains("/search") || path.contains("/queries/query/objects")) { value["data"][0]["properties"]["status"] = json!(["B","A","B"]); }
                     let body = serde_json::to_vec(&value).unwrap();
                     let status = if fl.load(Ordering::SeqCst) {
                         "500 Internal Server Error"
@@ -987,12 +996,42 @@ mod tests {
         }
     }
     #[test]
+    fn duplicate_property_publication_clears_stale_results_and_preserves_formulas() {
+        let f = Fixture::with_grouping("duplicate");
+        let args = f.kanban_args();
+        fs::write(f.root.join("blob/.blobui-kanban-formulas.json"), json!({"version":2,"display":"balanced","definitions":[{"target":args["target"],"tokens":args["tokens"]}]}).to_string()).unwrap();
+        let mut data = crate::read_json_file(&f.root.join("blob/data.json")).unwrap();
+        data["kanbanFormulaResults"] = json!({"version":2,"display":"balanced","calculatedAt":"old","results":[{"target":args["target"],"categoryId":"old-option","value":999}]});
+        fs::write(f.root.join("blob/data.json"), data.to_string()).unwrap();
+        let before = fs::read(f.root.join("blob/.blobui-kanban-formulas.json")).unwrap();
+        let mut refresh = f.kanban_args(); refresh.as_object_mut().unwrap().remove("tokens");
+        let result = f.call("refresh_kanban_calculation", refresh, "readWrite", &|| Ok(())).unwrap();
+        assert_eq!(result["publication_status"], "published");
+        assert!(result["warnings"].to_string().contains("duplicate_option_name"));
+        let data = crate::read_json_file(&f.root.join("blob/data.json")).unwrap();
+        assert!(data["kanbanFormulaResults"]["results"].as_array().unwrap().is_empty());
+        assert_eq!(serde_json::from_slice::<Value>(&fs::read(f.root.join("blob/.blobui-kanban-formulas.json")).unwrap()).unwrap(), serde_json::from_slice::<Value>(&before).unwrap());
+    }
+    #[test]
+    fn calendar_first_tag_and_duplicate_property_fallback_use_no_option_ids() {
+        for (mode, expected) in [("combination", "Blue"), ("multi_missing", "Red"), ("duplicate", "Blue")] {
+            let f = Fixture::with_grouping(mode);
+            let mut args = f.calendar_args();
+            args["rule"] = json!({"mode":"property","key":"status"});
+            let result = f.call("set_calendar_color_rule", args, "readWrite", &|| Ok(())).unwrap();
+            assert_eq!(result["publication_status"], "published");
+            let data = crate::read_json_file(&f.root.join("blob/data.json")).unwrap();
+            assert_eq!(data["calendarObjectColors"]["card"], expected);
+            if mode == "duplicate" { assert!(result["warnings"].to_string().contains("duplicate_option_name")); }
+        }
+    }
+    #[test]
     fn kanban_connector_identity_sources_and_failures_preserve_files() {
-        for mode in ["direct", "document", "endpoint", "checkbox", "missing", "multi"] {
+        for mode in ["direct", "document", "endpoint", "checkbox", "missing", "multi", "multi_group", "multi_missing", "combination"] {
             let f = Fixture::with_grouping(mode);
             if mode == "multi" {
                 let discovery = f.call("list_kanban_views", json!({"space_id":"space","object_id":"query"}), "read", &|| Ok(())).unwrap();
-                assert!(discovery.to_string().contains("unsupported_grouping_multi_select"));
+                assert!(!discovery.to_string().contains("unsupported_grouping_multi_select"));
             }
             let before = f.files();
             for tool in ["preview_kanban_calculation", "set_kanban_calculation"] {
@@ -1000,18 +1039,13 @@ mod tests {
                 if tool == "set_kanban_calculation" { args["dry_run"] = json!(true); }
                 else { args.as_object_mut().unwrap().remove("revision"); }
                 let result = f.call(tool, args, "readWrite", &|| Ok(()));
-                if mode == "missing" || mode == "multi" {
-                    let error = result.unwrap_err();
-                    assert!(error.contains(if mode == "multi" {"unsupported_grouping_multi_select"} else {"unresolved_category_identity"}), "{error}");
-                } else {
-                    let preview = result.unwrap_or_else(|error| panic!("{mode}: {error}"));
-                    let results = preview["results"].as_array().unwrap();
-                    assert!(results.iter().any(|result| result["value"].as_f64() == Some(5.0)));
-                    assert!(results.iter().any(|result| result["categoryId"] == if mode == "checkbox" {"false"} else {"empty"}));
-                }
+                let preview = result.unwrap_or_else(|error| panic!("{mode}: {error}"));
+                let results = preview["results"].as_array().unwrap();
+                assert!(results.iter().any(|result| result["value"].as_f64() == Some(5.0)));
+                assert!(results.iter().any(|result| result["categoryId"] == if mode == "checkbox" {"false"} else {"[]"}));
                 assert_eq!(f.files(), before);
             }
-            if !["multi", "missing"].contains(&mode) {
+            if mode != "missing" && mode != "multi_missing" {
                 let mut args = f.kanban_args();
                 args.as_object_mut().unwrap().remove("revision");
                 args["tokens"] = json!([{"kind":"count"}]);
@@ -1020,15 +1054,22 @@ mod tests {
                 assert!(preview["results"].as_array().unwrap().iter().all(|result| result["value"].as_f64() == Some(1.0)));
                 assert_eq!(f.files(), before);
             }
-            if mode == "multi" || mode == "missing" {
+            if mode == "multi" {
+                let published = f.call("set_kanban_calculation", f.kanban_args(), "readWrite", &|| Ok(())).unwrap();
+                assert_eq!(published["publication_status"], "published");
+                assert!(fs::read_to_string(f.root.join("custom.css")).unwrap().contains(".card:not(.add)"));
+                let mut args = f.kanban_args(); args.as_object_mut().unwrap().remove("tokens");
+                f.call("refresh_kanban_calculation", args, "readWrite", &|| Ok(())).unwrap();
+            }
+            if mode == "missing" || mode == "multi_missing" {
                 let args = f.kanban_args();
                 fs::write(f.root.join("blob/.blobui-kanban-formulas.json"), json!({"version":2,"display":"balanced","definitions":[{"target":args["target"],"tokens":args["tokens"]}]}).to_string()).unwrap();
                 let before = f.files();
                 let mut refresh = f.kanban_args();
                 refresh.as_object_mut().unwrap().remove("tokens");
-                let error = f.call("refresh_kanban_calculation", refresh, "readWrite", &|| Ok(())).unwrap_err();
-                assert!(error.contains(if mode == "multi" {"unsupported_grouping_multi_select"} else {"unresolved_category_identity"}), "{error}");
-                assert_eq!(f.files(), before);
+                let result = f.call("refresh_kanban_calculation", refresh, "readWrite", &|| Ok(())).unwrap();
+                assert_eq!(result["publication_status"], "published");
+                assert_ne!(f.files(), before);
             }
         }
     }

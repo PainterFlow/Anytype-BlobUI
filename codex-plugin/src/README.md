@@ -99,9 +99,8 @@ Discovery follows the [OpenAI skill packaging format](https://developers.openai.
 
 ## BlobUI calculations and calendar colors
 
-Anyblob 0.2.15 adds twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
+Anyblob 0.2.16 supports multi-select Kanban calculations and calendar property colors across its twelve BlobUI tools. Every request requires an explicit `space_id`. View targets contain full `spaceId`, `objectId`, `blockId`, and `viewId` values returned by discovery. Calendar requests also require `type_key`; omit `target` for the type default.
 
-Use `list_kanban_views` or `list_calendar_color_targets` to discover permitted targets. An optional `object_id` narrows discovery to one source. Read saved configuration and its revision with `get_kanban_calculation` or `get_calendar_color_rule`. Preview with `preview_kanban_calculation` or `preview_calendar_color_rule`. Kanban uses existing typed calculator tokens and stable property keys. Calendar rules use `inherit`, `none`, or `property` with a stable property key. Only single-select and checkbox properties support property colors.
 
 Publish through `set_kanban_calculation` or `set_calendar_color_rule`. Remove through `remove_kanban_calculation` or `remove_calendar_color_rule`. Refresh saved results through `refresh_kanban_calculation` or `refresh_calendar_colors`. These operations require the revision from the last read and support `dry_run`. A conflict requires a new read and preview. Never automatically retry an unknown mutation outcome.
 
@@ -110,3 +109,11 @@ Configuration changes need Read-Write access. Type defaults need a whole-space R
 Publication updates the selected saved rule and snapshot transactionally. Unrelated settings and rules remain intact. Results include publication status, warnings, revision, and whether a manual reload is needed. Cached timestamps describe saved publication, not a new live calculation. Press Ctrl+R in Anytype after a successful publication. Anyblob never reloads Anytype. Open Settings drafts detect conflicting configuration edits and require reloading Settings before saving.
 
 Board layout, collapsed categories, formula placement, and the Calendar Colors switch remain Settings controls.
+
+Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
+
+Multi-select calculations use the complete sorted, deduplicated combination, stored as a serialized name array. Checkbox categories use true and false. Missing options, incomplete membership and conflicting metadata block publication.
+
+Version 3 results match every saved card object ID inside the column body, scoped to the host object, block and active view. Empty or unmatched columns show the formula evaluated on an empty card list. A populated column without any matching rendered card also shows that fallback for as long as no anchor is rendered.
+
+Card moves, option renames and membership changes require refresh. Legacy version 1 and 2 results remain readable.

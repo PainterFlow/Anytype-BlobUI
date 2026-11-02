@@ -52,10 +52,10 @@
       content.append(wrapper);
       const getOptions = () => {
       const options = [{ value: "inherit", label: override ? "Use type default" : "Use Calendar Color" }, { value: "none", label: "No color" }];
-      const properties = (active.properties || []).filter(p => ["select", "checkbox"].includes(p.format));
+      const properties = (active.properties || []).filter(p => ["select", "multi_select", "checkbox"].includes(p.format));
       const counts = new Map(); properties.forEach(p => counts.set(p.name, (counts.get(p.name) || 0) + 1));
       properties.sort((a,b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key)).forEach(p => options.push({ value: "property:" + p.key, label: p.name,
-        description: counts.get(p.name) > 1 ? p.key : undefined }));
+        description: [counts.get(p.name) > 1 ? p.key : "", p.format === "multi_select" ? "Uses the first selected tag's color" : ""].filter(Boolean).join(" · ") || undefined }));
       const current = override?.rule || entry(active)?.default || { mode: "inherit" };
       const value = current.mode === "property" ? "property:" + current.key : current.mode;
       if (current.mode === "property" && !properties.some(p => p.key === current.key)) options.push({ value, label: "Unavailable property", description: current.key });
@@ -84,7 +84,7 @@
         () => { saved.overrides = saved.overrides.filter(item => item !== override); changed(); typeScreen(); });
     }
     const add = button("Add override", calendarsScreen); add.disabled = locked || loading || !discovered; content.append(add);
-    if (!(active.properties || []).length) content.append(make("p", "input-hint", "This type has no available single-select or checkbox properties. Multi-select properties are not supported."));
+    if (!(active.properties || []).length) content.append(make("p", "input-hint", "This type has no available select or checkbox properties."));
     finishScreen();
   }
   function calendarsScreen() {

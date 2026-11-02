@@ -76,7 +76,7 @@ pub(crate) fn type_properties(document: &Value, properties: &[Value]) -> Vec<Val
         .or_else(|| document.pointer("/type_settings/property_definitions"));
     let keys: BTreeSet<&str> = definitions.and_then(Value::as_array).into_iter().flatten()
         .filter_map(|p| p["property"].as_str().or_else(|| p["key"].as_str())).collect();
-    properties.iter().filter(|p| matches!(p["format"].as_str(), Some("select" | "checkbox"))
+    properties.iter().filter(|p| matches!(p["format"].as_str(), Some("select" | "multi_select" | "checkbox"))
         && p["key"].as_str().is_some_and(|key| keys.contains(key))).cloned().collect()
 }
 pub(crate) fn calendar_views(space: &str, space_name: &str, document: &Value) -> Vec<Value> {
@@ -172,10 +172,10 @@ pub(crate) fn resolve(rule: &Rule, object: &Value, eligible: &[Value], options: 
             if format == "checkbox" {
                 return value.as_bool().map(|value| Some(if value { "Green" } else { "Grey" }.into()));
             }
-            // v2 search serves single-select properties as arrays too. Only a
-            // single value is valid here; never choose arbitrarily from many.
+            // Multi-select colors follow the first selection in API order.
+            // Single-select still rejects malformed multiple selections.
             let value = match value.as_array() {
-                Some(values) if values.len() == 1 => &values[0],
+                Some(values) if !values.is_empty() && (format == "multi_select" || values.len() == 1) => &values[0],
                 Some(_) => return None,
                 None => value,
             };
@@ -212,16 +212,11 @@ pub fn snapshot(key: &str, ip: &str, port: u16, config: &Configuration) -> Resul
             if let Rule::Property { key } = rule {
                 if !fields.insert(key.clone()) { continue; }
                 if let Some(property) = eligible.iter().find(|p| p["key"] == *key) {
-                    if property["format"] == "select" {
+                    if matches!(property["format"].as_str(), Some("select" | "multi_select")) {
                         let values = client.pages("GET", &format!("/v2/spaces/{space}/properties/{}/options?ids=full", enc(key)), None)?;
-                        let mut names = BTreeSet::new();
-                        for value in &values {
-                            if !names.insert(value["name"].clone().to_string()) {
-                                info.push(format!("Ambiguous option name on calendar property '{key}'. Matching objects use their fallback color."));
-                            }
-                            if value["color"].as_str().and_then(|color| crate::api::canonical_calendar_color(match color { "orange" => "Amber", "ice" => "Sky", "lime" => "Green", other => other }).ok()).is_none() {
-                                info.push(format!("Unavailable option color on calendar property '{key}'. Matching objects use their fallback color."));
-                            }
+                        if let Err(error) = crate::category_identity::validate_names(&entry.space_id, key, &values) {
+                            info.push(error);
+                            continue;
                         }
                         options.insert(key.clone(), values);
                     }
@@ -306,10 +301,16 @@ mod tests {
     fn calendar_rules_resolve_only_typed_properties_and_unambiguous_colors() {
         let properties = vec![json!({"key":"done","format":"checkbox"}), json!({"key":"status","format":"select"}), json!({"key":"tags","format":"multi_select"})];
         let eligible = type_properties(&json!({"type_settings":{"property_definitions":[{"property":"done"},{"property":"status"},{"property":"tags"}]}}), &properties);
-        assert_eq!(eligible.len(), 2);
+        assert_eq!(eligible.len(), 3);
         let checkbox = Rule::Property { key: "done".into() };
         let select = Rule::Property { key: "status".into() };
         let mut options = BTreeMap::from([("status".into(), vec![json!({"name":"Active","color":"lime"})])]);
+        let multi = Rule::Property { key: "tags".into() };
+        options.insert("tags".into(), vec![json!({"name":"A","color":"orange"}), json!({"name":"B","color":"ice"})]);
+        assert_eq!(resolve(&multi, &json!({"properties":{"tags":["A","B"]}}), &eligible, &options), Some(Some("Amber".into())));
+        assert_eq!(resolve(&multi, &json!({"properties":{"tags":{"multi_select":["B","A"]}}}), &eligible, &options), Some(Some("Sky".into())));
+        assert_eq!(resolve(&multi, &json!({"properties":{"tags":[]}}), &eligible, &options), None);
+        assert_eq!(resolve(&multi, &json!({"properties":{"tags":["Missing","A"]}}), &eligible, &options), None);
         assert_eq!(resolve(&checkbox, &json!({"properties":{"done":true}}), &eligible, &options), Some(Some("Green".into())));
         assert_eq!(resolve(&checkbox, &json!({"properties":{"done":{"checkbox":false}}}), &eligible, &options), Some(Some("Grey".into())));
         assert_eq!(resolve(&checkbox, &json!({"properties":{"done":null}}), &eligible, &options), None);
@@ -357,6 +358,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let stop = Arc::new(AtomicBool::new(false)); let done = stop.clone();
         let fail = Arc::new(AtomicBool::new(false)); let failure = fail.clone();
+        let duplicate = Arc::new(AtomicBool::new(false)); let duplicates = duplicate.clone();
         let server = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(30);
             while !done.load(Ordering::Relaxed) && Instant::now() < deadline {
@@ -375,6 +377,12 @@ mod tests {
                 assert!(request.contains("Authorization: Bearer fixture-key"));
                 let path = request.lines().next().unwrap().split_whitespace().nth(1).unwrap();
                 assert!(path.starts_with("/v2/"));
+                if path.split_once("include=").is_some_and(|(_, rest)| rest.split('&').next() != Some("blocks")) {
+                    let body = r#"{"code":"validation_error","issues":[{"message":"include must be blocks"}]}"#;
+                    write!(stream, "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                    continue;
+                }
+
                 let page = |data: Value| json!({"data":data,"has_more":false});
                 let properties = json!([
                     {"key":"legacy","name":"Calendar Color","format":"text"},
@@ -386,7 +394,8 @@ mod tests {
                 let response = if path.starts_with("/v2/spaces?") { page(json!([{"id":"space","name":"Work"}])) }
                 else if path.starts_with("/v2/spaces/space/types?") { page(json!([{"key":"task","name":"Task"}])) }
                 else if path.starts_with("/v2/spaces/space/types/task?") { document }
-                else if path.starts_with("/v2/spaces/space/properties/status/options?") { page(json!([{"name":"Active","color":"blue"}])) }
+                else if path.starts_with("/v2/spaces/space/properties/status/options?") { page(if duplicates.load(Ordering::Relaxed) { json!([{"name":"Active","color":"blue"},{"name":"Other","color":"red"},{"name":"Other","color":"green"}]) } else { json!([{"name":"Active","color":"blue"}]) }) }
+                else if path.starts_with("/v2/spaces/space/properties/tags/options?") { page(json!([{"name":"A","color":"red"},{"name":"B","color":"blue"}])) }
                 else if path.starts_with("/v2/spaces/space/properties?") { page(properties) }
                 else if path.starts_with("/v2/spaces/space/objects/") { json!({"id":"event","name":"Event","blocks":[]}) }
                 else if path.starts_with("/v2/spaces/space/search?") {
@@ -395,7 +404,7 @@ mod tests {
                     if payload["fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field == "done")) {
                         assert_eq!(payload["type"], "task", "Property rules must use a server-side type filter");
                     }
-                    if path.contains("offset=0") { json!({"data":[{"id":"event","type":"type-task-full-id","properties":{"legacy":"Pink","done":false,"status":["Active"]}}],"has_more":true}) }
+                    if path.contains("offset=0") { json!({"data":[{"id":"event","type":"type-task-full-id","properties":{"legacy":"Pink","done":false,"status":["Active"],"tags":["B","A"]}}],"has_more":true}) }
                     else { page(json!([{"id":"empty","type":"task","properties":{"legacy":"Purple","done":true,"status":[]}},{"id":"missing","type":"task","properties":{"legacy":"Red"}}])) }
                 } else { panic!("Unexpected fixture request {path}"); };
                 let body = serde_json::to_vec(&response).unwrap();
@@ -406,7 +415,7 @@ mod tests {
         let result = (|| -> Result<(), String> {
             let client = Client::with_connection("fixture-key", "127.0.0.1", port);
             let catalog = discover(&client)?;
-            assert_eq!(catalog["types"][0]["properties"].as_array().unwrap().len(), 2);
+            assert_eq!(catalog["types"][0]["properties"].as_array().unwrap().len(), 3);
             assert_eq!(catalog["views"].as_array().unwrap().len(), 1);
             let target = |view| Target { space_id:"space".into(), object_id:"type-task".into(), block_id:"calendar".into(), view_id:view };
             let mut config = Configuration { version:1, types:vec![TypeRule { space_id:"space".into(), type_key:"task".into(),
@@ -431,6 +440,14 @@ mod tests {
             config.types[0].default = Rule::None;
             let colors = snapshot("fixture-key", "127.0.0.1", port, &config)?;
             assert!(colors["base"].as_object().unwrap().is_empty());
+            config.types[0].default = Rule::Property { key: "tags".into() };
+            let colors = snapshot("fixture-key", "127.0.0.1", port, &config)?;
+            assert_eq!(colors["base"]["event"], "Blue", "Use the first API selection without sorting");
+            duplicate.store(true, Ordering::Relaxed);
+            config.types[0].default = Rule::Property { key: "status".into() };
+            let colors = snapshot("fixture-key", "127.0.0.1", port, &config)?;
+            assert_eq!(colors["base"]["event"], "Pink", "A duplicate anywhere excludes the whole property");
+            assert!(colors["info"].to_string().contains("duplicate_option_name"));
             fail.store(true, Ordering::Relaxed);
             assert!(snapshot("fixture-key", "127.0.0.1", port, &config).is_err());
             Ok(())

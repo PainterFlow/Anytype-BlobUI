@@ -29,6 +29,7 @@ mod anyblob_content;
 mod anyblob_creation;
 mod anyblob_mentions;
 mod marketplace;
+mod category_identity;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
