@@ -35,6 +35,7 @@ describe("Settings controls", () => {
     }
     render(<Example />);
     const button = screen.getByRole("button", { name: "Search views" });
+    expect(button.querySelector("svg path")).not.toBeNull();
     const input = screen.getByRole("searchbox", { name: "Search views" });
     fireEvent.click(button);
     expect(document.activeElement).toBe(input);

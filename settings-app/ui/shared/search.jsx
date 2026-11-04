@@ -1,7 +1,8 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
+import { SearchIcon } from "./catalog-icons.jsx";
 import { IconButton } from "./settings-controls.jsx";
 
-export function ExpandableSearch({ id, value, onChange, label, icon, placeholder = label, toggleId = `${id}-toggle`, disabled }) {
+export function ExpandableSearch({ id, value, onChange, label, placeholder = label, toggleId = `${id}-toggle`, disabled }) {
   const [expanded, setExpanded] = useState(false);
   const button = useRef(null);
   const input = useRef(null);
@@ -28,7 +29,7 @@ export function ExpandableSearch({ id, value, onChange, label, icon, placeholder
       if (!event.currentTarget.contains(event.relatedTarget) && !value) setExpanded(false);
     }}>
     <IconButton ref={button} id={toggleId} aria-label={label} aria-controls={id} disabled={disabled}
-      aria-expanded={visible} onClick={open}>{icon}</IconButton>
+      aria-expanded={visible} onClick={open}><SearchIcon /></IconButton>
     <label className="sr-only" htmlFor={id}>{label}</label>
     <input ref={input} id={id} type="search" disabled={disabled}
       tabIndex={visible ? 0 : -1} placeholder={placeholder} value={value}
