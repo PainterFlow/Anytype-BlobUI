@@ -15,19 +15,24 @@ export function Tabs({ id, label, items, selected, onSelect, className = "advanc
     let active = true;
     function refresh(animate = false) {
       if (!active || !button?.offsetWidth) return;
-      const immediate = !animate || !container.classList.contains("indicator-ready");
-      if (immediate) {
-        container.classList.add("indicator-initializing");
-        void container.offsetWidth;
-      }
       const left = button.offsetLeft;
       const width = button.offsetWidth;
-      container.style.setProperty("--tab-left", left + "px");
-      container.style.setProperty("--tab-width", width + "px");
-      container.classList.add("indicator-ready");
-      if (immediate) {
-        void container.offsetWidth;
-        container.classList.remove("indicator-initializing");
+      const ready = container.classList.contains("indicator-ready");
+      // Observer callbacks with unchanged geometry must leave a running transition alone.
+      if (!ready || container.style.getPropertyValue("--tab-left") !== left + "px"
+        || container.style.getPropertyValue("--tab-width") !== width + "px") {
+        const immediate = !animate || !ready;
+        if (immediate) {
+          container.classList.add("indicator-initializing");
+          void container.offsetWidth;
+        }
+        container.style.setProperty("--tab-left", left + "px");
+        container.style.setProperty("--tab-width", width + "px");
+        container.classList.add("indicator-ready");
+        if (immediate) {
+          void container.offsetWidth;
+          container.classList.remove("indicator-initializing");
+        }
       }
       if (left < container.scrollLeft) container.scrollLeft = left;
       else if (left + width > container.scrollLeft + container.clientWidth) {
