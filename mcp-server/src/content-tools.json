@@ -72,7 +72,7 @@
         },
         "op": {
           "type": "string",
-          "description": "Op name: set_properties, update_block, replace_subtree, insert_blocks, move_block, delete_block, replace_text, set_cell, update_view, insert_view, move_view, delete_view, add_items, remove_items"
+          "description": "Operation name from the ops returned by list_schemas, such as set_type or add_property."
         }
       },
       "required": [
