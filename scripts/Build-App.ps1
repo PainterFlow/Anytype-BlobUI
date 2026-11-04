@@ -46,6 +46,26 @@ if ($c -and $env:BLOBUI_BUILD_ONLY -ne '1') {
 }
 
 & (Join-Path $PSScriptRoot 'Build-Codex.ps1')
+$nodeExecutable = Get-Command node -ErrorAction SilentlyContinue
+$npmExecutable = Get-Command npm -ErrorAction SilentlyContinue
+if ($null -eq $nodeExecutable -or $null -eq $npmExecutable) {
+    throw 'Node.js and npm are required to build the Settings frontend.'
+}
+Push-Location $projectDirectory
+try {
+    $workspaceNpmCache = Join-Path $workspaceRoot '.test-run\npm-cache'
+    & npm ci --prefer-offline --no-audit --no-fund --cache $workspaceNpmCache
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Settings frontend dependency install failed with exit code $LASTEXITCODE."
+    }
+    & npm run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Settings frontend build failed with exit code $LASTEXITCODE."
+    }
+}
+finally {
+    Pop-Location
+}
 $buildEnvironment = @{}
 foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER', 'CARGO_TARGET_DIR')) {
     $buildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')

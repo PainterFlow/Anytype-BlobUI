@@ -1,3 +1,4 @@
+const { loadSettings } = require('./frontend-fixture.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -46,7 +47,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
         return {};
       } } };
     });
-    await page.goto(require('node:url').pathToFileURL(path.join(ui, 'index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady && document.getElementById('create-blob-backup-button')?.disabled === false);
     await page.locator('#advanced-nav').click();
     await page.locator('#advanced-app-tab').click();

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const path = require('node:path');
 const source = path.resolve(__dirname, '../ui');
 
@@ -9,10 +9,6 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 850 }, colorScheme: 'dark' });
-    await context.route('http://fixture/**', route => {
-      const file = new URL(route.request().url()).pathname.slice(1) || 'index.html';
-      route.fulfill({ contentType: file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html', body: fs.readFileSync(path.join(source, file)) });
-    });
     const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
@@ -28,7 +24,7 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
         return {};
       } } };
     });
-    await page.goto('http://fixture/'); await page.waitForFunction(() => window.appReady);
+    await loadSettings(page); await page.waitForFunction(() => window.appReady);
     const handle = page.locator('.sidebar > .sidebar-resizer');
     const width = () => page.locator('.sidebar').evaluate(n => n.getBoundingClientRect().width);
     assert.equal(await page.locator('#sidebar-resize-mode').count(), 0);

@@ -16,51 +16,60 @@
   };
   const icon = name => '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + icons[name] + '</svg>';
 
-  function attach(slot, media) {
+  function attach(slot, media, suppliedHost = null) {
     const doc = slot.ownerDocument;
-    const host = doc.createElement("span");
-    host.className = "markdown-video";
-    host.tabIndex = 0;
-    host.setAttribute("role", "group");
-    host.setAttribute("aria-label", slot.getAttribute("aria-label") || media.alt || "Video");
-    const video = doc.createElement("video");
-    video.preload = "metadata";
-    video.muted = true;
-    video.playsInline = true;
-    video.controls = false;
-    video.setAttribute("controlslist", "nofullscreen");
-    video.setAttribute("webkit-playsinline", "");
-    video.setAttribute("aria-label", host.getAttribute("aria-label"));
-    const playButton = doc.createElement("button");
-    playButton.type = "button";
-    playButton.className = "markdown-video-overlay";
-    playButton.innerHTML = icon("play");
-    playButton.setAttribute("aria-label", "Play");
-    playButton.title = "Play";
-    const controls = doc.createElement("span");
-    controls.className = "markdown-video-controls";
-    const status = doc.createElement("span");
-    status.className = "markdown-video-status";
-    status.setAttribute("role", "status");
-    status.textContent = "Loading video…";
-    host.append(video, playButton, controls, status);
-    slot.replaceWith(host);
+    const reactOwned = Boolean(suppliedHost);
+    const host = suppliedHost || doc.createElement("span");
+    if (!reactOwned) {
+      host.className = "markdown-video";
+      host.tabIndex = 0;
+      host.setAttribute("role", "group");
+      host.setAttribute("aria-label", slot.getAttribute("aria-label") || media.alt || "Video");
+    }
+    const video = reactOwned ? host.querySelector("video") : doc.createElement("video");
+    const playButton = reactOwned ? host.querySelector(".markdown-video-overlay") : doc.createElement("button");
+    const controls = reactOwned ? host.querySelector(".markdown-video-controls") : doc.createElement("span");
+    const status = reactOwned ? host.querySelector(".markdown-video-status") : doc.createElement("span");
+    if (!reactOwned) {
+      video.preload = "metadata";
+      video.muted = true;
+      video.playsInline = true;
+      video.controls = false;
+      video.setAttribute("controlslist", "nofullscreen");
+      video.setAttribute("webkit-playsinline", "");
+      video.setAttribute("aria-label", host.getAttribute("aria-label"));
+      playButton.type = "button";
+      playButton.className = "markdown-video-overlay";
+      playButton.innerHTML = icon("play");
+      playButton.setAttribute("aria-label", "Play");
+      playButton.title = "Play";
+      controls.className = "markdown-video-controls";
+      status.className = "markdown-video-status";
+      status.setAttribute("role", "status");
+      status.textContent = "Loading video…";
+      host.append(video, playButton, controls, status);
+      slot.replaceWith(host);
+    }
     let disposed = false, timer = null, statusTimer = null, url = null, visible = false, manualPause = false, completed = false, requested = false, manualPlayback = false;
     let progressFrame = null, seekScrubbing = false, volumeScrubbing = false, seekPending = false;
     let playButtonState = null, muteButtonState = null;
     const listeners = [];
     function on(node, type, handler) { node.addEventListener(type, handler); listeners.push(() => node.removeEventListener(type, handler)); }
-    function button(label, symbol, action) {
-      const element = doc.createElement("button");
-      element.type = "button";
-      if (icons[symbol]) element.innerHTML = icon(symbol); else element.textContent = symbol;
-      element.setAttribute("aria-label", label);
-      element.title = label;
+    function button(label, symbol, action, selector) {
+      const element = reactOwned ? controls.querySelector(selector) : doc.createElement("button");
+      if (!reactOwned) {
+        element.type = "button";
+        element.className = selector.slice(1);
+        if (icons[symbol]) element.innerHTML = icon(symbol); else element.textContent = symbol;
+        element.setAttribute("aria-label", label);
+        element.title = label;
+        controls.append(element);
+      }
+      if (!element) return null;
       on(element, "click", action);
-      controls.append(element);
       return element;
     }
-    const fullscreenButton = button("Enter fullscreen", "fullscreen", toggleFullscreen);
+    const fullscreenButton = button("Enter fullscreen", "fullscreen", toggleFullscreen, ".markdown-video-fullscreen");
     fullscreenButton.hidden = typeof host.requestFullscreen !== "function" && typeof host.webkitRequestFullscreen !== "function";
     function play(manual = false) {
       if (disposed || !video.src || requested) return;
@@ -76,9 +85,11 @@
     }
     on(playButton, "click", () => { toggle(); reveal(); });
     function seek(seconds) { if (Number.isFinite(video.duration)) video.currentTime = Math.max(0, Math.min(video.duration, seconds)); }
-    const seekbar = doc.createElement("input");
-    seekbar.type = "range"; seekbar.min = "0"; seekbar.max = "0"; seekbar.step = "0.01"; seekbar.value = "0";
-    seekbar.setAttribute("aria-label", "Seek video"); seekbar.className = "markdown-video-seek";
+    const seekbar = reactOwned ? controls.querySelector(".markdown-video-seek") : doc.createElement("input");
+    if (!reactOwned) {
+      seekbar.type = "range"; seekbar.min = "0"; seekbar.max = "0"; seekbar.step = "0.01"; seekbar.value = "0";
+      seekbar.setAttribute("aria-label", "Seek video"); seekbar.className = "markdown-video-seek";
+    }
     on(seekbar, "input", () => {
       const target = Number(seekbar.value);
       const previous = video.currentTime;
@@ -86,18 +97,20 @@
       seekPending = target !== previous;
       updateRangeProgress(seekbar);
     });
-    const clock = doc.createElement("span"); clock.className = "markdown-video-time";
-    controls.append(seekbar, clock);
-    const mute = button("Unmute", "mute", () => { video.muted = !video.muted; update(); });
-    const volume = doc.createElement("input");
-    volume.type = "range"; volume.min = "0"; volume.max = "1"; volume.step = "0.05"; volume.value = "1";
-    volume.setAttribute("aria-label", "Volume"); volume.className = "markdown-video-volume";
+    const clock = reactOwned ? controls.querySelector(".markdown-video-time") : doc.createElement("span");
+    if (!reactOwned) { clock.className = "markdown-video-time"; controls.append(seekbar, clock); }
+    const mute = button("Unmute", "mute", () => { video.muted = !video.muted; update(); }, ".markdown-video-mute");
+    const volume = reactOwned ? controls.querySelector(".markdown-video-volume") : doc.createElement("input");
+    if (!reactOwned) {
+      volume.type = "range"; volume.min = "0"; volume.max = "1"; volume.step = "0.05"; volume.value = "1";
+      volume.setAttribute("aria-label", "Volume"); volume.className = "markdown-video-volume";
+    }
     on(volume, "input", () => {
       video.volume = Number(volume.value);
       video.muted = video.volume === 0;
       updateRangeProgress(volume);
     });
-    controls.append(volume);
+    if (!reactOwned) controls.append(volume);
     function updateRangeProgress(input) {
       const min = Number(input.min) || 0;
       const max = Number(input.max) || 0;
@@ -298,7 +311,8 @@
   });
   lifecycle.observe(root.document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "inert", "aria-hidden", "class", "style"] });
   BlobUI.VideoPlayer = Object.freeze({
-    attach,
+    attach(slot, media) { return attach(slot, media); },
+    attachExisting(host, media) { return attach(host, media, host); },
     setAutoplay(value) { autoplay = value !== false; for (const player of players.values()) { if (!autoplay) player.stopAutoplay(); player.sync(); } },
     destroyTree(container) { for (const [host, player] of players) if (container.contains(host)) player.destroy(); },
   });

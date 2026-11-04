@@ -6,38 +6,65 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   const identity = target => JSON.stringify([target.spaceId, target.objectId, target.blockId, target.viewId]);
   const el = id => doc.getElementById(id);
-  const contents = el("formula-contents"), message = el("formula-storage-message"), preference = el("formula-display");
-  const fields = el("formula-fields"), search = el("formula-search"), reload = el("formula-reload");
-  const filterButton = el("formula-filter");
-  const displayPickerRoot = el("formula-display-select");
-  const modalBackdrop = el("formula-calculator-backdrop"), modalDialog = el("formula-calculator-dialog");
-  const modalClose = el("formula-calculator-close"), modalContent = el("formula-calculator-content");
+  let contents, fields, search, reload, filterButton;
+  let modalBackdrop, modalDialog, modalClose, modalContent;
+  function syncDomRefs() {
+    contents = el("formula-contents");
+    fields = el("formula-fields"); search = el("formula-search"); reload = el("formula-reload");
+    filterButton = el("formula-filter");
+    modalBackdrop = el("formula-calculator-backdrop"); modalDialog = el("formula-calculator-dialog");
+    modalClose = el("formula-calculator-close"); modalContent = el("formula-calculator-content");
+  }
   function setMessage(text, success = false) {
-    if (!message) return;
-    UI.CatalogBrowser.status(message, text, success);
+    pageMessage = text;
+    messageSuccess = success;
+    if (text) loadError = success ? "" : text;
+    publish();
   }
   const operations = { total: "Total", average: "Average", minimum: "Minimum", maximum: "Maximum", median: "Median" };
   let state = defaults(), persistedState = defaults(), catalog = [], api, invoke, calculatorModal;
   let locked = false, dirty = false, loading = true, discovering = false, discovered = false;
   let records = [], initialized = false, loadError = "", activeRecord = null, modalSaving = false, calculatedAt = "";
-  let displayControl, reloadController, unregisterReload, browser;
+  let reloadController, unregisterReload;
+  let pageMessage = "", messageSuccess = false;
   let discoveryRequested = false;
   let discoveryGeneration = 0;
+  const viewSubscribers = new Set();
+  let searchText = "", selectedSpace = "";
+  function snapshot() {
+    return {
+      views: records.map(record => ({ ...record.view, key: record.key, active: !!activeRecord && activeRecord.viewKey === record.key })),
+      loading, locked: locked || loading, discovering, message: pageMessage,
+      success: messageSuccess, display: state.display, calculatedAt,
+      active: activeRecord ? calculatorSnapshot(activeRecord) : null,
+      searchText, selectedSpace,
+    };
+  }
+  function publish() { const value = snapshot(); viewSubscribers.forEach(listener => listener(value)); }
+  function calculatorSnapshot(record) {
+    const tokens = serializedTokens(record);
+    const unavailable = values => values.some(token => (["aggregate", "property"].includes(token.kind)
+      && !(record.view.properties || []).some(property => property.key === token.property))
+      || (token.calculation && unavailable(token.calculation)));
+    const status = record.statusText || record.status?.textContent || (unavailable([...record.numerator, ...record.denominator])
+      ? "A saved property is unavailable. Remove the calculation and choose a replacement." : "");
+    return {
+      view: record.view, sourceMode: !!record.sourceMode, source: record.source || "", sourceError: record.sourceError || "",
+      numerator: copy(record.numerator || []), denominator: copy(record.denominator || []), fraction: !!record.fraction,
+      status, markup: math.toMathML(tokens, record.view.properties),
+      unsupported: record.view.unsupported || "", hasSaved: !!targetDefinition(record.view.target),
+      pendingProperty: record.pendingProperty || "",
+      properties: (record.view.properties || []).filter(property => ["number", "boolean", "checkbox"].includes(property.format)
+        && typeof property.key === "string" && typeof property.name === "string").map(property => ({
+          key: property.key, name: property.name, description: math.propertyReference(property.key, record.view.properties),
+        })),
+      locked: locked || loading,
+    };
+  }
   const localDrafts = new Map();
   let draftGeneration=0;
   const math = UI.CalculatorMath;
 
-  function make(tag, className, text) {
-    const node = doc.createElement(tag);
-    node.className = className || "";
-    if (text !== undefined) node.textContent = text;
-    return node;
-  }
-  function button(text, action, className) {
-    return UI.Components.Button({ label: text, onClick: action,
-      attributes: { class: className || "formula-button" },
-    }).element;
-  }
   function targetDefinition(target, source) {
     return (source || state).definitions.find(item => identity(item.target) === identity(target));
   }
@@ -100,9 +127,12 @@
   function updateRows() {
     records.forEach(record => {
       const active = !!activeRecord && activeRecord.viewKey === record.key;
-      record.row.dataset.active = String(active);
-      record.row.setAttribute("aria-pressed", String(active));
+      if (record.row) {
+        record.row.dataset.active = String(active);
+        record.row.setAttribute("aria-pressed", String(active));
+      }
     });
+    publish();
   }
   function updateSaveActions(record) {
     if (!record) return;
@@ -113,7 +143,6 @@
   function syncLocks() {
     const pageLocked = locked || loading;
     if (fields) fields.disabled = pageLocked;
-    if (preference) preference.disabled = pageLocked;
     if (reload) {
       reload.disabled = pageLocked || discovering;
       reload.setAttribute("aria-busy", String(discovering));
@@ -125,11 +154,6 @@
       if (activeRecord.fieldset) activeRecord.fieldset.disabled = pageLocked || !!activeRecord.view.unsupported;
       updateSaveActions(activeRecord);
     }
-  }
-  function syncDisplayPicker() {
-    if (!preference) return;
-    preference.value = state.display;
-    if (displayControl) displayControl.setValue(state.display);
   }
   function openCalculator(record) {
     if (!record || locked || loading || !calculatorModal || !modalContent) return;
@@ -158,56 +182,9 @@
     calculatorModal.open();
     if (activeRecord.display) activeRecord.display.focus({ preventScroll: true });
     syncLocks();
+    publish();
   }
-  function renderSequence(record, host, tokens, cursor, section, placeholder) {
-    host.replaceChildren();
-    if (!tokens.length) {
-      if (record.active === section && cursor === 0) host.append(make("span", "formula-caret", "│"));
-      host.append(make("span", "formula-placeholder", placeholder));
-      return;
-    }
-    for (let index = 0; index <= tokens.length; index++) {
-      if (record.active === section && index === cursor) host.append(make("span", "formula-caret", "│"));
-      if (index < tokens.length) {
-        const token = make("span", ["aggregate", "count"].includes(tokens[index].kind) ? "formula-term" : "formula-symbol", tokenLabel(tokens[index], record.view));
-        token.dataset.tokenIndex = String(index);
-        host.append(token);
-      }
-    }
-  }
-  function updateDisplay(record) {
-    if (!record.display) return;
-    syncRenderToggle(record);
-    record.display.hidden = !!record.sourceMode;
-    if (record.sourceInput) record.sourceInput.hidden = !record.sourceMode;
-    record.linearDisplay.hidden = record.fraction;
-    record.fractionDisplay.hidden = !record.fraction;
-    record.display.dataset.fraction = String(record.fraction);
-    const renderMath = (host, tokens, section) => { host.innerHTML = math.toMathML(tokens, record.view.properties, record.cursors[section], false); };
-    renderMath(record.fraction ? record.numeratorDisplay : record.linearDisplay, record.numerator, "numerator");
-    if (record.fraction) {
-      record.fractionDisplay.innerHTML='<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mrow data-section="numerator">'+math.toMathMLBody(record.numerator,record.view.properties,record.cursors.numerator,false)+'</mrow><mrow data-section="denominator">'+math.toMathMLBody(record.denominator,record.view.properties,record.cursors.denominator,false)+'</mrow></mfrac></math>';
-      record.numeratorDisplay=record.fractionDisplay.querySelector('[data-section="numerator"]');record.denominatorDisplay=record.fractionDisplay.querySelector('[data-section="denominator"]');
-      for(const section of ['numerator','denominator']) record[section+'Display'].addEventListener('click',event=>displayTokenClick(record,section,event));
-    }
-    else { record.numeratorDisplay.replaceChildren(); record.denominatorDisplay.replaceChildren(); }
-    record.display.dataset.active = record.active;
-    record.numeratorDisplay.classList.toggle("is-active", record.fraction && record.active === "numerator");
-    record.linearDisplay.classList.toggle("is-active", !record.fraction && record.active === "numerator");
-    record.denominatorDisplay.classList.toggle("is-active", record.active === "denominator");
-    const topLabel = record.numerator.map(token => tokenLabel(token, record.view)).join(" ") || "empty";
-    const bottomLabel = record.denominator.map(token => tokenLabel(token, record.view)).join(" ") || "empty";
-    record.display.setAttribute("aria-label", record.fraction
-      ? "Calculation numerator " + topLabel + ", denominator " + bottomLabel + ". Read only. Show LaTeX to edit."
-      : "Calculation " + topLabel + ". Read only. Show LaTeX to edit.");
-  }
-  function syncRenderToggle(record) {
-    if (!record || !record.renderToggle) return;
-    const label = record.sourceMode ? "Show rendered" : "Show LaTeX";
-    record.renderToggle.setAttribute("aria-label", label);
-    record.renderToggle.setAttribute("title", label);
-    record.renderToggle.setAttribute("aria-pressed", String(!!record.sourceMode));
-  }
+  function updateDisplay() { publish(); }
   function recordSnapshot(record) {
     return {
       numerator: copy(record.numerator), denominator: copy(record.denominator),
@@ -323,7 +300,7 @@
     if (action === "clear") {
       source.value = "";
       source.setSelectionRange(0, 0);
-      source.dispatchEvent(new root.Event("input", { bubbles: true }));
+      handleSourceInput(record, source);
       source.focus({ preventScroll: true });
       return;
     }
@@ -347,23 +324,17 @@
     start ??= source.selectionStart;
     end ??= source.selectionEnd;
     source.setRangeText(snippet, start, end, "end");
-    source.dispatchEvent(new root.Event("input", { bubbles: true }));
+    handleSourceInput(record, source);
     source.focus({ preventScroll: true });
   }
 
   function setActiveStatus(record, text) {
-    if (!record || !record.status) return;
+    if (!record) return;
+    record.statusText = text || "";
+    if (!record.status) { publish(); return; }
     record.status.textContent = text || "";
     record.status.title = text || "";
   }
-  function handleDisplayKeydown(record, event) {
-    if (event.key === "Enter" || event.key === "=") {
-      event.preventDefault();
-      void saveCalculator(record);
-    }
-  }
-  function displayTokenClick() { /* The rendered formula is read only. */ }
-
   function endsValue(tokens, cursor) {
     const previous = tokens[cursor - 1];
     return !!previous && ["number", "aggregate", "count", "close"].includes(previous.kind);
@@ -448,7 +419,7 @@
       const insertion = before + snippet + after;
       source.focus({ preventScroll: true });
       source.setRangeText(insertion, start, end, "end");
-      source.dispatchEvent(new root.Event("input", { bubbles: true }));
+      handleSourceInput(record, source);
       source.focus({ preventScroll: true });
       const caret = start + before.length + snippet.length;
       source.setSelectionRange(caret, caret);
@@ -456,239 +427,72 @@
     }
   }
 
-  function createPropertyControls(record, host) {
-    const area = make('div', 'formula-variable-actions'); record.variableActions=area;
-    const pickerShell = UI.Components.PropertyPickerShell({ label: 'Insert property', onClick: event => {
-      if (!record.sourceMode) { event.preventDefault(); event.stopImmediatePropagation(); }
-      else if (trigger.getAttribute('aria-expanded') !== 'true') record.resetPropertyPicker?.();
-    } });
-    const picker = pickerShell.element, trigger = pickerShell.trigger, menu = pickerShell.menu;
-    trigger.addEventListener('keydown', event => {
-      if (!record.sourceMode && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    });
-    trigger.tabIndex = -1;
-    trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
-    picker.append(trigger,menu); area.append(picker,button('Card count',()=>insertVariable(record,{kind:'count'}),'formula-variable-button'));
-    const properties=()=>(record.view.properties||[])
-      .filter(property=>(property.format==="number"||property.format==="boolean"||property.format==="checkbox")
-        && typeof property.key==="string" && typeof property.name==="string")
-      .map(property=>({
-        value:property.key,
-        label:property.name,
-        description:math.propertyReference(property.key,record.view.properties),
-      }));
-    let pendingProperty = null;
-    record.refreshPropertyOptions = () => { if (!pendingProperty) record.propertyPicker?.setOptions(properties(), { preserveOpen: true }); };
-    record.resetPropertyPicker = () => {
-      pendingProperty = null;
-      record.propertyPicker?.setOptions(properties());
-      trigger.textContent = "Insert property";
-    };
-    record.propertyPicker=UI.Components.Picker({root:picker,options:properties(),focusOnOpen:false,restoreFocusOnSelect:false,emptyMessage:'No number or boolean properties in this view',onChange(value){
-      if (!record.sourceMode) return;
-      if (!pendingProperty) {
-        const source = record.sourceInput;
-        if (source && sourceIsPerCard(source.value, source.selectionStart, source.selectionEnd)) {
-          insertVariable(record, { kind: 'property', property: value });
-          return;
-        }
-        pendingProperty = value;
-        record.propertyPicker.setOptions(Object.entries(operations).map(([operation, label]) => ({ value: operation, label })));
-        trigger.textContent = 'Choose aggregation';
-        queueMicrotask(() => record.propertyPicker.open());
-        return;
-      }
-      insertVariable(record,{kind:'aggregate',property:pendingProperty,operation:value});
-      pendingProperty = null;
-      record.propertyPicker.setOptions(properties());
-      trigger.textContent = 'Insert property';
-    }});
-    host.append(area);
-  }
-
   function saveCalculator(record) {
     if (!record || record !== activeRecord || locked || loading) return;
     calculatorModal.close();
   }
-  function buildCalculator(record) {
-    const view = record.view, host = modalContent;
-    UI.Components.destroyTree(host);
-    host.replaceChildren();
-    const heading = make("div", "formula-calculator-heading");
-    heading.append(make("h2", "formula-calculator-title", view.name));
-    heading.append(make("p", "formula-calculator-source", view.space + " · " + view.source + " · " + view.kind));
-    host.append(heading);
-    if (view.unsupported) host.append(make("p", "formula-calculator-error field-error", view.unsupported));
-    else {
-      const fieldset = make("fieldset", "formula-calculator");
-      record.fieldset = fieldset;
-      fieldset.append(make("legend", "sr-only", "Calculator for " + view.name));
-      const display = make("div", "formula-display");
-      const displaySlot = make("div", "formula-display-slot");
-      record.displaySlot = displaySlot;
-      display.tabIndex = 0;
-      display.setAttribute("aria-readonly", "true");
-      display.setAttribute("role", "textbox");
-      display.setAttribute("aria-multiline", "false");
-      display.setAttribute("aria-label", "Calculation numerator and denominator");
-      const linear = make("div", "formula-linear");
-      const fraction = make("div", "formula-fraction");
-      record.fractionDisplay = fraction;
-      const numerator = make("div", "formula-numerator");
-      const denominator = make("div", "formula-denominator");
-      numerator.setAttribute("aria-label", "Numerator");
-      denominator.setAttribute("aria-label", "Denominator");
-      fraction.append(numerator, make("span", "formula-fraction-bar", ""), denominator);
-      display.append(linear, fraction);
-      record.display = display;
-      record.linearDisplay = linear;
-      record.numeratorDisplay = numerator;
-      record.denominatorDisplay = denominator;
-      linear.addEventListener("click", event => displayTokenClick(record, "numerator", event));
-      numerator.addEventListener("click", event => displayTokenClick(record, "numerator", event));
-      denominator.addEventListener("click", event => displayTokenClick(record, "denominator", event));
-      display.addEventListener("keydown", event => handleDisplayKeydown(record, event));
-      displaySlot.append(display);
-      fieldset.append(displaySlot);
-      createPropertyControls(record, fieldset);
-      const utility = make("div", "formula-calculator-utility");
-      [["C", "clear", "Clear calculation"], ["", "backspace", "Backspace"]].forEach(([label, action, accessible]) => {
-        const key = button(label, () => edit(record, action), "formula-key");
-        key.tabIndex = -1;
-        key.setAttribute("aria-label", accessible); key.title = accessible;
-        if (action === "backspace") {
-          key.append(UI.Components.DeleteIcon());
-        }
-        utility.append(key);
-      });
-      fieldset.append(utility);
-      const keypad = make("div", "formula-keypad");
-      const keys = [
-        ["√", "sqrt", "Square root"], ["(", "(", "Open parenthesis"], [")", ")", "Close parenthesis"], ["ⁿ√", "root", "Nth root"], ["÷", "/", "Divide"],
-        ["xʸ", "^", "Power"], ["7", "7"], ["8", "8"], ["9", "9"], ["×", "*", "Multiply"],
-        ["x²", "square", "Square"], ["4", "4"], ["5", "5"], ["6", "6"], ["−", "-", "Subtract"],
-        [",", ",", "Comma"], ["1", "1"], ["2", "2"], ["3", "3"], ["+", "+", "Add"],
-        ["x/y", "fraction", "Fraction"], ["±", "sign", "Change sign"], ["0", "0"], [".", ".", "Decimal point"], ["Save", "save", "Save calculation"],
-      ];
-      const logicKeys = [
-        ['=', '==', 'Equal'], ['≠', '!=', 'Not equal'], ['<', '<', 'Less than'], ['≤', '<=', 'Less than or equal'], ['Save', 'save', 'Save calculation'],
-        ['>', '>', 'Greater than'], ['≥', '>=', 'Greater than or equal'], ['AND', '&&', 'Logical AND'], ['OR', '||', 'Logical OR'], ['NOT', '!', 'Logical NOT'],
-        ['True', 'true', 'True'], ['False', 'false', 'False'], ['(', '(', 'Open parenthesis'], [')', ')', 'Close parenthesis'], ['?', '?', 'Conditional question mark'],
-        [':', ':', 'Conditional colon'],
-      ];
-      const modes = make('div', 'formula-keypad-modes');
-      modes.setAttribute('role', 'group'); modes.setAttribute('aria-label', 'Calculator keypad');
-      const modeButtons = ['Math', 'Logic'].map(label => {
-        const control = button(label, () => showKeys(label), 'formula-key');
-        control.addEventListener('mousedown', event => event.preventDefault());
-        modes.append(control); return control;
-      });
-      fieldset.append(modes);
-      function showKeys(mode) {
-        modeButtons.forEach(control => control.setAttribute('aria-pressed', String(control.textContent === mode)));
-        keypad.replaceChildren();
-        (mode === 'Logic' ? logicKeys : keys).forEach(([label, action, accessible]) => {
-          const key = button(label, () => {
-            if (action === "save") void saveCalculator(record);
-            else edit(record, action);
-          }, "formula-key");
-          key.tabIndex = -1;
-          if (accessible) { key.setAttribute("aria-label", accessible); key.title = accessible; }
-          if (action === "save") { key.id = "formula-calculator-save"; record.save = key; }
-          keypad.append(key);
-        });
-      }
-      showKeys('Math');
-      fieldset.append(keypad);
-      host.append(fieldset);
-      record.status = make("p", "formula-calculator-status");
-      record.status.id = "formula-calculator-status";
-      record.status.setAttribute("role", "status");
-      record.status.setAttribute("aria-live", "polite");
-      display.setAttribute("aria-describedby", record.status.id);
-      const unavailableProperty = tokens => tokens.some(token => (["aggregate", "property"].includes(token.kind)
-        && !(view.properties || []).some(item => item.key === token.property)) || (token.calculation && unavailableProperty(token.calculation)));
-      if (unavailableProperty([...record.numerator, ...record.denominator])) {
-        record.status.textContent = "A saved property is unavailable. Remove the calculation and choose a replacement.";
-      }
-      host.append(record.status);
+  function toggleSourceMode(record = activeRecord) {
+    if (!record || record !== activeRecord || locked || loading || record.view.unsupported) return;
+    record.resetPropertyPicker?.();
+    record.sourceMode = !record.sourceMode;
+    if (record.sourceMode && record.source === undefined) {
+      try { record.source = record.fraction ? math.toLatex(record, record.view.properties, true)
+        : record.numerator.length ? math.toLatex(record.numerator, record.view.properties) : ""; }
+      catch (_) { record.source = record.numerator.map(token => tokenLabel(token, record.view)).join(" "); }
     }
-    const actions = make("div", "formula-calculator-actions");
-    record.actions = actions;
-    if (view.unsupported) {
-      if (targetDefinition(view.target)) {
-        record.remove = button("Remove calculation", () => {
-          if (record !== activeRecord || locked || loading) return;
-          record.numerator = [];
-          record.denominator = [];
-          record.fraction = false;
-          record.cursors = { numerator: 0, denominator: 0 };
-          record.source = "";
-          record.sourceError = "";
-          changed(record);
-          calculatorModal.close();
-        }, "formula-calculator-save");
-        actions.append(record.remove);
-      }
-      record.save = button("Save", () => void saveCalculator(record), "formula-calculator-save");
-      record.save.id = "formula-calculator-save";
-      actions.append(record.save);
-    }
-    if (view.unsupported) host.append(actions);
-    if (!view.unsupported) {
-      const source=make('textarea','formula-latex-input');source.setAttribute('aria-label','LaTeX source');source.spellcheck=false;source.hidden=true;record.sourceInput=source;
-      const toggle=button('',()=>{
-        record.resetPropertyPicker?.();
-        record.sourceMode=!record.sourceMode;
-        if(record.sourceMode && record.source === undefined){try{record.source=record.fraction?math.toLatex(record,view.properties,true):record.numerator.length?math.toLatex(record.numerator,view.properties):'';}catch(_){record.source=record.numerator.map(t=>tokenLabel(t,view)).join(' ');}}
-        source.value=record.source||'';
-        updateDisplay(record);(record.sourceMode?source:record.display).focus();
-      },'formula-render-toggle');
-      toggle.tabIndex=-1;
-      toggle.classList.add('neutral-icon-button');
-      toggle.append(root.VisibilityIcon.create());
-      record.renderToggle=toggle;
-      record.variableActions.append(toggle);
-      record.displaySlot.insertBefore(source,record.display);
-      const scrollbars = [record.display, source].map(scrollArea => UI.Scrollbar.attach(scrollArea));
-      UI.Components.component(record.fieldset, {}, undefined, () => scrollbars.forEach(controller => controller.destroy()));
-      source.addEventListener('input',()=>{
-        if (!record.sourceMode || locked || loading || modalSaving) { source.value=record.source||''; return; }
-        record.source=source.value;record.sourceError='';
-        try{const tokens=source.value.trim()?math.parseLatex(source.value,view.properties):[];const fraction=parseFraction(tokens);record.numerator=fraction?fraction.numerator:tokens;record.denominator=fraction?fraction.denominator:[];record.fraction=!!fraction;record.cursors={numerator:record.numerator.length,denominator:record.denominator.length};}
-        catch(error){record.sourceError=error.message;}
-        changed(record);
-      });
-      const utility=record.fieldset.querySelector('.formula-calculator-utility');utility.prepend(record.status);
-      source.value=record.source||'';
-      updateDisplay(record);
-      record.fieldset.addEventListener('mousedown', event => {
-        if (event.target.closest('button,[role="option"]')) event.preventDefault();
-      });
-    }
-    updateSaveActions(record);
+    publish();
   }
-  function filter() { browser?.filter(); }
-  function updateFilterOptions() { browser?.refresh(); }
-  function attachSharedControls() {
-    let empty = el("formula-no-matches");
-    if (!empty) { empty = make("p", "input-hint"); empty.id = "formula-no-matches"; contents.after(empty); }
-    browser = UI.CatalogBrowser.attach({ prefix: "formula", toolbar: el("formulas-page").querySelector(".formula-toolbar"), records: () => records, empty });
-    if (UI.PickControl && displayPickerRoot) displayControl = UI.Components.Picker({ root: displayPickerRoot });
+  function handleSourceInput(record, source) {
+    if (!record || record !== activeRecord || !source || !record.sourceMode || locked || loading || modalSaving) return;
+    record.sourceInput = source;
+    record.source = source.value;
+    record.sourceError = "";
+    try {
+      const tokens = source.value.trim() ? math.parseLatex(source.value, record.view.properties) : [];
+      const fraction = parseFraction(tokens);
+      record.numerator = fraction ? fraction.numerator : tokens;
+      record.denominator = fraction ? fraction.denominator : [];
+      record.fraction = !!fraction;
+      record.cursors = { numerator: record.numerator.length, denominator: record.denominator.length };
+    } catch (error) { record.sourceError = error.message; }
+    changed(record);
   }
-  function render() {
-    if (!initialized || !contents) return;
-    if (calculatorModal && calculatorModal.isOpen()) {
-      updateTimestamp();
+  function chooseProperty(record, key) {
+    if (!record || record !== activeRecord || !record.sourceMode || locked || loading) return;
+    const source = record.sourceInput;
+    if (source && sourceIsPerCard(source.value, source.selectionStart, source.selectionEnd)) {
+      insertVariable(record, { kind: "property", property: key });
+      record.pendingProperty = null;
+      publish();
       return;
     }
-    UI.Components.destroyTree(contents);
-    contents.replaceChildren();
+    record.pendingProperty = key;
+    publish();
+  }
+  function chooseAggregation(record, operation) {
+    if (!record || record !== activeRecord || !record.pendingProperty || !record.sourceMode || locked || loading) return;
+    insertVariable(record, { kind: "aggregate", property: record.pendingProperty, operation });
+    record.pendingProperty = null;
+    publish();
+  }
+  function removeActiveCalculation(record = activeRecord) {
+    if (!record || record !== activeRecord || locked || loading || !targetDefinition(record.view.target)) return;
+    record.numerator = []; record.denominator = []; record.fraction = false;
+    record.cursors = { numerator: 0, denominator: 0 }; record.source = ""; record.sourceError = "";
+    changed(record);
+    calculatorModal.close();
+  }
+  function buildCalculator(record) { publish(); }
+  function filter() { publish(); }
+  function updateFilterOptions() { publish(); }
+  function render() {
+    if (!initialized) return;
+    if (calculatorModal && calculatorModal.isOpen()) {
+      updateTimestamp();
+      publish();
+      return;
+    }
     records = [];
-    syncDisplayPicker();
     const supported = catalog.filter(view => !view.unsupported);
     const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(supported).views : supported.slice();
     for (const saved of state.definitions) {
@@ -704,31 +508,12 @@
       }
     }
     views.sort((left, right) => left.name.localeCompare(right.name) || left.space.localeCompare(right.space) || left.source.localeCompare(right.source));
-    views.forEach(view => {
-      let record;
-      const { item, row } = UI.CatalogBrowser.row({ name: view.name,
-        metadata: view.space + " · " + view.source + " · " + view.kind,
-        warning: view.unsupported, onSelect: () => openCalculator(record) });
-      row.setAttribute("aria-pressed", "false");
-      record = { view, item, row, key: identity(view.target) };
-      records.push(record);
-      contents.append(item);
-    });
-    if (!views.length) {
-      UI.CatalogBrowser.empty(contents, { loading: discovering || !discovered, loadingLabel: "Loading Kanban views…", emptyLabel: "No accessible Kanban views found." });
-    }
-    let empty = el("formula-no-matches");
-    if (!empty) {
-      empty = make("p", "input-hint");
-      empty.id = "formula-no-matches";
-      contents.append(empty);
-    }
-    empty.textContent = "No matching Kanban views.";
-    empty.hidden = true;
+    views.forEach(view => records.push({ view, item: null, row: null, key: identity(view.target) }));
     updateFilterOptions();
     filter();
     syncLocks();
     updateTimestamp();
+    publish();
   }
   async function discover(forceRefresh = false) {
     if (!invoke) return;
@@ -772,7 +557,7 @@
   }
   function configureModal() {
     if (!modalBackdrop || !modalDialog || !modalContent || !UI.createModalController) return;
-    calculatorModal = UI.Components.Modal({
+    calculatorModal = UI.createModalController({
       backdrop: modalBackdrop,
       dialog: modalDialog,
       initialFocus: () => activeRecord && activeRecord.display ? activeRecord.display : modalClose,
@@ -786,48 +571,50 @@
         }
         activeRecord = null;
         modalSaving = false;
-        UI.Components.destroyTree(modalContent);
-        modalContent.replaceChildren();
         updateRows();
         render();
       },
     });
-    modalDialog.addEventListener("keydown", event => {
-      if (event.key !== "Tab" || modalBackdrop.hidden) return;
-      const focusable = [activeRecord && activeRecord.display, activeRecord && activeRecord.sourceMode && activeRecord.sourceInput]
-        .filter(element => element && !element.hidden && !element.disabled);
-      if (!focusable.length) return;
-      event.preventDefault();
-      const index = focusable.indexOf(doc.activeElement);
-      const next = event.shiftKey
-        ? index <= 0 ? focusable.length - 1 : index - 1
-        : index < 0 || index === focusable.length - 1 ? 0 : index + 1;
-      focusable[next].focus({ preventScroll: true });
-    }, true);
     if (modalClose) modalClose.addEventListener("click", () => calculatorModal.close());
   }
   UI.FormulaPage = {
     init(options) {
       api = options;
       initialized = true;
+      syncDomRefs();
       const nav = el("formulas-nav"), open = el("open-formulas"), title = el("page-title");
       if (nav) nav.addEventListener("click", () => api.navigate("formulas"));
       if (open) open.addEventListener("click", () => { api.navigate("formulas"); if (title) title.focus({ preventScroll: true }); });
-      if (preference) preference.addEventListener("change", () => {
-        if (locked || loading) return;
-        state.display = ["balanced", "spacious"].includes(preference.value) ? preference.value : "balanced";
-        syncDisplayPicker();
-        api.onChange();
-      });
       if (UI.AppReload) {
         reloadController = UI.AppReload;
-        reload.addEventListener("click", () => void discover(true));
         unregisterReload = reloadController.register(() => discover(true));
       }
       configureModal();
-      attachSharedControls();
       render();
     },
+    getSnapshot: snapshot,
+    subscribe(listener) { viewSubscribers.add(listener); listener(snapshot()); return () => viewSubscribers.delete(listener); },
+    setDisplay(value) {
+      if (locked || loading) return;
+      state.display = ["balanced", "spacious"].includes(value) ? value : "balanced";
+      publish(); api?.onChange();
+    },
+    selectView(target, row) {
+      const record = records.find(item => identity(item.view.target) === identity(target));
+      if (!record) return;
+      record.row = row || null;
+      openCalculator(record);
+    },
+    reloadViews() { return discover(true); },
+    setCalculatorSourceInput(input) { if (activeRecord) activeRecord.sourceInput = input || null; },
+    setCalculatorDisplay(display) { if (activeRecord) activeRecord.display = display || null; },
+    calculatorSourceChanged(input) { handleSourceInput(activeRecord, input); },
+    toggleCalculatorSource() { toggleSourceMode(); },
+    calculatorEdit(action) { if (action === "save") saveCalculator(activeRecord); else edit(activeRecord, action); },
+    calculatorChooseProperty(key) { chooseProperty(activeRecord, key); },
+    calculatorChooseAggregation(operation) { chooseAggregation(activeRecord, operation); },
+    calculatorInsertCount() { insertVariable(activeRecord, { kind: "count" }); },
+    removeCalculatorDefinition() { removeActiveCalculation(); },
     read: () => copy(state),
     validateSaved(result) {
       if (!result?.configuration || result.configuration.version !== 2 || !Array.isArray(result.configuration.definitions)
@@ -857,7 +644,6 @@
         if (!equal(before, after)) {
           record.generation++;
           record.propertyPicker?.destroy();
-          UI.Components.destroyTree(modalContent); modalContent.replaceChildren();
           const definition = state.definitions.find(d => identity(d.target) === key);
           if (!definition && before) {
             draftGeneration++;
@@ -874,7 +660,7 @@
           }
         }
       }
-      syncDisplayPicker(); render(); updateRows();
+      render(); updateRows();
     },
     acceptSaved(result) {
       configurationRevision = result.revision || null;
@@ -899,7 +685,7 @@
       discoveryGeneration++;
       discovering = false;
       catalog = [];
-      browser?.reset();
+      searchText = ""; selectedSpace = "";
       draftGeneration++;
       if (calculatorModal?.isOpen()) calculatorModal.close({ restoreFocus: false });
       localDrafts.clear();
@@ -948,6 +734,7 @@
       locked = value;
       dirty = !!pending;
       syncLocks();
+      publish();
       if (wasLocked && !locked && !loading && discoveryRequested) {
         void discover();
       }
@@ -959,8 +746,7 @@
       return !discovering && !loading && !locked ? discover() : undefined;
     },
     destroy() {
-      browser?.destroy();
-      if (displayControl) displayControl.destroy();
+      viewSubscribers.clear();
       unregisterReload?.();
       if (reloadController) reloadController.bindButton(null);
       if (calculatorModal) calculatorModal.close({ restoreFocus: false });

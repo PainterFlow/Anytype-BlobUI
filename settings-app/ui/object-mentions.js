@@ -1,102 +1,47 @@
 (function (root) {
   'use strict';
-  const UI = root.BlobUI, C = UI.Components, make = UI.CatalogBrowser.node;
-  UI.ObjectMentions = { mount(panel, api, normalize) {
-    let spaces = [], types = [], epoch = 0, pending = false, loaded = false;
-    const status = make('p','input-hint'); status.setAttribute('role','status'); status.id='object-mentions-status';
-    const note = make('p','input-hint','Filters control suggestions. Reading an object still requires permission, including Always Ask. Save to apply changes.');
-    const group = C.Group({attributes:{id:'object-mentions-group'}});
-    const section=C.Section({attributes:{id:'object-mentions-section'},content:[C.Heading({title:'Object Mentions'}).element,group.element,note,status]});
-    panel.append(section.element);
-    const pickers = {};
-    const key = (kind,row) => kind==='spaces' ? row.id : JSON.stringify([row.spaceId,row.id]);
-    const filters = () => normalize(api.read()).objectMentions;
-    function options(kind) {
-      const saved = filters(), selected = saved[kind], entries = new Map();
-      const active = sid => saved.spaces.all || saved.spaces.items.some(s=>s.id===sid);
-      const available = kind==='spaces' ? spaces : types.filter(t=>active(t.spaceId)&&spaces.some(s=>s.id===t.spaceId));
-      for (const row of available) entries.set(key(kind,row),{row,available:true});
-      for (const row of selected.items) if (!entries.has(key(kind,row))) entries.set(key(kind,row),{row,available:false});
-      return [{value:'*',label:'All'},...[...entries].map(([value,{row,available}])=>({value,row,
-        label:kind==='spaces' ? row.name : row.name+' · '+row.space,
-        description:kind==='types'&&!active(row.spaceId) ? 'Inactive outside filtered spaces' : available ? '' : 'Unavailable saved selection'
-      })).sort((a,b)=>a.label.localeCompare(b.label)||a.value.localeCompare(b.value))];
+  const UI=root.BlobUI;
+  const key=(kind,row)=>kind==='spaces'?row.id:JSON.stringify([row.spaceId,row.id]);
+  function createController(){
+    let api,normalize,spaces=[],types=[],epoch=0,pending=false,loaded=false,status='';
+    let snapshot={spaces:[],types:[],status:'',loaded:false,pending:false,selections:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false}};
+    const listeners=new Set();
+    const subscribe=listener=>{listeners.add(listener);return()=>listeners.delete(listener);};
+    const getSnapshot=()=>snapshot;
+    function publish(patch={}){snapshot={...snapshot,...patch};listeners.forEach(listener=>listener());}
+    function filters(){return api?normalize(api.read()).objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false};}
+    function options(kind){
+      const saved=filters(),selected=saved[kind],entries=new Map();
+      const active=sid=>saved.spaces.all||saved.spaces.items.some(space=>space.id===sid);
+      const available=kind==='spaces'?spaces:types.filter(type=>active(type.spaceId)&&spaces.some(space=>space.id===type.spaceId));
+      for(const row of available)entries.set(key(kind,row),{row,available:true});
+      for(const row of selected.items)if(!entries.has(key(kind,row)))entries.set(key(kind,row),{row,available:false});
+      return [{value:'*',label:'All'},...[...entries].map(([value,{row,available}])=>({value,row,label:kind==='spaces'?row.name:row.name+' · '+row.space,description:kind==='types'&&!active(row.spaceId)?'Inactive outside filtered spaces':available?'':'Unavailable saved selection'})).sort((a,b)=>a.label.localeCompare(b.label)||a.value.localeCompare(b.value))];
     }
-    function change(kind,values) {
-      const next = normalize(api.read()), before = next.objectMentions[kind];
-      const all = values.includes('*') && !before.all;
-      const selected = values.filter(v=>v!=='*');
-      next.objectMentions[kind] = {all,items:all ? [] : options(kind).filter(o=>selected.includes(o.value)).map(o=>o.row)};
-      api.onChange(next); refresh();
-      if (kind==='spaces') void discoverTypes();
+    function change(kind,values){
+      if(!api)return;
+      const next=normalize(api.read()),before=next.objectMentions[kind],all=values.includes('*')&&!before.all,selected=values.filter(value=>value!=='*');
+      next.objectMentions[kind]={all,items:all?[]:options(kind).filter(option=>selected.includes(option.value)).map(option=>option.row)};
+      api.onChange(next);refresh();if(kind==='spaces')void discoverTypes();
     }
-    for (const [kind,label] of [['spaces','Filtered spaces'],['types','Filtered object types']]) {
-      const shell = C.PropertyPickerShell({label:'All',showValue:true,accessibleLabel:label,menuLabel:label});
-      const row = C.SettingsRow({label,content:[shell.element],attributes:{class:'settings-row kanban-setting-row object-mention-row'}});
-      group.element.append(row.element);
-      shell.menu.classList.add('app-scrollbar');
-      const scrollbar=UI.Scrollbar.attach(shell.menu);
-      const controller = C.Picker({root:shell.element,menu:shell.menu,multiple:true,closeOnSelect:false,onChange:values=>change(kind,values)});
-      const place = () => {
-        const rect=shell.trigger.getBoundingClientRect(), width=Math.min(300,root.innerWidth-80);
-        shell.menu.style.width=width+'px';shell.menu.style.left=Math.max(16,Math.min(rect.right-width,root.innerWidth-width-16))+'px';
-        const below=root.innerHeight-rect.bottom-16, above=rect.top-16;
-        const desired=Math.min(360,12+[...shell.menu.children].reduce((height,option)=>height+(option.querySelector('.kanban-select-option-description')?52:34),0));
-        const up=below<desired&&above>below;
-        shell.menu.style.top=up?'auto':rect.bottom+6+'px';shell.menu.style.bottom=up?root.innerHeight-rect.top+6+'px':'auto';
-        shell.menu.style.maxHeight=Math.max(80,Math.min(360,up?above-6:below-6))+'px';
-      };
-      shell.trigger.addEventListener('click',place,true);shell.trigger.addEventListener('keydown',place,true);
-      root.addEventListener('resize',()=>controller.close());
-      root.document.querySelector('.page-content').addEventListener('scroll',()=>controller.close());
-      pickers[kind]={shell,controller,scrollbar};
+    function setIncompleteTasks(checked){if(!api)return;const next=normalize(api.read());next.objectMentions.filterIncompleteTasks=checked===true;api.onChange(next);refresh();}
+    function refresh(){const selected=filters();publish({spaces:options('spaces'),types:options('types'),selections:selected,filterIncompleteTasks:selected.filterIncompleteTasks});}
+    async function discoverTypes(forceRefresh=false){
+      const current=++epoch,saved=filters(),ids=spaces.filter(space=>forceRefresh||saved.spaces.all||saved.spaces.items.some(value=>value.id===space.id)).map(space=>space.id);
+      if(!ids.length){status='';publish({status});refresh();return;}
+      status='Loading object types…';publish({status});
+      try{const result=await api.invoke('discover_anyblob_types',{spaceIds:ids,forceRefresh});if(current!==epoch)return;if(!Array.isArray(result?.types)||!Array.isArray(result?.errors))throw Error('Type discovery returned an invalid response.');const failed=new Set(result.errors.map(error=>error.spaceId));types=types.filter(type=>!ids.includes(type.spaceId)||failed.has(type.spaceId));const merged=new Map(types.map(type=>[key('types',type),type]));for(const type of result.types)merged.set(key('types',type),type);types=[...merged.values()];status=result.errors.map(error=>error.error).join(' ');}
+      catch(error){if(current===epoch)status=String(error.message||error);}
+      finally{if(current===epoch){publish({types,status});refresh();}}
     }
-    const incomplete=C.ToggleSetting({id:'filter-incomplete-tasks',label:'Filter Incomplete Tasks',className:'native-accent-control settings-row kanban-setting-row',
-      inputAttributes:{'aria-label':'Filter Incomplete Tasks'},onChange:()=>{
-        const next=normalize(api.read());next.objectMentions.filterIncompleteTasks=incomplete.input.checked;api.onChange(next);
-      }});
-    group.element.append(incomplete.element);
-    function refresh() {
-      incomplete.input.checked=filters().filterIncompleteTasks;
-      for (const kind of ['spaces','types']) {
-        const selection=filters()[kind], picker=pickers[kind];
-        const available=options(kind), signature=JSON.stringify(available);
-        if(picker.signature!==signature){picker.controller.setOptions(available, { preserveOpen: true });picker.signature=signature;}
-        picker.controller.setValue(selection.all ? ['*'] : selection.items.map(row=>key(kind,row)));
-        picker.shell.trigger.querySelector('[data-pick-value]').textContent=selection.all?'All':selection.items.length?selection.items.length+' selected':'None';
-        // These are suggestion filters, independent of the permission lock and discovery state.
-        picker.shell.trigger.disabled=false;
-        picker.scrollbar.update();
-      }
+    async function discover(forceRefresh=false){
+      if(pending||!api)return;pending=true;status='Loading spaces…';publish({status,pending});
+      try{const result=await api.invoke('discover_codex_spaces',{forceRefresh});if(!Array.isArray(result))throw Error('Space discovery returned an invalid response.');spaces=result;loaded=true;status='';publish({spaces,loaded,status});refresh();await discoverTypes(forceRefresh);}
+      catch(error){status=String(error.message||error);publish({status});}
+      finally{pending=false;publish({pending});refresh();}
     }
-    async function discoverTypes(forceRefresh = false) {
-      const current=++epoch, saved=filters();
-      const ids=spaces.filter(s=>forceRefresh||saved.spaces.all||saved.spaces.items.some(v=>v.id===s.id)).map(s=>s.id);
-      if (!ids.length) { status.textContent='';refresh(); return; }
-      status.textContent='Loading object types…';
-      try {
-        const result=await api.invoke('discover_anyblob_types',{spaceIds:ids,forceRefresh});
-        if(current!==epoch)return;
-        if(!Array.isArray(result?.types)||!Array.isArray(result?.errors))throw Error('Type discovery returned an invalid response.');
-        const failed=new Set(result.errors.map(e=>e.spaceId));
-        types=types.filter(t=>!ids.includes(t.spaceId)||failed.has(t.spaceId));
-        const merged=new Map(types.map(t=>[key('types',t),t]));
-        for(const type of result.types)merged.set(key('types',type),type);
-        types=[...merged.values()];status.textContent=result.errors.map(e=>e.error).join(' ');
-      } catch(error) {if(current===epoch)status.textContent=String(error.message||error);}
-      finally {if(current===epoch)refresh();}
-    }
-    async function discover(forceRefresh = false) {
-      if(pending)return;pending=true;status.textContent='Loading spaces…';
-      try {
-        const result=await api.invoke('discover_codex_spaces',{forceRefresh});
-        if(!Array.isArray(result))throw Error('Space discovery returned an invalid response.');
-        spaces=result;loaded=true;status.textContent='';refresh();await discoverTypes(forceRefresh);
-      } catch(error) {status.textContent=String(error.message||error);}
-      finally {pending=false;refresh();}
-    }
-    UI.AppReload?.register(() => discover(true));
-    refresh();
-    return {refresh,show(){refresh();if(!loaded&&!pending)void discover();}};
-  }};
+    return {subscribe,getSnapshot,init(options,normalizer){api=options;normalize=normalizer;UI.AppReload?.register(()=>discover(true));refresh();},options,change,setIncomplete:setIncompleteTasks,refresh,discover(){return discover(false);},show(){refresh();if(!loaded&&!pending)void discover();},discoverTypes,destroy(){epoch++;listeners.clear();}};
+  }
+  const controller=createController();
+  UI.ObjectMentions={...controller,createController};
 })(window);

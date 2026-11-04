@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {pathToFileURL}=require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 test('object mention filters stay editable and preserve saved drafts in dark mode',async()=>{
   const workspace=path.resolve(__dirname,'../..'),fixture=path.join(workspace,'.test-run/object-mentions-ui');
@@ -31,7 +31,7 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
         return null;
       }}};
     });
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(()=>window.appReady);await page.locator('#codex-nav').click();
     const spaces=page.getByRole('button',{name:'Filtered spaces',exact:true}),types=page.getByRole('button',{name:'Filtered object types',exact:true});
     const spaceMenu=page.getByRole('listbox',{name:'Filtered spaces',exact:true}),typeMenu=page.getByRole('listbox',{name:'Filtered object types',exact:true});

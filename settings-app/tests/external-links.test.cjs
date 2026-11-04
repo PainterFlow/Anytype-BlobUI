@@ -16,7 +16,12 @@ test('Docs and release-note links open externally without replacing the reader',
       } } };
     });
     await page.addScriptTag({ path: path.resolve(__dirname, '../ui/external-links.js') });
-    await page.evaluate(() => { window.links = BlobUI.ExternalLinks.attach(document, { onError: error => window.errors.push(error.message) }); });
+    await page.evaluate(() => {
+      window.links = BlobUI.ExternalLinks.attach(document, {
+        open: url => window.__TAURI__.core.invoke('open_external_link', { url }),
+        onError: error => window.errors.push(error.message),
+      });
+    });
     const original = page.url();
     await page.locator('#guide span').click();
     await page.locator('#release').click({ modifiers: ['Control'] });

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname, '../..');
 test('Codex permissions preserve drafts, save and undo in the standard layout', async () => {
@@ -25,7 +25,7 @@ test('Codex permissions preserve drafts, save and undo in the standard layout', 
         return null;
       }}};
     });
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(()=>window.appReady);
     await page.locator('#codex-nav').click();
     assert.equal(await page.locator('#codex-panel-0').getAttribute('hidden'),null);

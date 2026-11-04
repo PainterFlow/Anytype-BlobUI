@@ -13,6 +13,9 @@ data.json
 /settings-app/target/
 /settings-app/gen/
 /settings-app/dist/
+/settings-app/frontend-dist/
+/settings-app/node_modules/
+/settings-app/ui/node_modules/
 /dist/
 /installer/target/
 /mcp-server/target/

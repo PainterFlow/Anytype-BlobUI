@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const fs=require('node:fs');
-const {pathToFileURL}=require('node:url');
+const { loadSettings, openFormulas } = require('./frontend-fixture.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const workspace=path.resolve(__dirname,'../..');
 
@@ -44,7 +44,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
   });
   const refresh=()=>page.evaluate(()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'r',ctrlKey:true,bubbles:true,cancelable:true}));return window.BlobUI.AppReload.run();});
   try{
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(()=>window.appReady && window.calls.some(c=>c.name==='discover_anyblob_types') && !document.getElementById('object-mentions-status').textContent.includes('Loading'));
     const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
@@ -67,7 +67,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
       assert.equal(calls.find(c=>c.name===name).args.forceRefresh,true);
     }
     assert(!calls.some(c=>c.name==='discover_codex_projects'),'Local project discovery stays separate');
-    await page.locator('#formulas-nav').click();await page.getByRole('button',{name:'Board',exact:false}).first().click();
+    await openFormulas(page);await page.getByRole('button',{name:'Board',exact:false}).first().click();
     const dialog=page.locator('#formula-calculator-dialog');await dialog.waitFor({state:'visible'});
     await dialog.getByRole('button',{name:'Show LaTeX',exact:true}).click();
     const source=dialog.getByRole('textbox',{name:'LaTeX source'});await source.fill('7 + 3');
@@ -98,7 +98,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     assert.match(await page.getByRole('button',{name:/Access for Work/}).innerText(),/Read/);
     assert.match(await page.getByRole('button',{name:/Approval for Work/}).innerText(),/Always Ask/);
     assert.equal(await page.getByRole('switch',{name:/Upload.delete files for Work/}).isChecked(),false);
-    await page.locator('#formulas-nav').click();await page.evaluate(()=>{window.calls=[];});
+    await openFormulas(page);await page.evaluate(()=>{window.calls=[];});
     await page.locator('#formula-reload').click();await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_kanban_views'));
     assert.deepEqual(await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')).map(c=>c.name)),['discover_kanban_views']);
     assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='discover_kanban_views').args.forceRefresh),true);

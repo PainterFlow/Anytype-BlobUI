@@ -43,3 +43,64 @@ test('new calendar defaults and view overrides are independent additions',()=>{
   const result=plain(merge(base,local,remote,()=>assert.fail('Independent rules should merge'),'Calendar'));
   assert.equal(result.types[0].default.mode,'none');assert.equal(result.types[0].overrides.length,1);
 });
+
+test('refresh controller coalesces events during a read into one follow-up', async () => {
+  const { createRefreshController } = sandbox.window.BlobUI.SavedState;
+  let resolveFirst;
+  let reads = 0;
+  const controller = createRefreshController({ refresh: () => {
+    reads++;
+    if (reads === 1) return new Promise(resolve => { resolveFirst = resolve; });
+  } });
+  controller.setReady();
+  const first = controller.request();
+  await Promise.resolve();
+  controller.request();
+  controller.request();
+  assert.equal(reads, 1);
+  resolveFirst();
+  await first;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 2);
+  assert.equal(controller.pending, null);
+  assert.equal(controller.queued, false);
+});
+
+test('refresh controller queues while blocked and retries after a failed read', async () => {
+  const { createRefreshController } = sandbox.window.BlobUI.SavedState;
+  let blocked = true;
+  let fail = true;
+  let reads = 0;
+  const controller = createRefreshController({ isBlocked: () => blocked, refresh: () => {
+    reads++;
+    if (fail) throw new Error('snapshot unavailable');
+  } });
+  controller.request();
+  await controller.setReady();
+  assert.equal(reads, 0);
+  assert.equal(controller.queued, true);
+  blocked = false;
+  await assert.rejects(controller.flush(), /snapshot unavailable/);
+  assert.equal(controller.pending, null);
+  fail = false;
+  await controller.request();
+  assert.equal(reads, 2);
+  assert.equal(controller.queued, false);
+});
+
+test('refresh controller marks an in-flight result stale after invalidation', async () => {
+  const { createRefreshController } = sandbox.window.BlobUI.SavedState;
+  let resolveRead;
+  let stale = null;
+  const controller = createRefreshController({ refresh: context => new Promise(resolve => {
+    resolveRead = () => { stale = !context.isCurrent(); resolve(); };
+  }) });
+  controller.setReady();
+  const read = controller.request();
+  await Promise.resolve();
+  controller.invalidate();
+  resolveRead();
+  await read;
+  assert.equal(stale, true);
+  assert.equal(controller.generation, 1);
+});

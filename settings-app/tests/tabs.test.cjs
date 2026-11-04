@@ -93,7 +93,7 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
 
 test('real settings tabs keep their width and open panels at the top across height changes', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-  const { pathToFileURL } = require('node:url');
+  const { loadSettings } = require('./frontend-fixture.cjs');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
     const page = await browser.newPage();
@@ -107,7 +107,7 @@ test('real settings tabs keep their width and open panels at the top across heig
         return {};
       } } };
     });
-    await page.goto(pathToFileURL(path.join(ui, 'index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
     for (const size of [{ width: 800, height: 650 }, { width: 920, height: 740 }, { width: 960, height: 740 }]) {
       await page.setViewportSize(size);

@@ -4,7 +4,7 @@
   "version": "2.0.1",
   "identifier": "io.blobui.settings",
   "build": {
-    "frontendDist": "ui"
+    "frontendDist": "frontend-dist"
   },
   "app": {
     "withGlobalTauri": true,

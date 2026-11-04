@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings, openFormulas } = require('./frontend-fixture.cjs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname, '../..');
 const root = path.join(workspace, '.test-run/kanban-live');
@@ -54,7 +54,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
   const close=async()=>{await key('Save calculation').click();await modal.waitFor({state:'hidden'});};
   const read=()=>page.evaluate(()=>window.BlobUI.FormulaPage.read());
   try {
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(()=>window.appReady);
     await page.waitForFunction(()=>document.querySelector('#status-message').textContent.includes('Settings loaded from this device.'));
     await page.waitForFunction(()=>window.__calls.includes('discover_kanban_views'));
@@ -70,7 +70,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(()=>!document.getElementById('formula-reload').disabled);
     assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
     assert.equal(await page.locator('#formulas-page').isVisible(),false,'Unlock retries queued discovery while the formula page is hidden.');
-    await page.locator('#formulas-nav').click();await page.locator('.formula-view-row').first().waitFor();
+    await openFormulas(page);await page.locator('.formula-view-row').first().waitFor();
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);
     const rows=await page.locator('.formula-view-row').evaluateAll(nodes=>nodes.map(n=>({font:getComputedStyle(n.querySelector('.formula-view-name')).fontSize,radius:getComputedStyle(n).borderRadius})));
@@ -119,8 +119,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     const booleanDraft=await read();await key('True').click();assert.deepEqual(await read(),booleanDraft);
     await page.screenshot({path:path.join(root,'calculator-logic-dark.png')});
     await page.setViewportSize({width:480,height:700});
-    await page.evaluate(()=>document.documentElement.dataset.theme='light');
-    await page.screenshot({path:path.join(root,'calculator-logic-light-narrow.png')});
+    await page.screenshot({path:path.join(root,'calculator-logic-dark-narrow.png')});
     assert.ok(await modal.evaluate(n=>n.getBoundingClientRect().bottom <= innerHeight));
     await page.setViewportSize({width:1050,height:1000});
     await page.evaluate(()=>document.documentElement.dataset.theme='dark');
@@ -169,7 +168,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
       await page.setViewportSize(size);const bounds=await modal.boundingBox();assert.ok(bounds.y>=0&&bounds.y+bounds.height<=size.height);
       assert.equal(await modal.evaluate(n=>n.scrollHeight<=n.clientHeight),true);
     }
-    await page.evaluate(()=>document.documentElement.dataset.theme='light');await page.screenshot({path:path.join(root,'calculator-modal-light-narrow.png')});
+    await page.screenshot({path:path.join(root,'calculator-modal-dark-narrow.png')});
     await close();
     await page.setViewportSize({width:1050,height:1000});
     await page.locator('.formula-view-row').filter({hasText:'Tasks'}).click();await modal.waitFor({state:'visible'});
@@ -261,7 +260,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     const remove = key('Remove calculation');
     await remove.waitFor();
     await page.evaluate(() => window.BlobUI.FormulaPage.setLocked(true, false));
-    assert.equal(await remove.isDisabled(), true);
+    await page.waitForFunction(() => document.querySelector('.formula-remove-calculation')?.disabled);
     await page.evaluate(() => window.BlobUI.FormulaPage.setLocked(false, false));
     await remove.click();
     await modal.waitFor({ state: 'hidden' });
