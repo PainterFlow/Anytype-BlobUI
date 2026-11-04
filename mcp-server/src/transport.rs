@@ -172,8 +172,9 @@ mod windows {
                 }
                 let mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
                 if SetNamedPipeHandleState(handle, &mode, ptr::null(), ptr::null()) == 0 {
+                    let error = io::Error::last_os_error();
                     CloseHandle(handle);
-                    return Err(io::Error::last_os_error());
+                    return Err(error);
                 }
                 Ok(Self(handle))
             }
@@ -298,7 +299,10 @@ mod tests {
         std::env::set_var("ANYBLOB_BRIDGE_INSTANCE",format!("fixture-aborted-{}",std::process::id()));
         let listener=Pipe::listen(true).unwrap();
         for _ in 0..3 {
-            let client=Pipe::connect().unwrap();drop(client);
+            let client = Pipe::connect().expect(
+                "Connect to the same-user fixture pipe. On access denied, run the test in a normal Windows session outside the restricted sandbox.",
+            );
+            drop(client);
             assert!(!listener.accept().expect("A client that leaves before accept must reset the listener"));
             assert!(!listener.accept().unwrap()); // Re-arm the disconnected instance on the next poll.
         }

@@ -12,7 +12,9 @@ Settings retains permission pickers but no approval modal, approval event listen
 
 ## Validation
 
-Run `scripts/tests/Test-Anyblob.ps1` for isolated stdio, pipe, mock API and authorization tests. The dedicated `mcp-server/tests/elicitation.rs` fixture covers capability negotiation, explicit true and false answers, decline, cancel, malformed content, stale and duplicate responses, two simultaneous calls answered in reverse order, cancellation and unsupported clients. The mock API fixture also confirms a successful mutation receipt after a real question-and-answer exchange. Existing tests retain permission revocation, project membership, overlapping grants, irreversible actions and prepared upload coverage.
+Run `scripts/tests/Test-Anyblob.ps1` in a normal Windows user session for isolated stdio, pipe, mock API and authorization tests. The Windows fixtures use the same user-only pipe permissions as the bridge. If a restricted sandbox denies the fixture pipe connection with OS error 5, run the suite outside that sandbox. The elicitation fixture needs that connection before it can send a form request. Its assertion includes the full MCP reply to show failures that occur before the form.
+
+The dedicated `mcp-server/tests/elicitation.rs` fixture covers capability negotiation, acceptance, decline, cancel, malformed content, stale and duplicate responses, two simultaneous calls answered in reverse order, cancellation and unsupported clients. The mock API fixture also confirms a successful mutation receipt after a real question-and-answer exchange. Existing tests retain permission revocation, project membership, overlapping grants, irreversible actions and prepared upload coverage.
 
 Dark Playwright fixtures retain permission-picker Save/Undo coverage and assert that Settings registers no approval listeners. Validation never controls the user's running Anytype instance.
 
