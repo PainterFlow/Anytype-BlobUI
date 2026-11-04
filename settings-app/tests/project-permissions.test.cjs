@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {pathToFileURL} = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname,'../..');
 test('project catalogs and source drafts survive search, refresh, modal dismissal, Save and Undo in dark layouts', async()=>{
@@ -30,7 +30,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
         return null;
       }}};
     });
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);await page.waitForFunction(()=>window.appReady);
+    await loadSettings(page);await page.waitForFunction(()=>window.appReady);
     assert.equal(await page.evaluate(()=>calls.includes('discover_codex_projects')),false);
     await page.locator('#codex-nav').click();await page.locator('#codex-tab-2').click();
     const projects=page.locator('#codex-project-list .formula-view-row');await projects.first().waitFor();assert.equal(await projects.count(),2);

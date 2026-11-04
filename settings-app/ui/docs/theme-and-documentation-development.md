@@ -22,7 +22,7 @@ The compiler recognizes annotated placeholders such as `accentColor` and `banner
 
 Follow the existing Preferences and Accessibility layout. Update the frontend draft, dirty comparison, validation, preview, Save, and Undo together. Add the corresponding persisted Rust settings and CSS generation. Test older local settings and rollback when saving fails.
 
-Use the shared DOM components in `ui/components.js` for settings rows, fields, buttons, and groups. Add properties to the relevant screen definition and a named template slot in `index.html`. `screens.js` mounts these before application bindings run. Keep component updates separate from saving and native commands. Read `settings-app/UI_REFERENCE.md` for the lifecycle and controller contracts.
+Use the shared React controls in `ui/shared` for settings rows, fields, buttons, and groups. Add JSX to the relevant feature view in `ui/screens`. Pass draft values and change handlers as props. Keep saving and native commands in the application. See `settings-app/UI_REFERENCE.md` for the layout and lifecycle rules.
 
 Appearance changes remain drafts until Save. App preferences and shortcuts have separate persistence paths; follow their existing behavior. Use accessible labels, keyboard focus, status messages, and reduced-motion handling.
 

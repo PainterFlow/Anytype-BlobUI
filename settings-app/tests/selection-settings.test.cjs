@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const test = require('node:test');
 const workspace = path.resolve(__dirname, '../..');
 let chromium;
@@ -41,7 +41,7 @@ test('Include selections sits inside the accent box and supports migration, Save
         return null;
       } } };
     });
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
     const toggle = page.locator('#include-selections');
     assert.equal(await toggle.isChecked(), true);

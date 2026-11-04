@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname, '../..');
 const root = path.join(workspace, '.test-run/calendar-property');
@@ -52,7 +52,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   };
   const close = async () => { await modal.getByRole('button', { name: 'Close color rules' }).click(); await modal.waitFor({ state: 'hidden' }); };
   try {
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady && window.__calls.includes('load_calendar_rules'));
     assert.equal(await page.locator('#open-calendar-colors').count(), 1);
     assert.deepEqual(await page.evaluate(() => {
@@ -92,10 +92,10 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     const read = () => page.evaluate(() => window.BlobUI.CalendarPage.read());
     assert.equal((await read()).types[0].default.key, 'status');
     assert.equal((await read()).types[0].overrides[0].rule.mode, 'none');
-    await page.evaluate(() => {
-      const toggle = document.getElementById('calendar-colors-enabled');
-      toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await page.locator('#preferences-nav').click();
+    await page.locator('#preference-tab-2').click();
+    await page.locator('#calendar-colors-enabled').uncheck();
+    await page.locator('#open-calendar-colors').click();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__calendarSettings[0].calendarColorsEnabled), false);
@@ -215,7 +215,7 @@ test('saved calendar rules do not become unavailable during initial loading, fai
   const rejectCatalog = async () => page.evaluate(() => { const pending = window.__pendingDiscover; window.__pendingDiscover = null; pending.reject(Error('Fixture discovery unavailable')); });
   const list = page.locator('#calendar-type-list');
   try {
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady && !document.querySelector('#open-calendar-colors').disabled);
     await page.locator('#open-calendar-colors').evaluate(button => button.click());
     await page.waitForFunction(() => !!window.__pendingDiscover);

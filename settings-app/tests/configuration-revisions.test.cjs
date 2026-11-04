@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const workspace = path.resolve(__dirname, '../..');
 
@@ -26,7 +26,7 @@ test('Settings sends loaded revisions, advances after saves, and retains conflic
     } } };
   });
   try {
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady && window.__calls.includes('load_calendar_rules'));
     const result = await page.evaluate(async () => {
       const UI = window.BlobUI, sent = [];

@@ -1,18 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const source = path.resolve(__dirname, '../ui');
+const { loadSettings } = require('./frontend-fixture.cjs');
 
 test('sidebar row geometry stays stable with expandable sections', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
     const context = await browser.newContext({ viewport: { width: 1000, height: 850 }, colorScheme: 'dark' });
-    await context.route('http://fixture/**', route => {
-      const file = new URL(route.request().url()).pathname.slice(1) || 'index.html';
-      route.fulfill({ contentType: file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'application/javascript' : 'text/html', body: fs.readFileSync(path.join(source, file)) });
-    });
     const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
@@ -28,7 +22,7 @@ test('sidebar row geometry stays stable with expandable sections', async () => {
         return {};
       } } };
     });
-    await page.goto('http://fixture/'); await page.waitForFunction(() => window.appReady);
+    await loadSettings(page); await page.waitForFunction(() => window.appReady);
 
 
     const geometry = () => page.locator('.nav-item:visible').evaluateAll(nodes => nodes.map(n => ({ width:n.getBoundingClientRect().width, height:n.getBoundingClientRect().height })));

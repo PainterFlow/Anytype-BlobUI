@@ -145,6 +145,7 @@ const context = {
     __TAURI__: {
       event: { async listen(name, handler) {
         if (name === 'blobui-rebuild-custom-css') rebuildListener = handler;
+        else if (name === 'blobui-saved-state-changed') return () => {};
         else assert.equal(name, 'blobui-show-onboarding');
       } },
       core: { async invoke(name, args) {
@@ -169,6 +170,8 @@ const context = {
         return;
       }
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
+      // External refresh behavior is covered by saved-state-refresh.test.cjs.
+      if (name === 'get_saved_state_snapshot') return new Promise(() => {});
       if (name === 'get_app_state') {
         if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
         return {
@@ -297,9 +300,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   helperSession.discard();
   assert.equal(JSON.stringify(helperState), JSON.stringify({ settings: { font: 'Libron' }, connection: { port: 31010 } }), 'Undo restores unsaved sections while retaining successful partial saves.');
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/tabs.js'), 'utf8'), context);
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/settings-v21.js'), 'utf8'), context);
   // Layout is covered by the real-browser suite. Keep the shared tab controller in this form harness.
-  context.window.BlobUI.SettingsV21.init = () => {};
   // The formula page has its own browser and storage tests. Keep this form
   // harness independent of its DOM while retaining a stable edit snapshot.
   context.window.BlobUI.CodexPage = {
@@ -317,13 +318,85 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     option.querySelector('.kanban-option-label').textContent = value[0].toUpperCase() + value.slice(1);
     element('kanban-style-options').append(option);
   }
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/pick-control.js'), 'utf8'), context);
   context.window.document = context.document;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/components.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/saved-state.js'), 'utf8'), context);
+  context.createNativeService = require('../ui/native-service.js').createNativeService;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), context);
+  context.view = {
+    updateSettingsFields(values) {
+      for (const [id, value] of Object.entries(values)) element(id)[typeof value === 'boolean' ? 'checked' : 'value'] = value;
+    },
+    update(patch) {
+      if ('page' in patch) {
+        const pages = { preferences: 'Preferences', accessibility: 'Accessibility', advanced: 'Advanced Settings',
+          formulas: 'Kanban View Formulas', 'calendar-colors': 'Color by Property', codex: 'Anyblob' };
+        for (const name of Object.keys(pages)) {
+          const selected = patch.page === name;
+          element(name + '-page').hidden = !selected;
+          element(name + '-nav').classList.toggle('active', selected);
+          element(name + '-nav').setAttribute('aria-current', selected ? 'page' : 'false');
+        }
+        element('page-title').textContent = pages[patch.page];
+      }
+      if ('saveVisible' in patch) {
+        Object.assign(element('save-button'), { hidden: !patch.saveVisible, disabled: patch.saveDisabled });
+        Object.assign(element('discard-button'), { hidden: !patch.saveVisible, disabled: patch.discardDisabled });
+        element('save-button').classList.toggle('busy', patch.saveBusy);
+        element('save-button.save-label').textContent = patch.saveBusy ? 'Saving…' : 'Save changes';
+      }
+      if ('kanbanStyle' in patch) element('kanban-view-style').value = patch.kanbanStyle;
+      if ('kanbanStyleDisabled' in patch) element('kanban-view-style').disabled = patch.kanbanStyleDisabled;
+      if ('logRows' in patch) {
+        element('log-entries').replaceChildren(...patch.logRows.map(({ level, text }) => {
+          const row = context.document.createElement('p');
+          row.className = 'log-entry ' + level;
+          row.textContent = text;
+          return row;
+        }));
+        element('log-button').hidden = !patch.logRows.length;
+        element('log-button').dataset.severity = patch.logSeverity;
+        element('log-label').textContent = patch.logSeverity === 'error' ? 'Errors and logs'
+          : patch.logSeverity === 'warning' ? 'Warnings and logs' : 'Logs';
+      }
+      if ('shortcutRows' in patch) {
+        element('keybind-list').replaceChildren(...patch.shortcutRows.map(({ action, label, fixed, capturing, shortcut }) => {
+          const row = context.document.createElement('div');
+          const name = element('keybind-label-' + action);
+          name.textContent = label;
+          const button = element('keybind-button-' + action);
+          if (!fixed) {
+            button.dataset.shortcutAction = action;
+            button.setAttribute('aria-pressed', String(capturing));
+            button.handlers.click = () => context.testApp.beginShortcutCapture(action);
+          }
+          button.textContent = capturing ? 'Press a shortcut…' : shortcut || 'Unavailable';
+          row.append(name, button);
+          return row;
+        }));
+      }
+      if ('releaseNotesMedia' in patch) {
+        element('release-notes-content').innerHTML = patch.releaseNotesMedia
+          ? context.window.BlobUI.Markdown.render(patch.releaseNotesMedia.markdown, patch.releaseNotesMedia) : '';
+      }
+      if (patch.documentationOpened) context.window.BlobUI.DocsUI.load();
+    },
+  };
+  const appSource = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');
+  context.testApp = vm.runInNewContext(appSource.replace(/^export function /, 'function ') + '\nstartSettingsApp({ createNativeService, view });', context);
+  for (const name of ['preferences', 'accessibility', 'advanced']) {
+    element(name + '-nav').handlers.click = () => context.testApp.showSettingsPage(name);
+  }
+  for (const id of ['native-accent', 'include-selections', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'collapsed-categories', 'calendar-colors-enabled']) {
+    element(id).handlers.change = () => context.testApp.changeSettingField(id, element(id).checked);
+  }
+  for (const id of ['accent-value', 'font-family', 'code-font-family']) {
+    element(id).handlers.input = () => context.testApp.changeSettingField(id, element(id).value);
+  }
+  element('save-button').handlers.click = () => context.testApp.save();
+  element('kanban-view-style').handlers.change = () => context.testApp.changeKanbanStyle(element('kanban-view-style').value);
+  element('discard-button').handlers.click = () => context.testApp.openDiscardConfirmation();
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
@@ -576,6 +649,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await busySave;
   for (let turn = 0; turn < 10 && calls.filter(name => name === 'apply_update').length === applyCallsBeforeBusyCheck; turn += 1) await flush();
   assert.equal(calls.filter(name => name === 'apply_update').length, applyCallsBeforeBusyCheck + 1, 'A deferred automatic update resumes after Save completes.');
+  for (let turn = 0; turn < 10 && element('font-family').disabled; turn += 1) await flush();
+  assert.equal(element('font-family').disabled, false, 'Wait for the deferred updater to unlock the Settings fields.');
   await input('font-family', 'Libron');
   await element('save-button').handlers.click();
   assert.equal(element('save-button').hidden, true, 'The updater deferral fixture restores the original appearance baseline.');

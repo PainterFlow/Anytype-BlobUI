@@ -5,6 +5,46 @@
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const target = t => JSON.stringify([t.spaceId, t.objectId, t.blockId, t.viewId]);
   const type = t => JSON.stringify([t.spaceId, t.typeKey]);
+
+  function createRefreshController({ refresh, isBlocked = () => false, onError = null } = {}) {
+    if (typeof refresh !== "function") throw new TypeError("A saved-state refresh function is required.");
+    let ready = false;
+    let queued = false;
+    let pending = null;
+    let generation = 0;
+
+    function blocked() { return !ready || !!isBlocked(); }
+
+    function run() {
+      if (blocked()) { queued = true; return Promise.resolve(); }
+      if (pending) { queued = true; return pending; }
+      queued = false;
+      const startedAt = generation;
+      pending = Promise.resolve().then(() => refresh({
+        generation: startedAt,
+        isCurrent: () => generation === startedAt,
+      })).finally(() => {
+        pending = null;
+        if (queued && !blocked()) {
+          const followUp = Promise.resolve().then(run);
+          if (typeof onError === "function") followUp.catch(onError);
+        }
+      });
+      return pending;
+    }
+
+    return Object.freeze({
+      request() { queued = true; return run(); },
+      run,
+      setReady(value = true) { ready = !!value; if (ready && queued && !blocked()) return run(); return Promise.resolve(); },
+      flush() { return queued ? run() : Promise.resolve(); },
+      invalidate() { generation++; return generation; },
+      get generation() { return generation; },
+      get pending() { return pending; },
+      get queued() { return queued; },
+      get ready() { return ready; },
+    });
+  }
   function merge(base, local, saved, warn, path = "Settings") {
     if (equal(local, base)) return copy(saved);
     if (equal(saved, base) || equal(local, saved)) return copy(local);
@@ -36,5 +76,5 @@
     }
     return result;
   }
-  UI.SavedState = { merge, equal, target, copy };
+  UI.SavedState = { merge, equal, target, copy, createRefreshController };
 })(window);

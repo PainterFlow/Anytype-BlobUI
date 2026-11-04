@@ -47,6 +47,13 @@ jobs:
             throw 'Release tags must point to a commit on main. Merge dev into main before releasing.'
           }
 
+      - name: Select the Node.js toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.1
+          cache: npm
+          cache-dependency-path: settings-app/package-lock.json
+
       - name: Select the Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal
@@ -54,18 +61,23 @@ jobs:
           rustup default stable
           if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed.' }
 
-      - name: Build Settings and close the launched app
+      - name: Install frontend dependencies and build Settings
         env:
+          BLOBUI_BUILD_ONLY: '1'
           APPDATA: ${{ github.workspace }}\.test-run\ci-roaming
           LOCALAPPDATA: ${{ github.workspace }}\.test-run\ci-local
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force $env:APPDATA, $env:LOCALAPPDATA | Out-Null
-          try {
-            ./scripts/Build-App.ps1 -s -c
-          } finally {
-            Get-Process -Name blobui-settings -ErrorAction SilentlyContinue | Stop-Process -Force
-          }
+          ./scripts/Build-App.ps1 -s -c
+
+      - name: Validate the bundled Settings frontend
+        working-directory: settings-app
+        run: |
+          npm run test:ui
+          if ($LASTEXITCODE -ne 0) { throw 'Settings frontend component tests failed.' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Settings frontend behavior tests failed.' }
 
       - name: Build and validate the production installer and release package
         run: |

@@ -64,9 +64,9 @@ You can also use it to manage your Anytype space as there are quite a few skills
 *Developers Note: A variety of undocumented bugs related to kanban view calculations were fixed. If you noticed
 any buggy behaviour in v1.3.0, expect it to be fixed now. If not then please report the issue.*
 
-- Issue#71 - In-Object searched text results are unaffected by the accent color setting.
-- Issue#72 - The `/` command preview of checkmarks is unaffected by the accent color setting.
 - Issue#75 - Uncollapsed settings tabs have a thinner selected box then normal.
+- Issue#72 - The `/` command preview of checkmarks is unaffected by the accent color setting.
+- Issue#71 - In-Object searched text results are unaffected by the accent color setting.
 
 ## Developer Changelogs
 

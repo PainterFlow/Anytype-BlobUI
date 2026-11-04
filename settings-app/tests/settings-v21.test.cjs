@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const source = path.resolve(__dirname, '../ui');
 
 // This suite creates its own browser and a mocked bridge. It never attaches to
@@ -13,13 +13,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     const page = await browser.newPage({ viewport: { width: 1000, height: 850 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const html = fs.readFileSync(path.join(source, 'index.html'), 'utf8')
-      .replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '')
-      .replace('<link rel="stylesheet" href="./styles.css" />', '');
-    await page.setContent(html);
-    await page.addStyleTag({ path: path.join(source, 'styles.css') });
-    await page.addStyleTag({ path: path.join(source, 'formula-page.css') });
-    await page.evaluate(() => {
+    await page.addInitScript(() => {
       window.mockCalls = [];
       window.__TAURI__ = { core: { invoke: async (command, args) => {
         window.mockCalls.push(command);
@@ -35,9 +29,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
         return {};
       } } };
     });
-    for (const name of fs.readFileSync(path.join(source, 'index.html'), 'utf8').matchAll(/<script src="\.\/([^"]+)"/g)) {
-      await page.addScriptTag({ path: path.join(source, name[1]) });
-    }
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
     assert.equal(await page.locator('#settings-v21-enabled, #advanced-experiments-tab').count(), 0);
     assert.equal(await page.locator('.preference-tabs').isVisible(), true);

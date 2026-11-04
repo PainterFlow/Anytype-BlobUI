@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const fs=require('node:fs');
-const {pathToFileURL}=require('node:url');
+const { loadSettings, openFormulas } = require('./frontend-fixture.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const workspace=path.resolve(__dirname,'../..');
 test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures and queued events',async()=>{
@@ -45,11 +45,12 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
   });
   const settle=async()=>{await page.waitForFunction(()=>!document.getElementById('save-button').disabled || document.getElementById('save-button').hidden);await page.evaluate(()=>window.BlobUI.AppReload.run());};
   try{
-    await page.goto(pathToFileURL(path.join(workspace,'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(()=>window.appReady&&window.snapshots>0&&window.BlobUI.FormulaPage.read().definitions.length===1);
     await settle();
-    await page.evaluate(()=>{const input=document.getElementById('reduced-motion');input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));});
-    await page.locator('#formulas-nav').click();await page.getByRole('button',{name:'Board a',exact:false}).first().click();
+    await page.locator('#accessibility-nav').click();
+    await page.locator('#reduced-motion').check();
+    await openFormulas(page);await page.getByRole('button',{name:'Board a',exact:false}).first().click();
     const dialog=page.locator('#formula-calculator-dialog');
     await dialog.getByRole('button',{name:'Show LaTeX',exact:true}).click();
     const source=dialog.getByRole('textbox',{name:'LaTeX source'});

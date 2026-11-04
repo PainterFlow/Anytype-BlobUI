@@ -9,13 +9,7 @@
   }
 
   function attach(targetDocument, options = {}) {
-    const open = options.open || ((url) => {
-      const api = root.__TAURI__ && root.__TAURI__.core;
-      if (!api || typeof api.invoke !== "function") {
-        return Promise.reject(new Error("The settings app bridge is unavailable. Launch BlobUI Settings using blobui-settings.exe."));
-      }
-      return api.invoke("open_external_link", { url });
-    });
+    const open = options.open;
     const onError = options.onError || ((error) => root.console.error("Could not open an external link.", error));
 
     function handleActivation(event) {

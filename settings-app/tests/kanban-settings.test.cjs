@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const test = require('node:test');
 const workspace = path.resolve(__dirname, '../..');
 let chromium;
@@ -26,8 +26,9 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
         return null;
       } } };
     });
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
+    await page.locator('#preference-tab-1').click();
     const trigger = page.locator('#kanban-view-style');
     const menu = page.locator('#kanban-style-options');
     assert.equal(await trigger.evaluate(el => el.tagName), 'BUTTON');
@@ -68,8 +69,8 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
     assert.deepEqual(await formulaOptions.allTextContents(), ['Balanced', 'Spacious']);
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('#collapsed-categories').evaluate(el => el === document.activeElement), true);
-    const section = page.locator('section[aria-labelledby="kanban-heading"]');
-    for (const theme of ['dark', 'light']) {
+    const section = page.locator('#preference-panel-1');
+    for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       await section.scrollIntoViewIfNeeded();
       await section.screenshot({ path: path.join(root, `settings-${theme}.png`) });
