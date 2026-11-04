@@ -88,7 +88,10 @@ fn native_forms_fail_closed_and_correlate_concurrent_calls() {
             json!({"jsonrpc":"2.0","id":i+10,"method":"tools/call","params":{"name":"read_object","arguments":{"space_id":"s","object_id":"o"}}}),
         );
         let question = receive(&mut out);
-        assert_eq!(question["method"], "elicitation/create");
+        assert_eq!(
+            question["method"], "elicitation/create",
+            "Expected a form request. MCP replied with: {question}"
+        );
         assert_eq!(
             question["params"]["requestedSchema"]["properties"],
             json!({})
