@@ -13,6 +13,8 @@ export function createSettingsView() {
     page: "preferences", preferenceTab: 0, advancedTab: 0,
     documentationOpened: false, releaseNotesMedia: null,
     logRows: [], logSeverity: "info", shortcutRows: [],
+    startupMode: "off", startupModeDisabled: true,
+    backgroundExperiment: "disabled", backgroundExperimentDisabled: true,
     kanbanStyle: "default", kanbanStyleDisabled: true,
     saveVisible: false, saveDisabled: true, discardDisabled: true, saveBusy: false,
     settingsFields: {

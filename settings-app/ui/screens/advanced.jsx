@@ -8,14 +8,16 @@ import {
   Switch,
   VisibilityTextField,
 } from "../shared/settings-controls.jsx";
+import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 
 const advancedTabs = [
   { title: "API key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
   { title: "App settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
+  { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
 
-export function Advanced({ selectedTab, onSelectTab }) {
+export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
@@ -79,7 +81,12 @@ export function Advanced({ selectedTab, onSelectTab }) {
       <SettingsSection aria-labelledby="app-general-heading">
         <SettingsHeading id="app-general-heading" title="General" />
         <section className="app-general-settings">
-          <Switch id="start-on-login" label="Launch at startup" className="native-accent-control settings-row accessibility-row" />
+          {backgroundExperiment === "autostart-background" ? <SettingsRow className="native-accent-control settings-row accessibility-row" label="Launch at startup">
+            <SelectPicker id="startup-mode" label="Launch at startup" value={startupMode} disabled={startupModeDisabled}
+              options={[{ value: "off", label: "Don't autostart" }, { value: "foreground", label: "Autostart" }, { value: "background", label: "Autostart in background" }]}
+              onChange={onStartupModeChange} />
+          </SettingsRow> : <Switch id="start-on-login" label="Launch at startup" className="native-accent-control settings-row accessibility-row"
+            checked={startupMode !== "off"} disabled={startupModeDisabled} onChange={checked => onStartupModeChange?.(checked ? "foreground" : "off")} />}
           <Switch id="autoplay-videos" label="Autoplay videos" className="native-accent-control settings-row accessibility-row" />
         </section>
       </SettingsSection>
@@ -124,6 +131,28 @@ export function Advanced({ selectedTab, onSelectTab }) {
         <SettingsHeading id="app-uninstall-heading" title="Uninstall" />
         <Button id="uninstall-button" className="banner-image-button danger-button">Uninstall BlobUI</Button>
       </SettingsSection>
+    </SettingsSection>
+    <SettingsSection aria-labelledby="experiments-heading">
+      <div className="section-heading">
+        <h2 id="experiments-heading">Experiments</h2>
+        <p>Experimental features may change while they are in development.</p>
+        <p id="experiments-warning" className="experiments-warning">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a1.7 1.7 0 0 1 3 0l6 11a1.7 1.7 0 0 1-1.5 2.5H4a1.7 1.7 0 0 1-1.5-2.5Z" /><path d="M10 7v4" /><circle cx="10" cy="13.5" r=".7" fill="currentColor" stroke="none" /></svg>
+          <span>Experiments may break things. Use at your own risk.</span>
+        </p>
+      </div>
+      <SettingsGroup>
+        <SettingsRow className="native-accent-control settings-row accessibility-row">
+          <span>Run in background</span>
+          <SelectPicker id="background-experiment" label="Run in background" value={backgroundExperiment}
+            disabled={backgroundExperimentDisabled} descriptionId="experiments-warning" onChange={onBackgroundExperimentChange}
+            options={[
+              { value: "disabled", label: "Disabled", description: "Use standard Settings controls." },
+              { value: "normal", label: "Variant 1", description: "Normal. Adds the title-bar background button." },
+              { value: "autostart-background", label: "Variant 2", description: "Autostart Background. Also enables background startup." },
+            ]} />
+        </SettingsRow>
+      </SettingsGroup>
     </SettingsSection>
   </Tabs>;
 }

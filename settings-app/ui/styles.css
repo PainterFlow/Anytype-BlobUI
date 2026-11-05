@@ -78,6 +78,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .window-controls { display: flex; align-self: stretch; }
 .window-control { display: grid; place-items: center; width: 44px; padding: 0; border-radius: 0; background: transparent; color: var(--text-secondary); }
 .window-control svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; pointer-events: none; }
+#window-background svg { stroke-width: 1.5; }
 #documentation-back svg { width: 14px; height: 14px; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .window-control:hover { background: var(--active); color: var(--text); }
 .window-control:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: -3px; }
@@ -811,3 +812,8 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 
 .kanban-select-option-description { color: var(--text-secondary); font-size: 12px; line-height: 16px; }
 .kanban-select-option:has(.kanban-select-option-description) { height: auto; min-height: 52px; padding-block: 6px; }
+
+.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
+.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+#advanced-experiments-panel .settings-list { overflow: visible; }

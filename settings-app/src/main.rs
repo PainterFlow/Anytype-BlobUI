@@ -40,6 +40,9 @@ mod updater;
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static UPDATER_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static SHOW_ONBOARDING: AtomicBool = AtomicBool::new(false);
+static ONBOARDING_READY: AtomicBool = AtomicBool::new(false);
+static SETTINGS_VISIBLE: AtomicBool = AtomicBool::new(false);
+static BACKGROUND_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 struct SaveGuard;
 impl Drop for SaveGuard {
@@ -129,6 +132,17 @@ struct SettingsDraft {
     calendar_colors_enabled: bool,
     #[serde(default, deserialize_with = "deserialize_sidebar_resize_mode")]
     sidebar_resize_mode: SidebarResizeMode,
+    #[serde(default)]
+    background_experiment: BackgroundExperiment,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum BackgroundExperiment {
+    #[default]
+    Disabled,
+    Normal,
+    AutostartBackground,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -538,14 +552,15 @@ async fn save_updater_settings(settings: updater::UpdaterSettingsDraft) -> Resul
         let _updater_guard = updater_guard;
         let app_data = app_data_directory();
         let default_install = resolve_default_install_directory(&app_data)?;
-        let previous_start_on_login = autostart::is_enabled()?;
-        let start_on_login = autostart::set_enabled(settings.start_on_login)?;
+        let previous_startup = autostart::snapshot()?;
+        let startup_mode = autostart::set_mode(settings.startup_mode)?;
         match updater::save_settings(&app_data, settings, &default_install) {
             Ok(mut state) => {
-                state.start_on_login = start_on_login;
+                state.start_on_login = startup_mode != autostart::AutostartMode::Disabled;
+                state.startup_mode = startup_mode;
                 Ok(state)
             }
-            Err(error) => match autostart::set_enabled(previous_start_on_login) {
+            Err(error) => match autostart::restore(&previous_startup) {
                 Ok(_) => Err(error),
                 Err(rollback) => Err(format!("{error} The previous startup setting could not be restored: {rollback}")),
             },
@@ -679,7 +694,7 @@ async fn apply_update(
     automatic: Option<bool>,
 ) -> Result<updater::UpdaterState, String> {
     let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
-    let start_on_login = autostart::is_enabled()?;
+    let startup_mode = autostart::get_mode()?;
     let state = tauri::async_runtime::spawn_blocking(move || {
         let _save_guard = save_guard;
         let _updater_guard = updater_guard;
@@ -691,7 +706,8 @@ async fn apply_update(
     .await
     .map_err(|_| "The update installation task stopped unexpectedly.".to_string())??;
     let mut state = state;
-    state.start_on_login = start_on_login;
+    state.start_on_login = startup_mode != autostart::AutostartMode::Disabled;
+    state.startup_mode = startup_mode;
     if state.status == "restarting" {
         // The installer has been verified and started. Exit only on this
         // explicit handoff state so every earlier failure leaves Settings open.
@@ -769,7 +785,8 @@ fn uninstall_blobui(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn with_startup_state(mut state: updater::UpdaterState) -> Result<updater::UpdaterState, String> {
-    state.start_on_login = autostart::is_enabled()?;
+    state.startup_mode = autostart::get_mode()?;
+    state.start_on_login = state.startup_mode != autostart::AutostartMode::Disabled;
     Ok(state)
 }
 
@@ -903,12 +920,91 @@ fn normalize_connection(mut connection: ConnectionDraft) -> Result<ConnectionDra
     Ok(connection)
 }
 
+const BACKGROUND_TRAY_ID: &str = "blobui-background";
+
+fn deliver_pending_onboarding(app: &tauri::AppHandle) {
+    if SETTINGS_VISIBLE.load(Ordering::Acquire)
+        && ONBOARDING_READY.load(Ordering::Acquire)
+        && SHOW_ONBOARDING.swap(false, Ordering::AcqRel)
+    {
+        if app.emit("blobui-show-onboarding", ()).is_err() {
+            SHOW_ONBOARDING.store(true, Ordering::Release);
+        }
+    }
+}
+
+#[tauri::command]
+fn onboarding_ready(app: tauri::AppHandle) {
+    ONBOARDING_READY.store(true, Ordering::Release);
+    deliver_pending_onboarding(&app);
+    if let Some(error) = BACKGROUND_ERROR.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = app.emit("blobui-background-error", error);
+    }
+}
+
 fn show_settings_window(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || show_settings_window_on_main(&handle));
+}
+
+fn show_settings_window_on_main(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
+        if window.show().is_err() { return; }
+        SETTINGS_VISIBLE.store(true, Ordering::Release);
         let _ = window.unminimize();
         let _ = window.set_focus();
+        app.remove_tray_by_id(BACKGROUND_TRAY_ID);
+        deliver_pending_onboarding(app);
     }
+}
+
+fn enter_background(app: &tauri::AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || { let _ = sender.send(enter_background_on_main(&handle)); })
+        .map_err(|e| e.to_string())?;
+    receiver.recv().map_err(|e| e.to_string())?
+}
+
+fn enter_background_on_main(app: &tauri::AppHandle) -> Result<(), String> {
+    let result = (|| -> Result<(), String> {
+        if app.tray_by_id(BACKGROUND_TRAY_ID).is_none() {
+            let open = tauri::menu::MenuItem::with_id(app, "open-settings", "Open Settings", true, None::<&str>).map_err(|e| e.to_string())?;
+            let quit = tauri::menu::MenuItem::with_id(app, "quit-blobui", "Quit BlobUI", true, None::<&str>).map_err(|e| e.to_string())?;
+            let menu = tauri::menu::Menu::with_items(app, &[&open, &quit]).map_err(|e| e.to_string())?;
+            let icon = app.default_window_icon().cloned().ok_or("The BlobUI tray icon is missing.")?;
+            tauri::tray::TrayIconBuilder::with_id(BACKGROUND_TRAY_ID)
+                .icon(icon).tooltip("BlobUI Settings").menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open-settings" => show_settings_window(app),
+                    "quit-blobui" => if let Err(error) = quit_app(app.clone()) {
+                        show_settings_window(app);
+                        let _ = app.emit("blobui-background-error", error);
+                    },
+                    _ => {}
+                })
+                .build(app).map_err(|e| e.to_string())?;
+        }
+        app.get_webview_window("main").ok_or("The Settings window is unavailable.")?
+            .hide().map_err(|e| e.to_string())?;
+        SETTINGS_VISIBLE.store(false, Ordering::Release);
+        Ok(())
+    })();
+    if let Err(error) = &result {
+        show_settings_window(app);
+        eprintln!("Could not run BlobUI in background: {error}");
+        if ONBOARDING_READY.load(Ordering::Acquire) {
+            let _ = app.emit("blobui-background-error", error);
+        } else {
+            *BACKGROUND_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+        }
+    }
+    result
+}
+
+#[tauri::command]
+fn run_in_background(app: tauri::AppHandle) -> Result<(), String> {
+    enter_background(&app)
 }
 
 #[tauri::command]
@@ -917,8 +1013,8 @@ fn minimize_window(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn hide_window(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|error| error.to_string())
+fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
+    enter_background(&app)
 }
 
 #[tauri::command]
@@ -1029,7 +1125,7 @@ fn load_app_state() -> Result<AppState, String> {
             .unwrap_or_default(),
         message,
         hotkey_error: hotkey::error(),
-        onboarding_complete: onboarding_complete && !SHOW_ONBOARDING.load(Ordering::Acquire),
+        onboarding_complete,
         api_port,
         api_ip,
         has_saved_api_key,
@@ -1160,6 +1256,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
+        "backgroundExperiment": settings.background_experiment,
     });
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -1188,6 +1285,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             "codexIntegration": settings.codex_integration,
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
+        "backgroundExperiment": settings.background_experiment,
         }
     });
 }
@@ -1344,6 +1442,11 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         object_mention_hover_effect,
         kanban_view_style,
         collapsed_categories,
+        background_experiment: match read_string(local, "backgroundExperiment").or_else(|| read_string(Some(normalized), "backgroundExperiment")).as_deref() {
+            Some("normal") => BackgroundExperiment::Normal,
+            Some("autostart-background") => BackgroundExperiment::AutostartBackground,
+            _ => BackgroundExperiment::Disabled,
+        },
         sidebar_resize_mode: match read_string(local, "sidebarResizeMode").or_else(|| read_string(Some(normalized), "sidebarResizeMode")).as_deref() {
             Some("standard") => SidebarResizeMode::Standard,
             Some("pro") => SidebarResizeMode::Pro,
@@ -1730,14 +1833,18 @@ fn configure_webview_profile() {
     }
 }
 
-fn consume_pending_onboarding_request() -> bool {
+fn consume_pending_launch_request(name: &str) -> bool {
     let Ok(executable) = env::current_exe() else {
         return false;
     };
     let Some(directory) = executable.parent() else {
         return false;
     };
-    match fs::remove_file(directory.join(".blobui-onboarding-next")) {
+    consume_pending_launch_request_in(directory, name)
+}
+
+fn consume_pending_launch_request_in(directory: &Path, name: &str) -> bool {
+    match fs::remove_file(directory.join(name)) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(_) => false,
@@ -1755,12 +1862,12 @@ fn main() {
             let onboarding_argument = arguments
                 .iter()
                 .any(|argument| argument == "--onboarding" || argument == "-n");
-            let pending_onboarding = consume_pending_onboarding_request();
+            let pending_onboarding = consume_pending_launch_request(".blobui-onboarding-next");
             if onboarding_argument || pending_onboarding {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
-                let _ = app.emit("blobui-show-onboarding", ());
             }
-            if !arguments.iter().any(|argument| argument == "--background") {
+            let pending_background = consume_pending_launch_request(".blobui-background-next");
+            if !pending_background && !arguments.iter().any(|argument| argument == "--background") {
                 show_settings_window(app);
             }
         }))
@@ -1811,6 +1918,8 @@ fn main() {
             uninstall_blobui,
             minimize_window,
             hide_window,
+            run_in_background,
+            onboarding_ready,
             start_window_drag,
             open_project_repository,
             open_author_profile,
@@ -1822,7 +1931,7 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                let _ = enter_background(window.app_handle());
             }
         })
         .setup(|app| {
@@ -1847,7 +1956,7 @@ fn main() {
                 .build()?;
             let theme = read_anytype_theme(&app_data_directory().join("devconfig.json"));
             main_window.set_theme(native_theme(&theme))?;
-            if consume_pending_onboarding_request() {
+            if consume_pending_launch_request(".blobui-onboarding-next") {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
             let app_data = app_data_directory();
@@ -1859,8 +1968,11 @@ fn main() {
             let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
             hotkey::start(app.handle().clone(), &shortcuts);
             anyblob::start(app.handle().clone());
-            if !env::args().any(|argument| argument == "--background") {
+            let pending_background = consume_pending_launch_request(".blobui-background-next");
+            if !pending_background && !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
+            } else {
+                let _ = enter_background(app.handle());
             }
             Ok(())
         })
@@ -1887,6 +1999,7 @@ impl Default for SettingsDraft {
             collapsed_categories: false,
             calendar_colors_enabled: true,
             sidebar_resize_mode: SidebarResizeMode::Off,
+            background_experiment: BackgroundExperiment::Disabled,
         }
     }
 }
@@ -1897,6 +2010,56 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_launch_requests_are_independent_and_consumed_once() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run").join(format!(
+            "pending-launch-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        for name in [".blobui-background-next", ".blobui-onboarding-next"] {
+            fs::write(directory.join(name), "").unwrap();
+        }
+        assert!(consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(consume_pending_launch_request_in(&directory, ".blobui-onboarding-next"));
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-onboarding-next"));
+        // A directory is an invalid request and must not be removed as a file.
+        fs::create_dir(directory.join(".blobui-background-next")).unwrap();
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(directory.join(".blobui-background-next").is_dir());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn background_experiment_defaults_and_persists_all_modes() {
+        assert_eq!(SettingsDraft::default().background_experiment, BackgroundExperiment::Disabled);
+        let mut legacy = serde_json::to_value(SettingsDraft::default()).unwrap();
+        legacy.as_object_mut().unwrap().remove("backgroundExperiment");
+        assert_eq!(serde_json::from_value::<SettingsDraft>(legacy).unwrap().background_experiment, BackgroundExperiment::Disabled);
+        assert_eq!(settings_from_data(&json!({"settings": {}})).background_experiment, BackgroundExperiment::Disabled);
+        for (name, mode) in [("disabled", BackgroundExperiment::Disabled), ("normal", BackgroundExperiment::Normal), ("autostart-background", BackgroundExperiment::AutostartBackground)] {
+            let draft = SettingsDraft { background_experiment: mode, ..SettingsDraft::default() };
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &draft);
+            let saved = serialize_data(&data).unwrap();
+            let saved: Value = serde_json::from_slice(&saved).unwrap();
+            assert_eq!(saved["settings"]["backgroundExperiment"], name);
+            assert_eq!(saved["settingsV2"]["settings"]["backgroundExperiment"], name);
+            assert_eq!(settings_from_data(&saved).background_experiment, mode);
+            assert_eq!(serde_json::from_value::<SettingsDraft>(serde_json::to_value(&draft).unwrap()).unwrap().background_experiment, mode);
+            assert_eq!(settings_from_data(&json!({"settings": {"backgroundExperiment": name}})).background_experiment, mode);
+        }
+        assert_eq!(settings_from_data(&json!({"settings": {"backgroundExperiment": "normal"}, "settingsV2": {"settings": {"backgroundExperiment": "autostart-background"}}})).background_experiment, BackgroundExperiment::AutostartBackground);
+        for invalid in [json!("unknown"), json!(42), Value::Null] {
+            assert_eq!(settings_from_data(&json!({"settings": {"backgroundExperiment": invalid.clone()}})).background_experiment, BackgroundExperiment::Disabled);
+            assert_eq!(settings_from_data(&json!({"settingsV2": {"settings": {"backgroundExperiment": invalid.clone()}}})).background_experiment, BackgroundExperiment::Disabled);
+            let mut draft = serde_json::to_value(SettingsDraft::default()).unwrap();
+            draft["backgroundExperiment"] = invalid;
+            assert!(serde_json::from_value::<SettingsDraft>(draft).is_err());
+        }
+    }
 
     #[test]
     fn native_tests_reject_real_profile_paths_before_credential_access() {

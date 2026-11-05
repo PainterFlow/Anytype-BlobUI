@@ -34,13 +34,14 @@ function Choice({ id, title, useApi, recommended = false }) {
   </Button>;
 }
 
-export function Titlebar() {
+export function Titlebar({ backgroundExperiment = "disabled" }) {
   return <header className="window-titlebar" id="title-drag-region" aria-label="Window title bar">
     <span className="window-title">BlobUI Settings</span>
     <div className="window-controls">
       <Button id="documentation-back" className="window-control" aria-label="Back to settings" title="Back to settings" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h11a7 7 0 0 1 7 7v3" /></svg>
       </Button>
+      <Button hidden={backgroundExperiment === "disabled"} id="window-background" className="window-control" aria-label="Run in background" title="Run in background"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v7m-3-3 3 3 3-3M1 9v2h10V9" /></svg></Button>
       <Button id="window-minimize" className="window-control" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg></Button>
       <Button id="window-close" className="window-control window-close" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><CloseIcon /></Button>
     </div>

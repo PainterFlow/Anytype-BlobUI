@@ -41,12 +41,12 @@ let app;
 
 function SettingsScreens() {
   const { page, preferenceTab, advancedTab, settingsFields, saveVisible, saveDisabled, discardDisabled, saveBusy,
-    documentationOpened, releaseNotesMedia, logRows, logSeverity, shortcutRows, kanbanStyle, kanbanStyleDisabled } =
+    documentationOpened, releaseNotesMedia, logRows, logSeverity, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, backgroundExperiment, backgroundExperimentDisabled } =
     useSyncExternalStore(view.subscribe, view.getSnapshot);
   const calendar = useSyncExternalStore(calendarController.subscribe, calendarController.getSnapshot);
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
   return <>
-    <Titlebar />
+    <Titlebar backgroundExperiment={backgroundExperiment} />
     <Documentation><DocumentationReader visible={documentationOpened} /></Documentation>
     <Onboarding />
     <div className="app-shell" id="settings-shell">
@@ -69,7 +69,7 @@ function SettingsScreens() {
             <div id="calendar-colors-page" className="settings-page" hidden={page !== "calendar-colors"}><CalendarColors controller={calendarController} /></div>
             <div id="formulas-page" className="settings-page" hidden={page !== "formulas"}><FormulaPageView controller={window.BlobUI.FormulaPage} /></div>
             <div id="accessibility-page" className="settings-page" hidden={page !== "accessibility"}><Accessibility {...settingsProps} /></div>
-            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
+            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced startupMode={startupMode} startupModeDisabled={startupModeDisabled} onStartupModeChange={value => app?.changeStartupMode(value)} backgroundExperiment={backgroundExperiment} backgroundExperimentDisabled={backgroundExperimentDisabled} onBackgroundExperimentChange={value => app?.changeBackgroundExperiment(value)} selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
             <div id="codex-page" className="settings-page" hidden={page !== "codex"}><CodexPage /></div>
           </div>
         </section>

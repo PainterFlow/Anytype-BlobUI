@@ -2,10 +2,23 @@ param(
     [switch]$s,
     [switch]$c,
     [Alias('n')]
-    [switch]$Onboarding
+    [switch]$Onboarding,
+    [switch]$b,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArguments
 )
 
 $ErrorActionPreference = 'Stop'
+if ($null -ne $RemainingArguments) {
+    foreach ($argument in $RemainingArguments) {
+        if ($argument -ceq '--silent') {
+            $b = $true
+            continue
+        }
+        throw "Unknown Build-App argument: $argument"
+    }
+}
+
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
 $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
@@ -104,6 +117,22 @@ catch [System.IO.IOException] {
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
 
+if ($b -and -not $s) {
+    $backgroundRequestPath = Join-Path $distributionDirectory '.blobui-background-next'
+    $backgroundRequest = Get-Item -LiteralPath $backgroundRequestPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $backgroundRequest -and
+        (($backgroundRequest.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The pending background request is a reparse point: $backgroundRequestPath"
+    }
+    if ($null -ne $backgroundRequest -and $backgroundRequest.PSIsContainer) {
+        throw "The pending background request is not a file: $backgroundRequestPath"
+    }
+    if ($null -eq $backgroundRequest) {
+        [System.IO.File]::WriteAllText($backgroundRequestPath, '')
+    }
+    Write-Host 'The next BlobUI Settings launch will start in the background.'
+}
+
 if ($Onboarding -and -not $s) {
     $onboardingRequestPath = Join-Path $distributionDirectory '.blobui-onboarding-next'
     $onboardingRequest = Get-Item -LiteralPath $onboardingRequestPath -Force -ErrorAction SilentlyContinue
@@ -125,6 +154,12 @@ if ($s -and $env:BLOBUI_BUILD_ONLY -ne '1') {
         FilePath = $distributionExecutable
         WindowStyle = 'Normal'
     }
-    if ($Onboarding) { $launchArguments.ArgumentList = @('--onboarding') }
+    if ($b) { $launchArguments.WindowStyle = 'Hidden' }
+    $applicationArguments = @()
+    if ($Onboarding) { $applicationArguments += '--onboarding' }
+    if ($b) { $applicationArguments += '--background' }
+    if ($applicationArguments.Count -gt 0) {
+        $launchArguments.ArgumentList = $applicationArguments
+    }
     Start-Process @launchArguments | Out-Null
 }

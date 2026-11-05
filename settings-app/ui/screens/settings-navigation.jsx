@@ -10,6 +10,7 @@ const icons = {
   Typography: <path d="M3 4h14M10 4v13m-4 0h8M3 4v3m14-3v3" />,
   "Space banner": <><rect x="2" y="4" width="16" height="12" rx="2" /><circle cx="7" cy="8" r="1" /><path d="m3 15 5-5 3 3 3-4 4 6" /></>,
   "API key": <><circle cx="7" cy="7" r="4" /><path d="m10 10 7 7m-3-3 2-2m-4 0 2-2" /></>,
+  Experiments: <><path d="M7 2.5h6M8 2.5v5.2l-4.3 7.1A2 2 0 0 0 5.4 18h9.2a2 2 0 0 0 1.7-3.2L12 7.7V2.5M6 13h8" /></>,
   "App Settings": <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" /></>,
   Settings: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="2" /><circle cx="13" cy="10" r="2" /></>,
   Permissions: <><path d="m10 2 7 3v5c0 4-7 8-7 8s-7-4-7-8V5l7-3Z" /><path d="m6 10 3 3 5-6" /></>,
@@ -61,7 +62,7 @@ export function SettingsNavigation({ page, onNavigate, onSection }) {
     <NavigationGroup {...group("accessibility")} label="Accessibility">
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="6" r="1.2" fill="currentColor" /><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </NavigationGroup>
-    <NavigationGroup {...group("advanced")} label="Advanced Settings" sections={["API key", "App Settings"]}>
+    <NavigationGroup {...group("advanced")} label="Advanced Settings" sections={["API key", "App Settings", "Experiments"]}>
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /></svg>
     </NavigationGroup>
     <span className="nav-group-label">Integrations</span>
