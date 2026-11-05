@@ -58,6 +58,11 @@ You can also use it to manage your Anytype space as there are quite a few skills
 
 - Implement the `Settings Future Proof UI Refresh` experiment.
 
+### Added new 'Run in background' experiment.
+
+- Variant 1: Adds a new button in the title bar which allows moving the app to the background.
+- Variant 2: Variant 1 + Adds a new option to allow autostarting the app in the background.
+
 
 ## Bugfixes
 
@@ -76,6 +81,7 @@ any buggy behaviour in v1.3.0, expect it to be fixed now. If not then please rep
 - Added `Build-Codex.ps1` script which builds Anyblob.
 - Added `Rust-Toolchain.ps1` which is the rust toolchain.
 - The `Build-App.ps1` script now also builds the MCP server.
+- Added a new argument to `Build-App.ps1`, `-b` which makes the app start in the background next time it's started. 
 - Added a cache to cache Anytype stuff like requested objects, views, properties, etc..
     - This cache updates when pressing `Ctrl+r` or when restarting the App, it should have no effect on settings etc..
 - The BlobUI app UI now uses React JS, I hope this improves performance and eases development.
