@@ -54,26 +54,47 @@ try {
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Build-Codex.ps1'), '')
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Rust-Toolchain.ps1'), '')
 
-    $failed = $false
-    try { & $fixtureScriptPath -b } catch { $failed = $_.Exception.Message -like '*requires -s*' }
-    Assert $failed '-b without -s must fail with a requirement message.'
-    Assert ($global:BlobUIBuildAppTestGitCalls -eq 0) '-b without -s must fail before build setup.'
+    $backgroundRequestPath = Join-Path $fixtureRoot 'settings-app/dist/.blobui-background-next'
+    $onboardingRequestPath = Join-Path $fixtureRoot 'settings-app/dist/.blobui-onboarding-next'
+    $distributionExecutable = Join-Path $fixtureRoot 'settings-app/dist/blobui-settings.exe'
+    & $fixtureScriptPath -b
+    Assert (Test-Path -LiteralPath $distributionExecutable -PathType Leaf) '-b without -s must build the distribution executable.'
+    Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '-b without -s must queue background mode beside the distribution executable.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-b without -s must not launch the Settings app.'
+    Assert (-not (Test-Path -LiteralPath $onboardingRequestPath)) '-b alone must not queue onboarding.'
 
-    $failed = $false
-    try { & $fixtureScriptPath --silent } catch { $failed = $_.Exception.Message -like '*requires -s*' }
-    Assert $failed '--silent without -s must fail with a requirement message.'
-    Assert ($global:BlobUIBuildAppTestGitCalls -eq 0) '--silent without -s must fail before build setup.'
+    [IO.File]::WriteAllText($backgroundRequestPath, 'existing request')
+    & $fixtureScriptPath -b
+    Assert ([IO.File]::ReadAllText($backgroundRequestPath) -ceq 'existing request') 'Repeated -b requests must preserve the pending background request.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) 'Repeated -b requests must not launch the Settings app.'
+    Remove-Item -LiteralPath $backgroundRequestPath -Force
+
+    & $fixtureScriptPath --silent
+    Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '--silent without -s must queue background mode.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '--silent without -s must not launch the Settings app.'
+    Remove-Item -LiteralPath $backgroundRequestPath -Force
+
+    & $fixtureScriptPath -b -n
+    Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '-b -n must queue background mode.'
+    Assert (Test-Path -LiteralPath $onboardingRequestPath -PathType Leaf) '-b -n must queue onboarding.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-b -n without -s must not launch the Settings app.'
+    & $fixtureScriptPath -b -n
+    Assert ((Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) -and (Test-Path -LiteralPath $onboardingRequestPath -PathType Leaf)) 'Repeated -b -n requests must keep both pending requests.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) 'Repeated -b -n requests must not launch the Settings app.'
+    Remove-Item -LiteralPath $backgroundRequestPath, $onboardingRequestPath -Force
 
     & $fixtureScriptPath --silent -s
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '--silent -s must launch the Settings app.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 1 -and $global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--background') '--silent -s must pass --background.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Hidden') 'Silent launches must use a hidden window.'
+    Assert (-not (Test-Path -LiteralPath $backgroundRequestPath)) '--silent -s must not queue background mode.'
 
     $global:BlobUIBuildAppTestLaunches = @()
     & $fixtureScriptPath -b -s
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '-b -s must launch the Settings app.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 1 -and $global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--background') '-b -s must pass --background.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Hidden') '-b -s must use a hidden window.'
+    Assert (-not (Test-Path -LiteralPath $backgroundRequestPath)) '-b -s must not queue background mode.'
 
     $global:BlobUIBuildAppTestLaunches = @()
     & $fixtureScriptPath -s --silent -n
@@ -81,10 +102,11 @@ try {
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 2) 'Silent onboarding must pass both app arguments.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--onboarding') '-n must continue to pass --onboarding when launching.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList[1] -ceq '--background') '-b must pass --background when launching.'
+    Assert (-not (Test-Path -LiteralPath $backgroundRequestPath)) '-s --silent -n must not queue background mode.'
+    Assert (-not (Test-Path -LiteralPath $onboardingRequestPath)) '-s --silent -n must not queue onboarding.'
 
     $global:BlobUIBuildAppTestLaunches = @()
     & $fixtureScriptPath -n
-    $onboardingRequestPath = Join-Path $fixtureRoot 'settings-app/dist/.blobui-onboarding-next'
     Assert (Test-Path -LiteralPath $onboardingRequestPath -PathType Leaf) '-n without -s must continue to create the deferred onboarding request.'
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-n without -s must not launch the Settings app.'
     Remove-Item -LiteralPath $onboardingRequestPath -Force

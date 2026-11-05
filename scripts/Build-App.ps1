@@ -18,9 +18,6 @@ if ($null -ne $RemainingArguments) {
         throw "Unknown Build-App argument: $argument"
     }
 }
-if ($b -and -not $s) {
-    throw 'The -b option requires -s.'
-}
 
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
@@ -119,6 +116,22 @@ catch [System.IO.IOException] {
 }
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
+
+if ($b -and -not $s) {
+    $backgroundRequestPath = Join-Path $distributionDirectory '.blobui-background-next'
+    $backgroundRequest = Get-Item -LiteralPath $backgroundRequestPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $backgroundRequest -and
+        (($backgroundRequest.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The pending background request is a reparse point: $backgroundRequestPath"
+    }
+    if ($null -ne $backgroundRequest -and $backgroundRequest.PSIsContainer) {
+        throw "The pending background request is not a file: $backgroundRequestPath"
+    }
+    if ($null -eq $backgroundRequest) {
+        [System.IO.File]::WriteAllText($backgroundRequestPath, '')
+    }
+    Write-Host 'The next BlobUI Settings launch will start in the background.'
+}
 
 if ($Onboarding -and -not $s) {
     $onboardingRequestPath = Join-Path $distributionDirectory '.blobui-onboarding-next'

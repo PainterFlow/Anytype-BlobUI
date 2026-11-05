@@ -69,4 +69,4 @@ Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrati
 
 ## Background development launches
 
-Build with `scripts/Build-App.ps1 -s -c -b` to launch Settings in the background after compilation. `-b` requires `-s`. The `--silent` spelling is also accepted. Add `-n` to show onboarding on the first foreground reveal. A normal second launch restores the existing window. A second launch with `--background` preserves its current visibility.
+Build with `scripts/Build-App.ps1 -s -c -b` to launch Settings in the background after compilation. Without `-s`, `-b` queues background mode for the next launch without starting the app. The `--silent` spelling is also accepted. Add `-n` to show onboarding on the first foreground reveal. A normal second launch restores the existing window. A second launch with `--background` preserves its current visibility.

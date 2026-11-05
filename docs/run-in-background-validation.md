@@ -8,7 +8,7 @@ The title-bar background action, Close and background launch create one tray ico
 
 Advanced Settings > Experiments contains a separate Run in background experiment with Disabled plus the Normal and Autostart Background variants. The shared dropdown follows the older Resizable Sidebar experiment, with Disabled, Variant 1 and Variant 2. Gray text below each menu option explains its behavior. Disabled is the default. Normal enables the title-bar action. Autostart Background also enables the startup picker in App settings. The startup setting stays in App settings, with its standard switch for the other variants. Save and Undo include the experiment choice. The startup picker uses the Windows Run entry and supports off, foreground and background modes. Save captures the registry value's original type and bytes for rollback. Ownership checks accept only supported executable paths and command forms. Installer cleanup preserves unrelated or malformed values.
 
-Build-App accepts `-b` and `--silent`, requires `-s`, and forwards `--background`. Explicit onboarding waits for initial frontend loading, event subscription and a foreground reveal. Background second launches preserve visibility.
+Build-App accepts `-b` and `--silent`. With `-s`, it forwards `--background`. Without `-s`, it queues background mode for the next launch. The request is consumed once, and a second launch preserves the existing window visibility. Explicit onboarding waits for initial frontend loading, event subscription and a foreground reveal. Background second launches preserve visibility.
 
 ## Checks
 
@@ -21,7 +21,7 @@ The final experiment correction passed four focused frontend test files and the 
 - Seven startup mode and ownership tests passed. Installer ownership tests and installer compilation passed. Registry parsing tests include malformed strings, hidden trailing commands and unrelated executable paths. Tests did not change the user's Run entry or exercise a real Windows sign-in.
 - The isolated Rust suite passed 228 tests with two ignored and one filtered. The filtered, unchanged `release_metadata_validates_schema_and_semantic_version` test expects version 1.2.0 while repository metadata contains 1.3.0. The initial sandboxed run lacked localhost access and failed local API fixtures. Those passed with localhost access and isolated environment variables.
 - The frontend suite passed 93 tests and the shared controls suite passed two tests. A final targeted regression confirms native background errors appear in Logs.
-- Build argument fixtures passed for normal launch, both silent spellings, silent onboarding and rejection of silent without `-s`.
+- Build argument fixtures passed for normal launch, both background spellings, deferred background requests, repeated requests and combined background and onboarding requests.
 - Both branch ancestry checks passed. `origin/main` is an ancestor of `dev`, and `dev` is an ancestor of the active branch.
 
 The native Anytype foreground shortcut was covered by its existing unit tests and shared restore function. It was not exercised against the user's running Anytype app. Tray creation failure recovery was reviewed and its frontend reporting was tested, without forcing a shell failure.

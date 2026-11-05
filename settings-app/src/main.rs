@@ -1833,14 +1833,18 @@ fn configure_webview_profile() {
     }
 }
 
-fn consume_pending_onboarding_request() -> bool {
+fn consume_pending_launch_request(name: &str) -> bool {
     let Ok(executable) = env::current_exe() else {
         return false;
     };
     let Some(directory) = executable.parent() else {
         return false;
     };
-    match fs::remove_file(directory.join(".blobui-onboarding-next")) {
+    consume_pending_launch_request_in(directory, name)
+}
+
+fn consume_pending_launch_request_in(directory: &Path, name: &str) -> bool {
+    match fs::remove_file(directory.join(name)) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(_) => false,
@@ -1858,11 +1862,12 @@ fn main() {
             let onboarding_argument = arguments
                 .iter()
                 .any(|argument| argument == "--onboarding" || argument == "-n");
-            let pending_onboarding = consume_pending_onboarding_request();
+            let pending_onboarding = consume_pending_launch_request(".blobui-onboarding-next");
             if onboarding_argument || pending_onboarding {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
-            if !arguments.iter().any(|argument| argument == "--background") {
+            let pending_background = consume_pending_launch_request(".blobui-background-next");
+            if !pending_background && !arguments.iter().any(|argument| argument == "--background") {
                 show_settings_window(app);
             }
         }))
@@ -1951,7 +1956,7 @@ fn main() {
                 .build()?;
             let theme = read_anytype_theme(&app_data_directory().join("devconfig.json"));
             main_window.set_theme(native_theme(&theme))?;
-            if consume_pending_onboarding_request() {
+            if consume_pending_launch_request(".blobui-onboarding-next") {
                 SHOW_ONBOARDING.store(true, Ordering::Release);
             }
             let app_data = app_data_directory();
@@ -1963,7 +1968,8 @@ fn main() {
             let shortcuts = app_data.parent().unwrap_or(&app_data).join("BlobUI").join("shortcuts.json");
             hotkey::start(app.handle().clone(), &shortcuts);
             anyblob::start(app.handle().clone());
-            if !env::args().any(|argument| argument == "--background") {
+            let pending_background = consume_pending_launch_request(".blobui-background-next");
+            if !pending_background && !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
             } else {
                 let _ = enter_background(app.handle());
@@ -2004,6 +2010,27 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_launch_requests_are_independent_and_consumed_once() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run").join(format!(
+            "pending-launch-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        for name in [".blobui-background-next", ".blobui-onboarding-next"] {
+            fs::write(directory.join(name), "").unwrap();
+        }
+        assert!(consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(consume_pending_launch_request_in(&directory, ".blobui-onboarding-next"));
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-onboarding-next"));
+        // A directory is an invalid request and must not be removed as a file.
+        fs::create_dir(directory.join(".blobui-background-next")).unwrap();
+        assert!(!consume_pending_launch_request_in(&directory, ".blobui-background-next"));
+        assert!(directory.join(".blobui-background-next").is_dir());
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn background_experiment_defaults_and_persists_all_modes() {
