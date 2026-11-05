@@ -31,12 +31,13 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     });
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
-    assert.equal(await page.locator('#settings-v21-enabled, #advanced-experiments-tab').count(), 0);
+    assert.equal(await page.locator('#settings-v21-enabled').count(), 0);
+    assert.equal(await page.locator('#advanced-experiments-tab').count(), 1);
     assert.equal(await page.locator('.preference-tabs').isVisible(), true);
     assert.equal(await page.locator('#save-button').isVisible(), false);
     assert.equal(await page.locator('#preferences-page input[type="search"], #advanced-page input[type="search"], #accessibility-page input[type="search"], .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
-    assert.equal(await page.locator('.v21-section-link svg').count(), 10);
+    assert.equal(await page.locator('.v21-section-link svg').count(), 11);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);
     await page.locator('#preferences-nav').click();
     assert.equal(await page.locator('#preferences-nav').getAttribute('aria-expanded'), 'true');
@@ -67,10 +68,57 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.ok(Math.max(...advancedWidths) - Math.min(...advancedWidths) < 1, 'Advanced tabs divide the width equally');
     assert.equal(await page.locator('#advanced-app-panel > section').nth(1).evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
     assert.equal(await page.locator('.app-general-settings .settings-list').count(), 0);
+    assert.equal(await page.locator('#advanced-app-panel #start-on-login').isVisible(), true);
+    assert.equal(await page.locator('#startup-mode, #experiment-run-background').count(), 0);
     assert.equal(await page.locator('.app-backup-box #import-blob-backup-button').count(), 1);
     assert.equal(await page.locator('.app-backup-box #create-blob-backup-button').count(), 1);
     await page.locator('#advanced-api-tab').click();
+    await page.locator('#advanced-section-links').getByRole('button', { name: 'Experiments', exact: true }).click();
+    assert.equal(await page.locator('#advanced-experiments-tab').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#advanced-experiments-panel').isVisible(), true);
+    await page.locator('#advanced-api-tab').click();
     await page.locator('#advanced-api-key').fill('fixture-pending-key');
+    await page.locator('#advanced-api-tab').focus();
+    await page.keyboard.press('End');
+    assert.equal(await page.locator('#advanced-experiments-tab').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#advanced-experiments-panel').isVisible(), true);
+    assert.equal(await page.locator('#advanced-experiments-panel #startup-mode, #advanced-experiments-panel #start-on-login, #experiment-run-background').count(), 0);
+    assert.equal(await page.locator('#advanced-experiments-panel #background-experiment').isVisible(), true);
+    assert.equal(await page.getByRole('radiogroup').count(), 0);
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.locator('#background-experiment').focus();
+    await page.keyboard.press('Enter');
+    for (const [label, prefix] of [['Disabled', 'Use standard Settings controls.'], ['Variant 1', 'Normal.'], ['Variant 2', 'Autostart Background.']]) {
+      const option = page.getByRole('option', { name: label, exact: true });
+      assert.equal(await option.isVisible(), true);
+      const geometry = await option.evaluate(button => {
+        const copy = button.querySelector('.kanban-select-option-description');
+        const title = button.querySelector('.kanban-option-label');
+        const rect = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return { text: copy.textContent, below: copy.getBoundingClientRect().top >= title.getBoundingClientRect().bottom,
+          color: getComputedStyle(copy).color, titleColor: getComputedStyle(title).color, size: parseFloat(getComputedStyle(copy).fontSize), titleSize: parseFloat(getComputedStyle(title).fontSize), overflow: button.scrollWidth > button.clientWidth, reachable: Boolean(hit && button.contains(hit)) };
+      });
+      assert.ok(geometry.text.startsWith(prefix));
+      assert.equal(geometry.below, true);
+      assert.notEqual(geometry.color, geometry.titleColor);
+      assert.ok(geometry.size < geometry.titleSize);
+      assert.equal(geometry.overflow, false);
+      assert.equal(geometry.reachable, true, 'Each dropdown option must remain visible outside the settings group.');
+    }
+    assert.equal(await page.locator('#advanced-experiments-panel').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: path.resolve(__dirname, '../../.test-run/advanced-experiments-options-dark.png') });
+    await page.keyboard.press('Escape');
+    await page.locator('#advanced-experiments-tab').focus();
+    await page.waitForFunction(() => {
+      const strip = document.getElementById('advanced-tabs');
+      const current = new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
+      return Math.abs(current - document.getElementById('advanced-experiments-tab').offsetLeft) < 1;
+    });
+    await page.screenshot({ path: path.resolve(__dirname, '../../.test-run/advanced-experiments-dark.png') });
+    await page.keyboard.press('Home');
+    assert.equal(await page.locator('#advanced-api-tab').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#advanced-api-key').inputValue(), 'fixture-pending-key');
     await page.locator('#preferences-nav').click();
     await page.locator('#preference-tab-3').click();
     assert.equal(await page.locator('#font-family').inputValue(), 'Arial');

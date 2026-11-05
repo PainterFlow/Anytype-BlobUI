@@ -66,3 +66,7 @@ in their contributions and must have permission to submit them.
 ## Anyblob integration
 
 Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrations > Anyblob > Settings > Install to register its personal marketplace, then select Anyblob in the Codex Plugins Directory. Credentials are configured automatically when you enable Anyblob. Follow the [setup and permissions guide](codex-plugin/src/README.md).
+
+## Background development launches
+
+Build with `scripts/Build-App.ps1 -s -c --silent` to launch Settings in the background after compilation. `-Silent` is also accepted and requires `-s`. Add `-n` to show onboarding on the first foreground reveal. A normal second launch restores the existing window. A second launch with `--background` preserves its current visibility.

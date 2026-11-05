@@ -13,6 +13,10 @@ test('import and export preserve cancellation, refresh restored settings, and bl
   });
   try {
     const page = await browser.newPage({ viewport: { width: 1000, height: 850 } });
+    const chooseExperiment = async label => {
+      await page.locator('#background-experiment').click();
+      await page.getByRole('option', { name: label, exact: true }).click();
+    };
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(() => {
@@ -21,9 +25,11 @@ test('import and export preserve cancellation, refresh restored settings, and bl
         window.mockCalls.push({ command, args });
         if (command === 'get_app_state') {
           if (window.failReload) throw Error('Fixture reload failure');
-          return { ready: true, onboardingComplete: true, theme: 'dark', settings: { fontFamily: window.imported ? 'Georgia' : 'Arial' }, hasSavedApiKey: false, apiIp: '127.0.0.1', apiPort: 31009 };
+          return { ready: true, onboardingComplete: true, theme: 'dark', settings: { fontFamily: window.imported ? 'Georgia' : 'Arial', backgroundExperiment: window.savedExperiment || 'disabled' }, hasSavedApiKey: false, apiIp: '127.0.0.1', apiPort: 31009 };
         }
-        if (command === 'get_updater_state') return { installDirectory: 'C:/fixture', startOnLogin: false, autoplayVideos: true, automaticUpdatesEnabled: false, automaticChecksEnabled: false, status: 'current', currentVersion: 'Dev+fixture' };
+        if (command === 'save_settings') { window.savedExperiment = args.settings.backgroundExperiment; return {}; }
+        if (command === 'save_updater_settings') { window.savedStartupMode = args.settings.startupMode; return { ...args.settings, status: 'current' }; }
+        if (command === 'get_updater_state') return { installDirectory: 'C:/fixture', startupMode: window.savedStartupMode || 'off', autoplayVideos: true, automaticUpdatesEnabled: false, automaticChecksEnabled: false, status: 'current', currentVersion: 'Dev+fixture' };
         if (command === 'get_calendar_api_availability') return 'available';
         if (command === 'get_keyboard_shortcuts') return [{ action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false }];
         if (command === 'load_kanban_formulas') return { configuration: { version: 2, display: 'balanced', definitions: [] }, calculatedAt: null };
@@ -52,6 +58,56 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#advanced-nav').click();
     await page.locator('#advanced-app-tab').click();
 
+    assert.equal(await page.locator('#window-background').isHidden(), true);
+    assert.equal(await page.locator('#advanced-app-panel #start-on-login').isVisible(), true);
+    assert.equal(await page.locator('#startup-mode').count(), 0);
+    await page.locator('#advanced-experiments-tab').click();
+    assert.equal(await page.locator('#background-experiment').getAttribute('value'), 'disabled');
+    await chooseExperiment('Variant 1');
+    assert.equal(await page.locator('#window-background').isVisible(), true);
+    await page.locator('#window-background').focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.command === 'run_in_background').length), 1);
+    await page.locator('#advanced-app-tab').click();
+    assert.equal(await page.locator('#start-on-login').isVisible(), true);
+    assert.equal(await page.locator('#startup-mode').count(), 0);
+    await page.locator('#discard-button').click();
+    await page.locator('#discard-confirmation-undo').click();
+    await page.waitForFunction(() => document.getElementById('window-background').hidden && !document.getElementById('settings-shell').inert);
+    await page.locator('#advanced-experiments-tab').click();
+    await chooseExperiment('Variant 2');
+    assert.equal(await page.locator('#advanced-experiments-panel #startup-mode, #advanced-experiments-panel #start-on-login').count(), 0);
+    await page.locator('#save-button').click();
+    await page.waitForFunction(() => window.savedExperiment === 'autostart-background' && document.getElementById('save-button').hidden);
+    assert.equal(await page.locator('#api-key-removal-backdrop').isHidden(), true, 'An experiment-only save does not ask to remove a missing API key.');
+    await page.locator('#advanced-app-tab').click();
+    await page.locator('#startup-mode').click();
+    await page.getByRole('option', { name: 'Autostart in background', exact: true }).click();
+    await page.locator('#advanced-experiments-tab').click();
+    await page.locator('#advanced-app-tab').click();
+    assert.match(await page.locator('#startup-mode').textContent(), /Autostart in background/);
+    await page.locator('#discard-button').click();
+    await page.locator('#discard-confirmation-undo').click();
+    await page.waitForFunction(() => document.getElementById('startup-mode').textContent.includes("Don't autostart") && !document.getElementById('settings-shell').inert);
+    await page.locator('#startup-mode').click();
+    await page.getByRole('option', { name: 'Autostart in background', exact: true }).click();
+    await page.locator('#save-button').click();
+    await page.waitForFunction(() => window.savedStartupMode === 'background' && document.getElementById('save-button').hidden);
+    assert.equal(await page.evaluate(() => window.mockCalls.findLast(call => call.command === 'save_updater_settings').args.settings.startupMode), 'background');
+    await page.locator('#advanced-experiments-tab').click();
+    await chooseExperiment('Variant 1');
+    await page.locator('#advanced-app-tab').click();
+    assert.equal(await page.locator('#start-on-login').isChecked(), true);
+    await page.locator('#advanced-experiments-tab').click();
+    await chooseExperiment('Variant 2');
+    await page.locator('#advanced-app-tab').click();
+    assert.match(await page.locator('#startup-mode').textContent(), /Autostart in background/, 'Changing variants preserves the saved background startup mode.');
+    await page.locator('#startup-mode').click();
+    await page.getByRole('option', { name: "Don't autostart", exact: true }).click();
+    await page.locator('#discard-button').click();
+    await page.locator('#discard-confirmation-undo').click();
+    await page.waitForFunction(() => document.getElementById('startup-mode').textContent.includes('Autostart in background') && !document.getElementById('settings-shell').inert);
+
     assert.equal(await page.locator('#advanced-app-panel > section').count(), 5);
     assert.equal(await page.locator('#advanced-app-panel > section').first().getAttribute('aria-labelledby'), 'app-general-heading');
     assert.equal(await page.locator('.app-backup-row').count(), 2);
@@ -77,6 +133,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     assert.equal(await page.locator('#create-blob-backup-button').textContent(), 'Export');
     assert.equal(await page.locator('#import-blob-backup-button').textContent(), 'Import');
 
+    const savesBeforeBackup = await page.evaluate(() => window.mockCalls.filter(call => call.command === 'save_settings').length);
     await page.evaluate(() => {
       window.nextFolderPromise = new Promise(resolve => { window.resolveNextFolder = resolve; });
     });
@@ -84,7 +141,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.waitForFunction(() => window.mockCalls.some(call => call.command === 'select_blob_backup_destination'));
     assert.equal(await page.locator('#create-blob-backup-button').isDisabled(), true, 'backup actions lock while a native picker is open');
     await page.keyboard.press('Alt+r');
-    assert.equal(await page.evaluate(() => window.mockCalls.some(call => call.command === 'save_settings')), false, 'rebuild shortcut cannot save while exporting');
+    assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.command === 'save_settings').length), savesBeforeBackup, 'rebuild shortcut cannot save while exporting');
     await page.evaluate(() => window.resolveNextFolder(null));
     await page.waitForFunction(() => document.getElementById('create-blob-backup-button').disabled === false);
     assert.equal(await page.locator('#blob-backup-status').textContent(), '');
@@ -117,7 +174,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#blob-import-cancel').click();
     await page.keyboard.press('Alt+r');
     assert.equal(await page.locator('#create-blob-backup-button').isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.mockCalls.some(call => call.command === 'save_settings')), false, 'failed reload blocks rebuild shortcuts from saving stale settings');
+    assert.equal(await page.evaluate(() => window.mockCalls.filter(call => call.command === 'save_settings').length), savesBeforeBackup, 'failed reload blocks rebuild shortcuts from saving stale settings');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

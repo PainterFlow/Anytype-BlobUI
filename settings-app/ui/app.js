@@ -47,7 +47,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     view.update({ advancedTab: index });
   }
   const installDirectory = el("install-directory");
-  const startOnLogin = el("start-on-login");
+
   const autoplayVideos = el("autoplay-videos");
   function applyAutoplay(value) {
     if (autoplayVideos) autoplayVideos.checked = value !== false;
@@ -515,13 +515,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
     return !!left && !!right
       && left.installDirectory === right.installDirectory
-      && left.startOnLogin === right.startOnLogin
+      && left.startupMode === right.startupMode
       && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled;
@@ -534,7 +534,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       : directory.startsWith("\\\\?\\") ? directory.slice(4) : directory;
     return {
       installDirectory: displayDirectory,
-      startOnLogin: !!(settings && settings.startOnLogin),
+      startupMode: ["off", "foreground", "background"].includes(settings?.startupMode) ? settings.startupMode : settings?.startOnLogin ? "foreground" : "off",
       autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
@@ -545,7 +545,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
-    startOnLogin.checked = updaterDraft.startOnLogin;
+    view.update({ startupMode: updaterDraft.startupMode });
     applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -632,7 +632,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (!updaterSettingsLoaded) {
         assignUpdaterSettings({
           installDirectory: installDirectory.value || "",
-          startOnLogin: false,
+          startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
         });
@@ -1128,7 +1128,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (snapshot.updaterSettings) {
       updaterDraft = { ...snapshot.updaterSettings };
       installDirectory.value = updaterDraft.installDirectory;
-      startOnLogin.checked = updaterDraft.startOnLogin;
+      view.update({ startupMode: updaterDraft.startupMode });
       applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -1196,8 +1196,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     const saveVisible = Boolean(draft && dirty);
     const discardDisabled = settingsLocked || bannerReadPending || !saveVisible;
     const saveDisabled = discardDisabled || (!window.appReady && !prototypeDirty);
-    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, kanbanStyleDisabled: settingsLocked || !draft });
+    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady, backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady, kanbanStyleDisabled: settingsLocked || !draft });
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #advanced-page input, #onboarding input").forEach((control) => {
+      if (control.id === "start-on-login") return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
@@ -1209,7 +1210,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, startOnLogin, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
@@ -1257,6 +1258,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       sidebarResizeMode: "standard",
+      backgroundExperiment: ["normal", "autostart-background"].includes(settings.backgroundExperiment) ? settings.backgroundExperiment : "disabled",
     };
   }
 
@@ -1271,7 +1273,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
     root.dataset.includeSelections = String(draft.includeSelections);
-    view.update({ kanbanStyle: draft.kanbanViewStyle });
+    view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
     applyFontFamilies();
@@ -1525,7 +1527,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       panelId = "codex-panel-" + index;
     } else {
       selectAdvancedTab(index);
-      panelId = index === 0 ? "advanced-api-panel" : "advanced-app-panel";
+      panelId = ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
     }
     const heading = el(panelId)?.querySelector("h2");
     if (heading) {
@@ -1711,7 +1713,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
 
-    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && settingsChanged);
+    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment }, initialDraft);
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && nonExperimentSettingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
       openKeyRemovalConfirmation();
@@ -1936,6 +1939,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   });
   let folderPickerBusy = false;
+  function changeStartupMode(value) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate() || !["off", "foreground", "background"].includes(value)) return;
+    updaterDraft.startupMode = value;
+    view.update({ startupMode: value });
+    markDirty();
+  }
+
+  function changeBackgroundExperiment(value) {
+    if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
+    draft.backgroundExperiment = value;
+    view.update({ backgroundExperiment: value });
+    markDirty();
+  }
+
   function changeKanbanStyle(value) {
     if (!draft || saveBusy || isInstallingUpdate()) return;
     if (!["default", "balanced", "compact"].includes(value)) return;
@@ -1983,7 +2000,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   });
   for (const [control, property] of [
-    [startOnLogin, "startOnLogin"],
+
     [autoplayVideos, "autoplayVideos"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
@@ -2194,6 +2211,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       setStatus(error.message || String(error), "error");
     }
   }
+  listen(el("window-background"), "click", () => windowAction("run_in_background"));
   listen(el("window-minimize"), "click", () => windowAction("minimize_window"));
   listen(el("window-close"), "click", () => windowAction("hide_window"));
   listen(el("open-author"), "click", () => windowAction("open_author_profile"));
@@ -2494,7 +2512,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
       return unlisten;
     });
-    return subscription.catch(error => { onError(error); });
+    return subscription.catch(error => { onError(error); return false; });
   }
   savedStateSubscription = subscribeNativeEvent("blobui-saved-state-changed", () => requestSavedRefresh(), error => {
     addLog("Could not listen for saved settings changes. " + String(error.message || error), "error");
@@ -2502,9 +2520,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   subscribeNativeEvent("blobui-rebuild-custom-css", () => save({ forceRebuild: true }), error => {
     setStatus(error.message || String(error), "error");
   });
-  subscribeNativeEvent("blobui-show-onboarding", () => showOnboarding(), error => {
+  const onboardingSubscription = subscribeNativeEvent("blobui-show-onboarding", () => showOnboarding(), error => {
     setStatus(error.message || String(error), "error");
   });
+  const backgroundErrorSubscription = subscribeNativeEvent("blobui-background-error", event => {
+    const message = String(event.payload || "Could not run BlobUI in background.");
+    setStatus(message, "error");
+    addLog(message, "error");
+  }, error => addLog(String(error.message || error), "error"));
   function dispose() {
     if (disposed) return;
     disposed = true;
@@ -2547,18 +2570,21 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
-  savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
+  const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
     addLog("Settings could not be loaded. " + String(error.message || error), "error");
   }).finally(() => {
     if (disposed) return;
     void savedRefresh.setReady();
     requestSavedRefresh();
   });
+  Promise.all([onboardingSubscription, initialStateLoaded, backgroundErrorSubscription]).then(([subscription]) => {
+    if (!disposed && subscription !== false) return invoke("onboarding_ready");
+  }).catch(error => setStatus(String(error.message || error), "error"));
   const themeInterval = window.setInterval(refreshTheme, 2000);
   const updateInterval = window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectAdvancedTab, changeSettingField, changeKanbanStyle, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }

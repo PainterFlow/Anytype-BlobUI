@@ -2,10 +2,26 @@ param(
     [switch]$s,
     [switch]$c,
     [Alias('n')]
-    [switch]$Onboarding
+    [switch]$Onboarding,
+    [switch]$Silent,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArguments
 )
 
 $ErrorActionPreference = 'Stop'
+if ($null -ne $RemainingArguments) {
+    foreach ($argument in $RemainingArguments) {
+        if ($argument -ceq '--silent') {
+            $Silent = $true
+            continue
+        }
+        throw "Unknown Build-App argument: $argument"
+    }
+}
+if ($Silent -and -not $s) {
+    throw 'The -Silent option requires -s.'
+}
+
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
 $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
@@ -125,6 +141,12 @@ if ($s -and $env:BLOBUI_BUILD_ONLY -ne '1') {
         FilePath = $distributionExecutable
         WindowStyle = 'Normal'
     }
-    if ($Onboarding) { $launchArguments.ArgumentList = @('--onboarding') }
+    if ($Silent) { $launchArguments.WindowStyle = 'Hidden' }
+    $applicationArguments = @()
+    if ($Onboarding) { $applicationArguments += '--onboarding' }
+    if ($Silent) { $applicationArguments += '--background' }
+    if ($applicationArguments.Count -gt 0) {
+        $launchArguments.ArgumentList = $applicationArguments
+    }
     Start-Process @launchArguments | Out-Null
 }

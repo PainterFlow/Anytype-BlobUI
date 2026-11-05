@@ -72,7 +72,7 @@ const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'pa
 const releaseNotesAcknowledgements = [];
 const updaterPrefs = {
   installDirectory: '%APPDATA%\\anytype',
-  startOnLogin: false,
+  startupMode: "off",
   automaticUpdatesEnabled: false,
   automaticChecksEnabled: !!releaseNotesScenario,
 };
@@ -89,6 +89,7 @@ let pendingGeneralSaveResolve = null;
 let deferUpdateApply = false;
 let pendingUpdateApplyReject = null;
 let rebuildListener = null;
+let backgroundErrorListener = null;
 const timers = new Map();
 const intervals = [];
 let nextTimerId = 1;
@@ -118,7 +119,7 @@ const context = {
     querySelector: selector => selector === '.page-content' ? element('page-content') : null,
     createElement: () => element('row-' + elements.size),
     createElementNS: () => element('svg-' + elements.size),
-    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
+    querySelectorAll: () => ['accent-hue', 'accent-saturation', 'accent-brightness', 'native-accent', 'accent-value', 'font-family', 'code-font-family', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'install-directory', 'startup-mode', 'automatic-updates-enabled', 'automatic-checks-enabled', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'].map(element),
   },
   CSS: { supports: () => true },
   atob,
@@ -145,6 +146,7 @@ const context = {
     __TAURI__: {
       event: { async listen(name, handler) {
         if (name === 'blobui-rebuild-custom-css') rebuildListener = handler;
+        else if (name === 'blobui-background-error') backgroundErrorListener = handler;
         else if (name === 'blobui-saved-state-changed') return () => {};
         else assert.equal(name, 'blobui-show-onboarding');
       } },
@@ -346,6 +348,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         element('save-button').classList.toggle('busy', patch.saveBusy);
         element('save-button.save-label').textContent = patch.saveBusy ? 'Saving…' : 'Save changes';
       }
+      if ('backgroundExperiment' in patch) { element('background-experiment').value = patch.backgroundExperiment; element('window-background').hidden = patch.backgroundExperiment === 'disabled'; }
+      if ('startupMode' in patch) element('startup-mode').value = patch.startupMode;
+      if ('startupModeDisabled' in patch) element('startup-mode').disabled = patch.startupModeDisabled;
       if ('kanbanStyle' in patch) element('kanban-view-style').value = patch.kanbanStyle;
       if ('kanbanStyleDisabled' in patch) element('kanban-view-style').disabled = patch.kanbanStyleDisabled;
       if ('logRows' in patch) {
@@ -416,7 +421,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   if (loadErrorScenario) {
     assert.match(status(), /not valid JSON/, 'The original state-load failure remains visible.');
     assert.equal(element('install-directory').disabled, false, 'The folder picker remains available after a profile load error.');
-    assert.equal(element('start-on-login').disabled, true, 'Other updater controls stay disabled until the profile loads.');
+    assert.equal(element('startup-mode').disabled, true, 'Other updater controls stay disabled until the profile loads.');
     selectedFolder = 'C:\\Recovered Anytype';
     await element('install-directory').handlers.click();
     assert.deepEqual(recoveryRequests, [selectedFolder], 'Selecting a valid profile invokes the recovery command.');
@@ -493,7 +498,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
   assert.equal(status(), 'Settings loaded from this device.');
   assert.equal(element('install-directory').value, '%APPDATA%\\anytype', 'App Settings load the configured Anytype data folder.');
-  assert.equal(element('start-on-login').checked, false, 'Startup is opt-in by default.');
+  assert.equal(element('startup-mode').value, 'off', 'Startup is opt-in by default.');
   assert.equal(element('automatic-updates-enabled').checked, false);
   assert.equal(element('automatic-checks-enabled').checked, false);
   assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
@@ -537,9 +542,23 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await flush();
   assert.equal(calls.at(-1), 'check_for_updates', 'The manual update action checks for updates.');
   assert.equal(element('check-updates-button').textContent, "You're up to date");
+  assert.equal(element('background-experiment').value, 'disabled');
+  assert.equal(element('window-background').hidden, true);
+  context.testApp.changeBackgroundExperiment('normal');
+  assert.equal(element('window-background').hidden, false, 'Normal previews the background action.');
+  context.window.BlobUI.discardChanges();
+  assert.equal(element('background-experiment').value, 'disabled');
+  assert.equal(element('window-background').hidden, true, 'Undo restores the experiment preview.');
+  context.testApp.changeBackgroundExperiment('autostart-background');
+  await element('save-button').handlers.click();
+  assert.equal(savedSettings.at(-1).backgroundExperiment, 'autostart-background');
+  assert.equal(element('save-button').hidden, true);
+  context.testApp.changeBackgroundExperiment('normal');
+  context.window.BlobUI.discardChanges();
+  assert.equal(element('background-experiment').value, 'autostart-background', 'Undo uses the saved experiment variant.');
   const generalSavesBeforeUpdaterSave = savedSettings.length;
   await input('install-directory', 'C:\\BlobUI\\AnytypeData');
-  await changeToggle('start-on-login', true);
+  context.testApp.changeStartupMode('background');
   await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
@@ -547,7 +566,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startOnLogin: true, autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -564,12 +583,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('font-family').value, 'Libron');
   assert.equal(element('install-directory').value, 'C:\\BlobUI\\AnytypeData');
   await changeToggle('automatic-updates-enabled', false);
-  await changeToggle('start-on-login', false);
+  context.testApp.changeStartupMode('off');
   element('discard-button').handlers.click();
   element('discard-confirmation-undo').handlers.click();
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
-  assert.equal(element('start-on-login').checked, true, 'Undo restores the startup preference.');
+  assert.equal(element('startup-mode').value, 'background', 'Undo restores the startup preference.');
 
   element('help-button').handlers.click();
   assert.equal(element('help-popup').hidden, false, 'The Help button opens its mini-menu.');
@@ -1201,5 +1220,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   context.window.BlobUI.discardChanges();
   assert.equal(element('save-button').hidden, true, 'The failure fixture leaves no pending settings edits.');
 
+  assert.equal(typeof backgroundErrorListener, 'function');
+  backgroundErrorListener({ payload: 'Fixture tray creation failed.' });
+  assert(element('log-entries').children.some(row => row.textContent.includes('Fixture tray creation failed.')),
+    'Native tray failures must appear in Logs.');
   console.log('UI save, Alt+R rebuild, log severity, popup, copy, and window action tests passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
