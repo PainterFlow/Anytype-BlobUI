@@ -55,9 +55,9 @@ try {
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Rust-Toolchain.ps1'), '')
 
     $failed = $false
-    try { & $fixtureScriptPath -Silent } catch { $failed = $_.Exception.Message -like '*requires -s*' }
-    Assert $failed '-Silent without -s must fail with a requirement message.'
-    Assert ($global:BlobUIBuildAppTestGitCalls -eq 0) '-Silent without -s must fail before build setup.'
+    try { & $fixtureScriptPath -b } catch { $failed = $_.Exception.Message -like '*requires -s*' }
+    Assert $failed '-b without -s must fail with a requirement message.'
+    Assert ($global:BlobUIBuildAppTestGitCalls -eq 0) '-b without -s must fail before build setup.'
 
     $failed = $false
     try { & $fixtureScriptPath --silent } catch { $failed = $_.Exception.Message -like '*requires -s*' }
@@ -70,17 +70,17 @@ try {
     Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Hidden') 'Silent launches must use a hidden window.'
 
     $global:BlobUIBuildAppTestLaunches = @()
-    & $fixtureScriptPath -Silent -s
-    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '-Silent -s must launch the Settings app.'
-    Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 1 -and $global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--background') '-Silent -s must pass --background.'
-    Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Hidden') '-Silent -s must use a hidden window.'
+    & $fixtureScriptPath -b -s
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '-b -s must launch the Settings app.'
+    Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 1 -and $global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--background') '-b -s must pass --background.'
+    Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Hidden') '-b -s must use a hidden window.'
 
     $global:BlobUIBuildAppTestLaunches = @()
     & $fixtureScriptPath -s --silent -n
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '-s --silent -n must launch the Settings app.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 2) 'Silent onboarding must pass both app arguments.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--onboarding') '-n must continue to pass --onboarding when launching.'
-    Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList[1] -ceq '--background') '-Silent must pass --background when launching.'
+    Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList[1] -ceq '--background') '-b must pass --background when launching.'
 
     $global:BlobUIBuildAppTestLaunches = @()
     & $fixtureScriptPath -n

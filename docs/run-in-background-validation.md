@@ -8,7 +8,7 @@ The title-bar background action, Close and background launch create one tray ico
 
 Advanced Settings > Experiments contains a separate Run in background experiment with Disabled plus the Normal and Autostart Background variants. The shared dropdown follows the older Resizable Sidebar experiment, with Disabled, Variant 1 and Variant 2. Gray text below each menu option explains its behavior. Disabled is the default. Normal enables the title-bar action. Autostart Background also enables the startup picker in App settings. The startup setting stays in App settings, with its standard switch for the other variants. Save and Undo include the experiment choice. The startup picker uses the Windows Run entry and supports off, foreground and background modes. Save captures the registry value's original type and bytes for rollback. Ownership checks accept only supported executable paths and command forms. Installer cleanup preserves unrelated or malformed values.
 
-Build-App accepts `-Silent` and `--silent`, requires `-s`, and forwards `--background`. Explicit onboarding waits for initial frontend loading, event subscription and a foreground reveal. Background second launches preserve visibility.
+Build-App accepts `-b` and `--silent`, requires `-s`, and forwards `--background`. Explicit onboarding waits for initial frontend loading, event subscription and a foreground reveal. Background second launches preserve visibility.
 
 ## Checks
 

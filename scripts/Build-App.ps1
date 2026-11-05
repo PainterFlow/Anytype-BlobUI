@@ -3,7 +3,7 @@ param(
     [switch]$c,
     [Alias('n')]
     [switch]$Onboarding,
-    [switch]$Silent,
+    [switch]$b,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$RemainingArguments
 )
@@ -12,14 +12,14 @@ $ErrorActionPreference = 'Stop'
 if ($null -ne $RemainingArguments) {
     foreach ($argument in $RemainingArguments) {
         if ($argument -ceq '--silent') {
-            $Silent = $true
+            $b = $true
             continue
         }
         throw "Unknown Build-App argument: $argument"
     }
 }
-if ($Silent -and -not $s) {
-    throw 'The -Silent option requires -s.'
+if ($b -and -not $s) {
+    throw 'The -b option requires -s.'
 }
 
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -141,10 +141,10 @@ if ($s -and $env:BLOBUI_BUILD_ONLY -ne '1') {
         FilePath = $distributionExecutable
         WindowStyle = 'Normal'
     }
-    if ($Silent) { $launchArguments.WindowStyle = 'Hidden' }
+    if ($b) { $launchArguments.WindowStyle = 'Hidden' }
     $applicationArguments = @()
     if ($Onboarding) { $applicationArguments += '--onboarding' }
-    if ($Silent) { $applicationArguments += '--background' }
+    if ($b) { $applicationArguments += '--background' }
     if ($applicationArguments.Count -gt 0) {
         $launchArguments.ArgumentList = $applicationArguments
     }
