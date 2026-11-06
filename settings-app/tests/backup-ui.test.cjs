@@ -59,11 +59,15 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#advanced-app-tab').click();
 
     assert.equal(await page.locator('#window-background').isHidden(), true);
+    await page.locator('#window-close').click();
+    assert.equal(await page.evaluate(() => window.mockCalls.at(-1).command), 'hide_window');
     assert.equal(await page.locator('#advanced-app-panel #start-on-login').isVisible(), true);
     assert.equal(await page.locator('#startup-mode').count(), 0);
     await page.locator('#advanced-experiments-tab').click();
     assert.equal(await page.locator('#background-experiment').getAttribute('value'), 'disabled');
     await chooseExperiment('Variant 1');
+    await page.locator('#window-close').click();
+    assert.equal(await page.evaluate(() => window.mockCalls.at(-1).command), 'quit_app');
     assert.equal(await page.locator('#window-background').isVisible(), true);
     await page.locator('#window-background').focus();
     await page.keyboard.press('Enter');
@@ -76,6 +80,8 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.waitForFunction(() => document.getElementById('window-background').hidden && !document.getElementById('settings-shell').inert);
     await page.locator('#advanced-experiments-tab').click();
     await chooseExperiment('Variant 2');
+    await page.locator('#window-close').click();
+    assert.equal(await page.evaluate(() => window.mockCalls.at(-1).command), 'quit_app');
     assert.equal(await page.locator('#advanced-experiments-panel #startup-mode, #advanced-experiments-panel #start-on-login').count(), 0);
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.savedExperiment === 'autostart-background' && document.getElementById('save-button').hidden);

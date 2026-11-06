@@ -2213,7 +2213,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
   listen(el("window-background"), "click", () => windowAction("run_in_background"));
   listen(el("window-minimize"), "click", () => windowAction("minimize_window"));
-  listen(el("window-close"), "click", () => windowAction("hide_window"));
+  listen(el("window-close"), "click", () => windowAction(
+    ["normal", "autostart-background"].includes(draft?.backgroundExperiment) ? "quit_app" : "hide_window"
+  ));
   listen(el("open-author"), "click", () => windowAction("open_author_profile"));
   listen(el("open-repository"), "click", () => windowAction("open_project_repository"));
   const onboarding = el("onboarding");

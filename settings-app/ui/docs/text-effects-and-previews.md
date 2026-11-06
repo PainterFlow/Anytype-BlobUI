@@ -42,7 +42,7 @@ Reduced Motion in Accessibility suppresses BlobUI's animated text effects. Setti
 
 ## Background operation and shortcuts
 
-Run in background in the title bar and closing the window keep Settings running with its drafts intact. The Windows tray menu offers Open Settings and Quit BlobUI. Launching Settings again restores the existing window and removes its tray icon. Advanced Settings > Experiments has a separate Run in background experiment. Disabled keeps the standard controls. Normal adds the title-bar background button. Autostart Background also changes Launch at startup in App settings into a picker with Don't autostart, Autostart, and Autostart in background. Press Save to keep the selected experiment and startup settings. Ctrl+Q in Settings exits completely.
+Run in background in the title bar keeps Settings running with its drafts intact. With Variant 1 or Variant 2 enabled, the title-bar close button quits Settings like Ctrl+Q. With the experiment disabled, the close button keeps Settings running in the background. The Windows tray menu offers Open Settings and Quit BlobUI. Launching Settings again restores the existing window and removes its tray icon. Advanced Settings > Experiments has a separate Run in background experiment. Disabled keeps the standard controls. Normal adds the title-bar background button. Autostart Background also changes Launch at startup in App settings into a picker with Don't autostart, Autostart, and Autostart in background. Press Save to keep the selected experiment and startup settings. Ctrl+Q in Settings exits completely.
 
 | Default shortcut | Action |
 | --- | --- |

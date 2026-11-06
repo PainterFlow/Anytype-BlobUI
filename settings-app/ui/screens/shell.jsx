@@ -43,7 +43,7 @@ export function Titlebar({ backgroundExperiment = "disabled" }) {
       </Button>
       <Button hidden={backgroundExperiment === "disabled"} id="window-background" className="window-control" aria-label="Run in background" title="Run in background"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v7m-3-3 3 3 3-3M1 9v2h10V9" /></svg></Button>
       <Button id="window-minimize" className="window-control" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10" /></svg></Button>
-      <Button id="window-close" className="window-control window-close" aria-label="Close to background" title="Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits."><CloseIcon /></Button>
+      <Button id="window-close" className="window-control window-close" aria-label={backgroundExperiment === "disabled" ? "Close to background" : "Quit BlobUI Settings"} title={backgroundExperiment === "disabled" ? "Close to background. Numpad 1 reopens Settings in Anytype. Ctrl+Q quits." : "Quit BlobUI Settings. Ctrl+Q quits."}><CloseIcon /></Button>
     </div>
   </header>;
 }
