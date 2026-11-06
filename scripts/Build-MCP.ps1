@@ -1,6 +1,7 @@
 param([switch]$Test)
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'Restore-ProcessEnvironment.ps1')
 . (Join-Path $PSScriptRoot 'Workspace-Build-Paths.ps1')
 Assert-WorkspaceBuildPath (Join-Path $workspaceRoot 'mcp-server/target')
 Assert-WorkspaceBuildPath (Join-Path $workspaceRoot 'mcp-server/dist/blobui-mcp.exe')
@@ -20,4 +21,4 @@ try {
     [IO.Directory]::CreateDirectory($dist) | Out-Null
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/blobui-mcp.exe') -Destination (Join-Path $dist 'blobui-mcp.exe') -Force
     Write-Host "Built $dist/blobui-mcp.exe"
-} finally { foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name,$savedEnvironment[$name],'Process') } }
+} finally { Restore-ProcessEnvironment -SavedEnvironment $savedEnvironment }

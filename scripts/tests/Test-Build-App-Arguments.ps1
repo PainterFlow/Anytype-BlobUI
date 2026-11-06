@@ -51,6 +51,7 @@ try {
     [IO.Directory]::CreateDirectory($projectDirectory) | Out-Null
     [IO.File]::WriteAllText((Join-Path $projectDirectory 'Cargo.toml'), '[package]')
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Build-App.ps1') -Destination $fixtureScriptPath
+    Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Restore-ProcessEnvironment.ps1') -Destination (Join-Path $scriptDirectory 'Restore-ProcessEnvironment.ps1')
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Build-Codex.ps1'), '')
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Rust-Toolchain.ps1'), '')
 
