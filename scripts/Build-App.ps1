@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Restore-ProcessEnvironment.ps1')
 if ($null -ne $RemainingArguments) {
     foreach ($argument in $RemainingArguments) {
         if ($argument -ceq '--silent') {
@@ -94,9 +95,7 @@ try {
 }
 finally {
     Pop-Location
-    foreach ($name in $buildEnvironment.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $buildEnvironment[$name], 'Process')
-    }
+    Restore-ProcessEnvironment -SavedEnvironment $buildEnvironment
 }
 
 if (-not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
