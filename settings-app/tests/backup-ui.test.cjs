@@ -12,7 +12,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     ignoreDefaultArgs: ['--hide-scrollbars'],
   });
   try {
-    const page = await browser.newPage({ viewport: { width: 1000, height: 850 } });
+    const page = await browser.newPage({ viewport: { width: 1000, height: 850 }, reducedMotion: 'reduce' });
     const chooseExperiment = async label => {
       await page.locator('#background-experiment').click();
       await page.getByRole('option', { name: label, exact: true }).click();
