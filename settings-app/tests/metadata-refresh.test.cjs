@@ -25,6 +25,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
       if(name==='load_calendar_rules')return {version:1,types:[]};
       if(name==='get_calendar_api_availability')return 'available';
       if(name==='get_keyboard_shortcuts'||name==='save_keyboard_shortcuts')return [{action:'openSettings',code:'KeyS',ctrl:true,alt:false,shift:false,meta:false}];
+      if(name==='get_updater_state')return {automaticChecksEnabled:false,automaticUpdatesEnabled:false};
       if(name==='anyblob_status')return {enabled:false};
       if(name.startsWith('discover_')&&name!=='discover_codex_projects'){
         const key=JSON.stringify([name,args.spaceIds]);
@@ -46,6 +47,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
   try{
     await loadSettings(page);
     await page.waitForFunction(()=>window.appReady && window.calls.some(c=>c.name==='discover_anyblob_types') && !document.getElementById('object-mentions-status').textContent.includes('Loading'));
+    assert.equal(await page.evaluate(()=>window.calls.some(c=>c.name==='check_for_updates')),false,'Startup respects disabled automatic checks');
     const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
       assert.equal(startup.filter(c=>c.name===name).length,1,name+' refreshes once at startup');
@@ -67,6 +69,10 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
       assert.equal(calls.find(c=>c.name===name).args.forceRefresh,true);
     }
     assert(!calls.some(c=>c.name==='discover_codex_projects'),'Local project discovery stays separate');
+    for(const name of ['anyblob_status','anyblob_installation_status','check_for_updates']) {
+      assert.equal(calls.filter(c=>c.name===name).length,1,name+' refreshes once across coalesced shortcuts');
+    }
+    assert(!calls.some(c=>c.name==='apply_update'),'Reload only checks for updates');
     await openFormulas(page);await page.getByRole('button',{name:'Board',exact:false}).first().click();
     const dialog=page.locator('#formula-calculator-dialog');await dialog.waitFor({state:'visible'});
     await dialog.getByRole('button',{name:'Show LaTeX',exact:true}).click();
@@ -106,7 +112,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     await page.locator('#keybinds-dialog').waitFor({state:'visible'});
     const localShortcut=page.locator('#keybind-button-refreshMetadata');
     assert.equal(await localShortcut.locator('kbd').allTextContents().then(keys=>keys.join('+')),'Ctrl+R');
-    assert.equal(await page.locator('#keybind-label-refreshMetadata').innerText(),'Refresh Anytype lists and pickers');
+    assert.equal(await page.locator('#keybind-label-refreshMetadata').innerText(),'Reload BlobUI');
     assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
     await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
     await page.screenshot({path:path.join(temp,'keybinds-dark.png')});

@@ -16,7 +16,7 @@
         return () => handlers.delete(handler);
       }
 
-      function run() {
+      function run({ checkUpdates = true } = {}) {
         if (locked) { queued = true; return Promise.resolve(); }
         if (pending) return pending;
         if (!handlers.size) return Promise.resolve();
@@ -26,7 +26,7 @@
         }
         const execute = () => { if (locked) { queued = true; return []; }
           try { onReload?.(); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
-          return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(handler))); };
+          return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(() => handler({ checkUpdates })))); };
         pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
           .catch(error => [{ status: "rejected", reason: error }])
           .then(results => {

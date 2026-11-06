@@ -949,7 +949,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
-    ["refreshMetadata", "Refresh Anytype lists and pickers", { code: "KeyR", ctrl: true }],
+    ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
@@ -1349,7 +1349,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
-    if (refreshOnStart) await window.BlobUI.AppReload.run();
+    if (refreshOnStart) await window.BlobUI.AppReload.run({ checkUpdates: false });
     if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
@@ -2566,6 +2566,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     },
     onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); },
   });
+  window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
     onChange: markDirty, onInfo: message => addLog(message, "info") });
