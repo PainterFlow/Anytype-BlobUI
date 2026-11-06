@@ -71,6 +71,26 @@ jobs:
           New-Item -ItemType Directory -Force $env:APPDATA, $env:LOCALAPPDATA | Out-Null
           ./scripts/Build-App.ps1 -s -c
 
+      - name: Generate CSS fixtures for frontend behavior tests
+        env:
+          APPDATA: ${{ github.workspace }}\.test-run\ci-roaming
+          LOCALAPPDATA: ${{ github.workspace }}\.test-run\ci-local
+          CARGO_TARGET_DIR: ${{ github.workspace }}\settings-app\target
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = 'settings-app/Cargo.toml'
+          $filters = @(
+            'css::tests::calendar_scoped_rules_export_isolated_dom_fixture',
+            'calendar::tests::calendar_v2_fixture_covers_discovery_paging_precedence_and_outages',
+            'css::tests::selection_css_defaults_on_and_compiles_independently_of_accent_mode',
+            'kanban_css::tests::'
+          )
+          foreach ($filter in $filters) {
+            Write-Host "Generating frontend CSS fixtures with $filter"
+            & cargo test --locked --release --manifest-path $manifestPath --bin blobui-settings $filter -- --test-threads=1
+            if ($LASTEXITCODE -ne 0) { throw "CSS fixture generation failed for Rust test filter $filter." }
+          }
+
       - name: Validate the bundled Settings frontend
         working-directory: settings-app
         run: |
