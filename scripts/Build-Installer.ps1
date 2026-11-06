@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Restore-ProcessEnvironment.ps1')
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $manifestPath = Join-Path $workspaceRoot 'installer\Cargo.toml'
 $distributionDirectory = Join-Path $workspaceRoot 'dist'
@@ -82,7 +83,7 @@ try {
     # An explicit target keeps these flags away from host build/proc-macro crates.
     $env:CARGO_TARGET_DIR = Assert-WorkspacePath (Join-Path $workspaceRoot 'installer\target')
     $env:RUSTFLAGS = '-C target-feature=+crt-static'
-    [Environment]::SetEnvironmentVariable('CARGO_ENCODED_RUSTFLAGS', $null, 'Process')
+    Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
     $cargoArgs = @('build', '--locked', '--release', '--quiet', '--target', 'x86_64-pc-windows-msvc', '--manifest-path', $manifestPath)
     if ($d) { $cargoArgs += @('--features', 'development') }
     & cargo @cargoArgs
@@ -90,7 +91,7 @@ try {
 }
 finally {
     Pop-Location
-    foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }
+    Restore-ProcessEnvironment -SavedEnvironment $savedEnvironment
 }
 
 $null = Assert-WorkspacePath $distributionDirectory
