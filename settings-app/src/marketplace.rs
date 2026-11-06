@@ -226,7 +226,7 @@ fn installation_status(root: &Path, bytes: &[u8]) -> Result<Value, String> {
             }
         }
     }
-    Ok(json!({"installed":current,"updateAvailable":version.is_some() && (!current || refresh),
+    Ok(json!({"installed":current,"updateAvailable":version.is_some() && !current,
         "bundledVersion":bundled,"installedVersion":version,"codexRefreshRequired":refresh}))
 }
 fn install_at(root: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -352,10 +352,11 @@ mod tests {
         fs::write(cache.join("README.md"), b"old release content").unwrap();
         let stale = installation_status(&root, PAYLOAD).unwrap();
         assert_eq!(stale["installed"], true);
-        assert_eq!(stale["updateAvailable"], true);
+        assert_eq!(stale["updateAvailable"], false);
         assert_eq!(stale["codexRefreshRequired"], true);
         install_at(&root, PAYLOAD).unwrap();
         assert_eq!(fs::read(cache.join("README.md")).unwrap(), b"old release content");
+        assert_eq!(installation_status(&root, PAYLOAD).unwrap()["updateAvailable"], false);
         assert_eq!(installation_status(&root, PAYLOAD).unwrap()["codexRefreshRequired"], true);
         let old_cache = cache.with_file_name("0.0.1");
         fs::rename(&cache, &old_cache).unwrap();

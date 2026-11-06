@@ -17,7 +17,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
         if(name==='get_calendar_api_availability')return'available';
         if(name==='anyblob_status')return{enabled:window.enabled};
         if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;return{enabled:args.enabled};}
-        if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,bundledVersion:'0.1.1',installedVersion:window.installed?'0.1.0':null};
+        if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,codexRefreshRequired:!!window.codexRefreshRequired,bundledVersion:'0.1.1',installedVersion:window.installed?(window.installedVersion||'0.1.0'):null};
         if(name==='install_anyblob_marketplace'){window.installCalls++;await new Promise(resolve=>window.finishInstall=resolve);if(window.installError)throw Error('Fixture install failed');window.installed=true;return null;}
         return null;
       }}};
@@ -39,9 +39,22 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await page.locator('#codex-panel-0 .anyblob-version').innerText(),'v0.1.0 → v0.1.1');
     assert.equal(await panel.locator('.anyblob-version-available').evaluate(el=>getComputedStyle(el).color),'rgb(78, 204, 78)');
     await page.screenshot({path:path.join(fixture,'update-version-dark.png')});assert.equal((await update.boundingBox()).width,original.width);
+    await page.evaluate(()=>{window.installedVersion='0.1.1';window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
+    await page.waitForFunction(()=>document.querySelector('#codex-panel-0 .anyblob-version').textContent==='v0.1.1');
+    assert.equal(await panel.getByRole('button',{name:'Update',exact:true}).isVisible(),true);
+    await page.evaluate(()=>{window.installedVersion=null;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
+    await page.waitForFunction(()=>document.querySelector('#codex-panel-0 .anyblob-version').textContent.includes(' → '));
     await update.click();const updating=panel.getByRole('button',{name:'Updating…',exact:true});assert.equal(await updating.isDisabled(),true);
     await page.evaluate(()=>window.finishInstall());const updated=page.getByRole('dialog',{name:'Anyblob marketplace updated'});await updated.waitFor();assert.match(await updated.innerText(),/uninstall and reinstall/);await page.keyboard.press('Escape');await updated.waitFor({state:'hidden'});
     await update.waitFor();await page.evaluate(()=>window.updateAvailable=false);
+    await page.evaluate(()=>{window.codexRefreshRequired=true;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
+    const refresh=panel.getByRole('button',{name:'Refresh in Codex',exact:true});await refresh.waitFor();
+    assert.equal(await panel.locator('.anyblob-version').innerText(),'v0.1.0');
+    const calls=await page.evaluate(()=>window.installCalls);await refresh.click();
+    const refreshDialog=page.getByRole('dialog',{name:'Refresh Anyblob in Codex'});await refreshDialog.waitFor();
+    assert.match(await refreshDialog.innerText(),/marketplace package is up to date/);assert.equal(await page.evaluate(()=>window.installCalls),calls);
+    await page.keyboard.press('Escape');await refreshDialog.waitFor({state:'hidden'});
+    await page.evaluate(()=>{window.codexRefreshRequired=false;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
     await page.locator('#preferences-nav').click();await page.evaluate(()=>window.installed=false);await page.locator('#codex-nav').click();await install.waitFor();
     await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('[role=status]').first().innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('End');assert.equal(await page.locator('#codex-tab-2').getAttribute('aria-selected'),'true');await page.keyboard.press('Home');assert.equal(await page.locator('#codex-tab-0').getAttribute('aria-selected'),'true');
