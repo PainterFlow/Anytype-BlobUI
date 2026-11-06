@@ -63,7 +63,8 @@ pub struct UpdaterSettingsDraft {
     pub autoplay_videos: bool,
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
-    pub start_on_login: bool,
+    #[serde(default)]
+    pub startup_mode: crate::autostart::AutostartMode,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,6 +75,7 @@ pub struct UpdaterState {
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
     pub start_on_login: bool,
+    pub startup_mode: crate::autostart::AutostartMode,
     pub current_version: String,
     pub latest_version: Option<String>,
     pub update_available: bool,
@@ -249,6 +251,7 @@ fn state_for(
         automatic_updates_enabled: preferences.automatic_updates_enabled,
         automatic_checks_enabled: preferences.automatic_checks_enabled,
         start_on_login: false,
+        startup_mode: crate::autostart::AutostartMode::Disabled,
         current_version: if fallback_runtime.is_some_and(is_development_runtime) {
             env!("BLOBUI_BUILD_VERSION").into()
         } else { current },

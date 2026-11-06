@@ -3,9 +3,10 @@
   const UI = root.BlobUI = root.BlobUI || {};
 
   UI.ReloadController = {
-    create({ button = null, onBusyChange = null, onError = null } = {}) {
+    create({ button = null, onBusyChange = null, onError = null, isCapturing = null, beforeRun = null, onReload = null } = {}) {
       const handlers = new Set();
       let pending = null;
+      let locked = false, queued = false;
       let boundButton = null;
       let buttonClick = null;
 
@@ -15,21 +16,29 @@
         return () => handlers.delete(handler);
       }
 
-      function run() {
+      function run({ checkUpdates = true } = {}) {
+        if (locked) { queued = true; return Promise.resolve(); }
         if (pending) return pending;
         if (!handlers.size) return Promise.resolve();
         if (boundButton) boundButton.setAttribute("aria-busy", "true");
         if (typeof onBusyChange === "function") {
           try { onBusyChange(true); } catch (_) { /* Keep reload execution independent of UI callbacks. */ }
         }
-        pending = Promise.all([...handlers].map(handler => Promise.resolve().then(handler)))
-          .catch(error => {
+        const execute = () => { if (locked) { queued = true; return []; }
+          try { onReload?.(); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
+          return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(() => handler({ checkUpdates })))); };
+        pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
+          .catch(error => [{ status: "rejected", reason: error }])
+          .then(results => {
+            const error = results.find(result => result.status === "rejected")?.reason;
+            if (!error) return;
             if (typeof onError === "function") {
               try { onError(error); } catch (_) { /* Keep keyboard reload errors handled. */ }
             }
           })
           .finally(() => {
             pending = null;
+            if (queued && !locked) { queued = false; void run(); }
             if (boundButton) boundButton.setAttribute("aria-busy", "false");
             if (typeof onBusyChange === "function") {
               try { onBusyChange(false); } catch (_) { /* Keep busy cleanup reliable. */ }
@@ -47,6 +56,7 @@
 
       function handleKeydown(event) {
         if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== "r") return;
+        if (isCapturing?.()) return;
         event.preventDefault();
         void run();
       }
@@ -56,6 +66,7 @@
 
       return {
         register,
+        setLocked(value) { locked = !!value; if (!locked && queued && !pending) { queued = false; void run(); } },
         bindButton,
         run,
         destroy() {

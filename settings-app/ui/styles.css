@@ -78,6 +78,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .window-controls { display: flex; align-self: stretch; }
 .window-control { display: grid; place-items: center; width: 44px; padding: 0; border-radius: 0; background: transparent; color: var(--text-secondary); }
 .window-control svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; pointer-events: none; }
+#window-background svg { stroke-width: 1.5; }
 #documentation-back svg { width: 14px; height: 14px; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .window-control:hover { background: var(--active); color: var(--text); }
 .window-control:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: -3px; }
@@ -102,13 +103,14 @@ button:focus-visible, input:focus-visible { outline: none; }
   inherits: true;
   initial-value: transparent;
 }
+.app-scrollbar { --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 
 .page-content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
-.page-content.has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling, .sidebar-nav.has-overflow.is-scrolling, .keybinds-content.has-overflow.is-scrolling, .formula-display-slot > .is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
-.page-content::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .keybinds-content::-webkit-scrollbar, .formula-display-slot > *::-webkit-scrollbar { width: 12px; height: 12px; }
-.page-content::-webkit-scrollbar-track, .page-content::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .keybinds-content::-webkit-scrollbar-track, .formula-display-slot > *::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner, .sidebar-nav::-webkit-scrollbar-corner, .keybinds-content::-webkit-scrollbar-corner, .formula-display-slot > *::-webkit-scrollbar-corner { background: transparent; }
-.page-content::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .keybinds-content::-webkit-scrollbar-thumb, .formula-display-slot > *::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
-.page-content::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button, .sidebar-nav::-webkit-scrollbar-button, .keybinds-content::-webkit-scrollbar-button, .formula-display-slot > *::-webkit-scrollbar-button { display: none; }
+:is(.page-content, .app-scrollbar).has-overflow.is-scrolling, .onboarding-scroll.has-overflow.is-scrolling, .log-entries.has-overflow.is-scrolling, .release-notes-dialog.has-overflow.is-scrolling, .documentation-navigation.has-overflow.is-scrolling, .documentation-content.has-overflow.is-scrolling, .sidebar-nav.has-overflow.is-scrolling, .keybinds-content.has-overflow.is-scrolling, .formula-display-slot > .is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar, .onboarding-scroll::-webkit-scrollbar, .log-entries::-webkit-scrollbar, .release-notes-dialog::-webkit-scrollbar, .documentation-navigation::-webkit-scrollbar, .documentation-content::-webkit-scrollbar, .sidebar-nav::-webkit-scrollbar, .keybinds-content::-webkit-scrollbar, .formula-display-slot > *::-webkit-scrollbar { width: 12px; height: 12px; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-track, :is(.page-content, .app-scrollbar)::-webkit-scrollbar-corner, .onboarding-scroll::-webkit-scrollbar-track, .onboarding-scroll::-webkit-scrollbar-corner, .log-entries::-webkit-scrollbar-track, .log-entries::-webkit-scrollbar-corner, .release-notes-dialog::-webkit-scrollbar-track, .release-notes-dialog::-webkit-scrollbar-corner, .documentation-navigation::-webkit-scrollbar-track, .documentation-navigation::-webkit-scrollbar-corner, .documentation-content::-webkit-scrollbar-track, .sidebar-nav::-webkit-scrollbar-track, .keybinds-content::-webkit-scrollbar-track, .formula-display-slot > *::-webkit-scrollbar-track, .documentation-content::-webkit-scrollbar-corner, .sidebar-nav::-webkit-scrollbar-corner, .keybinds-content::-webkit-scrollbar-corner, .formula-display-slot > *::-webkit-scrollbar-corner { background: transparent; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-thumb, .onboarding-scroll::-webkit-scrollbar-thumb, .log-entries::-webkit-scrollbar-thumb, .release-notes-dialog::-webkit-scrollbar-thumb, .documentation-navigation::-webkit-scrollbar-thumb, .documentation-content::-webkit-scrollbar-thumb, .sidebar-nav::-webkit-scrollbar-thumb, .keybinds-content::-webkit-scrollbar-thumb, .formula-display-slot > *::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
+:is(.page-content, .app-scrollbar)::-webkit-scrollbar-button, .onboarding-scroll::-webkit-scrollbar-button, .log-entries::-webkit-scrollbar-button, .release-notes-dialog::-webkit-scrollbar-button, .documentation-navigation::-webkit-scrollbar-button, .documentation-content::-webkit-scrollbar-button, .sidebar-nav::-webkit-scrollbar-button, .keybinds-content::-webkit-scrollbar-button, .formula-display-slot > *::-webkit-scrollbar-button { display: none; }
 .settings-content { width: calc(100% - 64px); max-width: 640px; margin: 0 auto; padding: 26px 0 36px; }
 .page-heading { margin-bottom: 32px; text-align: left; }
 .page-heading h1 { margin: 0; font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -.56px; }
@@ -129,7 +131,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .advanced-tabs:not(.indicator-ready) [aria-selected="true"] { border-bottom-color: var(--text); }
 :root[data-reduced-motion="true"] .advanced-tabs::after, :root[data-reduced-motion="true"] .advanced-tabs [role="tab"] { transition: none; }
 @media (prefers-reduced-motion: reduce) { .advanced-tabs::after, .advanced-tabs [role="tab"] { transition: none; } }
-.advanced-tabs [role="tab"]:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 4px; }
+.advanced-tabs [role="tab"]:focus-visible { outline: none; }
 
 .color-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: center; padding: 16px; }
 .color-plane { position: relative; height: 164px; border-radius: 8px; background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), var(--picker-hue, #ff00ff); touch-action: none; cursor: crosshair; }
@@ -194,15 +196,16 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-select-trigger:hover:not(:disabled), .kanban-select-trigger[aria-expanded="true"] { background: var(--active); }
 .kanban-select-trigger:focus-visible, .kanban-select-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
 .kanban-select-trigger:disabled { color: var(--text-muted); cursor: default; }
-.kanban-select-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out; }
+.kanban-trigger-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kanban-select-trigger svg { flex-shrink: 0; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.kanban-select-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: 268px; max-width: calc(100vw - 16px); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease-out, transform 140ms ease-out, --page-scrollbar-color .15s ease; }
 .kanban-select-menu[data-state="open"] { opacity: 1; transform: translateY(0); }
 .kanban-select-menu[data-state="closing"] { opacity: 0; transform: translateY(-4px); transition-duration: 100ms; pointer-events: none; }
 .kanban-select-menu[data-state="closed"] { opacity: 0; transform: translateY(-4px); }
 .kanban-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 34px; min-height: 34px; padding: 0 9px; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .kanban-select-option:hover, .kanban-select-option:focus-visible, .kanban-select-option[aria-selected="true"] { background: var(--active); color: var(--text); }
-.kanban-option-copy { display: grid; gap: 0; }
-.kanban-option-label { font-size: 16px; line-height: 22px; }
+.kanban-option-copy { display: grid; gap: 0; flex: 1; min-width: 0; }
+.kanban-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; line-height: 22px; }
 .kanban-select-option > svg { flex: 0 0 15px; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
 .kanban-select-option[aria-selected="true"] > svg { opacity: 1; }
 .kanban-collapse-help { margin: 8px 0 0; }
@@ -298,10 +301,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .keybinds-content > p:first-child { margin: 0 0 12px; font-size: 13px; line-height: 20px; }
 .keybind-list { display: grid; gap: 2px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; padding: 4px 0; }
+.keybind-button.keybind-fixed { cursor: default; }
 .keybind-label { color: var(--text); font-size: 13.5px; }
 .keybind-button { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; flex: 0 0 auto; min-height: 28px; max-width: 60%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-family: var(--font-interface); font-size: 13px; letter-spacing: 0; text-align: right; overflow-wrap: anywhere; cursor: pointer; }
 .keybind-keycap { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 5px; background: #303030; color: #e1e1e1; font: inherit; line-height: 1; transition: background-color .12s ease; }
-.keybind-button:hover .keybind-keycap { background: #442544; }
+button.keybind-button:hover .keybind-keycap { background: #442544; }
 .keybind-button:focus-visible { outline: none; }
 .keybind-button:focus-visible .keybind-keycap { background: #505050; }
 .keybind-button[aria-pressed="true"] { color: var(--accent); }
@@ -711,11 +715,9 @@ button:focus-visible, input:focus-visible { outline: none; }
 .advanced-tabs::-webkit-scrollbar { height: 4px; }
 .advanced-tabs::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
 .advanced-tabs::-webkit-scrollbar-button { display: none; }
-:root[data-settings-v21="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; }
 .v21-section-link { font: inherit; }
 
-.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
-.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .markdown-video, .markdown-video * { border: 0; outline: 0; box-shadow: none; }
 .markdown-video { display: block; position: relative; width: 100%; margin: 12px 0 18px; overflow: hidden; border-radius: 10px; background: #111; color: #fff; line-height: 1; }
 .markdown-video video { display: block; width: 100%; max-height: 520px; min-height: 160px; object-fit: contain; }
@@ -751,3 +753,67 @@ button:focus-visible, input:focus-visible { outline: none; }
 html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-motion="true"] .markdown-video-overlay { transition: none; }
 
 .markdown-video-controls button svg { width: 18px; height: 18px; }
+
+/* Shared App Settings layout. */
+#advanced-app-panel > .settings-group { margin: 0; }
+#advanced-app-panel > .settings-group + .settings-group { margin-top: 28px; }
+#advanced-app-panel .app-general-settings { margin: 0; }
+#advanced-app-panel .app-general-settings .settings-row { padding: 8px 0; border: 0; }
+#advanced-app-panel .app-general-settings input { right: 0; }
+#advanced-app-panel .app-backup-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#advanced-app-panel .app-backup-row + .app-backup-row { border-top: 1px solid var(--line); }
+#advanced-app-panel .app-backup-row .kanban-setting-copy { min-width: 0; }
+#advanced-app-panel .app-backup-description { display: block; color: var(--text-secondary); font-size: 14px; line-height: 20px; margin-top: 4px; }
+#advanced-app-panel .blob-backup-button { flex-shrink: 0; }
+#advanced-app-panel .blob-backup-status:empty { margin: 0; }
+
+/* Shared Settings and Docs sidebar. */
+.sidebar, .documentation-layout { position: relative; }
+.sidebar { min-width: 0; }
+.sidebar-resizer { position: absolute; z-index: 1; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.sidebar > .sidebar-resizer { right: -4px; }
+.documentation-layout > .sidebar-resizer { left: calc(var(--sidebar-width) - 4px); }
+.sidebar-resizer[hidden] { display: none; }
+.sidebar-resizer:focus-visible { outline: none; }
+.sidebar-resizing, .sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item > span,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item-label,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item-label,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-chevron,
+:root[data-sidebar-collapsed="true"] .documentation-category-label > span:not(.documentation-category-icon),
+:root[data-sidebar-collapsed="true"] .nav-group-label { display: none; }
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item { justify-content: center; padding-inline: 0; gap: 0; }
+:root[data-sidebar-collapsed="true"] .documentation-children { margin-left: 0; padding-inline: 0; }
+:root[data-sidebar-collapsed="true"] .documentation-children::before { display: none; }
+:root[data-sidebar-collapsed="true"] .documentation-category-label { justify-content: center; padding-inline: 0; }
+:root[data-sidebar-collapsed="true"] .sidebar-bottom { justify-content: center; }
+:root[data-sidebar-collapsed="true"] .sidebar-nav { overflow-y: auto; min-height: 0; }
+.help-popup { max-width: calc(100vw - 32px); }
+
+/* Sidebar labels never wrap, including the original Settings navigation. */
+.sidebar .nav-item > span:not(.nav-icon) { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:root[data-sidebar-collapsed="true"] .window-title { margin-left: 72px; }
+:root[data-sidebar-collapsed="true"] .sidebar .nav-item,
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-item,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-item { width: 32px; height: 32px; min-height: 32px; margin-inline: auto; border-radius: 50%; }
+:root[data-sidebar-collapsed="true"] .sidebar .documentation-child .documentation-item-icon,
+:root[data-sidebar-collapsed="true"] .documentation-navigation .documentation-child .documentation-item-icon { color: var(--text-muted); }
+.sidebar-navigation-tooltip { position: fixed; z-index: 100; max-width: min(320px, calc(100vw - 24px)); padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--text); font: 14px/20px var(--font-interface); overflow-wrap: anywhere; pointer-events: none; }
+.sidebar-navigation-tooltip[hidden] { display: none; }
+.advanced-tabs { overflow-x: hidden; scrollbar-width: none; }
+.advanced-tabs::-webkit-scrollbar { display: none; }
+.sidebar-resizing .advanced-tabs::after { transition: none; }
+
+.sidebar-nav, .documentation-article-list, .documentation-children-inner { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.sidebar .nav-item, .documentation-item { min-width: 0; }
+
+.kanban-select-option-description { color: var(--text-secondary); font-size: 12px; line-height: 16px; }
+.kanban-select-option:has(.kanban-select-option-description) { height: auto; min-height: 52px; padding-block: 6px; }
+
+.section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
+.experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+#advanced-experiments-panel .settings-list { overflow: visible; }

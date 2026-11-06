@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { loadSettings } = require('./frontend-fixture.cjs');
 
 const workspace = path.resolve(__dirname, '../..');
 
@@ -23,63 +24,55 @@ const chromeCandidates = [
 ].filter(Boolean);
 const chromePath = chromeCandidates.find(candidate => fs.existsSync(candidate));
 
-test('documentation navigation selects articles, expands one child level, and sanitizes Markdown', {
+test('React release notes render sanitized Markdown and stop video media when the dialog closes', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
+  timeout: 60000,
 }, async () => {
   const browser = await chromium.launch({ executablePath: chromePath, headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent(`<!doctype html><html><body>
-      <nav id="documentation-navigation" aria-label="Documentation articles"></nav>
-      <main id="documentation-content"><div id="documentation-article"></div>
-        <div id="documentation-load-error" hidden><button id="documentation-retry">Try again</button></div>
-      </main>
-    </body></html>`);
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/vendor/marked.umd.js') });
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/markdown.js') });
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/disclosure.js') });
-    await page.evaluate(() => {
-      window.BlobUI.DocsData = {
-        async load() {
-          return {
-            categories: [
-              { id: 'getting-started', name: 'Getting Started' },
-              { id: 'reference', name: 'Reference' },
-            ],
-            articles: [
-              { id: 'parent', category: 'getting-started', parent: null, icon: '', name: 'Zebra guide', markdown: '# Parent article\n\n<script>window.docsXss = true</script>' },
-              { id: 'child-b', category: 'getting-started', parent: 'parent', icon: '', name: 'Child B', markdown: '# Child article' },
-              { id: 'child-a', category: 'getting-started', parent: 'parent', icon: '', name: 'Child A', markdown: '# Child article' },
-              { id: 'first', category: 'getting-started', parent: null, icon: '', name: 'Alpha guide', markdown: '# First article' },
-              { id: 'reference', category: 'reference', parent: null, icon: '', name: 'API reference', markdown: '# Reference article' },
-            ],
-          };
-        },
-        resolveImage() { return ''; },
-      };
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error.stack || error.message));
+    const media = fs.readFileSync(path.join(workspace, 'settings-app/ui/cdn/kanban-compact-collapsing.mp4')).toString('base64');
+    await page.addInitScript((video) => {
+      window.__videoFixture = video;
+      window.__TAURI__ = { core: { invoke: async (command) => {
+        if (command === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: { settingsV21Enabled: false }, hasSavedApiKey: false, apiIp: '127.0.0.1', apiPort: 31009 };
+        if (command === 'get_updater_state') return { installDirectory: 'C:/fixture', currentVersion: 'Dev+fixture', automaticChecksEnabled: false, automaticUpdatesEnabled: false };
+        if (command === 'get_release_notes') return null;
+        if (command === 'get_latest_release_notes') return { version: 'Dev+fixture', markdown: '@demo\n\n<script>window.releaseXss = true</script>', imageManifest: 'images: []\nvideos:\n  - id: demo\n    src: assets/changelogs/demo.mp4\n    alt: Demo video\n' };
+        if (command === 'get_release_note_video' || command === 'get_release_note_history_video') return `data:video/mp4;base64,${window.__videoFixture}`;
+        if (command === 'get_calendar_api_availability') return 'available';
+        return {};
+      } } };
+    }, media);
+    await loadSettings(page);
+    await page.waitForTimeout(1000);
+    const startup = await page.evaluate(() => ({ ready: window.appReady, bridge: typeof window.__TAURI__?.core?.invoke,
+      status: document.getElementById('status-message')?.textContent, html: document.getElementById('settings-react-root')?.innerText.slice(0, 300) }));
+    if (!startup.ready) throw new Error(JSON.stringify({ startup, pageErrors }));
+    await page.locator('#help-button').click();
+    await page.locator('#help-whats-new').click();
+    await page.locator('#release-notes-backdrop').waitFor({ state: 'visible' });
+    const player = page.locator('#release-notes-content .markdown-video');
+    await page.waitForTimeout(1200);
+    const mediaState = await page.evaluate(() => ({ html: document.getElementById('release-notes-content')?.innerHTML, calls: window.__TAURI__?.core?.calls }));
+    if (!(await player.count())) throw new Error(JSON.stringify({ mediaState, pageErrors }));
+    await page.waitForFunction(() => document.querySelector('#release-notes-content video')?.readyState >= 1);
+    await page.waitForFunction(() => document.querySelector('#release-notes-content video')?.currentTime > 0.1);
+    assert.equal(await page.evaluate(() => window.releaseXss), undefined, 'Unsafe Markdown scripts must not run.');
+    const revocations = await page.evaluate(() => {
+      window.revokedMedia = [];
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = value => { window.revokedMedia.push(value); revoke(value); };
+      return true;
     });
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/components.js') });
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/scrollbar.js') });
-    await page.addScriptTag({ path: path.join(workspace, 'settings-app/ui/docs.js') });
-    await page.evaluate(() => window.BlobUI.DocsUI.load());
-
-    assert.equal(await page.locator('#documentation-article h1').textContent(), 'First article', 'The first code-ordered category and alphabetical root should open by default.');
-    assert.equal(await page.locator('[data-article-id="first"]').getAttribute('aria-current'), 'page');
-    assert.equal(await page.evaluate(() => window.docsXss), undefined, 'Unsafe Markdown scripts must be removed.');
-
-    const parent = page.locator('[data-article-id="parent"]');
-    await parent.click();
-    assert.equal(await parent.getAttribute('aria-expanded'), 'true', 'Selecting a parent article should also expand it.');
-    assert.equal(await parent.getAttribute('aria-current'), 'page');
-    const childIds = await page.locator('#documentation-children-parent [data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(childIds, ['child-a', 'child-b'], 'Children should be alphabetized.');
-
-    await page.locator('[data-article-id="child-a"]').click();
-    assert.equal(await page.locator('#documentation-article h1').textContent(), 'Child article');
-    assert.equal(await page.locator('[data-article-id="child-a"]').getAttribute('aria-current'), 'page');
-    await parent.click();
-    assert.equal(await parent.getAttribute('aria-expanded'), 'false', 'Selecting the expanded parent should collapse its children.');
-    assert.equal(await parent.getAttribute('aria-current'), 'page');
+    assert.equal(revocations, true);
+    await page.keyboard.press('Escape');
+    await page.locator('#release-notes-backdrop').waitFor({ state: 'hidden' });
+    assert.equal(await player.locator('video').count(), 0, 'Closing release notes removes the video.');
+    assert.equal(await page.evaluate(() => window.revokedMedia.length), 1, 'Closing release notes revokes the video URL.');
+    assert.deepEqual(await page.evaluate(() => window.__TAURI__.core ? [] : ['bridge missing']), []);
   } finally {
     await browser.close();
   }
@@ -166,134 +159,83 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('all bundled articles and feature children render offline in dark mode', {
+test('React documentation renders every bundled article offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
+  timeout: 60000,
 }, async () => {
-  const uiRoot = path.join(workspace, 'settings-app/ui');
   const testRoot = path.join(workspace, '.test-run', 'docs-ui-integration');
-  const profile = path.join(testRoot, 'chrome-profile');
   const screenshot = path.join(workspace, '.test-run', 'docs-preview.png');
   fs.mkdirSync(testRoot, { recursive: true });
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-
-  const mimeTypes = {
-    '.css': 'text/css; charset=utf-8',
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.md': 'text/markdown; charset=utf-8',
-    '.png': 'image/png',
-    '.svg': 'image/svg+xml',
-  };
-  const hostHtml = `<!doctype html><html lang="en" data-theme="dark"><head>
-    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/styles.css"><title>Documentation preview</title></head><body>
-    <header class="window-titlebar"><span class="window-title">BlobUI Settings</span><div class="window-controls">
-      <button id="documentation-back" class="window-control" type="button" aria-label="Back to settings" title="Back to settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 4-6 6 6 6M3 10h11a7 7 0 0 1 7 7v3"/></svg></button>
-    </div></header>
-    <section id="documentation" class="documentation" aria-label="Documentation">
-      <div class="documentation-layout">
-        <nav id="documentation-navigation" class="documentation-navigation" aria-label="Documentation articles"></nav>
-        <main id="documentation-content" class="documentation-content" aria-label="Article" tabindex="-1">
-          <div id="documentation-article" class="documentation-article markdown-content"></div>
-          <div id="documentation-load-error" class="documentation-load-error" role="alert" hidden>
-            <p>Documentation could not be loaded.</p><button id="documentation-retry" class="banner-image-button" type="button">Try again</button>
-          </div>
-        </main>
-      </div>
-    </section>
-    <script src="/vendor/marked.umd.js"></script><script src="/video-player.js"></script><script src="/markdown.js"></script>
-    <script src="/docs-data.js"></script><script src="/disclosure.js"></script>
-    <script src="/components.js"></script><script src="/scrollbar.js"></script><script src="/docs.js"></script>
-    <script>window.docsReady = window.BlobUI.DocsUI.load();</script>
-  </body></html>`;
-
-  let context;
+  const browser = await chromium.launch({ executablePath: chromePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
-    context = await chromium.launchPersistentContext(profile, {
-      executablePath: chromePath,
-      headless: true,
-      viewport: { width: 960, height: 740 },
+    const page = await browser.newPage({ viewport: { width: 960, height: 740 } });
+    const errors = [];
+    const externalRequests = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('request', request => {
+      if (!request.url().startsWith('http://blobui.test/') && !request.url().startsWith('blob:')) externalRequests.push(request.url());
     });
-    await context.route('http://docs.test/**', async route => {
-      const requestUrl = new URL(route.request().url());
-      if (requestUrl.pathname === '/__docs-host') {
-        await route.fulfill({ status: 200, contentType: mimeTypes['.html'], body: hostHtml });
-        return;
-      }
-      const relativePath = decodeURIComponent(requestUrl.pathname).replace(/^\/+/, '');
-      const filePath = path.resolve(uiRoot, relativePath);
-      const relative = path.relative(uiRoot, filePath);
-      if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-        await route.fulfill({ status: 404, body: 'Not found' });
-        return;
-      }
-      try {
-        const content = fs.readFileSync(filePath);
-        await route.fulfill({
-          status: 200,
-          contentType: mimeTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-          body: content,
-        });
-      } catch {
-        await route.fulfill({ status: 404, body: 'Not found' });
-      }
+    await page.addInitScript(() => {
+      window.__TAURI__ = { core: { invoke: async command => {
+        if (command === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: { settingsV21Enabled: false }, hasSavedApiKey: false, apiIp: '127.0.0.1', apiPort: 31009 };
+        if (command === 'get_updater_state') return { installDirectory: 'C:/fixture', currentVersion: 'Dev+fixture', automaticChecksEnabled: false, automaticUpdatesEnabled: false };
+        if (command === 'get_release_notes' || command === 'get_latest_release_notes') return null;
+        if (command === 'get_calendar_api_availability') return 'available';
+        return {};
+      } } };
     });
-    const page = await context.newPage();
-    await page.goto('http://docs.test/__docs-host');
-    await page.evaluate(() => window.docsReady);
+    await loadSettings(page);
+    await page.waitForTimeout(1000);
+    const startup = await page.evaluate(() => ({ ready: window.appReady, bridge: typeof window.__TAURI__?.core?.invoke,
+      status: document.getElementById('status-message')?.textContent, html: document.getElementById('settings-react-root')?.innerText.slice(0, 300) }));
+    if (!startup.ready) throw new Error(JSON.stringify({ startup, pageErrors }));
+    await page.locator('#help-button').click();
+    await page.locator('#help-documentation').click();
+    await page.locator('#documentation-navigation [data-article-id="introduction"]').waitFor();
+    await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Introduction');
 
     assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
-    assert.equal(await page.locator('#documentation-article h1').textContent(), 'Introduction');
-    assert.equal(await page.locator('.documentation-child').count(), 5);
-    assert.equal(await page.locator('[data-article-id="features"]').getAttribute('aria-expanded'), 'false');
-    assert.equal(await page.locator('[data-article-id="experiment"]').getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('#documentation-navigation .documentation-child').count(), 4);
     assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
     const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'experiment', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
-    assert.equal(await page.locator('.documentation-item-icon svg').count(), ids.length);
-    const iconPath = async id => page.locator('[data-article-id="' + id + '"] .documentation-item-icon svg').innerHTML();
-    assert.notEqual(await iconPath('experiment'), await iconPath('settings-ui-refresh'));
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.equal(await page.locator('#documentation-navigation .documentation-item-icon svg').count(), ids.length);
     assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
-    const externalRequests = [];
-    page.on('request', request => {
-      if (!request.url().startsWith('http://docs.test/') && !request.url().startsWith('blob:')) externalRequests.push(request.url());
-    });
-    for (const theme of ['dark']) {
-      await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-      for (const id of ids) {
-        await page.locator('[data-article-id="' + id + '"]').click();
-        await page.waitForFunction(expected => document.getElementById('documentation-article').getAttribute('aria-label') === expected,
-          await page.locator('[data-article-id="' + id + '"]').getAttribute('aria-label'));
-        assert.equal(await page.locator('#documentation-article h1').count(), 1);
-        assert.ok((await page.locator('#documentation-article').textContent()).length > 150);
-        assert.equal(await page.locator('#documentation-load-error').evaluate(node => node.hidden), true);
-        assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true, id + ' should not overflow horizontally');
-        await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: node.scrollHeight, behavior: 'instant' }));
-        const geometry = await page.locator('#documentation-content').evaluate(node => ({ top: node.scrollTop, overflow: node.scrollHeight > node.clientHeight }));
-        if (geometry.overflow) assert.ok(geometry.top > 0, id + ' should scroll when it overflows');
-        if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 0);
-        if (id === 'testing-and-releases') {
-          assert.ok(await page.locator('#documentation-article pre code').count() >= 3);
-          const code = page.locator('#documentation-article pre').first();
-          const scroll = await code.evaluate(node => {
-            node.scrollLeft = node.scrollWidth;
-            return { overflow: node.scrollWidth > node.clientWidth, left: node.scrollLeft,
-              width: getComputedStyle(node).scrollbarWidth, color: getComputedStyle(node).scrollbarColor };
-          });
-          assert.equal(scroll.overflow, true, 'Long commands should stay within a scrollable code block');
-          assert.ok(scroll.left > 0);
-          assert.equal(scroll.width, 'thin');
-          assert.notEqual(scroll.color, 'auto');
-          await code.evaluate(node => node.scrollLeft = 0);
-        }
-        await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
-        await page.screenshot({ path: path.join(testRoot, id + '-' + theme + '.png') });
+
+    for (const id of ids) {
+      await page.locator('[data-article-id="' + id + '"]').click();
+      const expected = await page.locator('[data-article-id="' + id + '"]').getAttribute('aria-label');
+      await page.waitForFunction(name => document.getElementById('documentation-article')?.getAttribute('aria-label') === name, expected);
+      assert.equal(await page.locator('#documentation-article h1').count(), 1);
+      assert.ok((await page.locator('#documentation-article').textContent()).length > 150);
+      assert.equal(await page.locator('#documentation-load-error').count(), 0);
+      assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true, id + ' should not overflow horizontally');
+      await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: node.scrollHeight, behavior: 'instant' }));
+      const geometry = await page.locator('#documentation-content').evaluate(node => ({ top: node.scrollTop, overflow: node.scrollHeight > node.clientHeight }));
+      if (geometry.overflow) assert.ok(geometry.top > 0, id + ' should scroll when it overflows');
+      if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 0);
+      if (id === 'testing-and-releases') {
+        assert.ok(await page.locator('#documentation-article pre code').count() >= 3);
+        const code = page.locator('#documentation-article pre').first();
+        const scroll = await code.evaluate(node => {
+          node.scrollLeft = node.scrollWidth;
+          return { overflow: node.scrollWidth > node.clientWidth, left: node.scrollLeft,
+            width: getComputedStyle(node).scrollbarWidth, color: getComputedStyle(node).scrollbarColor };
+        });
+        assert.equal(scroll.overflow, true);
+        assert.ok(scroll.left > 0);
+        assert.equal(scroll.width, 'thin');
+        assert.notEqual(scroll.color, 'auto');
+        await code.evaluate(node => node.scrollLeft = 0);
       }
+      await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
+      await page.screenshot({ path: path.join(testRoot, id + '-dark.png') });
     }
     assert.deepEqual(externalRequests, [], 'Bundled articles should not request external resources.');
     await page.screenshot({ path: screenshot });
+    assert.deepEqual(errors, []);
   } finally {
-    if (context) await context.close();
-    fs.rmSync(profile, { recursive: true, force: true });
+    await browser.close();
   }
 });

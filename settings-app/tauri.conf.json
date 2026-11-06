@@ -1,10 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "BlobUI Settings",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "identifier": "io.blobui.settings",
   "build": {
-    "frontendDist": "ui"
+    "frontendDist": "frontend-dist"
   },
   "app": {
     "withGlobalTauri": true,

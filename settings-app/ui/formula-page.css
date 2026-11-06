@@ -1,13 +1,12 @@
 /* Shared Anytype settings tokens. Toolbar uses 20px icons inside 32px circular controls. */
-:root[data-settings-v21="true"] #formulas-nav { display: none; }
-#open-formulas { display: none; margin-top: 16px; }
-:root[data-settings-v21="true"] #open-formulas { display: inline-flex; }
+#formulas-nav { display: none; }
+#open-formulas { display: inline-flex; margin-top: 16px; }
 #formulas-page { max-width: 640px; }
 #formula-storage-message[data-status="success"] { color: var(--color-teal); }
 #formulas-page, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 #formula-fields, .formula-calculator { border: 0; padding: 0; margin: 0; min-width: 0; }
-.formula-button, .formula-variable-button, .formula-insert-property, .formula-remove-calculation, .formula-property-insert { min-height: 32px; border: 0; border-radius: 16px; padding: 4px 10px; background: var(--input-bg); color: var(--text); font-size: 13px; line-height: 20px; cursor: pointer; }
-.formula-button:hover, .formula-variable-button:hover, .formula-insert-property:hover, .formula-remove-calculation:hover, .formula-property-insert:hover, .formula-key:hover { background: var(--hover); }
+.formula-button, .formula-variable-button, .formula-remove-calculation, .formula-property-insert { min-height: 32px; border: 0; border-radius: 16px; padding: 4px 10px; background: var(--input-bg); color: var(--text); font-size: 13px; line-height: 20px; cursor: pointer; }
+.formula-button:hover, .formula-variable-button:hover, .formula-remove-calculation:hover, .formula-property-insert:hover, .formula-key:hover { background: var(--hover); }
 #formulas-page button:focus-visible, #formula-calculator-dialog button:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: 2px; }
 .formula-toolbar { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 32px; padding-bottom: 12px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
 .neutral-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 6px; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
@@ -17,10 +16,6 @@
 #formula-filter.is-filtered, #formula-filter[aria-pressed="true"] { color: var(--accent); }
 #formula-filter-control { position: static; }
 #formula-filter-options { left: auto; right: 0; max-width: 100%; }
-/* Keyboard focus is an outline; only the current selection receives a fill. */
-#formula-filter-options .kanban-select-option { color: var(--text); background: transparent; }
-#formula-filter-options .kanban-select-option:focus-visible { background: transparent; outline: 1px solid var(--text-secondary); outline-offset: -2px; }
-#formula-filter-options .kanban-select-option:hover, #formula-filter-options .kanban-select-option[aria-selected="true"] { background: var(--active); color: var(--text); }
 .expandable-search { display: flex; align-items: center; flex: 0 1 32px; width: 32px; min-width: 32px; height: 32px; border: 0; border-radius: 16px; background: transparent; transition: flex-basis 200ms ease, width 200ms ease, background-color 160ms ease; overflow: hidden; }
 .expandable-search[data-expanded="true"] { flex-basis: 200px; width: 200px; background: var(--input-bg); }
 .expandable-search[data-expanded="true"] .neutral-icon-button { background: transparent; }
@@ -29,10 +24,11 @@
 .expandable-search[data-expanded="false"] input { visibility: hidden; padding: 0; }
 .expandable-search input::placeholder { color: var(--text-secondary); }
 .formula-view { border: 0; border-radius: 0; background: transparent; margin: 0; }
-.formula-view-row { display: grid; align-items: center; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; min-height: 56px; padding: 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; color: var(--text); font-family: inherit; line-height: 22px; cursor: pointer; }
+.formula-view-row { display: grid; align-items: center; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; min-height: 56px; padding: 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; color: var(--text); font-family: inherit; line-height: 22px; cursor: pointer; }
 .formula-view-row:hover { background: var(--hover); }
 .formula-view-name { font-size: 16px; font-weight: 400; overflow-wrap: anywhere; }
 .formula-source { color: var(--text-secondary); font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+.formula-view-warning { grid-column: 1 / -1; min-width: 0; color: var(--text-secondary); font-size: 14px; overflow-wrap: anywhere; }
 .confirm-dialog.formula-calculator-dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; user-select: none; -webkit-user-select: none; }
 .formula-calculator-heading { padding-right: 26px; }
 #formula-calculator-dialog .formula-calculator-title { font-size: 16px; line-height: 22px; }
@@ -56,9 +52,6 @@
 .formula-variable-actions, .formula-calculator-actions { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
 .formula-variable-actions > button { flex-shrink: 0; }
 .formula-property-picker { position: relative; display: inline-flex; align-items: center; margin: 0; }
-.formula-property-picker label { color: var(--text-secondary); font-size: 12px; }
-.formula-property-picker .kanban-select-empty { padding: 9px; color: var(--text-secondary); font-size: 13px; line-height: 18px; }
-.formula-property-picker .kanban-select-trigger { width: 100%; min-width: 0; font-size: 13px; }
 .formula-property-picker .kanban-select-menu { left: 0; right: auto; width: max-content; min-width: 150px; max-width: min(300px, calc(100vw - 80px)); }
 .formula-property-picker .kanban-select-empty { padding: 8px 9px; color: var(--text-secondary); font-size: 12px; line-height: 16px; }
 .formula-keypad { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
@@ -80,17 +73,15 @@
 
 #formula-filter.is-filtered:hover, #formula-filter.is-filtered[aria-expanded="true"], #formula-filter[aria-pressed="true"]:hover, #formula-filter[aria-pressed="true"][aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .formula-variable-actions { justify-content: flex-start; gap: 6px; }
-.formula-variable-actions .formula-insert-property, .formula-variable-actions .formula-variable-button { padding-inline: 7px; font-size: 12px; white-space: nowrap; }
+.formula-variable-actions .formula-variable-button { padding-inline: 7px; font-size: 12px; white-space: nowrap; }
 .formula-variable-actions .formula-render-toggle { margin-left: auto; }
 .formula-variable-actions .formula-render-toggle svg { stroke: currentColor; }
 .formula-property-picker .kanban-select-option-description { display: block; margin-top: 2px; color: var(--text-secondary); font-family: var(--font-code), monospace; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; }
-.formula-property-picker .kanban-select-option:has(.kanban-select-option-description) { display: block; height: auto; min-height: 48px; padding: 6px 9px; text-align: left; }
-.formula-property-picker .kanban-select-option:has(.kanban-select-option-description) .kanban-option-label { display: block; }
 .formula-key svg { display: block; width: 20px; height: 20px; margin: auto; }
 /* Navigation animation runs when the page leaves the hidden state. */
-:root[data-settings-v21="true"] #formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+#formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
 @keyframes formula-page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-:root[data-settings-v21="true"][data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
+:root[data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
 @media (prefers-reduced-motion: reduce) { #formulas-page { animation: none !important; } }
 
 /* Rendered calculations never expose an editing caret or pointer. */
@@ -102,3 +93,47 @@
 .formula-keypad-modes { display: flex; gap: 6px; margin: 0 0 6px; }
 .formula-keypad-modes .formula-key { height: 28px; padding: 0 12px; font-size: 12px; }
 .formula-keypad-modes [aria-pressed="true"] { background: var(--active); color: var(--text); }
+
+/* Catalog controls share the Kanban browser's measurements and tokens. */
+#calendar-colors-page { max-width: 640px; }
+#calendar-colors-page, .calendar-rule-dialog { font-family: var(--font-interface), "Segoe UI", sans-serif; }
+.view-open-button { margin-top: 16px; min-height: 40px; padding-inline: 18px; border-radius: 20px; font-size: 14px; }
+.confirm-dialog.calendar-rule-dialog { display: flex; flex-direction: column; width: min(580px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 16px; box-shadow: none; }
+.calendar-modal-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.calendar-modal-header h2 { flex: 1; min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
+.calendar-modal-content { min-height: 0; overflow-y: auto; padding: 6px 0 0; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.calendar-rule-row { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 4px; }
+.calendar-rule-name-group { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.calendar-rule-name { flex: 0 1 auto; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+.calendar-rule-row > section { flex: 1; min-width: 0; }
+.calendar-remove { flex: 0 0 28px; width: 28px; height: 28px; padding: 4px; color: var(--color-red); }
+.calendar-remove:hover { color: var(--color-red); background: color-mix(in srgb, var(--color-red) 12%, transparent); }
+.calendar-property-picker { flex: 0 1 auto; min-width: 0; }
+.calendar-property-menu { z-index: 2; right: auto; width: max-content; min-width: 150px; max-width: min(300px, calc(100vw - 80px)); overflow-y: auto; }
+.calendar-property-picker .kanban-select-trigger { max-width: min(240px, 42vw); }
+#calendar-reload svg, #calendar-override-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#calendar-filter-control, #calendar-override-filter-control { position: static; }
+#calendar-filter.is-filtered, #calendar-override-filter.is-filtered { color: var(--accent); }
+.calendar-rule-dialog button, .calendar-rule-dialog input { font-family: inherit; }
+.calendar-modal-close { font-size: 24px; }
+.calendar-view-results { min-width: 0; }
+#calendar-colors-page button:focus-visible, .confirm-dialog:focus-visible, .confirm-dialog button:focus-visible { outline: none !important; box-shadow: none !important; }
+#calendar-colors-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+:root[data-reduced-motion="true"] #calendar-colors-page { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { #calendar-colors-page { animation: none !important; } }
+
+.calendar-modal-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
+.calendar-modal-content::-webkit-scrollbar, .calendar-property-menu::-webkit-scrollbar { width: 12px; }
+.calendar-modal-content::-webkit-scrollbar-track, .calendar-property-menu::-webkit-scrollbar-track { background: transparent; }
+.calendar-modal-content::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); border-radius: 6px; }
+.calendar-property-menu::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; }
+.calendar-property-menu.app-scrollbar::-webkit-scrollbar-thumb { background: var(--page-scrollbar-color); }
+.calendar-modal-content::-webkit-scrollbar-button, .calendar-property-menu::-webkit-scrollbar-button { display: none; }
+.calendar-sticky-toolbar { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-top: 6px; }
+
+
+.calendar-modal-controls { flex-shrink: 0; min-width: 0; }
+.calendar-modal-controls:empty { display: none; }
+
+:root[data-reduced-motion="true"] .calendar-modal-content { transition: none; }
+@media (prefers-reduced-motion: reduce) { .calendar-modal-content { transition: none; } }

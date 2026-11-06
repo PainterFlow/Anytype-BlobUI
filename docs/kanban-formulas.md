@@ -1,6 +1,6 @@
 # Kanban formulas
 
-Open Kanban View Formulas in the Settings sidebar. With Settings Future Proof UI Refresh enabled, use Preferences > Kanban > Kanban View Formulas.
+Open Preferences > Kanban > Kanban View Formulas.
 
 The page follows Anytype's UI philosophy. Search the real views available to your API key, then select its flat list row to open the calculator dialog. The magnifier expands into a search field, the filter narrows the list by space, and the reload icon reloads available views. Each entry shows its space, source name, and source kind so duplicate names remain distinguishable.
 
@@ -38,11 +38,10 @@ Display formulas under Preferences > Kanban shares the grouped settings list and
 
 This uses the official Anytype app and its local API. It does not patch Anytype, inject JavaScript, enable debugging access, or poll in the background. The sample-data prototype is removed.
 
-Results require an exact object, block, active-view, and category identity. Single-select grouping uses option IDs resolved from the view's stored groups. Checkbox grouping uses true and false. Multi-select grouping is unavailable until API v2 exposes enough information to match its columns reliably. Duplicate option names prevent publication.
 
 Views opened from a Type are discovered through API v2's type documents. Their cards are read through type-scoped search with the stored view's filters and sorts. Query and collection views use their view membership endpoints. Inline boards follow their referenced query, collection, or Type for membership and category identities while keeping their host page and block IDs for CSS targeting. Unreadable or unsupported sources remain unavailable.
 
-Unused single-select options without known IDs do not block publication. A card using an unresolved option still prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save. Incomplete pagination prevents publication independently of API notices.
+Option IDs are not needed. A card naming an option absent from its property metadata prevents publication. A missing saved view or property retains its calculation until you remove or replace it and save. Incomplete pagination prevents publication independently of API notices.
 
 ### API warning handling
 
@@ -68,3 +67,15 @@ Result snapshots use version 2 with number, boolean, or null values. Version 1 n
 The version 2 configuration is `.blobui-kanban-formulas.json` at the source workspace root and is ignored by Git. Definitions retain full space, object, block, and view IDs. A previous `.blobui-formula-prototype.json` stays unchanged; only its display choice migrates when no live configuration exists. A malformed live file stays unchanged until an explicit successful save replaces it.
 
 Implementation and automated validation use workspace-local fixtures. A read-only live probe verifies discovery and calculation without publishing to the user's installed files.
+
+Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Scoped Anyblob grants can use option mappings already supplied by permitted property metadata without requiring separate object access to those options.
+
+Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
+
+Multi-select calculations use the complete sorted, deduplicated combination, stored as a serialized name array. Checkbox categories use true and false. Missing options, incomplete membership and conflicting metadata block publication.
+
+Version 3 results match every saved card object ID inside the column body, scoped to the host object, block and active view. Empty or unmatched columns show the formula evaluated on an empty card list. A populated column without any matching rendered card also shows that fallback for as long as no anchor is rendered.
+
+Card moves, option renames and membership changes require refresh. Legacy version 1 and 2 results remain readable.
+
+Isolated fixtures verify API v2 calculations and CSS matching. Actual Anytype rendering and the originally reported HTTP 400 remain unverified live.

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "anyblob": {
+      "command": "cmd.exe",
+      "cwd": ".",
+      "tool_timeout_sec": 180,
+      "args": [
+        "/d",
+        "/c",
+        ".\\bin\\blobui-mcp.exe"
+      ]
+    }
+  }
+}

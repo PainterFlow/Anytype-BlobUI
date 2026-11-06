@@ -430,40 +430,21 @@ where
 }
 
 fn startup_entry_targets_app(value: &str, app: &Path) -> bool {
-    let executable = if let Some(quoted) = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        quoted
-    } else {
-        value
-    };
-    if executable.contains('"') {
-        return false;
+    let Some(quoted) = value.strip_prefix('"') else { return false; };
+    let Some(end) = quoted.find('"') else { return false; };
+    let executable = &quoted[..end];
+    if !matches!(&quoted[end + 1..], "" | " --background") { return false; }
+    // Uninstall may already have removed these directories.
+    fn shell_path(path: &str) -> String {
+        if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{path}")
+        } else {
+            path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+        }
     }
-    let Some(executable_parent) = Path::new(executable).parent() else {
-        return false;
-    };
-    if Path::new(executable).file_name().is_none_or(|name| {
-        !name
-            .to_string_lossy()
-            .eq_ignore_ascii_case("blobui-settings.exe")
-    }) {
-        return false;
-    }
-    let Ok(executable_parent) = executable_parent.canonicalize() else {
-        return false;
-    };
-    let expected_parents = [app.to_path_buf(), app.join("settings-app/dist")];
-    expected_parents.iter().any(|expected_parent| {
-        expected_parent
-            .canonicalize()
-            .is_ok_and(|expected_parent| {
-                executable_parent
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&expected_parent.to_string_lossy())
-            })
-    })
+    [app.join("blobui-settings.exe"), app.join("settings-app/dist/blobui-settings.exe")]
+        .iter()
+        .any(|expected| shell_path(executable).replace('/', r"\").eq_ignore_ascii_case(&shell_path(&expected.to_string_lossy()).replace('/', r"\")))
 }
 
 #[cfg(windows)]
@@ -522,7 +503,7 @@ fn remove_startup_registration(app: &Path) -> Result<(), String> {
             io::Error::from_raw_os_error(queried as i32)
         ));
     }
-    if value_type != REG_SZ || value_bytes % std::mem::size_of::<u16>() as u32 != 0 {
+    if value_type != REG_SZ || value_bytes < 2 || value_bytes > 1024 * 1024 || value_bytes % std::mem::size_of::<u16>() as u32 != 0 {
         unsafe { RegCloseKey(key) };
         return Ok(());
     }
@@ -544,12 +525,16 @@ fn remove_startup_registration(app: &Path) -> Result<(), String> {
             io::Error::from_raw_os_error(queried as i32)
         ));
     }
-    let decoded = String::from_utf16(
-        &value[..value
-            .iter()
-            .position(|unit| *unit == 0)
-            .unwrap_or(value.len())],
-    );
+    if value_type != REG_SZ || value_bytes % 2 != 0 || value_bytes as usize / 2 > value.len() {
+        unsafe { RegCloseKey(key) };
+        return Ok(());
+    }
+    value.truncate(value_bytes as usize / 2);
+    if value.pop() != Some(0) || value.contains(&0) {
+        unsafe { RegCloseKey(key) };
+        return Ok(());
+    }
+    let decoded = String::from_utf16(&value);
     let value = match decoded {
         Ok(value) => value,
         Err(_) => {
@@ -922,10 +907,15 @@ mod tests {
             &format!("\"{}\"", other.display()),
             &app
         ));
-        assert!(!startup_entry_targets_app(
+        assert!(startup_entry_targets_app(
             &format!("\"{}\" --background", expected.display()),
             &app
         ));
+        for suffix in [" --background --extra", " --foreground", " --background ", " extra"] {
+            assert!(!startup_entry_targets_app(&format!("\"{}\"{suffix}", expected.display()), &app));
+        }
+        assert!(!startup_entry_targets_app(&expected.to_string_lossy(), &app));
+        assert!(startup_entry_targets_app(&format!("\"{}\" --background", app.join("blobui-settings.exe").display()), &app));
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -100,6 +100,7 @@ fn validate_import(blob: &Path, install: &Path) -> Result<(), String> {
     if !data.is_object() {
         return Err("The selected folder is not a BlobUI backup: data.json must contain an object.".into());
     }
+    crate::calendar::configuration(&data)?;
     let formula_path = blob.join(".blobui-kanban-formulas.json");
     crate::kanban::initialize_imported_configuration(&formula_path)?;
     let metadata_path = blob.join(META_FILE);

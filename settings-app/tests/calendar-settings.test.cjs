@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { loadSettings } = require('./frontend-fixture.cjs');
 const test = require('node:test');
 let chromium;
 try { chromium = require(process.env.PLAYWRIGHT_MODULE || 'playwright').chromium; } catch {}
@@ -36,13 +36,14 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
         return null;
       } } };
     });
-    await page.goto(pathToFileURL(path.join(workspace, 'settings-app/ui/index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
     const toggle = page.locator('#calendar-colors-enabled');
     const navigate = async status => {
       await page.evaluate(value => { window.__availability = value; }, status);
       await page.locator('#advanced-nav').click();
       await page.locator('#preferences-nav').click();
+      await page.locator('#preference-tab-2').click();
     };
     assert.equal(await toggle.isChecked(), true);
     await page.waitForFunction(() => document.getElementById('calendar-colors-help').textContent.includes('Add an Anytype API key'));
@@ -76,9 +77,9 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await page.evaluate(() => { window.__pending.splice(0).forEach(resolve => resolve('unavailable')); });
     assert.equal(await toggle.isDisabled(), false);
     assert.equal(await toggle.isChecked(), false);
-    for (const theme of ['light', 'dark']) {
+    for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-      await page.locator('section[aria-labelledby="calendar-heading"]').screenshot({ path: path.join(root, theme + '.png') });
+      await page.locator('#preference-panel-2').screenshot({ path: path.join(root, theme + '.png') });
     }
   } finally { await context.close(); }
 });

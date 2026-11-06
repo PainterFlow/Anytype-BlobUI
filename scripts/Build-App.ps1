@@ -2,10 +2,23 @@ param(
     [switch]$s,
     [switch]$c,
     [Alias('n')]
-    [switch]$Onboarding
+    [switch]$Onboarding,
+    [switch]$b,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArguments
 )
 
 $ErrorActionPreference = 'Stop'
+if ($null -ne $RemainingArguments) {
+    foreach ($argument in $RemainingArguments) {
+        if ($argument -ceq '--silent') {
+            $b = $true
+            continue
+        }
+        throw "Unknown Build-App argument: $argument"
+    }
+}
+
 $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
 $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
@@ -20,7 +33,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "The BlobUI Settings Rust project was not found: $manifestPath"
 }
 
-if ($c) {
+if ($c -and $env:BLOBUI_BUILD_ONLY -ne '1') {
     $oldInstances = @(Get-Process -Name 'blobui-settings', 'settings-app' -ErrorAction SilentlyContinue)
     $closedInstances = 0
     foreach ($instance in $oldInstances) {
@@ -45,44 +58,34 @@ if ($c) {
     }
 }
 
+& (Join-Path $PSScriptRoot 'Build-Codex.ps1')
+$nodeExecutable = Get-Command node -ErrorAction SilentlyContinue
+$npmExecutable = Get-Command npm -ErrorAction SilentlyContinue
+if ($null -eq $nodeExecutable -or $null -eq $npmExecutable) {
+    throw 'Node.js and npm are required to build the Settings frontend.'
+}
+Push-Location $projectDirectory
+try {
+    $workspaceNpmCache = Join-Path $workspaceRoot '.test-run\npm-cache'
+    & npm ci --prefer-offline --no-audit --no-fund --cache $workspaceNpmCache
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Settings frontend dependency install failed with exit code $LASTEXITCODE."
+    }
+    & npm run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Settings frontend build failed with exit code $LASTEXITCODE."
+    }
+}
+finally {
+    Pop-Location
+}
 $buildEnvironment = @{}
 foreach ($name in @('PATH', 'CARGO_HOME', 'RUSTUP_HOME', 'TEMP', 'TMP', 'LIB', 'INCLUDE', 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER', 'CARGO_TARGET_DIR')) {
     $buildEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 Push-Location $workspaceRoot
 try {
-    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-        $toolchainRoot = Join-Path $workspaceRoot '.test-run\toolchain'
-        $rustRoot = Join-Path $toolchainRoot 'rustup\toolchains\stable-x86_64-pc-windows-msvc'
-        $rustBin = Join-Path $rustRoot 'bin'
-        if (-not (Test-Path -LiteralPath (Join-Path $rustBin 'cargo.exe') -PathType Leaf)) {
-            throw 'Cargo was not found on PATH or in the workspace toolchain. Install Rust or add its cargo bin folder to PATH, then reopen PowerShell.'
-        }
-        $env:CARGO_HOME = Join-Path $toolchainRoot 'cargo'
-        $env:RUSTUP_HOME = Join-Path $toolchainRoot 'rustup'
-        $env:TEMP = Join-Path $toolchainRoot 'temp'
-        $env:TMP = $env:TEMP
-        [System.IO.Directory]::CreateDirectory($env:TEMP) | Out-Null
-        $env:PATH = "$rustBin;$env:PATH"
-
-        # The workspace toolchain uses the installed Visual C++ compiler and its local SDK.
-        $visualStudioRoot = Join-Path ${env:ProgramFiles} 'Microsoft Visual Studio'
-        $vcRoot = Get-ChildItem -Path (Join-Path $visualStudioRoot '*\*\VC\Tools\MSVC\*') -Directory -ErrorAction SilentlyContinue |
-            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin\Hostx64\x64\cl.exe') } |
-            Sort-Object Name -Descending | Select-Object -First 1
-        $sdkRoot = Join-Path $toolchainRoot 'sdk'
-        $sdkHeaders = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'microsoft.windows.sdk.cpp\c\Include') -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if (-not $vcRoot -or -not $sdkHeaders) {
-            throw 'The workspace Rust toolchain requires Visual C++ build tools and the workspace Windows SDK, but one is missing.'
-        }
-        $sdkBin = Join-Path $sdkRoot "microsoft.windows.sdk.cpp\c\bin\$($sdkHeaders.Name)\x64"
-        $env:PATH = "$($vcRoot.FullName)\bin\Hostx64\x64;$sdkBin;$env:PATH"
-        $env:LIB = "$($vcRoot.FullName)\lib\x64;$sdkRoot\microsoft.windows.sdk.cpp.x64\c\um\x64;$sdkRoot\microsoft.windows.sdk.cpp.x64\c\ucrt\x64;$env:LIB"
-        $env:INCLUDE = "$($vcRoot.FullName)\include;$($sdkHeaders.FullName)\ucrt;$($sdkHeaders.FullName)\shared;$($sdkHeaders.FullName)\um;$($sdkHeaders.FullName)\winrt;$env:INCLUDE"
-        $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = Join-Path $rustRoot 'lib\rustlib\x86_64-pc-windows-msvc\bin\rust-lld.exe'
-        Write-Host 'Using the workspace Rust toolchain.'
-    }
+    . (Join-Path $PSScriptRoot 'Rust-Toolchain.ps1')
     $env:CARGO_TARGET_DIR = Join-Path $projectDirectory 'target'
     & cargo build --locked --release --quiet --manifest-path $manifestPath
     if ($LASTEXITCODE -ne 0) {
@@ -114,6 +117,22 @@ catch [System.IO.IOException] {
 Write-Host "BlobUI Settings was built at $distributionExecutable"
 Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
 
+if ($b -and -not $s) {
+    $backgroundRequestPath = Join-Path $distributionDirectory '.blobui-background-next'
+    $backgroundRequest = Get-Item -LiteralPath $backgroundRequestPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $backgroundRequest -and
+        (($backgroundRequest.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The pending background request is a reparse point: $backgroundRequestPath"
+    }
+    if ($null -ne $backgroundRequest -and $backgroundRequest.PSIsContainer) {
+        throw "The pending background request is not a file: $backgroundRequestPath"
+    }
+    if ($null -eq $backgroundRequest) {
+        [System.IO.File]::WriteAllText($backgroundRequestPath, '')
+    }
+    Write-Host 'The next BlobUI Settings launch will start in the background.'
+}
+
 if ($Onboarding -and -not $s) {
     $onboardingRequestPath = Join-Path $distributionDirectory '.blobui-onboarding-next'
     $onboardingRequest = Get-Item -LiteralPath $onboardingRequestPath -Force -ErrorAction SilentlyContinue
@@ -130,11 +149,17 @@ if ($Onboarding -and -not $s) {
     Write-Host 'The next BlobUI Settings launch will open onboarding.'
 }
 
-if ($s) {
+if ($s -and $env:BLOBUI_BUILD_ONLY -ne '1') {
     $launchArguments = @{
         FilePath = $distributionExecutable
         WindowStyle = 'Normal'
     }
-    if ($Onboarding) { $launchArguments.ArgumentList = @('--onboarding') }
+    if ($b) { $launchArguments.WindowStyle = 'Hidden' }
+    $applicationArguments = @()
+    if ($Onboarding) { $applicationArguments += '--onboarding' }
+    if ($b) { $applicationArguments += '--background' }
+    if ($applicationArguments.Count -gt 0) {
+        $launchArguments.ArgumentList = $applicationArguments
+    }
     Start-Process @launchArguments | Out-Null
 }

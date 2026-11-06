@@ -28,7 +28,6 @@ The same articles are bundled in Settings under Help > Documentation for offline
   - [Calendar Colors](settings-app/ui/docs/calendar-colors.md)
   - [QoL Features](settings-app/ui/docs/text-effects-and-previews.md)
 - [API Guide](settings-app/ui/docs/api-guide.md)
-- [Experiment](settings-app/ui/docs/experiment.md)
   - [Settings UI](settings-app/ui/docs/settings-ui-refresh.md)
 - [Updating](settings-app/ui/docs/updating.md)
 
@@ -63,3 +62,11 @@ requirements. Third-party material retains its own license terms.
 Unless explicitly agreed otherwise, contributions submitted for inclusion in
 BlobUI must be licensed under these same terms. Contributors retain copyright
 in their contributions and must have permission to submit them.
+
+## Anyblob integration
+
+Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrations > Anyblob > Settings > Install to register its personal marketplace, then select Anyblob in the Codex Plugins Directory. Credentials are configured automatically when you enable Anyblob. Follow the [setup and permissions guide](codex-plugin/src/README.md).
+
+## Background development launches
+
+Build with `scripts/Build-App.ps1 -s -c -b` to launch Settings in the background after compilation. Without `-s`, `-b` queues background mode for the next launch without starting the app. The `--silent` spelling is also accepted. Add `-n` to show onboarding on the first foreground reveal. A normal second launch restores the existing window. A second launch with `--background` preserves its current visibility.

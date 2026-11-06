@@ -1,0 +1,10 @@
+interface:
+  display_name: "Configure Kanban calculations"
+  short_description: "Configure Kanban calculations through BlobUI"
+  default_prompt: "Use $configure-kanban-calculations to configure kanban calculations."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "anyblob"
+      description: "BlobUI configuration through the local Anyblob bridge"

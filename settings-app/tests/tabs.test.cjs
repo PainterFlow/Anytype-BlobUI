@@ -93,10 +93,10 @@ test('shared tabs animate their indicator and keep the last tab inside its horiz
 
 test('real settings tabs keep their width and open panels at the top across height changes', async () => {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-  const { pathToFileURL } = require('node:url');
+  const { loadSettings } = require('./frontend-fixture.cjs');
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ colorScheme: 'dark', reducedMotion: 'no-preference' });
     await page.addInitScript(() => {
       // A new browser with a mocked bridge cannot read or alter a native credential.
       window.__TAURI__ = { core: { invoke: async command => {
@@ -107,13 +107,30 @@ test('real settings tabs keep their width and open panels at the top across heig
         return {};
       } } };
     });
-    await page.goto(pathToFileURL(path.join(ui, 'index.html')).href);
+    await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
+    await page.locator('#advanced-nav').click();
+    const movement = await page.locator('#advanced-app-tab').evaluate(async tab => {
+      const strip = tab.parentElement;
+      const position = () => new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
+      const start = position();
+      tab.click();
+      // Let the resize observer for the new selection deliver its first measurement.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { start, current: position(), target: tab.offsetLeft };
+    });
+    assert.ok(movement.target > movement.start && movement.current < movement.target,
+      'The React tab indicator keeps animating after the resize observer runs');
+    await page.waitForFunction(target => {
+      const strip = document.getElementById('advanced-tabs');
+      const current = new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
+      return Math.abs(current - target) < 1;
+    }, movement.target);
     for (const size of [{ width: 800, height: 650 }, { width: 920, height: 740 }, { width: 960, height: 740 }]) {
       await page.setViewportSize(size);
       for (const [nav, ids] of [
         ['preferences', ['preference-tab-0', 'preference-tab-4', 'preference-tab-0', 'preference-tab-4']],
-        ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-experiments-tab', 'advanced-app-tab', 'advanced-experiments-tab', 'advanced-api-tab']],
+        ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-experiments-tab', 'advanced-app-tab', 'advanced-api-tab']],
       ]) {
         await page.locator(`#${nav}-nav`).click();
         const states = [];

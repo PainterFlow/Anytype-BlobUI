@@ -328,15 +328,24 @@
   BlobUI.Markdown = Object.freeze({
     parseImageManifest,
     parseMediaManifest,
-    mount(container, markdown, options = {}) {
+    attachMedia(container, options = {}) {
+      if (!container?.querySelectorAll) return;
       BlobUI.VideoPlayer?.destroyTree(container);
       BlobUI.MarkdownImageViewer?.destroyTree(container);
-      container.innerHTML = this.render(markdown, options);
       for (const slot of container.querySelectorAll("[data-blobui-video]")) {
         const media = options.videos?.[slot.getAttribute("data-blobui-video")];
         if (media && BlobUI.VideoPlayer) BlobUI.VideoPlayer.attach(slot, media);
       }
       BlobUI.MarkdownImageViewer?.mount(container);
+    },
+    attachImages(container) {
+      if (container?.querySelectorAll) BlobUI.MarkdownImageViewer?.mount(container);
+    },
+    mount(container, markdown, options = {}) {
+      BlobUI.VideoPlayer?.destroyTree(container);
+      BlobUI.MarkdownImageViewer?.destroyTree(container);
+      container.innerHTML = this.render(markdown, options);
+      this.attachMedia(container, options);
     },
     render(markdown, options = {}) {
       const images = normalizedImages(options.images);

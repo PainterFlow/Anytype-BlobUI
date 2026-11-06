@@ -1,5 +1,11 @@
-(function () {
-  "use strict";
+export function startSettingsApp({ view, createNativeService, tauri = window.__TAURI__ }) {
+  const removeListeners = [];
+  let disposed = false;
+  function listen(target, type, handler, options) {
+    if (!target) return;
+    target.addEventListener(type, handler, options);
+    removeListeners.push(() => target.removeEventListener?.(type, handler, options));
+  }
 
   // Retained only to read and save colors from earlier settings versions.
   const legacyAccents = [
@@ -22,7 +28,6 @@
   const hueInput = el("accent-hue");
   const saturationInput = el("accent-saturation");
   const brightnessInput = el("accent-brightness");
-  const includeSelections = el("include-selections");
   const nativeAccent = el("native-accent");
   const swatch = el("accent-swatch");
   const accentValue = el("accent-value");
@@ -32,39 +37,17 @@
   const chooseBannerImage = el("choose-banner-image");
   const resetBannerImage = el("reset-banner-image");
   const spacePreviewImage = el("space-preview-image");
-  const reducedMotion = el("reduced-motion");
-  const tabHoverEffect = el("tab-hover-effect");
-  const linkHoverEffect = el("link-hover-effect");
-  const objectMentionHoverEffect = el("object-mention-hover-effect");
   const kanbanViewStyle = el("kanban-view-style");
-  const kanbanSelect = el("kanban-select");
   const calendarColorsEnabled = el("calendar-colors-enabled");
   let calendarApiAvailability = "checking";
   let calendarApiRequest = 0;
-  const collapsedCategories = el("collapsed-categories");
-  const preferencesNav = el("preferences-nav");
-  const accessibilityNav = el("accessibility-nav");
-  const advancedNav = el("advanced-nav");
-  const preferencesPage = el("preferences-page");
-  const accessibilityPage = el("accessibility-page");
   const advancedPage = el("advanced-page");
-  const kanbanPicker = window.BlobUI.Components.Picker({ root: kanbanSelect });
-  function closeKanbanStyleMenu(restoreFocus = false) { kanbanPicker.close(restoreFocus); }
-  function syncKanbanStyleSelection(value) {
-    const selected = ["default", "balanced", "compact"].includes(value) ? value : "default";
-    kanbanPicker.setValue(selected);
-    return selected;
+  function selectAdvancedTab(index) {
+    if (index !== 0) resetAdvancedVisibility();
+    view.update({ advancedTab: index });
   }
-  const advancedTabs = [el("advanced-api-tab"), el("advanced-app-tab"), el("advanced-experiments-tab")];
-  const advancedTabController = window.BlobUI.Components.Tabs({
-    container: el("advanced-tabs"),
-    buttons: advancedTabs,
-    panels: [el("advanced-api-panel"), el("advanced-app-panel"), el("advanced-experiments-panel")],
-    onSelect(index) { if (index !== 0) resetAdvancedVisibility(); },
-  });
-  function selectAdvancedTab(index) { advancedTabController.select(index); }
   const installDirectory = el("install-directory");
-  const startOnLogin = el("start-on-login");
+
   const autoplayVideos = el("autoplay-videos");
   function applyAutoplay(value) {
     if (autoplayVideos) autoplayVideos.checked = value !== false;
@@ -85,21 +68,20 @@
   const apiKeyRemovalClose = el("api-key-removal-close");
   const apiKeyRemovalUndo = el("api-key-removal-undo");
   const apiKeyRemovalSave = el("api-key-removal-save");
-  const apiKeyRemovalModal = window.BlobUI.Components.Modal({
+  const apiKeyRemovalModal = window.BlobUI.createModalController({
     backdrop: apiKeyRemovalBackdrop,
     dialog: el("api-key-removal-dialog"),
     initialFocus: apiKeyRemovalClose,
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const discardConfirmationModal = window.BlobUI.Components.Modal({
+  const discardConfirmationModal = window.BlobUI.createModalController({
     backdrop: el("discard-confirmation-backdrop"),
     dialog: el("discard-confirmation-dialog"),
     initialFocus: el("discard-confirmation-close"),
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const releaseNotesContent = el("release-notes-content");
   const releaseNotesPrevious = el("release-notes-previous");
   const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
@@ -115,14 +97,14 @@
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
   let releaseNotesFailed = false;
-  const releaseNotesModal = window.BlobUI.Components.Modal({
+  const releaseNotesModal = window.BlobUI.createModalController({
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
     initialFocus: el("release-notes-dialog"),
     fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
-      window.BlobUI.VideoPlayer?.destroyTree(releaseNotesContent);
+      if (!disposed) view.update({ releaseNotesMedia: null });
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
       releaseNotesCurrentVersion = null;
@@ -145,12 +127,12 @@
       });
     },
   });
-  const helpErrorModal = window.BlobUI.Components.Modal({
+  const helpErrorModal = window.BlobUI.createModalController({
     backdrop: el("help-error-backdrop"), dialog: el("help-error-dialog"),
     initialFocus: el("help-error-close"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  const keybindModal = window.BlobUI.Components.Modal({
+  const keybindModal = window.BlobUI.createModalController({
     backdrop: el("keybinds-backdrop"), dialog: el("keybinds-dialog"),
     initialFocus: () => el("keybind-list").querySelector("button"), fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
@@ -168,7 +150,6 @@
   const pageTitle = el("page-title");
   const saveButton = el("save-button");
   const discardButton = el("discard-button");
-  const saveLabel = saveButton.querySelector(".save-label");
   const statusMessage = el("status-message");
   const logButton = el("log-button");
   const logPopup = el("log-popup");
@@ -176,6 +157,17 @@
   const pageContent = document.querySelector(".page-content");
   const logs = [];
   const root = document.documentElement;
+  const toggleSettings = {
+    "include-selections": "includeSelections",
+    "reduced-motion": "reducedMotion",
+    "tab-hover-effect": "tabHoverEffect",
+    "link-hover-effect": "linkHoverEffect",
+    "object-mention-hover-effect": "objectMentionHoverEffect",
+    "collapsed-categories": "collapsedCategories",
+    "calendar-colors-enabled": "calendarColorsEnabled",
+  };
+
+  const presentSettingsFields = view.updateSettingsFields;
 
   const visibilityFields = Object.create(null);
 
@@ -191,7 +183,7 @@
   }
 
   function bindVisibilityField(inputId, buttonId, fieldId, showLabel, hideLabel, defaultVisible, hooks = {}) {
-    visibilityFields[inputId] = window.BlobUI.Components.Visibility({
+    visibilityFields[inputId] = window.VisibilityField.bind({
       input: el(inputId),
       button: el(buttonId),
       field: el(fieldId),
@@ -222,6 +214,8 @@
   let saveBusy = false;
   let hasSavedApiKey = false;
   let advancedKeyEdited = false;
+  let editedApiKey = "";
+  let connectionDraft = { ip: "", port: "" };
   let initialApiDraft = { ip: "", port: "" };
   let currentApiIp = "";
   let currentApiPort = 31009;
@@ -248,6 +242,67 @@
     restore: restoreEditSnapshot,
     equals: editSnapshotsEqual,
   });
+  let savedRefreshEpoch = 0;
+  const refreshBlocked = () => saveBusy || blobFolderBusy || blobRestoreReloadFailed || bannerReadPending || isInstallingUpdate();
+  const savedRefresh = window.BlobUI.SavedState.createRefreshController({
+    isBlocked: refreshBlocked,
+    refresh: refreshSavedSnapshot,
+    onError: error => addLog("Saved settings reload failed. " + String(error.message || error), "error"),
+  });
+  function requestSavedRefresh() {
+    void savedRefresh.request().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error"));
+  }
+  function refreshSavedState() { return savedRefresh.run(); }
+  async function refreshSavedSnapshot({ generation, isCurrent }) {
+    const epoch = savedRefreshEpoch;
+    const directory = initialUpdaterSettings?.installDirectory;
+      const { app, updater, formulas, calendar } = await invoke("get_saved_state_snapshot");
+      if (!isCurrent() || generation !== savedRefresh.generation || epoch !== savedRefreshEpoch || directory !== initialUpdaterSettings?.installDirectory) { void savedRefresh.request(); return; }
+      if (refreshBlocked()) { void savedRefresh.request(); return; }
+      if (!app?.settings) throw Error("Saved settings could not be read.");
+      window.BlobUI.FormulaPage.validateSaved(formulas);
+      window.BlobUI.CalendarPage.validateSaved(calendar);
+      const UI = window.BlobUI, base = editSession.getBaseline(), local = readEditSnapshot();
+      const warnings = new Set(), warn = path => warnings.add(path);
+      const connection = {
+        inputIp: app.apiIp === "127.0.0.1" ? "" : String(app.apiIp || ""),
+        inputPort: !app.apiPort || app.apiPort === 31009 ? "" : String(app.apiPort),
+        apiIp: String(app.apiIp || ""), apiPort: app.apiPort || 31009,
+        hasSavedApiKey: app.hasSavedApiKey === true, keyChanged: false,
+      };
+      const calendarRules = UI.SavedState.copy(calendar); delete calendarRules.revision;
+      const remote = { settings: normalizedSettings(app.settings), updaterSettings: updater ? copyUpdaterSettings(updater) : base.updaterSettings,
+        connection, formulas: formulas.configuration, calendarRules };
+      const merged = {};
+      for (const [section, label] of Object.entries({ settings: "Settings", updaterSettings: "App settings", connection: "Connection", formulas: "Calculations", calendarRules: "Calendar" })) {
+        merged[section] = UI.SavedState.merge(base[section], local[section], remote[section], warn, label);
+      }
+      // Credentials are never included in snapshots or warnings.
+      const keyValue = editedApiKey, keyEdited = advancedKeyEdited;
+      if (!UI.SavedState.equal(local.settings, merged.settings)) assignDraftToForm(merged.settings);
+      initialDraft = remote.settings;
+      if (!UI.SavedState.equal(local.updaterSettings, merged.updaterSettings)) assignUpdaterSettings(merged.updaterSettings);
+      initialUpdaterSettings = remote.updaterSettings;
+      if (updater) mergeUpdaterState(updater);
+      if (!UI.SavedState.equal(local.connection, merged.connection)) {
+        assignAdvancedConnection(app);
+        assignConnectionInputs(merged.connection);
+        if (merged.connection.keyChanged) {
+          editedApiKey = keyValue;
+          advancedApiKey.value = keyValue;
+          advancedKeyEdited = keyEdited;
+        }
+      }
+      initialApiDraft = { ip: connection.inputIp, port: connection.inputPort };
+      UI.FormulaPage.reconcile(merged.formulas, remote.formulas, warn);
+      UI.CalendarPage.reconcile(merged.calendarRules, remote.calendarRules);
+      UI.FormulaPage.acceptSaved(formulas); UI.CalendarPage.acceptSaved(calendar);
+      editSession.commit(remote);
+      window.appReady = !!app.ready;
+      defaultBannerPreview = String(app.defaultBannerPreview || "");
+      for (const path of warnings) addLog("Saved settings replaced a conflicting local edit in " + path + ".", "warning");
+      updateSaveButton();
+  }
 
   window.BlobUI.discardChanges = function discardChanges() {
     if (saveBusy || isInstallingUpdate() || !draft) return;
@@ -260,7 +315,6 @@
     scrollbars.push(controller);
     return controller.update;
   }
-  window.addEventListener("unload", () => scrollbars.forEach(controller => controller.destroy()));
 
   setupScrollbar(el("sidebar-nav"), ".nav-item");
   setupScrollbar(el("keybinds-content"), "#keybind-list");
@@ -269,19 +323,18 @@
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
   const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
   const updateLogsScrollbar = setupScrollbar(logEntries, ".log-entry");
-  window.addEventListener("resize", () => {
+  listen(window, "resize", () => {
     updatePageScrollbar();
     updateOnboardingScrollbar();
     updateConnectionScrollbar();
   });
 
-  function invoke(name, args) {
-    const api = window.__TAURI__ && window.__TAURI__.core;
-    if (!api || typeof api.invoke !== "function") {
-      return Promise.reject(new Error("The settings app bridge is unavailable. Launch BlobUI Settings using blobui-settings.exe."));
-    }
-    return api.invoke(name, args || {});
-  }
+  const nativeService = createNativeService({
+    tauri,
+    onMetadataError: message => addLog(message, "error"),
+  });
+  const invoke = nativeService.invoke;
+  const metadataPending = nativeService.metadataPending;
 
   function themeSwatch(preset) {
     if (preset.swatch === "native") return "#377aff";
@@ -360,7 +413,7 @@
     el("color-cursor").style.left = hsv.s + "%";
     el("color-cursor").style.top = (100 - hsv.v) + "%";
     swatch.style.background = value;
-    nativeAccent.checked = native;
+    presentSettingsFields({ "native-accent": native });
     el("color-editor").classList.toggle("native-active", native);
     setAccentPreview(value);
   }
@@ -371,8 +424,7 @@
     draft.accentMode = "custom";
     draft.accentPreset = "";
     draft.accentColor = value;
-    accentValue.value = draft.accentColor;
-    nativeAccent.checked = false;
+    presentSettingsFields({ "accent-value": draft.accentColor });
     accentValue.classList.toggle("invalid", value === "#ffffff");
     el("accent-error").textContent = value === "#ffffff" ? "Pure white is reserved. Choose a slightly darker color." : "";
     renderPicker(false);
@@ -463,13 +515,13 @@
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.settingsV21Enabled === right.settingsV21Enabled;
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
     return !!left && !!right
       && left.installDirectory === right.installDirectory
-      && left.startOnLogin === right.startOnLogin
+      && left.startupMode === right.startupMode
       && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled;
@@ -482,7 +534,7 @@
       : directory.startsWith("\\\\?\\") ? directory.slice(4) : directory;
     return {
       installDirectory: displayDirectory,
-      startOnLogin: !!(settings && settings.startOnLogin),
+      startupMode: ["off", "foreground", "background"].includes(settings?.startupMode) ? settings.startupMode : settings?.startOnLogin ? "foreground" : "off",
       autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
@@ -493,7 +545,7 @@
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
-    startOnLogin.checked = updaterDraft.startOnLogin;
+    view.update({ startupMode: updaterDraft.startupMode });
     applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -580,7 +632,7 @@
       if (!updaterSettingsLoaded) {
         assignUpdaterSettings({
           installDirectory: installDirectory.value || "",
-          startOnLogin: false,
+          startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
         });
@@ -639,8 +691,8 @@
         ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })
         : await invoke("get_release_note_video", args);
     }));
-    if (window.BlobUI.Markdown.mount) window.BlobUI.Markdown.mount(releaseNotesContent, notes.markdown, { images, videos });
-    else releaseNotesContent.innerHTML = window.BlobUI.Markdown.render(notes.markdown, { images });
+    if (disposed) return;
+    view.update({ releaseNotesMedia: { markdown: notes.markdown, images, videos } });
     el("release-notes-image-warning").hidden = [...results, ...videoResults].every((result) => result.status === "fulfilled");
     el("release-notes-dialog").scrollTop = 0;
     updateReleaseNotesScrollbar();
@@ -684,7 +736,7 @@
     updateReleaseNotesNavigation();
   }
 
-  releaseNotesPrevious.addEventListener("click", async () => {
+  listen(releaseNotesPrevious, "click", async () => {
     if (!previousReleaseNotes || releaseNotesPrevious.disabled || !displayedReleaseNotes || releaseNotesNavigationBusy) return;
     const older = previousReleaseNotes;
     const newer = displayedReleaseNotes;
@@ -703,7 +755,7 @@
     }
   });
 
-  releaseNotesAfter.addEventListener("click", async () => {
+  listen(releaseNotesAfter, "click", async () => {
     if (!newerReleaseNotes.length || releaseNotesAfter.disabled || releaseNotesNavigationBusy) return;
     const newer = newerReleaseNotes.pop();
     const current = displayedReleaseNotes;
@@ -721,11 +773,11 @@
     }
   });
 
-  window.addEventListener("offline", () => {
+  listen(window, "offline", () => {
     releaseNotesHistoryRequest += 1;
     updateReleaseNotesNavigation();
   });
-  window.addEventListener("online", () => {
+  listen(window, "online", () => {
     if (releaseNotesModal.isOpen()) prefetchPreviousReleaseNotes();
     updateReleaseNotesNavigation();
   });
@@ -873,20 +925,15 @@
   }
 
   function addLog(message, kind) {
+    if (disposed) return;
     const level = kind === "error" || kind === "warning" ? kind : "info";
     const entry = { message: String(message), level, time: new Date().toLocaleTimeString() };
     logs.push(entry);
-    const row = document.createElement("p");
-    row.className = "log-entry " + level;
-    row.textContent = formatLog(entry);
-    logEntries.appendChild(row);
-    updateLogsScrollbar();
-    logEntries.scrollTop = logEntries.scrollHeight;
     const severity = logs.some((item) => item.level === "error") ? "error"
       : logs.some((item) => item.level === "warning") ? "warning" : "info";
-    logButton.dataset.severity = severity;
-    logButton.hidden = logs.length === 0;
-    el("log-label").textContent = severity === "error" ? "Errors and logs" : severity === "warning" ? "Warnings and logs" : "Logs";
+    view.update({ logRows: logs.map(item => ({ level: item.level, text: formatLog(item) })), logSeverity: severity });
+    updateLogsScrollbar();
+    logEntries.scrollTop = logEntries.scrollHeight;
   }
 
   function formatLog(entry) {
@@ -902,6 +949,7 @@
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
+    ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
@@ -937,41 +985,11 @@
     }
   }
   function renderShortcutBindings() {
-    const list = el("keybind-list");
-    window.BlobUI.Components.destroyTree(list);
-    list.replaceChildren();
-    shortcutActions.forEach(([action, label]) => {
-      const binding = shortcutBindings.find((item) => item.action === action);
-      const row = document.createElement("div");
-      row.className = "keybind-row";
-      const name = document.createElement("span");
-      name.className = "keybind-label";
-      name.id = `keybind-label-${action}`;
-      name.textContent = label;
-      const button = window.BlobUI.Components.Button({ onClick: () => beginShortcutCapture(action) }).element;
-      button.className = "keybind-button";
-      button.type = "button";
-      button.dataset.shortcutAction = action;
-      button.setAttribute("aria-labelledby", `${name.id} keybind-button-${action}`);
-      button.id = `keybind-button-${action}`;
-      button.setAttribute("aria-pressed", String(shortcutCaptureAction === action));
-      if (shortcutCaptureAction === action || !binding) {
-        button.textContent = shortcutCaptureAction === action ? "Press a shortcut…" : "Unavailable";
-      } else {
-        const shortcut = formatShortcut(binding);
-        const symbols = { Shift: "⇧", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" };
-        button.setAttribute("aria-label", shortcut);
-        shortcut.split("+").forEach((key) => {
-          const keycap = document.createElement("kbd");
-          keycap.className = "keybind-keycap";
-          keycap.setAttribute("aria-hidden", "true");
-          keycap.textContent = symbols[key] || key;
-          button.append(keycap);
-        });
-      }
-      row.append(name, button);
-      list.append(row);
-    });
+    view.update({ shortcutRows: shortcutActions.map(([action, label, fixedBinding]) => {
+      const binding = fixedBinding || shortcutBindings.find(item => item.action === action);
+      return { action, label, fixed: Boolean(fixedBinding), capturing: shortcutCaptureAction === action,
+        shortcut: binding ? formatShortcut(binding) : "" };
+    }) });
   }
   async function beginShortcutCapture(action) {
     shortcutCaptureAction = action;
@@ -1037,27 +1055,28 @@
     renderShortcutBindings();
     el("keybind-list").querySelector(`[data-shortcut-action="${action}"]`).focus();
   }
-  document.addEventListener("keydown", finishShortcutCapture, true);
+  listen(document, "keydown", finishShortcutCapture, true);
 
   function connectionHasChanges() {
-    const keyChanged = hasSavedApiKey ? advancedKeyEdited : advancedApiKey.value.trim() !== "";
-    return advancedApiIp.value.trim() !== initialApiDraft.ip
-      || advancedApiPort.value.trim() !== initialApiDraft.port
+    const keyChanged = hasSavedApiKey ? advancedKeyEdited : editedApiKey.trim() !== "";
+    return connectionDraft.ip.trim() !== initialApiDraft.ip
+      || connectionDraft.port.trim() !== initialApiDraft.port
       || keyChanged;
   }
 
   function readEditSnapshot() {
     return {
       formulas: window.BlobUI.FormulaPage.read(),
+      calendarRules: window.BlobUI.CalendarPage?.read(),
       settings: draft ? { ...draft } : null,
       updaterSettings: updaterDraft ? { ...updaterDraft } : null,
       connection: {
-        inputIp: advancedApiIp.value.trim(),
-        inputPort: advancedApiPort.value.trim(),
+        inputIp: connectionDraft.ip.trim(),
+        inputPort: connectionDraft.port.trim(),
         apiIp: currentApiIp,
         apiPort: currentApiPort,
         hasSavedApiKey,
-        keyChanged: hasSavedApiKey ? advancedKeyEdited : advancedApiKey.value.trim() !== "",
+        keyChanged: hasSavedApiKey ? advancedKeyEdited : editedApiKey.trim() !== "",
       },
     };
   }
@@ -1075,6 +1094,7 @@
 
   function editSnapshotsEqual(left, right) {
     if (!left || !right || !settingsEqual(left.settings, right.settings)) return false;
+    if (JSON.stringify(left.calendarRules) !== JSON.stringify(right.calendarRules)) return false;
     if (JSON.stringify(left.formulas) !== JSON.stringify(right.formulas)) return false;
     if (left.updaterSettings || right.updaterSettings) {
       if (!updaterSettingsEqual(left.updaterSettings, right.updaterSettings)) return false;
@@ -1101,13 +1121,14 @@
   function restoreEditSnapshot(snapshot) {
     if (!snapshot || !snapshot.settings || !snapshot.connection) return;
     window.BlobUI.FormulaPage.restore(snapshot.formulas);
+    window.BlobUI.CalendarPage?.restore(snapshot.calendarRules);
 
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
     if (snapshot.updaterSettings) {
       updaterDraft = { ...snapshot.updaterSettings };
       installDirectory.value = updaterDraft.installDirectory;
-      startOnLogin.checked = updaterDraft.startOnLogin;
+      view.update({ startupMode: updaterDraft.startupMode });
       applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -1123,11 +1144,11 @@
     currentApiPort = Number(connection.apiPort) || 31009;
     hasSavedApiKey = connection.hasSavedApiKey === true;
     advancedKeyEdited = false;
+    editedApiKey = "";
     advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
     advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
-    advancedApiIp.value = connection.inputIp;
-    advancedApiPort.value = connection.inputPort;
-    initialApiDraft = { ip: connection.inputIp, port: connection.inputPort };
+    assignConnectionInputs(connection);
+    initialApiDraft = { ...connectionDraft };
     el("advanced-api-key-hint").textContent = hasSavedApiKey
       ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
       : "Enter a new read-only Anytype API v2 key.";
@@ -1137,17 +1158,26 @@
     if (window.appReady) setStatus("No unsaved changes.", "info", false);
   }
 
+  function assignConnectionInputs({ inputIp, inputPort }) {
+    connectionDraft = { ip: inputIp, port: inputPort };
+    advancedApiIp.value = inputIp;
+    advancedApiPort.value = inputPort;
+  }
+
   function assignAdvancedConnection(state) {
     currentApiIp = String(state.apiIp || "").trim();
     currentApiPort = Number(state.apiPort) || 31009;
     hasSavedApiKey = state.hasSavedApiKey === true;
     advancedKeyEdited = false;
+    editedApiKey = "";
     advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
     advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
-    advancedApiIp.value = currentApiIp === "127.0.0.1" ? "" : currentApiIp;
-    advancedApiPort.value = currentApiPort === 31009 ? "" : String(currentApiPort);
+    assignConnectionInputs({
+      inputIp: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
+      inputPort: currentApiPort === 31009 ? "" : String(currentApiPort),
+    });
     resetAdvancedVisibility();
-    initialApiDraft = { ip: advancedApiIp.value.trim(), port: advancedApiPort.value.trim() };
+    initialApiDraft = { ...connectionDraft };
     el("advanced-api-key-hint").textContent = hasSavedApiKey
       ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
       : "Enter a new read-only Anytype API v2 key.";
@@ -1159,26 +1189,28 @@
   }
 
   function updateSaveButton() {
+    if (savedRefresh.queued && !savedRefresh.pending && !refreshBlocked()) queueMicrotask(requestSavedRefresh);
     const dirty = editSession.isDirty();
     const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
-    if (settingsLocked || !draft) closeKanbanStyleMenu();
-    saveButton.hidden = !draft || !dirty;
-    saveButton.disabled = settingsLocked || bannerReadPending || !draft || (!window.appReady && !prototypeDirty) || !dirty;
-    discardButton.hidden = !draft || !dirty;
-    discardButton.disabled = settingsLocked || bannerReadPending || !draft || !dirty;
-    document.querySelectorAll("input").forEach((control) => {
+    const saveVisible = Boolean(draft && dirty);
+    const discardDisabled = settingsLocked || bannerReadPending || !saveVisible;
+    const saveDisabled = discardDisabled || (!window.appReady && !prototypeDirty);
+    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady, backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady, kanbanStyleDisabled: settingsLocked || !draft });
+    document.querySelectorAll("#preferences-page input, #accessibility-page input, #advanced-page input, #onboarding input").forEach((control) => {
+      if (control.id === "start-on-login") return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
-    el("settings-v21-enabled").disabled = settingsLocked || !draft;
+    window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
-    kanbanViewStyle.disabled = settingsLocked || !draft;
     if ((settingsLocked || !draft) && document.activeElement === kanbanViewStyle) el("page-title").focus();
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, startOnLogin, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
@@ -1189,8 +1221,6 @@
       .forEach((id) => { el(id).disabled = settingsLocked; });
     ["onboarding-welcome", "onboarding-no-api-option", "onboarding-api-option", "connection-key-visibility", "connection-port-visibility", "connection-back", "connection-confirm"]
       .forEach((id) => { el(id).disabled = isInstallingUpdate() || connectionBusy; });
-    saveButton.classList.toggle("busy", saveBusy);
-    saveLabel.textContent = saveBusy ? "Saving…" : "Save changes";
     apiKeyRemovalSave.disabled = settingsLocked;
     apiKeyRemovalUndo.disabled = settingsLocked;
     apiKeyRemovalClose.disabled = settingsLocked;
@@ -1200,8 +1230,8 @@
   }
 
   function applyFontFamilies() {
-    const font = fontFamily.value.trim();
-    const codeFont = codeFontFamily.value.trim();
+    const font = draft.fontFamily;
+    const codeFont = draft.codeFontFamily;
     const validFamily = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
     const interfaceFamily = validFamily.test(font) ? font : "Inter";
     const codeFamily = validFamily.test(codeFont) ? codeFont : "Consolas";
@@ -1209,9 +1239,10 @@
     root.style.setProperty("--font-code", '"' + codeFamily + '", "Cascadia Code", monospace');
   }
 
-  function assignDraftToForm(settings) {
+  function normalizedSettings(settings) {
     const accent = normalizeForUi(settings);
-    draft = {
+    return {
+      codexIntegration: window.BlobUI.CodexPage.normalize(settings.codexIntegration),
       fontFamily: String(settings.fontFamily || "Inter"),
       codeFontFamily: String(settings.codeFontFamily || "Consolas"),
       accentColor: accent.accentColor,
@@ -1226,24 +1257,24 @@
       kanbanViewStyle: ["default", "balanced", "compact"].includes(settings.kanbanViewStyle) ? settings.kanbanViewStyle : "default",
       collapsedCategories: settings.collapsedCategories === true,
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
-      settingsV21Enabled: settings.settingsV21Enabled === true,
+      sidebarResizeMode: "standard",
+      backgroundExperiment: ["normal", "autostart-background"].includes(settings.backgroundExperiment) ? settings.backgroundExperiment : "disabled",
     };
-    fontFamily.value = draft.fontFamily;
-    codeFontFamily.value = draft.codeFontFamily;
-    accentValue.value = draft.accentColor;
-    reducedMotion.checked = draft.reducedMotion;
+  }
+
+  function assignDraftToForm(settings) {
+    draft = normalizedSettings(settings);
+    window.BlobUI.CodexPage?.render();
+    presentSettingsFields({
+      "font-family": draft.fontFamily,
+      "code-font-family": draft.codeFontFamily,
+      "accent-value": draft.accentColor,
+      ...Object.fromEntries(Object.entries(toggleSettings).map(([id, key]) => [id, draft[key]])),
+    });
     root.dataset.reducedMotion = String(draft.reducedMotion);
-    includeSelections.checked = draft.includeSelections;
     root.dataset.includeSelections = String(draft.includeSelections);
-    tabHoverEffect.checked = draft.tabHoverEffect;
-    linkHoverEffect.checked = draft.linkHoverEffect;
-    objectMentionHoverEffect.checked = draft.objectMentionHoverEffect;
-    closeKanbanStyleMenu();
-    syncKanbanStyleSelection(draft.kanbanViewStyle);
-    collapsedCategories.checked = draft.collapsedCategories;
-    calendarColorsEnabled.checked = draft.calendarColorsEnabled;
-    el("settings-v21-enabled").checked = draft.settingsV21Enabled;
-    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
+    view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
+    window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
     applyFontFamilies();
     syncBannerPreview();
@@ -1255,6 +1286,7 @@
     const request = ++calendarApiRequest;
     calendarApiAvailability = "checking";
     const help = el("calendar-colors-help");
+    help.hidden = false;
     help.textContent = "Checking the Anytype API connection...";
     updateSaveButton();
     try {
@@ -1266,14 +1298,15 @@
       calendarApiAvailability = "unavailable";
     }
     help.textContent = calendarApiAvailability === "available"
-      ? "Press Alt+R to rebuild, then Ctrl+R in Anytype to apply calendar color changes."
+      ? ""
       : calendarApiAvailability === "missing"
         ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
         : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
+    help.hidden = calendarApiAvailability === "available";
     updateSaveButton();
   }
 
-  async function loadState() {
+  async function loadState({ refreshMetadata = false } = {}) {
     let state = null;
     let stateError = null;
     try {
@@ -1292,7 +1325,9 @@
     }
 
     await loadUpdaterState();
-    await window.BlobUI.FormulaPage.load(invoke);
+    const refreshOnStart = refreshMetadata && state?.ready && state?.hasSavedApiKey;
+    await window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
+    await window.BlobUI.CalendarPage?.load(invoke);
     if (!stateError) editSession.commit();
     if (stateError) {
       setStatus(stateError.message || String(stateError), "error");
@@ -1314,10 +1349,13 @@
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
+    if (refreshOnStart) await window.BlobUI.AppReload.run({ checkUpdates: false });
     if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
+    savedRefreshEpoch++;
+    savedRefresh.invalidate();
     let state;
     try {
       state = await invoke("get_app_state");
@@ -1335,6 +1373,11 @@
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
     await loadUpdaterState();
+    if (window.BlobUI.CalendarPage && !await window.BlobUI.CalendarPage.load(invoke)) {
+      blobRestoreReloadFailed = true;
+      updateSaveButton();
+      throw new Error("The imported calendar rules could not be reloaded. Settings are locked to protect the restored folder.");
+    }
     if (reloadFormulas) {
       const loaded = await window.BlobUI.FormulaPage.load(invoke, { discover: false });
       if (!loaded) {
@@ -1452,39 +1495,51 @@
   }
 
   function showSettingsPage(page) {
-    closeKanbanStyleMenu();
     const isFormulas = page === "formulas";
+    const isCalendarColors = page === "calendar-colors";
+    const isCodex = page === "codex";
+    const isBrowser = isFormulas || isCalendarColors || isCodex;
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    if (!isAccessibility && !isAdvanced && !isFormulas && draft) void refreshCalendarApiAvailability();
-    preferencesPage.hidden = isAccessibility || isAdvanced || isFormulas;
-    el("formulas-page").hidden = !isFormulas;
-    el("formulas-nav").classList.toggle("active", isFormulas);
-    el("formulas-nav").setAttribute("aria-current", isFormulas ? "page" : "false");
-    accessibilityPage.hidden = !isAccessibility;
-    advancedPage.hidden = !isAdvanced;
-    if (isAdvanced) advancedTabController.refresh();
-    else if (!isAccessibility && !isFormulas) window.BlobUI.SettingsV21?.refreshTabs();
-    pageTitle.textContent = isFormulas ? "Kanban View Formulas" : isAccessibility ? "Accessibility" : isAdvanced ? "Advanced Settings" : "Preferences";
-    preferencesNav.classList.toggle("active", !isAccessibility && !isAdvanced && !isFormulas);
-    accessibilityNav.classList.toggle("active", isAccessibility);
-    advancedNav.classList.toggle("active", isAdvanced);
-    preferencesNav.setAttribute("aria-current", !isAccessibility && !isAdvanced && !isFormulas ? "page" : "false");
-    accessibilityNav.setAttribute("aria-current", isAccessibility ? "page" : "false");
-    advancedNav.setAttribute("aria-current", isAdvanced ? "page" : "false");
+    if (!isAccessibility && !isAdvanced && !isBrowser && draft) void refreshCalendarApiAvailability();
+    view.update({ page });
+    window.BlobUI.CodexPage?.show(isCodex);
     pageContent.scrollTop = 0;
     updatePageScrollbar();
+    window.BlobUI.CalendarPage?.show?.(isCalendarColors);
     if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
-  preferencesNav.addEventListener("click", () => showSettingsPage("preferences"));
-  accessibilityNav.addEventListener("click", () => showSettingsPage("accessibility"));
-  advancedNav.addEventListener("click", () => showSettingsPage("advanced"));
   showSettingsPage("preferences");
+
+  function openSection(page, index) {
+    showSettingsPage(page);
+    let panelId;
+    if (page === "preferences") {
+      view.update({ preferenceTab: index });
+      panelId = "preference-panel-" + index;
+    } else if (page === "codex") {
+      window.BlobUI.CodexPage.select(index);
+      panelId = "codex-panel-" + index;
+    } else {
+      selectAdvancedTab(index);
+      panelId = ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
+    }
+    const heading = el(panelId)?.querySelector("h2");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
+  }
+
+  function openFeature(page) {
+    showSettingsPage(page);
+    pageTitle.focus({ preventScroll: true });
+  }
 
   async function refreshTheme() {
     try {
@@ -1522,6 +1577,7 @@
   }
 
   function saveStatus(result, connectionOnly) {
+    (result.info || []).forEach(message => addLog(message, "info"));
     if (result.calendarStatus === "off") {
       setStatus("Saved. Press Ctrl+R in Anytype to apply. Calendar Colors are off.");
       return;
@@ -1544,11 +1600,14 @@
   function acceptAdvancedConnectionDraft(connection) {
     hasSavedApiKey = connection.enabled;
     advancedKeyEdited = false;
+    editedApiKey = "";
     advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
     advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
-    currentApiIp = advancedApiIp.value.trim();
-    currentApiPort = advancedApiPort.value.trim() ? Number(advancedApiPort.value.trim()) : 31009;
-    initialApiDraft = { ip: advancedApiIp.value.trim(), port: advancedApiPort.value.trim() };
+    const ip = connectionDraft.ip.trim();
+    const port = connectionDraft.port.trim();
+    currentApiIp = ip;
+    currentApiPort = port ? Number(port) : 31009;
+    initialApiDraft = { ip, port };
     el("advanced-api-key-hint").textContent = hasSavedApiKey
       ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
       : "Enter a new read-only Anytype API v2 key.";
@@ -1579,17 +1638,7 @@
       setStatus("Wait for the selected banner image to finish loading before saving.", "warning");
       return;
     }
-    draft.fontFamily = fontFamily.value.trim();
-    draft.codeFontFamily = codeFontFamily.value.trim();
-    draft.accentColor = accentValue.value.trim();
     draft.accentPreset = draft.accentMode === "preset" ? draft.accentPreset : "";
-    if (updaterDraft) {
-      updaterDraft.installDirectory = installDirectory.value;
-      updaterDraft.startOnLogin = startOnLogin.checked;
-      updaterDraft.autoplayVideos = autoplayVideos.checked;
-      updaterDraft.automaticUpdatesEnabled = automaticUpdatesEnabled.checked;
-      updaterDraft.automaticChecksEnabled = automaticChecksEnabled.checked;
-    }
 
     const familyPattern = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,79}$/u;
     let invalid = false;
@@ -1611,12 +1660,14 @@
     el("accent-error").textContent = !safeAccentSyntax || !supportedAccent ? "Use a 3 or 6 digit hex color, a supported rgb()/rgba() value, or an Anytype color variable. Pure white is reserved." : "";
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
+    const submittedCalendarRules = window.BlobUI.CalendarPage?.read();
+    const calendarRulesChanged = JSON.stringify(submittedCalendarRules) !== JSON.stringify(editSession.getBaseline().calendarRules);
     const settingsChanged = !settingsEqual(draft, initialDraft);
     const submittedFormulas = window.BlobUI.FormulaPage.read();
     const formulasChanged = JSON.stringify(submittedFormulas) !== JSON.stringify(editSession.getBaseline().formulas);
     const updaterSettingsChanged = !!updaterDraft && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
     if (updaterSettingsChanged) {
-      const directory = installDirectory.value.trim();
+      const directory = updaterDraft.installDirectory.trim();
       const validDirectory = directory.length > 0 && directory.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(directory);
       installDirectory.classList.toggle("invalid", !validDirectory);
       el("updater-settings-error").textContent = validDirectory ? "" : "Enter a valid Anytype data folder.";
@@ -1628,10 +1679,10 @@
     }
     const connectionChanged = connectionHasChanges();
     const updaterPathChanged = updaterSettingsChanged
-      && installDirectory.value.trim() !== String(initialUpdaterSettings.installDirectory || "").trim();
-    const apiIp = advancedApiIp.value.trim();
-    const apiPort = advancedApiPort.value.trim();
-    const apiKey = advancedApiKey.value.trim();
+      && updaterDraft.installDirectory.trim() !== String(initialUpdaterSettings.installDirectory || "").trim();
+    const apiIp = connectionDraft.ip.trim();
+    const apiPort = connectionDraft.port.trim();
+    const apiKey = editedApiKey.trim();
     const keepExistingKey = hasSavedApiKey && !advancedKeyEdited;
     advancedApiIp.classList.toggle("invalid", !isValidIpAddress(apiIp));
     if (apiIp && !isValidIpAddress(apiIp)) {
@@ -1657,19 +1708,20 @@
       return;
     }
 
-    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged)) {
+    if (updaterPathChanged && (settingsChanged || connectionChanged || formulasChanged || calendarRulesChanged)) {
       setStatus("Save or undo your appearance and Anytype API changes before changing the Anytype data folder.", "warning", false);
       return;
     }
 
-    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && el("advanced-experiments-panel").hidden && settingsChanged);
+    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment }, initialDraft);
+    const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && nonExperimentSettingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
       openKeyRemovalConfirmation();
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -1680,6 +1732,8 @@
       ip: apiIp || null,
       port: apiPort ? Number(apiPort) : null,
     } : null;
+    savedRefreshEpoch++;
+    savedRefresh.invalidate();
     saveBusy = true;
     updateSaveButton();
     setStatus(updaterSettingsChanged && !settingsChanged && !connectionChanged
@@ -1690,22 +1744,35 @@
     let connectionSaved = false;
     let generalSettingsSaved = false;
     let formulasSaved = false;
+    let calendarRulesSaved = false;
     let updaterSettingsSaved = false;
     try {
       let result = null;
       if (submittedConnection) {
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
+        void window.BlobUI.AppReload.run();
         acceptAdvancedConnectionDraft(submittedConnection);
         editSession.commit({ connection: readConnectionBaseline() });
         window.BlobUI.FormulaPage.reload();
+        window.BlobUI.CalendarPage?.reload();
       }
       if (formulasChanged) {
         await window.BlobUI.FormulaPage.save(invoke, submittedFormulas);
         editSession.commit({ formulas: submittedFormulas });
         formulasSaved = true;
       }
-      if (settingsChanged || options.forceRebuild) {
+      if (calendarRulesChanged) {
+        result = await window.BlobUI.CalendarPage.save(invoke, submittedCalendarRules, submittedSettings);
+        editSession.commit({ calendarRules: submittedCalendarRules });
+        calendarRulesSaved = true;
+        if (settingsChanged) {
+          generalSettingsSaved = true;
+          initialDraft = submittedSettings;
+          editSession.commit({ settings: submittedSettings });
+        }
+      }
+      if (!calendarRulesChanged && (settingsChanged || options.forceRebuild)) {
         result = await invoke("save_settings", { settings: submittedSettings });
         generalSettingsSaved = settingsChanged;
         if (settingsChanged) {
@@ -1731,6 +1798,8 @@
         setStatus(updaterPathChanged
           ? "App Settings saved. Loaded settings from the selected Anytype data folder."
           : "App Settings saved.", "info");
+      } else if (calendarRulesChanged && !connectionChanged) {
+        setStatus("Calendar rules saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else if (formulasChanged && !connectionChanged) {
         setStatus("Formulas saved. Press Ctrl+R in Anytype to apply.", "info", false);
       } else {
@@ -1740,7 +1809,7 @@
       const message = error.message || String(error);
       setStatus(connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
-        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved
+        : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved || calendarRulesSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
           : message, "error");
     } finally {
@@ -1750,19 +1819,19 @@
     }
   }
 
-  hueInput.addEventListener("input", () => {
+  listen(hueInput, "input", () => {
     if (isInstallingUpdate()) return;
     hsv.h = Number(hueInput.value);
     chooseCustomColor();
   });
-  chooseBannerImage.addEventListener("click", () => {
+  listen(chooseBannerImage, "click", () => {
     if (!chooseBannerImage.disabled && !isInstallingUpdate()) {
       invalidateBannerRead();
       bannerImageInput.click();
     }
   });
-  bannerImageInput.addEventListener("change", handleBannerFileChange);
-  resetBannerImage.addEventListener("click", () => {
+  listen(bannerImageInput, "change", handleBannerFileChange);
+  listen(resetBannerImage, "click", () => {
     if (!draft || saveBusy || isInstallingUpdate() || !window.appReady) return;
     draft.bannerImage = "";
     el("banner-error").textContent = "";
@@ -1770,12 +1839,12 @@
     syncBannerPreview();
     markDirty();
   });
-  saturationInput.addEventListener("input", () => {
+  listen(saturationInput, "input", () => {
     if (isInstallingUpdate()) return;
     hsv.s = Number(saturationInput.value);
     chooseCustomColor();
   });
-  brightnessInput.addEventListener("input", () => {
+  listen(brightnessInput, "input", () => {
     if (isInstallingUpdate()) return;
     hsv.v = Number(brightnessInput.value);
     chooseCustomColor();
@@ -1786,115 +1855,117 @@
     hsv.v = 100 - Math.max(0, Math.min(100, (event.clientY - bounds.top) / bounds.height * 100));
     chooseCustomColor();
   }
-  plane.addEventListener("pointerdown", (event) => {
+  listen(plane, "pointerdown", (event) => {
     if (!draft || saveBusy || isInstallingUpdate() || nativeAccent.checked || event.button !== 0) return;
     event.preventDefault();
     plane.setPointerCapture(event.pointerId);
     saturationInput.focus({ preventScroll: true });
     pickAtPointer(event);
   });
-  plane.addEventListener("pointermove", (event) => {
+  listen(plane, "pointermove", (event) => {
     if (plane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate() && !nativeAccent.checked) pickAtPointer(event);
   });
-  plane.addEventListener("pointerup", (event) => {
+  listen(plane, "pointerup", (event) => {
     if (plane.hasPointerCapture(event.pointerId)) plane.releasePointerCapture(event.pointerId);
   });
-  nativeAccent.addEventListener("change", () => {
+  function changeNativeAccent(checked) {
     if (!draft || saveBusy || isInstallingUpdate()) return;
-    if (nativeAccent.checked) {
+    if (checked) {
       lastCustomAccent = { accentMode: draft.accentMode, accentPreset: draft.accentPreset, accentColor: draft.accentColor };
       Object.assign(draft, { accentMode: "native", accentPreset: "", accentColor: "Default" });
     } else {
       Object.assign(draft, lastCustomAccent || { accentMode: "custom", accentPreset: "", accentColor: "#de50de" });
     }
-    accentValue.value = draft.accentColor;
+    presentSettingsFields({ "accent-value": draft.accentColor });
     accentValue.classList.remove("invalid");
     el("accent-error").textContent = "";
     renderPicker(true);
     markDirty();
-  });
-  accentValue.addEventListener("input", () => {
+  }
+  function changeAccentValue(value) {
     if (!draft || saveBusy || isInstallingUpdate()) return;
-    const raw = accentValue.value.trim();
+    const raw = value.trim();
     Object.assign(draft, normalizeForUi({ accentColor: raw }));
     // Empty input stays invalid until the user supplies a color.
     if (!raw) Object.assign(draft, { accentMode: "custom", accentPreset: "", accentColor: "" });
-    if (draft.accentMode !== "custom") accentValue.value = draft.accentColor;
+    presentSettingsFields({ "accent-value": draft.accentMode === "custom" ? value : draft.accentColor });
     if (isCoreSupportedCustomAccent(raw) || draft.accentMode !== "custom") renderPicker(true);
     accentValue.classList.remove("invalid");
     el("accent-error").textContent = "";
     markDirty();
-  });
-  fontFamily.addEventListener("input", () => {
-    if (!draft || isInstallingUpdate()) return;
-    draft.fontFamily = fontFamily.value.trim();
-    applyFontFamilies();
-    el("font-error").textContent = "";
-    fontFamily.classList.remove("invalid");
-    markDirty();
-  });
-  codeFontFamily.addEventListener("input", () => {
-    if (!draft || isInstallingUpdate()) return;
-    draft.codeFontFamily = codeFontFamily.value.trim();
-    applyFontFamilies();
-    el("font-error").textContent = "";
-    codeFontFamily.classList.remove("invalid");
-    markDirty();
-  });
-  advancedApiKey.addEventListener("input", () => {
+  }
+  function changeSettingField(id, value) {
+    if (id === "native-accent") return changeNativeAccent(value);
+    if (id === "accent-value") return changeAccentValue(value);
     if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (id === "font-family" || id === "code-font-family") {
+      draft[id === "font-family" ? "fontFamily" : "codeFontFamily"] = value.trim();
+      presentSettingsFields({ [id]: value });
+      applyFontFamilies();
+      el("font-error").textContent = "";
+      el(id).classList.remove("invalid");
+    } else {
+      const property = toggleSettings[id];
+      if (property === "calendarColorsEnabled" && calendarColorsEnabled.disabled) {
+        presentSettingsFields({ [id]: draft[property] });
+        return;
+      }
+      draft[property] = value;
+      presentSettingsFields({ [id]: value });
+      if (property === "reducedMotion" || property === "includeSelections") root.dataset[property] = String(value);
+    }
+    markDirty();
+  }
+  listen(advancedApiKey, "input", () => {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    editedApiKey = advancedApiKey.value;
     advancedKeyEdited = true;
     advancedApiKey.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
   });
-  advancedApiIp.addEventListener("input", () => {
+  listen(advancedApiIp, "input", () => {
     if (!draft || saveBusy || isInstallingUpdate()) return;
+    connectionDraft.ip = advancedApiIp.value;
     advancedApiIp.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
   });
-  advancedApiPort.addEventListener("input", () => {
+  listen(advancedApiPort, "input", () => {
     if (!draft || saveBusy || isInstallingUpdate()) return;
+    connectionDraft.port = advancedApiPort.value;
     advancedApiPort.classList.remove("invalid");
     el("advanced-api-error").textContent = "";
     markDirty();
   });
-  for (const [control, property] of [
-    [includeSelections, "includeSelections"],
-    [reducedMotion, "reducedMotion"],
-    [tabHoverEffect, "tabHoverEffect"],
-    [linkHoverEffect, "linkHoverEffect"],
-    [objectMentionHoverEffect, "objectMentionHoverEffect"],
-    [collapsedCategories, "collapsedCategories"],
-    [calendarColorsEnabled, "calendarColorsEnabled"],
-  ]) {
-    control.addEventListener("change", () => {
-      if (!draft || saveBusy || isInstallingUpdate()) return;
-      if (property === "calendarColorsEnabled" && calendarColorsEnabled.disabled) {
-        control.checked = draft[property];
-        return;
-      }
-      draft[property] = control.checked;
-      if (property === "reducedMotion") root.dataset.reducedMotion = String(draft.reducedMotion);
-      if (property === "includeSelections") root.dataset.includeSelections = String(draft.includeSelections);
-      markDirty();
-    });
-  }
   let folderPickerBusy = false;
-  kanbanViewStyle.addEventListener("change", () => {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
-    if (!["default", "balanced", "compact"].includes(kanbanViewStyle.value)) return;
-    syncKanbanStyleSelection(kanbanViewStyle.value);
-    draft.kanbanViewStyle = kanbanViewStyle.value;
+  function changeStartupMode(value) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate() || !["off", "foreground", "background"].includes(value)) return;
+    updaterDraft.startupMode = value;
+    view.update({ startupMode: value });
     markDirty();
-  });
+  }
+
+  function changeBackgroundExperiment(value) {
+    if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
+    draft.backgroundExperiment = value;
+    view.update({ backgroundExperiment: value });
+    markDirty();
+  }
+
+  function changeKanbanStyle(value) {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!["default", "balanced", "compact"].includes(value)) return;
+    draft.kanbanViewStyle = value;
+    view.update({ kanbanStyle: value });
+    markDirty();
+  }
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
     installDirectory.setAttribute("aria-busy", "true");
     try {
-      const selected = await invoke("select_anytype_folder", { currentDirectory: installDirectory.value });
+      const selected = await invoke("select_anytype_folder", { currentDirectory: updaterDraft.installDirectory });
       if (!selected || saveBusy || isInstallingUpdate()) return;
       installDirectory.value = selected;
       updaterDraft.installDirectory = selected;
@@ -1914,14 +1985,14 @@
       installDirectory.removeAttribute("aria-busy");
     }
   }
-  installDirectory.addEventListener("click", selectAnytypeFolder);
-  installDirectory.addEventListener("keydown", (event) => {
+  listen(installDirectory, "click", selectAnytypeFolder);
+  listen(installDirectory, "keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       selectAnytypeFolder();
     }
   });
-  installDirectory.addEventListener("input", () => {
+  listen(installDirectory, "input", () => {
     if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
     updaterDraft.installDirectory = installDirectory.value;
     installDirectory.classList.remove("invalid");
@@ -1929,47 +2000,47 @@
     markDirty();
   });
   for (const [control, property] of [
-    [startOnLogin, "startOnLogin"],
+
     [autoplayVideos, "autoplayVideos"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
-    control?.addEventListener("change", () => {
+    listen(control, "change", () => {
       if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
       updaterDraft[property] = control.checked;
       if (property === "autoplayVideos") applyAutoplay(control.checked);
       markDirty();
     });
   }
-  checkUpdatesButton.addEventListener("click", () => {
+  listen(checkUpdatesButton, "click", () => {
     if (updaterState && updaterState.updateAvailable === true) applyUpdate();
     else checkForUpdates(false);
   });
-  updateNowButton.addEventListener("click", () => applyUpdate());
+  listen(updateNowButton, "click", () => applyUpdate());
   const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
+    open: url => invoke("open_external_link", { url }),
     onError(error) {
       setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error");
     },
   });
-  window.addEventListener("unload", () => externalLinkController.destroy(), { once: true });
-  const blobImportModal = window.BlobUI.Components.Modal({
+  const blobImportModal = window.BlobUI.createModalController({
     backdrop: el("blob-import-backdrop"), dialog: el("blob-import-dialog"),
     initialFocus: el("blob-import-cancel"), fallbackFocus: el("import-blob-backup-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => { selectedBlobBackupDirectory = null; },
   });
-  const uninstallModal = window.BlobUI.Components.Modal({
+  const uninstallModal = window.BlobUI.createModalController({
     backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  el("uninstall-button").addEventListener("click", () => {
+  listen(el("uninstall-button"), "click", () => {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy || !window.appReady) return;
     el("uninstall-error").textContent = "";
     uninstallModal.open();
   });
-  ["uninstall-close", "uninstall-cancel"].forEach((id) => el(id).addEventListener("click", () => uninstallModal.close()));
-  el("uninstall-confirm").addEventListener("click", async () => {
+  ["uninstall-close", "uninstall-cancel"].forEach((id) => listen(el(id), "click", () => uninstallModal.close()));
+  listen(el("uninstall-confirm"), "click", async () => {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy) return;
     uninstallBusy = true;
     renderBlobBackupControls();
@@ -1989,7 +2060,7 @@
     blobBackupStatus.textContent = message;
     blobBackupStatus.classList.toggle("error", isError);
   }
-  createBlobBackupButton.addEventListener("click", async () => {
+  listen(createBlobBackupButton, "click", async () => {
     if (createBlobBackupButton.disabled) return;
     blobFolderBusy = true;
     updateSaveButton();
@@ -2007,7 +2078,7 @@
       updateSaveButton();
     }
   });
-  importBlobBackupButton.addEventListener("click", async () => {
+  listen(importBlobBackupButton, "click", async () => {
     if (importBlobBackupButton.disabled) return;
     blobFolderBusy = true;
     updateSaveButton();
@@ -2028,9 +2099,9 @@
     }
   });
   ["blob-import-close", "blob-import-cancel"].forEach((id) => {
-    el(id).addEventListener("click", () => blobImportModal.close());
+    listen(el(id), "click", () => blobImportModal.close());
   });
-  el("blob-import-confirm").addEventListener("click", async () => {
+  listen(el("blob-import-confirm"), "click", async () => {
     if (!selectedBlobBackupDirectory || blobFolderBusy || saveBusy || updaterBusyOperation || uninstallBusy) return;
     const backup = selectedBlobBackupDirectory;
     blobFolderBusy = true;
@@ -2061,10 +2132,8 @@
       updateSaveButton();
     }
   });
-  saveButton.addEventListener("click", save);
-  discardButton.addEventListener("click", () => window.BlobUI.openDiscardConfirmation());
-  el("discard-confirmation-close").addEventListener("click", () => window.BlobUI.closeDiscardConfirmation());
-  el("discard-confirmation-undo").addEventListener("click", () => {
+  listen(el("discard-confirmation-close"), "click", () => window.BlobUI.closeDiscardConfirmation());
+  listen(el("discard-confirmation-undo"), "click", () => {
     if (saveBusy || isInstallingUpdate()) return;
     window.BlobUI.discardChanges();
     window.BlobUI.closeDiscardConfirmation();
@@ -2074,14 +2143,14 @@
     window.BlobUI.discardChanges();
     apiKeyRemovalModal.close();
   }
-  apiKeyRemovalClose.addEventListener("click", discardAllFromApiRemovalModal);
-  apiKeyRemovalUndo.addEventListener("click", discardAllFromApiRemovalModal);
-  apiKeyRemovalSave.addEventListener("click", () => {
+  listen(apiKeyRemovalClose, "click", discardAllFromApiRemovalModal);
+  listen(apiKeyRemovalUndo, "click", discardAllFromApiRemovalModal);
+  listen(apiKeyRemovalSave, "click", () => {
     if (saveBusy || isInstallingUpdate()) return;
     apiKeyRemovalModal.close({ restoreFocus: false });
     save({ confirmKeyRemoval: true });
   });
-  logButton.addEventListener("click", () => {
+  listen(logButton, "click", () => {
     logPopup.hidden = !logPopup.hidden;
     logButton.setAttribute("aria-expanded", String(!logPopup.hidden));
     if (!logPopup.hidden) {
@@ -2096,35 +2165,35 @@
     helpButton.setAttribute("aria-expanded", "false");
     if (restoreFocus) helpButton.focus();
   }
-  helpButton.addEventListener("click", () => {
+  listen(helpButton, "click", () => {
     helpPopup.hidden = !helpPopup.hidden;
     helpButton.setAttribute("aria-expanded", String(!helpPopup.hidden));
     if (!helpPopup.hidden) el("help-whats-new").focus();
   });
-  document.addEventListener("pointerdown", (event) => {
+  listen(document, "pointerdown", (event) => {
     if (!el("help-control").contains(event.target)) closeHelp();
   });
-  document.addEventListener("focusin", (event) => {
+  listen(document, "focusin", (event) => {
     if (!el("help-control").contains(event.target)) closeHelp();
   });
-  el("help-whats-new").addEventListener("click", () => { closeHelp(); showLatestReleaseNotes(); });
-  el("help-documentation").addEventListener("click", () => { closeHelp(); showDocumentation(); });
-  el("help-keybinds").addEventListener("click", async () => {
+  listen(el("help-whats-new"), "click", () => { closeHelp(); showLatestReleaseNotes(); });
+  listen(el("help-documentation"), "click", () => { closeHelp(); showDocumentation(); });
+  listen(el("help-keybinds"), "click", async () => {
     closeHelp();
     el("keybind-status").textContent = "";
     el("keybind-status").classList.remove("error");
     await loadShortcutBindings();
     keybindModal.open();
   });
-  el("help-error-close").addEventListener("click", () => helpErrorModal.close());
-  el("keybinds-close").addEventListener("click", () => keybindModal.close());
-  document.addEventListener("pointerdown", (event) => {
+  listen(el("help-error-close"), "click", () => helpErrorModal.close());
+  listen(el("keybinds-close"), "click", () => keybindModal.close());
+  listen(document, "pointerdown", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
   });
-  document.addEventListener("focusin", (event) => {
+  listen(document, "focusin", (event) => {
     if (!el("log-control").contains(event.target)) closeLogs();
   });
-  el("copy-logs").addEventListener("click", async () => {
+  listen(el("copy-logs"), "click", async () => {
     try {
       await navigator.clipboard.writeText(logs.map(formatLog).join("\n"));
       el("copy-status").textContent = "All logs copied.";
@@ -2142,10 +2211,13 @@
       setStatus(error.message || String(error), "error");
     }
   }
-  el("window-minimize").addEventListener("click", () => windowAction("minimize_window"));
-  el("window-close").addEventListener("click", () => windowAction("hide_window"));
-  el("open-author").addEventListener("click", () => windowAction("open_author_profile"));
-  el("open-repository").addEventListener("click", () => windowAction("open_project_repository"));
+  listen(el("window-background"), "click", () => windowAction("run_in_background"));
+  listen(el("window-minimize"), "click", () => windowAction("minimize_window"));
+  listen(el("window-close"), "click", () => windowAction(
+    ["normal", "autostart-background"].includes(draft?.backgroundExperiment) ? "quit_app" : "hide_window"
+  ));
+  listen(el("open-author"), "click", () => windowAction("open_author_profile"));
+  listen(el("open-repository"), "click", () => windowAction("open_project_repository"));
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
   const onboardingApi = el("onboarding-api");
@@ -2191,7 +2263,7 @@
     documentation.hidden = false;
     documentationBack.hidden = false;
     documentationBack.focus();
-    window.BlobUI.DocsUI.load();
+    view.update({ documentationOpened: true });
   }
 
   function closeDocumentation() {
@@ -2210,7 +2282,7 @@
     }, reducedMotion ? 0 : 320);
   }
 
-  documentationBack.addEventListener("click", closeDocumentation);
+  listen(documentationBack, "click", closeDocumentation);
 
   function resetOnboardingTransition() {
     window.clearTimeout(onboardingTransition);
@@ -2276,7 +2348,7 @@
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   }
 
-  onboardingWelcome.addEventListener("click", advanceOnboarding);
+  listen(onboardingWelcome, "click", advanceOnboarding);
   function setConnectionBusy(busy) {
     connectionBusy = busy;
     apiOptions.forEach((option) => { option.disabled = busy; });
@@ -2344,7 +2416,7 @@
     }
   }
 
-  apiOptions.forEach((option) => option.addEventListener("click", () => {
+  apiOptions.forEach((option) => listen(option, "click", () => {
     if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
     el("onboarding-choice-error").textContent = "";
@@ -2354,12 +2426,12 @@
     else applyConnection(false, "", currentApiPort);
   }));
 
-  el("connection-back").addEventListener("click", () => {
+  listen(el("connection-back"), "click", () => {
     if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null) return;
     resetOnboardingTransition();
     showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
   });
-  el("connection-form").addEventListener("submit", (event) => {
+  listen(el("connection-form"), "submit", (event) => {
     event.preventDefault();
     if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null || onboarding.hidden) return;
     const key = el("connection-key").value.trim();
@@ -2377,13 +2449,8 @@
     applyConnection(true, key, portText ? Number(portText) : null);
   });
 
-  document.addEventListener("keydown", (event) => {
+  listen(document, "keydown", (event) => {
     if (event.defaultPrevented) return;
-    if (event.key === "Escape" && kanbanViewStyle.getAttribute("aria-expanded") === "true") {
-      event.preventDefault();
-      closeKanbanStyleMenu(true);
-      return;
-    }
     if (blobFolderBusy || blobRestoreReloadFailed || blobImportModal.isOpen()
       || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     const matches = (action) => {
@@ -2420,7 +2487,7 @@
       if (!event.repeat) windowAction("quit_app");
     }
   });
-  el("title-drag-region").addEventListener("pointerdown", (event) => {
+  listen(el("title-drag-region"), "pointerdown", (event) => {
     if (event.button === 0 && !event.target.closest("button")) {
       windowAction("start_window_drag");
     }
@@ -2436,30 +2503,91 @@
     }
   }
 
-  const eventApi = window.__TAURI__ && window.__TAURI__.event;
-  if (eventApi && typeof eventApi.listen === "function") {
-    eventApi.listen("blobui-rebuild-custom-css", () => save({ forceRebuild: true })).catch((error) => {
-      setStatus(error.message || String(error), "error");
+  let savedStateSubscription = Promise.resolve();
+  const eventUnsubscribers = [];
+  let nativeEventsDisposed = false;
+  function subscribeNativeEvent(name, handler, onError) {
+    const subscription = nativeService.listen(name, handler).then(unlisten => {
+      if (typeof unlisten === "function") {
+        if (nativeEventsDisposed) unlisten();
+        else eventUnsubscribers.push(unlisten);
+      }
+      return unlisten;
     });
-    eventApi.listen("blobui-show-onboarding", () => showOnboarding()).catch((error) => {
-      setStatus(error.message || String(error), "error");
+    return subscription.catch(error => { onError(error); return false; });
+  }
+  savedStateSubscription = subscribeNativeEvent("blobui-saved-state-changed", () => requestSavedRefresh(), error => {
+    addLog("Could not listen for saved settings changes. " + String(error.message || error), "error");
+  });
+  subscribeNativeEvent("blobui-rebuild-custom-css", () => save({ forceRebuild: true }), error => {
+    setStatus(error.message || String(error), "error");
+  });
+  const onboardingSubscription = subscribeNativeEvent("blobui-show-onboarding", () => showOnboarding(), error => {
+    setStatus(error.message || String(error), "error");
+  });
+  const backgroundErrorSubscription = subscribeNativeEvent("blobui-background-error", event => {
+    const message = String(event.payload || "Could not run BlobUI in background.");
+    setStatus(message, "error");
+    addLog(message, "error");
+  }, error => addLog(String(error.message || error), "error"));
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    nativeEventsDisposed = true;
+    nativeService.dispose();
+    eventUnsubscribers.splice(0).forEach(unlisten => {
+      try { unlisten(); } catch (_) { /* Teardown must not interrupt app shutdown. */ }
     });
+    removeListeners.splice(0).reverse().forEach(remove => remove());
+    [themeInterval, updateInterval].forEach(timer => window.clearInterval?.(timer));
+    resetOnboardingTransition();
+    resetDocumentationTransition();
+    invalidateBannerRead();
+    savedRefresh.invalidate();
+    void savedRefresh.setReady(false);
+    scrollbars.forEach(controller => controller.destroy());
+    Object.values(visibilityFields).forEach(controller => controller.destroy?.());
+    externalLinkController.destroy();
+    [apiKeyRemovalModal, discardConfirmationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
+      .forEach(controller => controller.destroy?.());
+    window.BlobUI.CalendarPage?.destroy?.();
+    window.BlobUI.FormulaPage?.destroy?.();
+    window.BlobUI.CodexPage?.destroy?.();
+    window.BlobUI.AppReload?.destroy?.();
   }
 
-  window.BlobUI.AppReload = window.BlobUI.ReloadController.create();
-  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
-  window.BlobUI.SettingsV21?.init({ showSettingsPage, selectAdvancedTab });
-  el("settings-v21-enabled").addEventListener("change", () => {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
-    draft.settingsV21Enabled = el("settings-v21-enabled").checked;
-    window.BlobUI.SettingsV21?.setEnabled(draft.settingsV21Enabled);
-    markDirty();
+  window.BlobUI.AppReload = window.BlobUI.ReloadController.create({
+    onReload: () => addLog("Reloading app metadata. Refreshing Anytype lists and pickers.", "info"),
+    isCapturing: () => !!shortcutCaptureAction,
+    beforeRun: async () => {
+      try { await refreshSavedState(); }
+      catch (error) { addLog("Saved settings reload failed. " + String(error.message || error), "error"); }
+      await Promise.allSettled([...metadataPending]);
+    },
+    onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); },
   });
+  window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
+  window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
+  window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
+    onChange: markDirty, onInfo: message => addLog(message, "info") });
+  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
-  loadState();
-  window.setInterval(refreshTheme, 2000);
-  window.setInterval(() => {
+  listen(window, "focus", requestSavedRefresh);
+  const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
+    addLog("Settings could not be loaded. " + String(error.message || error), "error");
+  }).finally(() => {
+    if (disposed) return;
+    void savedRefresh.setReady();
+    requestSavedRefresh();
+  });
+  Promise.all([onboardingSubscription, initialStateLoaded, backgroundErrorSubscription]).then(([subscription]) => {
+    if (!disposed && subscription !== false) return invoke("onboarding_ready");
+  }).catch(error => setStatus(String(error.message || error), "error"));
+  const themeInterval = window.setInterval(refreshTheme, 2000);
+  const updateInterval = window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
-  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", refreshTheme);
-}());
+  listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
+  return { dispose, showSettingsPage, openSection, openFeature, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
+    openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
+}
