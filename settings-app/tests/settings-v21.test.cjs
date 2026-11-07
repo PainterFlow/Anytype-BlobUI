@@ -88,6 +88,16 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     await page.setViewportSize({ width: 800, height: 650 });
     await page.locator('#background-experiment').focus();
     await page.keyboard.press('Enter');
+    assert.equal(await page.getByRole('option', { name: 'Disabled', exact: true }).isVisible(), true);
+    await page.waitForFunction(() => {
+      const trigger = document.getElementById('background-experiment');
+      return document.getElementById(trigger?.getAttribute('aria-controls'))?.dataset.state === 'open';
+    });
+    await page.setViewportSize({ width: 801, height: 651 });
+    await page.getByRole('option', { name: 'Disabled', exact: true }).waitFor({ state: 'hidden', timeout: 1000 });
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.locator('#background-experiment').focus();
+    await page.keyboard.press('Enter');
     for (const [label, prefix] of [['Disabled', 'Use standard Settings controls.'], ['Variant 1', 'Normal.'], ['Variant 2', 'Autostart Background.']]) {
       const option = page.getByRole('option', { name: label, exact: true });
       assert.equal(await option.isVisible(), true);
@@ -141,3 +151,4 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+
