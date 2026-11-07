@@ -1,7 +1,7 @@
 # BlobUI v1.4.1 - What's new?
 
 Welcome to v1.4.1, the first ever hotfix. I kinda just forgot to update the docs.
-Additionally there is also a small
+Additionally there is also a small fix for Anyblob.
 
 ## Anyblob (0.2.24 -> 0.2.25)
 
