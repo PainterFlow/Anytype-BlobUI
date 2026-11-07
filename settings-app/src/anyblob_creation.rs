@@ -600,7 +600,6 @@ mod tests {
         responses.extend(query_reads()); // dry run authorization
         responses.push(json!({"valid":true}));
         responses.extend(query_reads()); // commit authorization
-        responses.extend(query_reads()); // final authorization after journaling
         responses.push(json!({"id":"new-object"}));
         responses.extend(vec![
             doc("query"),
@@ -702,6 +701,7 @@ mod tests {
         let mut responses = vec![
             doc("collection"),
             json!({"valid":true}),
+            doc("collection"),
             json!({"id":"created"}),
             page(json!([])),
             doc("collection"),
@@ -760,12 +760,42 @@ mod tests {
         }
     }
     #[test]
+    fn collection_destination_changes_before_commit_prevent_creation() {
+        let request = req("collection");
+        let mut changed = doc("collection");
+        changed["etag"] = json!("changed");
+        let (client, capture, server) = fixture(vec![
+            doc("collection"),
+            json!({"valid":true}),
+            changed,
+        ]);
+        let error = dispatch(
+            &client,
+            "collection-change",
+            &project(source("collection", "createDelete")),
+            &request,
+            &|| Ok(()),
+            &|_, _| Ok(()),
+        )
+        .unwrap_err();
+        assert!(error.contains("Creation destination changed"), "{error}");
+        server.join().unwrap();
+        let requests = capture.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(String::from_utf8_lossy(&requests[0]).starts_with("GET /v2/spaces/s/objects/dest?ids=full "));
+        assert!(String::from_utf8_lossy(&requests[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
+        assert!(String::from_utf8_lossy(&requests[2]).starts_with("GET /v2/spaces/s/objects/dest?ids=full "));
+        assert!(requests.iter().all(|r| !String::from_utf8_lossy(r).starts_with("POST /v2/spaces/s/objects ")));
+        assert!(!record_path("collection-change", &request).unwrap().exists());
+    }
+    #[test]
     fn collection_conflict_recovers_without_creating_twice_and_binds_payload() {
         let request = req("collection");
         let p = project(source("collection", "createDelete"));
         let (client, capture, server) = fixture(vec![
             doc("collection"),
             json!({"valid":true}),
+            doc("collection"),
             json!({"id":"kept"}),
             page(json!([])),
             doc("collection"),
@@ -797,6 +827,7 @@ mod tests {
         );
         let (client, capture, server) = fixture(vec![
             doc("collection"),
+            json!({"valid":true}),
             page(json!([])),
             doc("collection"),
             schema(),
@@ -819,10 +850,10 @@ mod tests {
             .lock()
             .unwrap()
             .iter()
-            .all(|r| !String::from_utf8_lossy(r).starts_with("POST ")));
+            .all(|r| !String::from_utf8_lossy(r).starts_with("POST /v2/spaces/s/objects ")));
         let mut changed = request.clone();
         changed.arguments["body"]["name"] = json!("Different");
-        let (client, _, server) = fixture(vec![doc("collection")]);
+        let (client, _, server) = fixture(vec![doc("collection"), json!({"valid":true})]);
         assert!(dispatch(
             &client,
             "restart-project",
@@ -841,7 +872,7 @@ mod tests {
         for uncertain_create in [true, false] {
             let request = req("collection");
             let p = project(source("collection", "createDelete"));
-            let mut responses = vec![doc("collection"), json!({"valid":true})];
+            let mut responses = vec![doc("collection"), json!({"valid":true}), doc("collection")];
             if uncertain_create {
                 responses.push(json!("disconnect"));
             } else {
@@ -866,7 +897,7 @@ mod tests {
             .unwrap();
             assert!(result["outcome"] == "unknown" || result["placement"]["outcome"] == "unknown");
             server.join().unwrap();
-            let (client, capture, server) = fixture(vec![doc("collection")]);
+            let (client, capture, server) = fixture(vec![doc("collection"), json!({"valid":true})]);
             let result = dispatch(
                 &client,
                 "unknown-project",
@@ -878,7 +909,7 @@ mod tests {
             .unwrap();
             assert_eq!(result["placement"]["outcome"], "unknown");
             server.join().unwrap();
-            assert_eq!(capture.lock().unwrap().len(), 1);
+            assert_eq!(capture.lock().unwrap().len(), 2);
         }
     }
     #[test]
@@ -886,16 +917,33 @@ mod tests {
         for kind in ["query", "collection"] {
             let mut p = project(source(kind, "createDelete"));
             p.sources[0].permission.approval = "alwaysAsk".into();
-            let responses = if kind == "query" { query_reads() } else { vec![doc(kind)] };
+            let responses = if kind == "query" {
+                let mut responses = query_reads();
+                responses.extend(query_reads());
+                responses.push(json!({"valid":true}));
+                responses
+            } else {
+                vec![doc(kind),json!({"valid":true})]
+            };
             let (client, capture, server) = fixture(responses);
             let error = dispatch(&client, "project", &p, &req(kind), &|| Ok(()), &|op, _| {
                 assert_eq!(blobui_mcp::approval::describe(op), format!(
                     "An agent wants to create object 'Created' in {kind} 'Destination' in Work."));
+                if kind=="collection" {assert!(String::from_utf8_lossy(&capture.lock().unwrap()[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));}
                 Err("denied".into())
             }).unwrap_err();
             assert!(error.contains("denied"));
             server.join().unwrap();
-            assert!(capture.lock().unwrap().iter().all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+            if kind=="query" {
+                let requests=capture.lock().unwrap();
+                assert_eq!(requests.len(),9);
+                assert!(requests[..8].iter().all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+                assert!(String::from_utf8_lossy(&requests[8]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
+            } else {
+                let requests=capture.lock().unwrap();
+                assert_eq!(requests.len(),2);
+                assert!(String::from_utf8_lossy(&requests[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
+            }
         }
     }
     #[test]
@@ -903,7 +951,7 @@ mod tests {
         let request = req("collection");
         let mut p = project(source("collection", "createDelete"));
         p.sources[0].permission.approval = "approveForMe".into();
-        let (client, capture, server) = fixture(vec![doc("collection")]);
+        let (client, capture, server) = fixture(vec![doc("collection"),json!({"valid":true})]);
         assert!(
             dispatch(&client, "project", &p, &request, &|| Ok(()), &|_, _| Err(
                 "denied".into()
@@ -912,7 +960,7 @@ mod tests {
             .contains("denied")
         );
         server.join().unwrap();
-        assert_eq!(capture.lock().unwrap().len(), 1);
+        assert_eq!(capture.lock().unwrap().len(), 2);
         let client = Client::with_connection("fixture", "127.0.0.1", 1);
         assert!(dispatch(
             &client,
@@ -942,6 +990,64 @@ mod tests {
         }
     }
     #[test]
+    fn invalid_scoped_create_fails_before_approval_or_creation() {
+        let mut p=project(source("collection","createDelete"));
+        p.sources[0].permission.approval="alwaysAsk".into();
+        let (client,capture,server)=fixture(vec![
+            doc("collection"),
+            json!({"fixture_status":400,"code":"validation_failed","message":"Request validation failed","issues":[]}),
+        ]);
+        let error=dispatch(&client,"project",&p,&req("collection"),&||Ok(()),&|_,_|panic!("Invalid scoped creates must fail before approval")).unwrap_err();
+        assert!(error.contains("Cannot create the object"),"{error}");
+        assert!(error.contains("validation_failed"),"{error}");
+        server.join().unwrap();
+        let requests=capture.lock().unwrap();
+        assert_eq!(requests.len(),2);
+        assert!(String::from_utf8_lossy(&requests[0]).starts_with("GET /v2/spaces/s/objects/dest?ids=full "));
+        assert!(String::from_utf8_lossy(&requests[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
+        assert!(requests.iter().all(|r| !String::from_utf8_lossy(r).starts_with("POST /v2/spaces/s/objects ")));
+    }
+    #[test]
+    fn scoped_missing_option_error_names_the_value_without_recommending_a_rejected_flag() {
+        let mut request = req("collection");
+        request.arguments["body"]["properties"] = json!({"status":"Todo"});
+        let mut p = project(source("collection", "createDelete"));
+        p.sources[0].permission.approval = "alwaysAsk".into();
+        let (client, capture, server) = fixture(vec![
+            doc("collection"),
+            page(json!([{"key":"status","name":"Status","format":"select"}])),
+            json!({
+                "fixture_status":400,
+                "code":"validation_failed",
+                "message":"Request validation failed",
+                "issues":[{"path":"body.properties.status","message":"Invalid option"}]
+            }),
+        ]);
+        let error = dispatch(
+            &client,
+            "scoped-option",
+            &p,
+            &request,
+            &|| Ok(()),
+            &|_, _| panic!("Invalid scoped options must fail before approval"),
+        )
+        .unwrap_err();
+        assert!(error.contains("status") && error.contains("\"Todo\""), "{error}");
+        assert!(error.contains("Scoped creation cannot create select options"), "{error}");
+        assert!(!error.contains("create_missing_options=true"), "{error}");
+        server.join().unwrap();
+        let requests = capture.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(String::from_utf8_lossy(&requests[0]).starts_with("GET /v2/spaces/s/objects/dest?ids=full "));
+        assert!(String::from_utf8_lossy(&requests[1]).starts_with("GET /v2/spaces/s/properties?ids=full&limit=100&offset=0 "));
+        assert!(String::from_utf8_lossy(&requests[2]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
+        assert!(requests.iter().all(|r| {
+            let request = String::from_utf8_lossy(r);
+            !request.starts_with("GET /v2/spaces/s/properties/status/options")
+                && !request.starts_with("POST /v2/spaces/s/objects ")
+        }));
+    }
+    #[test]
     fn concurrent_query_changes_reject_before_commit_or_return_retained_receipt() {
         let mut responses = query_reads();
         responses.extend(vec![doc("query"), page(json!([{"id":"changed"}]))]);
@@ -968,7 +1074,6 @@ mod tests {
         let mut responses = query_reads();
         responses.extend(query_reads());
         responses.push(json!({"valid":true}));
-        responses.extend(query_reads());
         responses.extend(query_reads());
         responses.push(json!({"id":"retained"}));
         responses.extend(vec![
@@ -1042,6 +1147,7 @@ mod tests {
         let (client, _, server) = fixture(vec![
             doc("collection"),
             json!({"valid":true}),
+            doc("collection"),
             json!({"id":"created"}),
             page(json!([])),
             doc("collection"),
@@ -1056,7 +1162,7 @@ mod tests {
         .unwrap();
         server.join().unwrap();
         let (client, capture, server) =
-            fixture(vec![doc("collection"), page(json!([{"id":"created"}]))]);
+            fixture(vec![doc("collection"), json!({"valid":true}), page(json!([{"id":"created"}]))]);
         assert_eq!(
             dispatch(&client, "duplicate", &p, &request, &|| Ok(()), &|_, _| Ok(
                 ()
@@ -1065,7 +1171,7 @@ mod tests {
             "confirmed"
         );
         server.join().unwrap();
-        assert_eq!(capture.lock().unwrap().len(), 2);
+        assert_eq!(capture.lock().unwrap().len(), 3);
         let client = Client::with_connection("fixture", "127.0.0.1", 1);
         for access in ["none", "read", "readWrite"] {
             assert!(dispatch(
@@ -1162,10 +1268,10 @@ pub fn dispatch(
         .spaces
         .insert(source.space_id.clone(), source.permission.clone());
     let mut prepared = anyblob_content::prepare(client, req, &config, None, check)?;
-    let definition = definition(client, source, check)?;
+    let destination_definition = definition(client, source, check)?;
     if source.kind == "query" {
         let (response, canonical_type) =
-            query::assess_with_type(client, source, &definition, req, check)?;
+            query::assess_with_type(client, source, &destination_definition, req, check)?;
         prepared.request.arguments["body"]["type"] = json!(canonical_type);
         prepared.files |= anyblob_content::needs_files(&prepared.request.arguments["body"]);
         anyblob_content::permission(&config, None, &prepared.request, prepared.files)?;
@@ -1191,13 +1297,72 @@ pub fn dispatch(
             return Ok(response);
         }
     }
-    if req.requires_confirmation(&source.permission.approval) {
+    anyblob_content::inspect(client, &mut prepared, &config, None, check)?;
+    if req.arguments["dry_run"] == true {
+        let path = record_path(project_id, req)?;
+        let mut payload = req.arguments.clone();
+        payload.as_object_mut().unwrap().remove("dry_run");
+        let fingerprint = format!("{:x}", Sha256::digest(payload.to_string().as_bytes()));
+        let _lock = OPERATIONS
+            .lock()
+            .map_err(|_| "Creation operation lock unavailable.")?;
+        check()?;
+        if let Some(record) = load(&path)? {
+            if record["fingerprint"] != fingerprint {
+                return Err("Idempotency key was already used with a different payload.".into());
+            }
+            return Ok(json!({"outcome":"not_dispatched","dry_run":true,"creation":record["creation"],"placement":{"outcome":"not_dispatched"},"idempotency_key":req.arguments["idempotency_key"]}));
+        }
+    }
+    let needs_confirmation = req.requires_confirmation(&source.permission.approval);
+    let dispatch_type = prepared.request.arguments["body"]["type"].clone();
+    let fresh_state_check = || -> Result<(), String> {
+        check()?;
+        let current = definition(client, source, check)?;
+        if current != destination_definition {
+            return Err("Creation destination changed before creation. Retry with current requirements.".into());
+        }
+        if source.kind == "query"
+            && query_proof(client, source, &current, req, check)? != dispatch_type
+        {
+            return Err("Type identity changed before creation. Retry with current metadata.".into());
+        }
+        Ok(())
+    };
+    let validation = if source.kind == "query" {
+        anyblob_content::preflight(client, &mut prepared, &config, None, &fresh_state_check)?
+    } else {
+        anyblob_content::preflight(client, &mut prepared, &config, None, check)?
+    };
+    if needs_confirmation {
         approve(
             &creation_prompt(req, source),
             check,
         )?;
+        check()?;
+        let current = definition(client, source, check)?;
+        if current != destination_definition {
+            return Err("Creation destination changed before creation. Retry with current requirements.".into());
+        }
+        if source.kind == "query" {
+            let (response, canonical_type) =
+                query::assess_with_type(client, source, &current, req, check)?;
+            if let Some(response) = response {
+                return Ok(response);
+            }
+            if prepared.request.arguments["body"]["type"] != canonical_type {
+                return Err("Type identity changed before creation. Retry with current metadata.".into());
+            }
+        }
+        anyblob_content::inspect(client, &mut prepared, &config, None, check)?;
+        if req.arguments["dry_run"] != true {
+            anyblob_content::preflight(client, &mut prepared, &config, None, &fresh_state_check)?;
+        }
     }
-    anyblob_content::inspect(client, &mut prepared, &config, None, check)?;
+    if let Some(result) = validation {
+        check()?;
+        return Ok(result);
+    }
     // Serialize recovery and new operations across threads. The bridge is a single instance.
     let _lock = OPERATIONS
         .lock()
@@ -1235,29 +1400,20 @@ pub fn dispatch(
         ));
     }
     if record["state"] == "new" {
-        let dispatch_type = prepared.request.arguments["body"]["type"].clone();
-        let before_write = || {
-            check()?;
-            if source.kind == "query" {
-                let current = self::definition(client, source, check)?;
-                if current != definition {
-                    return Err("Query definition changed before creation. Retry with current requirements.".into());
-                }
-                if query_proof(client, source, &current, req, check)? != dispatch_type {
-                    return Err(
-                        "Type identity changed before creation. Retry with current metadata."
-                            .into(),
-                    );
-                }
-            }
-            Ok(())
-        };
         let mut pending = record.clone();
         pending["state"] = json!("creating");
-        let creation =
-            anyblob_content::execute_committing(client, &mut prepared, &before_write, &|| {
-                save(&path, &pending)
-            });
+        let before_commit = || {
+            fresh_state_check()?;
+            save(&path, &pending)
+        };
+        let creation = anyblob_content::execute_validated(
+            client,
+            &mut prepared,
+            check,
+            &before_commit,
+            &config,
+            None,
+        );
         let creation = match creation {
             Ok(c) => c,
             Err(e) => {
