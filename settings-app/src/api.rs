@@ -432,5 +432,14 @@ pub(crate) fn content_request(
         if let Some((_,etag))=headers.iter().find(|(k,_)|k=="etag") {if result.is_object()&&result.get("etag").is_none(){result["etag"]=json!(etag);}}
         Ok(result)
     })();
-    result.map_err(|error:String|if sent&&method!="GET" {format!("Mutation outcome unknown. Do not retry automatically. {error}")}else{error})
+    result.map_err(|error:String|if sent&&method!="GET" {
+        let dry_run = path.split_once('?').is_some_and(|(_, query)| {
+            query.split('&').any(|parameter| parameter == "dry_run=true")
+        });
+        if dry_run {
+            format!("Anytype validation did not complete. No mutation was dispatched. {error}")
+        } else {
+            format!("Mutation outcome unknown. Do not retry automatically. {error}")
+        }
+    }else{error})
 }

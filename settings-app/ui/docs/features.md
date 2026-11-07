@@ -19,7 +19,11 @@ BlobUI groups its customization guides under Features. Choose a guide for the se
 
 ## Calendar Colors
 
-[Calendar Colors](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/calendar-colors.md) covers the Calendar Color property and refreshing colors from Anytype. It requires the optional Local API connection.
+[Calendar Colors](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/calendar-colors.md) covers property-based event colors, calendar overrides, the legacy Calendar Color property, and refresh behavior. It requires the optional Local API connection.
+
+## Anyblob (Codex Integration)
+
+[Anyblob](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/anyblob-codex-integration.md) connects Codex to Anytype through BlobUI. Use its separate setup and configuration guides to install the plugin and set space or project permissions.
 
 ## QoL Features
 

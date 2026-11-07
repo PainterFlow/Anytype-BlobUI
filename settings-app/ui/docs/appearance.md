@@ -1,7 +1,7 @@
 ---
 category: getting-started
 parent: features
-index: 4
+index: 7
 icon: features
 name: Appearance
 ---

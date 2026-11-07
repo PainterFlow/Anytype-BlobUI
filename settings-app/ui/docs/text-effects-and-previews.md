@@ -1,7 +1,7 @@
 ---
 category: getting-started
 parent: features
-index: 7
+index: 10
 icon: features
 name: QoL Features
 ---
