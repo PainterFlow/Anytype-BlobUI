@@ -103,7 +103,9 @@ export function SelectPicker({
       if (!root.current?.contains(event.target) && !menu.current?.contains(event.target)) close();
     };
     const reposition = event => {
-      if (!menu.current?.contains(event.target)) close(menu.current?.contains(document.activeElement));
+      if (!(event.target instanceof Node) || !menu.current?.contains(event.target)) {
+        close(menu.current?.contains(document.activeElement));
+      }
     };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("focusin", dismiss);
@@ -185,3 +187,4 @@ export function SelectPicker({
     {portal ? createPortal(list, portal) : list}
   </div>;
 }
+
