@@ -12,7 +12,7 @@ const DocsData = context.BlobUI.DocsData;
 
 test('production catalog nests feature guides and README links resolve', async () => {
   const docsRoot = path.join(workspace, 'settings-app/ui/docs');
-  const expected = ['api-guide', 'appearance', 'calendar-colors', 'features', 'installation-and-removal', 'introduction', 'kanban-layouts-and-formulas', 'settings-ui-refresh', 'setup-and-architecture', 'testing-and-releases', 'text-effects-and-previews', 'theme-and-documentation-development', 'updating'];
+  const expected = ['anyblob-codex-integration', 'anyblob-configuration', 'anyblob-setup', 'api-guide', 'appearance', 'calendar-colors', 'features', 'installation-and-removal', 'introduction', 'kanban-layouts-and-formulas', 'settings-ui-refresh', 'setup-and-architecture', 'testing-and-releases', 'text-effects-and-previews', 'theme-and-documentation-development', 'updating'];
   const requested = [];
   context.fetch = async url => {
     requested.push(url);
@@ -23,7 +23,7 @@ test('production catalog nests feature guides and README links resolve', async (
   assert.deepEqual(Array.from(catalog.articles, item => item.id).sort(), expected);
   assert.deepEqual(fs.readdirSync(docsRoot).filter(name => name.endsWith('.md')).sort(), expected.map(id => id + '.md'));
   assert.equal(requested.length, expected.length);
-  const parents = { appearance: 'features', 'kanban-layouts-and-formulas': 'features', 'calendar-colors': 'features', 'text-effects-and-previews': 'features' };
+  const parents = { 'anyblob-setup': 'anyblob-codex-integration', 'anyblob-configuration': 'anyblob-codex-integration', appearance: 'features', 'kanban-layouts-and-formulas': 'features', 'calendar-colors': 'features', 'text-effects-and-previews': 'features' };
   for (const category of catalog.categories) {
     const group = catalog.articles.filter(article => article.category === category.id);
     assert.deepEqual(Array.from(group, article => article.index), Array.from(group, (_, index) => index + 1));
@@ -41,6 +41,9 @@ test('production catalog nests feature guides and README links resolve', async (
   assert.equal(byId['text-effects-and-previews'].name, 'QoL Features');
   assert.equal(byId['api-guide'].name, 'API Guide');
   assert.equal(byId['calendar-colors'].name, 'Calendar Colors');
+  assert.equal(byId['anyblob-codex-integration'].name, 'Anyblob (Codex Integration)');
+  assert.equal(byId['anyblob-codex-integration'].icon, 'anyblob');
+  assert.equal(byId['anyblob-configuration'].parent, 'anyblob-codex-integration');
   assert.equal(byId['settings-ui-refresh'].icon, 'settings-ui');
   assert.doesNotMatch(byId['text-effects-and-previews'].markdown, /## Video playback|skip ten seconds|enter fullscreen/i);
   assert.doesNotMatch(byId['settings-ui-refresh'].markdown, /## App settings and videos|ten-second skips|fullscreen/i);
@@ -133,6 +136,8 @@ test('frontmatter rejects duplicate keys and article body is required', () => {
 
 test('image aliases only return allowlisted local assets', () => {
   assert.equal(DocsData.resolveImage('blobui-mark'), './cdn/blobui-mark.svg');
+  assert.equal(DocsData.resolveImage('anyblob-codex-integration'), './cdn/anyblob-codex-integration.png');
+  assert.equal(DocsData.resolveImage('anyblob-project-permissions'), './cdn/anyblob-project-permissions.png');
   assert.equal(DocsData.resolveImage('../secret'), '');
   assert.equal(DocsData.resolveImage('https://example.com/image.svg'), '');
 });

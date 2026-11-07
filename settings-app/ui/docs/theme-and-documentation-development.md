@@ -40,7 +40,7 @@ Keep marker links outside normal hover-preview settings. Check formatted fragmen
 
 ## Write articles
 
-The seven production Markdown files live in `settings-app/ui/docs`. Lowercase filename slugs are article IDs. `docs-data.js` registers the explicit file list, categories, and allowlisted images. `docs.js` renders navigation and orders articles by their numeric `index` and opens the first root in category order.
+The production Markdown files live in `settings-app/ui/docs`. Lowercase filename slugs are article IDs. `docs-data.js` registers the explicit file list, categories, and allowlisted images. `docs.js` renders navigation and orders articles by their numeric `index` and opens the first root in category order.
 
 ```markdown
 ---
@@ -55,7 +55,7 @@ name: Introduction
 Write the article here.
 ```
 
-Use `getting-started` for User guide and `development` for Development. The production catalog has no nesting. The parser still accepts an optional `parent` field for one level; parents must exist in the same category and cannot have parents themselves. Required fields are `category`, `icon`, and `name`. Add a positive integer `index`, starting at 1 in each category, to control the order. Articles without an index follow indexed articles; ties use name and ID.
+Use `getting-started` for User guide and `development` for Development. The catalog supports one level of child articles through the optional `parent` field. Parents must exist in the same category and cannot have parents themselves. Required fields are `category`, `icon`, and `name`. Add a positive integer `index`, starting at 1 in each category, to control the order. Articles without an index follow indexed articles; ties use name and ID.
 
 Use sentence case, numbered procedures with expected results, and recovery advice beside the relevant task. Keep primary instructions complete for offline readers. README links are repository-relative. Article cross-links use absolute GitHub file URLs because relative links are stripped by the in-app sanitizer.
 

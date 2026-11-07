@@ -28,6 +28,12 @@ function SvgIcon({ path, className }) {
   return <span className={className}><svg viewBox="0 0 20 20" aria-hidden="true"><path d={path} /></svg></span>;
 }
 
+function AnyblobIcon({ className }) {
+  return <span className={className}><svg viewBox="0 0 24 24" aria-hidden="true" style={{ strokeWidth: 1.5 }}>
+    {Array.from({ length: 6 }, (_, index) => <path key={index} transform={`rotate(${index * 60} 12 12)`} d="M8.5 13V6l5-2.9a5.3 5.3 0 0 1 7.2 1.9" />)}
+  </svg></span>;
+}
+
 function articleIconSource(item) {
   const source = window.BlobUI.DocsData.resolveImage(item.icon || "");
   return typeof source === "string" && /^\.\/cdn\/[A-Za-z0-9_-]+\.(?:svg|png|jpe?g|gif|webp)$/i.test(source) ? source : "";
@@ -35,6 +41,7 @@ function articleIconSource(item) {
 
 function Icon({ item, category = false }) {
   const className = category ? "documentation-category-icon" : "documentation-item-icon";
+  if (!category && item.icon === "anyblob") return <AnyblobIcon className={className} />;
   const source = articleIconSource(item);
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [source]);
