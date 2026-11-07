@@ -502,14 +502,24 @@ fn dispatch_resolved_with(
             crate::anyblob_content::permission(&effective,scope.as_ref(),&wide,false)?;
         }
         let mut prepared=crate::anyblob_content::prepare(&client,content,&effective,scope.as_ref(),&check)?;
-        let permission=crate::anyblob_content::permission(&effective,scope.as_ref(),content,prepared.files)?;
-        if content.requires_confirmation(&permission.approval) {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
         let initial_files=prepared.files;
         let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,initial_files)?;}Ok(())};
-        if blobui_mcp::sources::needs_display_context(&request.request) && !content.requires_confirmation(&permission.approval) {
+        crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
+        let permission=crate::anyblob_content::permission(&effective,scope.as_ref(),content,prepared.files)?;
+        let needs_confirmation=content.requires_confirmation(&permission.approval);
+        let validation=crate::anyblob_content::preflight(&client,&mut prepared,&effective,scope.as_ref(),&check)?;
+        if needs_confirmation {approve(&prepared.approval_prompt(&client,&check)?,&check)?;}
+        if needs_confirmation {
+            let approval_files=prepared.files;
+            let inspect_check=|| -> Result<(),String> {check()?;if let Some(project)=project {let current=crate::anyblob_scope::Scope::load(&client,project,&check)?;crate::anyblob_content::permission(&effective,Some(&current),content,approval_files)?;}Ok(())};
+            crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
+            if content.mutates() && content.arguments["dry_run"]!=true {
+                crate::anyblob_content::preflight(&client,&mut prepared,&effective,scope.as_ref(),&check)?;
+            }
+        }
+        if blobui_mcp::sources::needs_display_context(&request.request) && !needs_confirmation {
             let _ = prepared.approval_prompt(&client,&inspect_check)?;
         }
-        crate::anyblob_content::inspect(&client,&mut prepared,&effective,scope.as_ref(),&inspect_check)?;
         let files=prepared.files;
         let before_dispatch=|| {
             check()?;
@@ -520,6 +530,7 @@ fn dispatch_resolved_with(
             } else {crate::anyblob_content::permission(&effective,None,content,files)?;}
             Ok(())
         };
+        if let Some(result)=validation { before_dispatch()?; return Ok(result); }
         // Every preflight and commit rechecks live authorization. Mutation receipts survive
         // membership changes caused by this edit, and are never followed by implicit reads.
         let mut result=if content.tool == "list_properties" && scope.as_ref().is_some_and(|s| !s.has_whole_space(content.arguments["space_id"].as_str().unwrap())) {
@@ -529,7 +540,7 @@ fn dispatch_resolved_with(
                 return Err("Project source membership changed. Reread before retrying.".into());
             }
             result
-        } else { crate::anyblob_content::execute(&client,&mut prepared,&before_dispatch)? };
+        } else { crate::anyblob_content::execute_validated(&client,&mut prepared,&check,&before_dispatch,&effective,scope.as_ref())? };
         if !content.mutates() {
             check()?;
             if let Some(project)=project {
@@ -743,7 +754,7 @@ mod tests {
         assert!(entered.load(Ordering::Acquire));
     }
     #[test]
-    fn content_access_and_approval_denial_dispatch_no_http() {
+    fn content_access_denial_precedes_http_and_approval_follows_preflight() {
         let operation=||blobui_mcp::operation("create_object",json!({"space_id":"space","body":{"type":"page","name":"fixture"}})).unwrap();
         for access in ["none","read","readWrite"] {
             let config=config(access,"fullAccess");
@@ -751,11 +762,52 @@ mod tests {
             assert!(result.unwrap_err().contains("Access denied"));
         }
         for approval in ["alwaysAsk", "approveForMe"] {
-        let config=config("createDelete",approval);
-        let prompted=std::cell::Cell::new(false);
-        let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(crate::kanban_api::Client::with_connection("fixture-key","127.0.0.1",1)),|op,_|{prompted.set(true);assert_eq!(op.name(),"create_object");Err("User denied mutation".into())},||Ok(None));
-        assert!(prompted.get());assert!(result.unwrap_err().contains("User denied mutation"));
+            let config=config("createDelete",approval);
+            let captured_body=json!({"type":"page","name":"fixture"});
+            let (client,captured,server)=mock_recording(vec![
+                ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":captured_body,"dry_run":true})),
+                ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+            ],None);
+            let prompted=std::cell::Cell::new(false);
+            let result=dispatch_resolved_with(request(operation()),||true,||Ok(enabled()),||Ok(config.clone()),||Ok(client.clone_for_fixture()),|op,_|{
+                prompted.set(true);assert_eq!(op.name(),"create_object");
+                assert!(captured.lock().unwrap()[0].starts_with("POST /v2/spaces/space/objects?dry_run=true "));
+                Err("User denied mutation".into())
+            },||Ok(None));
+            assert!(prompted.get(), "dispatch returned {:?}, requests {:?}", result, *captured.lock().unwrap());
+            assert!(result.unwrap_err().contains("User denied mutation"));
+            server.join().unwrap();
+            let requests=captured.lock().unwrap();
+            assert_eq!(requests.len(),2);
+            assert!(requests.iter().all(|request| !request.starts_with("POST /v2/spaces/space/objects ")));
         }
+    }
+    #[test]
+    fn invalid_create_option_returns_guidance_without_approval_or_creation() {
+        let body=json!({"type":"page","name":"fixture","properties":{"status":{"select":{"name":"Todo"}}}});
+        let (client,captured,server)=mock_recording(vec![
+            ("GET /v2/spaces/space/properties?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"key":"status","name":"Status","format":"select"}],"has_more":false})),
+            ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_status":400,"_fixture_request_body":body,"error":{"code":"validation_failed","message":"Request validation failed","issues":[{"path":"body.properties.status","message":"Option does not exist"}]}})),
+            ("GET /v2/spaces/space/properties?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"key":"status","name":"Status","format":"select"}],"has_more":false})),
+            ("GET /v2/spaces/space/properties/status/options?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"name":"Open"},{"name":"Done"}],"has_more":false})),
+        ],None);
+        let saved=config("createDelete","alwaysAsk");
+        let result=dispatch_resolved_with(
+            request(blobui_mcp::operation("create_object",json!({"space_id":"space","body":body})).unwrap()),
+            ||true,||Ok(enabled()),||Ok(saved.clone()),||Ok(client.clone_for_fixture()),
+            |_,_|panic!("Invalid create requests must fail before approval"),||Ok(None),
+        );
+        let error=result.unwrap_err();
+        assert!(error.contains("Cannot create the object because Status has no option named \"Todo\""),"{error}");
+        assert!(error.contains("Available options for Status are \"Open\", \"Done\""),"{error}");
+        assert!(error.contains("create_missing_options=true") && error.contains("space-wide Create-Delete permission"),"{error}");
+        assert!(error.contains("Technical details:") && error.contains("validation_failed"),"{error}");
+        server.join().unwrap();
+        let requests=captured.lock().unwrap();
+        assert_eq!(requests.len(),4);
+        assert!(requests[0].starts_with("GET /v2/spaces/space/properties?ids=full&limit=100&offset=0 "));
+        assert!(requests[1].starts_with("POST /v2/spaces/space/objects?dry_run=true "));
+        assert!(requests.iter().all(|request| !request.starts_with("POST /v2/spaces/space/objects ")));
     }
     fn config(access: &str, approval: &str) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":access,"approval":approval}}}))
@@ -946,9 +998,22 @@ mod tests {
         responses: Vec<(String, Value)>,
         revoke: Option<Arc<AtomicBool>>,
     ) -> (crate::kanban_api::Client, std::thread::JoinHandle<()>) {
+        let (client, _, server) = mock_recording(responses, revoke);
+        (client, server)
+    }
+    fn mock_recording(
+        responses: Vec<(String, Value)>,
+        revoke: Option<Arc<AtomicBool>>,
+    ) -> (
+        crate::kanban_api::Client,
+        Arc<std::sync::Mutex<Vec<String>>>,
+        std::thread::JoinHandle<()>,
+    ) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = requests.clone();
         let server = std::thread::spawn(move || {
             for (expected, body) in responses {
                 let deadline = Instant::now() + Duration::from_secs(10);
@@ -987,6 +1052,7 @@ mod tests {
                     }
                 }
                 let text = String::from_utf8(data).unwrap();
+                captured.lock().unwrap().push(text.clone());
                 assert!(text.starts_with(&expected), "{text}");
                 assert!(expected.contains("/v2/"));
                 if expected.starts_with("POST") {
@@ -997,12 +1063,18 @@ mod tests {
                     flag.store(true, Ordering::Release);
                 }
                 let status = body["_fixture_status"].as_u64().unwrap_or(200);
-                let body = body.to_string();
+                let mut response = body;
+                if let Some(fields) = response.as_object_mut() {
+                    fields.remove("_fixture_status");
+                    fields.remove("_fixture_request_body");
+                }
+                let body = response.to_string();
                 write!(stream,"HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
             }
         });
         (
             crate::kanban_api::Client::with_connection("fixture-api-key", "127.0.0.1", port),
+            requests,
             server,
         )
     }
@@ -1258,6 +1330,7 @@ mod tests {
                 ("GET /v2/spaces/space/objects/object?ids=full ".into(),json!({"id":"object","name":"Note","properties":{}})),
                 ("GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),json!({"id":"object","markdown":"resource content"})),
                 ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
+                ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true})),
                 ("GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),json!({"data":[{"id":"space","name":"Work"}],"has_more":false})),
                 ("POST /v2/spaces/space/objects?dry_run=true ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true})),
                 ("POST /v2/spaces/space/objects ".into(),json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"id":"created-object","etag":"created-etag"})),

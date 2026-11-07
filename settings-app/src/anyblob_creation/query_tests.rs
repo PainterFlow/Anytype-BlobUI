@@ -153,7 +153,7 @@ fn captured_request_creates_once_with_canonical_type_then_uses_normal_access() {
     responses.extend(vec![captured_query(), captured_views(true)]);
     responses.extend(captured_assessment());
     responses.push(json!({"valid":true}));
-    for _ in 0..2 {
+    for _ in 0..1 {
         responses.extend(vec![captured_query(), captured_views(true)]);
         responses.extend(captured_assessment());
     }
@@ -414,7 +414,7 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
     responses.extend(vec![property_doc(json!([])), views()]);
     responses.extend(assessment_reads());
     responses.push(json!({"valid":true}));
-    for _ in 0..2 {
+    for _ in 0..1 {
         responses.extend(vec![property_doc(json!([])), views()]);
         responses.extend(assessment_reads());
     }

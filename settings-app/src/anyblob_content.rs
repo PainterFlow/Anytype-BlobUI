@@ -11,6 +11,7 @@ use std::{
 const MAX_UPLOAD: u64 = 25 * 1024 * 1024;
 pub struct Prepared {
     pub request: ContentRequest,
+    mutation_key: Option<String>,
     file: Option<File>,
     path: Option<PathBuf>,
     size: u64,
@@ -93,6 +94,264 @@ fn response(value: Value) -> Result<Value, String> {
     } else {
         Ok(value)
     }
+}
+
+fn requested_option_values(value: &Value, values: &mut Vec<String>) {
+    match value {
+        Value::String(value) => values.push(value.clone()),
+        Value::Array(items) => {
+            for item in items {
+                requested_option_values(item, values);
+            }
+        }
+        Value::Object(fields) => {
+            for key in ["select", "multi_select"] {
+                if let Some(value) = fields.get(key) {
+                    requested_option_payload(value, values);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn requested_option_payload(value: &Value, values: &mut Vec<String>) {
+    match value {
+        Value::String(value) => values.push(value.clone()),
+        Value::Array(items) => {
+            for item in items {
+                requested_option_payload(item, values);
+            }
+        }
+        Value::Object(fields) => {
+            if let Some(name) = fields.get("name").and_then(Value::as_str) {
+                values.push(name.into());
+            } else {
+                for key in ["select", "multi_select"] {
+                    if let Some(value) = fields.get(key) {
+                        requested_option_payload(value, values);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn api_error_details(response: &Value) -> &Value {
+    let error = &response["error"];
+    if error["error"].is_object() {
+        &error["error"]
+    } else {
+        error
+    }
+}
+
+fn missing_option_detail(
+    client: &Client,
+    req: &ContentRequest,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
+    check: &impl Fn() -> Result<(), String>,
+    response: &Value,
+) -> Option<(String, String, Vec<String>)> {
+    let error = api_error_details(response);
+    if req.tool != "create_object"
+        || req.arguments["create_missing_options"] == true
+        || error["code"].as_str() != Some("validation_failed")
+    {
+        return None;
+    }
+    let space = req.arguments["space_id"].as_str()?;
+    let can_read_space_metadata = req.arguments.get("destination").is_none()
+        && scope.is_none_or(|scope| scope.has_whole_space(space));
+
+    let fields = req.arguments.pointer("/body/properties")?.as_object()?;
+    if fields.is_empty() {
+        return None;
+    }
+
+    let request = ContentRequest {
+        tool: "list_properties".into(),
+        arguments: json!({"space_id":space}),
+    };
+    let properties = if can_read_space_metadata
+        && permission(config, scope, &request, false).is_ok()
+        && check().is_ok()
+    {
+        client
+            .pages(
+                "GET",
+                &format!(
+                    "/v2/spaces/{}/properties?ids=full",
+                    crate::api::encode_segment(space)
+                ),
+                None,
+            )
+            .ok()
+            .filter(|_| check().is_ok())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    for (requested_property, raw_value) in fields {
+        let mut values = Vec::new();
+        requested_option_values(raw_value, &mut values);
+        if values.is_empty() {
+            continue;
+        }
+
+        let property = properties.iter().find(|property| {
+            matches!(property["format"].as_str(), Some("select" | "multi_select"))
+                && ["key", "id", "internal_key", "name"].iter().any(|field| {
+                    property[*field]
+                        .as_str()
+                        .is_some_and(|value| normalize_property(value) == normalize_property(requested_property))
+                })
+        });
+        if let Some(property) = property {
+            let key = property["key"]
+                .as_str()
+                .or_else(|| property["id"].as_str())
+                .unwrap_or(requested_property);
+            let options_request = ContentRequest {
+                tool: "list_property_options".into(),
+                arguments: json!({"space_id":space,"key":key}),
+            };
+            let options = if permission(config, scope, &options_request, false).is_ok()
+                && check().is_ok()
+            {
+                client
+                    .pages(
+                        "GET",
+                        &format!(
+                            "/v2/spaces/{}/properties/{}/options?ids=full",
+                            crate::api::encode_segment(space),
+                            crate::api::encode_segment(key)
+                        ),
+                        None,
+                    )
+                    .ok()
+                    .filter(|_| check().is_ok())
+            } else {
+                None
+            };
+            let Some(options) = options else {
+                continue;
+            };
+            let available = options
+                .iter()
+                .filter_map(|option| option["name"].as_str().map(String::from))
+                .collect::<Vec<_>>();
+            if let Some(missing) = values
+                .iter()
+                .find(|value| !available.iter().any(|option| option == *value))
+            {
+                let name = property["name"].as_str().unwrap_or(requested_property);
+                return Some((name.into(), missing.clone(), available));
+            }
+        }
+    }
+
+    let issue_text = format!(
+        "{} {}",
+        error["message"].as_str().unwrap_or(""),
+        error["issues"].to_string()
+    )
+    .to_lowercase();
+    if !issue_text.contains("option") {
+        return None;
+    }
+    let mut candidates = fields.iter().filter_map(|(name, value)| {
+        let mut values = Vec::new();
+        requested_option_values(value, &mut values);
+        let matching_path = issue_text.contains(&name.to_lowercase());
+        let matching_value = values.iter().find(|value| issue_text.contains(&value.to_lowercase()));
+        let inferred_value = if matching_path || fields.len() == 1 {
+            matching_value.or_else(|| (values.len() == 1).then(|| &values[0]))
+        } else {
+            matching_value
+        };
+        inferred_value.map(|value| (name.clone(), value.clone()))
+    });
+    let (property, value) = candidates.next()?;
+    let name = properties
+        .iter()
+        .find(|row| {
+            ["key", "id", "internal_key", "name"].iter().any(|field| {
+                row[*field]
+                    .as_str()
+                    .is_some_and(|candidate| normalize_property(candidate) == normalize_property(&property))
+            })
+        })
+        .and_then(|row| row["name"].as_str())
+        .unwrap_or(&property)
+        .to_string();
+    Some((name, value, Vec::new()))
+}
+
+fn create_object_error(
+    client: &Client,
+    req: &ContentRequest,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
+    check: &impl Fn() -> Result<(), String>,
+    value: &Value,
+) -> String {
+    let error = api_error_details(value);
+    let technical = value.to_string();
+    if let Some((property, option, available)) =
+        missing_option_detail(client, req, config, scope, check, value)
+    {
+        let available = if available.is_empty() {
+            String::new()
+        } else {
+            let shown = available.iter().take(10).map(|value| format!("{value:?}")).collect::<Vec<_>>();
+            let more = available.len().saturating_sub(shown.len());
+            format!(
+                " Available options for {property} are {}{}.",
+                shown.join(", "),
+                if more == 0 { String::new() } else { format!(", and {more} more") }
+            )
+        };
+        let guidance = if req.arguments.get("destination").is_some() {
+            format!(
+                "Scoped creation cannot create select options. Choose an existing {property} option."
+            )
+        } else {
+            format!(
+                "Choose an existing {property} option, or explicitly request a new one with create_missing_options=true.{available} Creating a missing option requires space-wide Create-Delete permission."
+            )
+        };
+        return format!(
+            "Cannot create the object because {property} has no option named {option:?}. {guidance} Anyblob will not create an option or substitute a value automatically. Technical details: {technical}"
+        );
+    }
+    let reason = error["message"]
+        .as_str()
+        .unwrap_or("Anytype rejected the request.");
+    format!(
+        "Cannot create the object because {}. Check that the object type and property keys are valid. If a select value needs a new option, explicitly request create_missing_options=true. Creating a missing option requires space-wide Create-Delete permission. Technical details: {technical}",
+        reason.trim_end_matches('.')
+    )
+}
+
+fn response_for_request(
+    client: &Client,
+    req: &ContentRequest,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
+    check: &impl Fn() -> Result<(), String>,
+    value: Value,
+) -> Result<Value, String> {
+    if value.get("_http_error").is_some() {
+        if req.tool == "create_object" {
+            return Err(create_object_error(client, req, config, scope, check, &value));
+        }
+        return response(value);
+    }
+    Ok(value)
 }
 fn request(
     client: &Client,
@@ -205,6 +464,7 @@ pub fn prepare(
     check()?;
     let mut prepared = Prepared {
         request: req.clone(),
+        mutation_key: req.arguments["idempotency_key"].as_str().map(String::from),
         file: None,
         path: None,
         size: 0,
@@ -456,24 +716,41 @@ pub fn inspect(
     check()?;
     Ok(())
 }
+#[cfg(test)]
 pub fn execute(
     client: &Client,
     prepared: &mut Prepared,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
-    execute_committing(client, prepared, check, &|| Ok(()))
+    let config = crate::codex::Configuration::default();
+    let validation = preflight(client, prepared, &config, None, check)?;
+    if let Some(result) = validation {
+        return Ok(result);
+    }
+    execute_validated(client, prepared, check, &|| Ok(()), &config, None)
 }
-pub fn execute_committing(
+/// Validate mutation semantics without committing. The returned value is present only when
+/// the caller explicitly requested dry_run.
+pub fn preflight(
     client: &Client,
     prepared: &mut Prepared,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
-    before_commit: &impl Fn() -> Result<(), String>,
-) -> Result<Value, String> {
+) -> Result<Option<Value>, String> {
     let req = &prepared.request;
     let spec = req.specification()?;
-    let method = spec["method"].as_str().unwrap();
-    let body = req.arguments.get("body");
-    let etag = req.arguments["etag"].as_str();
+    if !req.mutates() {
+        return Ok(None);
+    }
+    let supports_dry_run = spec["query"]
+        .as_array()
+        .is_some_and(|query| query.iter().any(|parameter| parameter == "dry_run"));
+    let dry = req.arguments["dry_run"] == true;
+    if dry && !supports_dry_run {
+        return Err("This operation does not support dry_run.".into());
+    }
+
     // Discover authoritative operation shapes before applying a document patch.
     if req.tool == "patch_object" {
         for op in req.arguments["body"]["ops"].as_array().unwrap() {
@@ -495,64 +772,110 @@ pub fn execute_committing(
             validate_schema(&schema["schema"], op, "body/ops")?;
         }
     }
+
+    if prepared.mutation_key.is_none() {
+        let mut random = [0u8; 16];
+        if getrandom::fill(&mut random).is_err() {
+            return Err("Could not generate mutation retry key.".into());
+        }
+        prepared.mutation_key = Some(random.iter().map(|b| format!("{b:02x}")).collect());
+    }
+    let key = prepared
+        .mutation_key
+        .as_deref()
+        .ok_or("Could not generate mutation retry key.")?;
+    if key.is_empty() {
+        return Err("Could not generate mutation retry key.".into());
+    }
+    if !supports_dry_run {
+        return Ok(None);
+    }
+    let method = spec["method"].as_str().unwrap();
+    let body = if req.tool == "upload_file" && req.arguments["url"].is_string() {
+        let mut url_body = json!({"url":req.arguments["url"]});
+        if req.arguments["name"].is_string() {
+            url_body["name"] = req.arguments["name"].clone();
+        }
+        Some(url_body)
+    } else {
+        None
+    };
+    let body = body.as_ref().or_else(|| req.arguments.get("body"));
+    let etag = req.arguments["etag"].as_str();
+
+    // Server dry runs validate current semantics and advertised limits without committing.
+    check()?;
+    let file = prepared
+        .file
+        .as_mut()
+        .map(|f| (f, prepared.size, prepared.name.as_str()));
+    let result = match client.content_request(
+        method,
+        &route(req, true)?,
+        body,
+        etag,
+        None,
+        file,
+    )? {
+        value if value.get("_http_error").is_some() => {
+            return Err(create_or_response_error(client, req, config, scope, check, value));
+        }
+        value => value,
+    };
+    if let Some(file) = prepared.file.as_mut() {
+        file.seek(SeekFrom::Start(0))
+            .map_err(|_| "Could not rewind staged upload.")?;
+    }
+    if dry {
+        return Ok(Some(json!({"outcome":"validated","receipt":result,"idempotency_key":key})));
+    }
+    Ok(None)
+}
+
+fn create_or_response_error(
+    client: &Client,
+    req: &ContentRequest,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
+    check: &impl Fn() -> Result<(), String>,
+    value: Value,
+) -> String {
+    match response_for_request(client, req, config, scope, check, value) {
+        Err(error) => error,
+        Ok(_) => "Anytype validation returned an unexpected response.".into(),
+    }
+}
+
+pub fn execute_validated(
+    client: &Client,
+    prepared: &mut Prepared,
+    check: &impl Fn() -> Result<(), String>,
+    before_commit: &impl Fn() -> Result<(), String>,
+    config: &crate::codex::Configuration,
+    scope: Option<&crate::anyblob_scope::Scope>,
+) -> Result<Value, String> {
+    let req = &prepared.request;
+    let spec = req.specification()?;
+    let method = spec["method"].as_str().unwrap();
+    let body = if req.tool == "upload_file" && req.arguments["url"].is_string() {
+        let mut url_body = json!({"url":req.arguments["url"]});
+        if req.arguments["name"].is_string() {
+            url_body["name"] = req.arguments["name"].clone();
+        }
+        Some(url_body)
+    } else {
+        None
+    };
+    let body = body.as_ref().or_else(|| req.arguments.get("body"));
+    let etag = req.arguments["etag"].as_str();
     if !req.mutates() {
         check()?;
         return request(client, method, &route(req, false)?, body, etag, None);
     }
-    let key = req.arguments["idempotency_key"]
-        .as_str()
-        .map(String::from)
-        .unwrap_or_else(|| {
-            let mut random = [0u8; 16];
-            if getrandom::fill(&mut random).is_err() {
-                return String::new();
-            }
-            random.iter().map(|b| format!("{b:02x}")).collect()
-        });
-    if key.is_empty() {
-        return Err("Could not generate mutation retry key.".into());
-    }
-    let url_body = if req.tool == "upload_file" && req.arguments["url"].is_string() {
-        let mut body = json!({"url":req.arguments["url"]});
-        if req.arguments["name"].is_string() {
-            body["name"] = req.arguments["name"].clone();
-        }
-        Some(body)
-    } else {
-        None
-    };
-    let body = url_body.as_ref().or(body);
-    let dry = req.arguments["dry_run"] == true;
-    // Server dry runs validate current semantics and advertised limits. They do not reserve state.
-    if spec["query"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|q| q == "dry_run")
-    {
-        check()?;
-        let file = prepared
-            .file
-            .as_mut()
-            .map(|f| (f, prepared.size, prepared.name.as_str()));
-        let result = response(client.content_request(
-            method,
-            &route(req, true)?,
-            body,
-            etag,
-            None,
-            file,
-        )?)?;
-        if dry {
-            return Ok(json!({"outcome":"validated","receipt":result,"idempotency_key":key}));
-        }
-        if let Some(file) = prepared.file.as_mut() {
-            file.seek(SeekFrom::Start(0))
-                .map_err(|_| "Could not rewind staged upload.")?;
-        }
-    } else if dry {
-        return Err("This operation does not support dry_run.".into());
-    }
+    let key = prepared
+        .mutation_key
+        .as_deref()
+        .ok_or("Mutation was not preflighted.")?;
     check()?;
     let file = prepared
         .file
@@ -560,10 +883,14 @@ pub fn execute_committing(
         .map(|f| (f, prepared.size, prepared.name.as_str()));
     before_commit()?;
     check()?;
-    let result = client.content_request(method, &route(req, false)?, body, etag, Some(&key), file);
-    match result {
+    match client.content_request(method, &route(req, false)?, body, etag, Some(key), file) {
         Ok(value) if value.get("_http_error").is_some() => {
-            Ok(json!({"outcome":"rejected","receipt":value,"idempotency_key":key}))
+            if req.tool == "create_object" {
+                let error = create_object_error(client, req, config, scope, check, &value);
+                Ok(json!({"outcome":"rejected","error":error,"technical_details":value,"receipt":value,"idempotency_key":key}))
+            } else {
+                Ok(json!({"outcome":"rejected","receipt":value,"idempotency_key":key}))
+            }
         }
         Ok(value) => Ok(json!({"outcome":"confirmed","receipt":value,"idempotency_key":key})),
         Err(error) if error.starts_with("Mutation outcome unknown") => Ok(
@@ -614,8 +941,10 @@ pub(crate) mod tests {
         content
     }
     fn prepared(req: ContentRequest) -> Prepared {
+        let mutation_key = req.arguments["idempotency_key"].as_str().map(String::from);
         Prepared {
             request: req,
+            mutation_key,
             file: None,
             path: None,
             size: 0,
@@ -677,6 +1006,10 @@ pub(crate) mod tests {
                     continue;
                 }
                 let status = response["fixture_status"].as_u64().unwrap_or(200);
+                let mut response = response;
+                if let Some(fields) = response.as_object_mut() {
+                    fields.remove("fixture_status");
+                }
                 let text = response.to_string();
                 write!(stream,"HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nETag: \"MixedCaseETag\"\r\nConnection: close\r\n\r\n{text}",text.len()).unwrap();
             }
@@ -805,6 +1138,19 @@ pub(crate) mod tests {
         assert_eq!(result["retry_automatically"], false);
         assert_eq!(result["idempotency_key"], "message-key");
         assert_eq!(capture.lock().unwrap().len(), 2);
+    }
+    #[test]
+    fn dry_run_transport_failure_does_not_claim_a_mutation_was_sent() {
+        let (client, capture, server) = fixture(vec![json!("disconnect")]);
+        let req=content("create_object",json!({"space_id":"s","body":{"type":"page","name":"fixture"}}));
+        let config=config("createDelete",true,false);
+        let mut prepared=prepare(&client,&req,&config,None,&||Ok(())).unwrap();
+        let error=preflight(&client,&mut prepared,&config,None,&||Ok(())).unwrap_err();
+        assert!(error.contains("No mutation was dispatched"),"{error}");
+        assert!(!error.contains("Mutation outcome unknown"),"{error}");
+        server.join().unwrap();
+        assert_eq!(capture.lock().unwrap().len(),1);
+        assert!(String::from_utf8_lossy(&capture.lock().unwrap()[0]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
     }
     #[test]
     fn upload_snapshot_and_multipart_preserve_unicode_and_bytes() {
