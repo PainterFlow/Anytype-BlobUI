@@ -1,14 +1,14 @@
 ---
 category: getting-started
 parent: features
-index: 5
+index: 8
 icon: features
 name: Kanban
 ---
 
 # Kanban
 
-v1.3.0 adds Board layout, Collapsed Categories, and custom calculations for Kanban views. Layout changes work without API access. Calculations require the optional Anytype API connection.
+Board layouts and Collapsed Categories work without API access. Calculations use the optional Anytype Local API v2 connection.
 
 ## Choose a board layout
 
@@ -41,7 +41,7 @@ The recording shows Compact spacing with Collapsed Categories enabled.
 
 Unsupported views are hidden from the list. Each exclusion is recorded as an info entry in Logs with the view's name, source, and reason. Saved calculations for hidden views are preserved. BlobUI does not estimate results from incomplete data.
 
-Views opened from a Type are included alongside query and collection views. Calculations support single-select, multi-select and checkbox grouping. Multi-select cards are grouped by their exact selected-option combination. Original option IDs are required to reproduce Anytype column IDs; missing IDs prevent publication. Duplicate option names or unresolved identities on options used by cards prevent publication.
+Views opened from a Type are included alongside query and collection views. Calculations support single-select, multi-select and checkbox grouping. Multi-select cards are grouped by their exact selected-option combination. Original option IDs are required to reproduce Anytype column IDs; missing IDs prevent publication. If a single-select or multi-select property has duplicate option names, BlobUI excludes that property and reports a hard error instead of publishing an ambiguous result. Unresolved identities on options used by cards also prevent publication.
 
 ## Use the calculator
 

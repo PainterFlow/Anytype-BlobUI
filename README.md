@@ -27,6 +27,9 @@ The same articles are bundled in Settings under Help > Documentation for offline
   - [Kanban](settings-app/ui/docs/kanban-layouts-and-formulas.md)
   - [Calendar Colors](settings-app/ui/docs/calendar-colors.md)
   - [QoL Features](settings-app/ui/docs/text-effects-and-previews.md)
+- [Anyblob (Codex Integration)](settings-app/ui/docs/anyblob-codex-integration.md)
+  - [Setup](settings-app/ui/docs/anyblob-setup.md)
+  - [Configuration](settings-app/ui/docs/anyblob-configuration.md)
 - [API Guide](settings-app/ui/docs/api-guide.md)
   - [Settings UI](settings-app/ui/docs/settings-ui-refresh.md)
 - [Updating](settings-app/ui/docs/updating.md)
@@ -65,7 +68,7 @@ in their contributions and must have permission to submit them.
 
 ## Anyblob integration
 
-Anyblob adds read-only Codex tools through the running BlobUI app. Use Integrations > Anyblob > Settings > Install to register its personal marketplace, then select Anyblob in the Codex Plugins Directory. Credentials are configured automatically when you enable Anyblob. Follow the [setup and permissions guide](codex-plugin/src/README.md).
+Anyblob connects Codex to Anytype through the running BlobUI Settings app. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the in-app [Anyblob guide](settings-app/ui/docs/anyblob-codex-integration.md) for setup and configuration details, or the [plugin reference](codex-plugin/src/README.md) for the complete tool list.
 
 ## Background development launches
 

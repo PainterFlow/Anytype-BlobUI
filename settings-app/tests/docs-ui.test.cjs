@@ -196,10 +196,10 @@ test('React documentation renders every bundled article offline in dark mode', {
     await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Introduction');
 
     assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
-    assert.equal(await page.locator('#documentation-navigation .documentation-child').count(), 4);
+    assert.equal(await page.locator('#documentation-navigation .documentation-child').count(), 6);
     assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
     const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'api-guide', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
+    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'anyblob-codex-integration', 'anyblob-setup', 'anyblob-configuration', 'api-guide', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
     assert.equal(await page.locator('#documentation-navigation .documentation-item-icon svg').count(), ids.length);
     assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
 

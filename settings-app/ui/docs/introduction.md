@@ -15,11 +15,11 @@ BlobUI Settings saves your preferences and generates Anytype's `custom.css`. Ena
 
 The native installer and Settings app support Windows. Using a published release does not require Rust, PowerShell, or a developer toolchain. Anytype must already be installed and have been opened once.
 
-## Optional API access
+## Optional API access and Anyblob
 
-Appearance settings work without an API key. Connect a read-only Anytype API v2 key if you want BlobUI to read Calendar Color properties and generate calendar styling. You do not need to import the old BlobUI Settings space or select a settings object.
+Appearance settings work without an API key. A read-only Anytype API v2 key lets BlobUI read calendar and Kanban data. Anyblob uses the saved API connection to give Codex permission-checked access to Anytype. Anytype's API key and BlobUI's saved Anyblob permissions both limit what Codex can do. Read [Anyblob Setup](https://github.com/PainterFlow/Anytype-BlobUI/blob/dev/settings-app/ui/docs/anyblob-setup.md) before connecting Codex.
 
-Settings live locally in the selected Anytype data folder. The API key is encrypted with Windows DPAPI for your Windows account, separately from `data.json`. BlobUI reads calendar data through the configured Anytype API and does not edit your objects. Update checks contact GitHub to find published releases.
+Settings live locally in the selected Anytype data folder. The API key is encrypted with Windows DPAPI for your Windows account, separately from `data.json`. Calendar styling and Kanban calculations read through the configured API connection. Update checks contact GitHub to find published releases.
 
 ## Start here
 

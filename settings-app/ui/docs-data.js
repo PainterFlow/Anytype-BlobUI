@@ -11,6 +11,8 @@
     "theme-swatches": "./cdn/theme-swatches.png",
     "settings-ui-refresh": "./cdn/settings-ui-refresh.png",
     "api-connection-settings": "./cdn/api-connection-settings.png",
+    "anyblob-codex-integration": "./cdn/anyblob-codex-integration.png",
+    "anyblob-project-permissions": "./cdn/anyblob-project-permissions.png",
     "kanban-formula-calculator": "./cdn/kanban-formula-calculator.png",
     "calendar-event-colors": "./cdn/calendar-event-colors.png",
     "kanban-balanced-expanded": "./cdn/kanban-balanced-expanded.png",
@@ -157,7 +159,7 @@
   }
 
   async function load() {
-    const ids = ["introduction", "installation-and-removal", "features", "appearance", "kanban-layouts-and-formulas", "calendar-colors", "text-effects-and-previews", "api-guide", "settings-ui-refresh", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
+    const ids = ["introduction", "installation-and-removal", "features", "anyblob-codex-integration", "anyblob-setup", "anyblob-configuration", "appearance", "kanban-layouts-and-formulas", "calendar-colors", "text-effects-and-previews", "api-guide", "settings-ui-refresh", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
     const entries = await Promise.all(ids.map(async (id) => {
       const response = await root.fetch(`./docs/${id}.md`);
       if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);
