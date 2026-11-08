@@ -20,7 +20,7 @@
 - The "Colors" tab now features a new section called: "Custom Themes".
     - You can choose a color to generate a theme from.
     - You can also toggle the based theme(*controls text color, etc.*).
-    - There are also 2 built-in themes: "OLED" and "Dark Mode+"
+    - There are also 2 built-in themes: "OLED" and "Dark Mode+".
 
 ## Chat Themes
 
