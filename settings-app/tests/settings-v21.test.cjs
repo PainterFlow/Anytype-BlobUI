@@ -37,7 +37,9 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.equal(await page.locator('#save-button').isVisible(), false);
     assert.equal(await page.locator('#preferences-page input[type="search"], #advanced-page input[type="search"], #accessibility-page input[type="search"], .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
-    assert.equal(await page.locator('.v21-section-link svg').count(), 11);
+    assert.equal(await page.locator('.v21-section-link svg').count(), 12);
+    assert.deepEqual(await page.locator('.sidebar-nav [data-settings-page]').evaluateAll(nodes => nodes.map(node => node.dataset.settingsPage)),
+      ['preferences', 'accessibility', 'calendar-events', 'kanban-views', 'advanced', 'codex']);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);
     await page.locator('#preferences-nav').click();
     assert.equal(await page.locator('#preferences-nav').getAttribute('aria-expanded'), 'true');
@@ -53,12 +55,22 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     const widths = await page.locator('.preference-tabs [role="tab"]').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().width));
     assert.ok(Math.max(...widths) - Math.min(...widths) < 1, 'Preferences tabs divide the width equally');
     await page.locator('#preference-tab-0').focus(); await page.keyboard.press('End');
-    assert.equal(await page.locator('#preference-tab-4').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#preference-tab-2').getAttribute('aria-selected'), 'true');
     await page.keyboard.press('Home');
     assert.equal(await page.locator('#preference-tab-0').getAttribute('aria-selected'), 'true');
-    await page.locator('#preference-tab-3').click(); await page.locator('#font-family').fill('Arial');
-    await page.locator('#preferences-section-links').getByRole('button', { name: 'Calendar', exact: true }).click();
+    await page.locator('#preference-tab-1').click(); await page.locator('#font-family').fill('Arial');
+    assert.deepEqual(await page.locator('#preferences-section-links .v21-section-link .documentation-item-label').allTextContents(), ['Colors', 'Font', 'Space banner']);
+    assert.equal(await page.locator('#preferences-section-links .settings-emoji-icon').textContent(), '🎨');
+    await page.locator('#calendar-events-nav').click();
+    assert.equal(await page.locator('#page-title').innerText(), 'Calendar Events');
+    assert.equal(await page.locator('#calendar-events-tab-0').getAttribute('aria-selected'), 'true');
+    await page.locator('#calendar-events-section-links').getByRole('button', { name: 'Color by property', exact: true }).click();
+    assert.equal(await page.locator('#calendar-events-tab-1').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
+    await page.locator('#kanban-views-nav').click();
+    assert.equal(await page.locator('#page-title').innerText(), 'Kanban Views');
+    await page.locator('#kanban-views-section-links').getByRole('button', { name: 'Kanban Calculations', exact: true }).click();
+    assert.equal(await page.locator('#kanban-views-tab-1').getAttribute('aria-selected'), 'true');
     await page.locator('#accessibility-nav').click();
     assert.equal(await page.locator('#accessibility-nav').getAttribute('aria-expanded'), null);
     assert.equal(await page.locator('#accessibility-section-links').count(), 0);
@@ -130,7 +142,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.equal(await page.locator('#advanced-api-tab').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#advanced-api-key').inputValue(), 'fixture-pending-key');
     await page.locator('#preferences-nav').click();
-    await page.locator('#preference-tab-3').click();
+    await page.locator('#preference-tab-1').click();
     assert.equal(await page.locator('#font-family').inputValue(), 'Arial');
     assert.equal(await page.locator('#advanced-api-key').inputValue(), 'fixture-pending-key');
     assert.equal(await page.locator('.preference-tabs').isVisible(), true);

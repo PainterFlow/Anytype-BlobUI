@@ -54,19 +54,11 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   try {
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady && window.__calls.includes('load_calendar_rules'));
-    assert.equal(await page.locator('#open-calendar-colors').count(), 1);
-    assert.deepEqual(await page.evaluate(() => {
-      const metrics = id => {
-        const style = getComputedStyle(document.getElementById(id));
-        return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
-      };
-      return metrics('open-formulas');
-    }), await page.evaluate(() => {
-      const style = getComputedStyle(document.getElementById('open-calendar-colors'));
-      return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
-    }));
+    assert.equal(await page.locator('#calendar-events-tab-1').innerText(), 'Color by property');
+    assert.equal(await page.locator('#kanban-views-tab-1').innerText(), 'Kanban Calculations');
     assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
-    await page.locator('#open-calendar-colors').evaluate(button => button.click());
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
     await typeRow().click();
     await choose('Default', 'Status');
     assert.equal(await modal.getByRole('button', { name: 'Default color property', exact: true }).count(), 1);
@@ -92,10 +84,9 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     const read = () => page.evaluate(() => window.BlobUI.CalendarPage.read());
     assert.equal((await read()).types[0].default.key, 'status');
     assert.equal((await read()).types[0].overrides[0].rule.mode, 'none');
-    await page.locator('#preferences-nav').click();
-    await page.locator('#preference-tab-2').click();
+    await page.locator('#calendar-events-tab-0').click();
     await page.locator('#calendar-colors-enabled').uncheck();
-    await page.locator('#open-calendar-colors').click();
+    await page.locator('#calendar-events-tab-1').click();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__calendarSettings[0].calendarColorsEnabled), false);
@@ -216,8 +207,9 @@ test('saved calendar rules do not become unavailable during initial loading, fai
   const list = page.locator('#calendar-type-list');
   try {
     await loadSettings(page);
-    await page.waitForFunction(() => window.appReady && !document.querySelector('#open-calendar-colors').disabled);
-    await page.locator('#open-calendar-colors').evaluate(button => button.click());
+    await page.waitForFunction(() => window.appReady);
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
     await page.waitForFunction(() => !!window.__pendingDiscover);
     assert.match(await list.textContent(), /Loading object types/);
     assert.doesNotMatch(await list.textContent(), /Unavailable type/);

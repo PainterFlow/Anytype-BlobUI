@@ -4,11 +4,14 @@ import { Button } from "../shared/settings-controls.jsx";
 import { preferenceLabels } from "./preferences-accessibility.jsx";
 
 const icons = {
-  Accent: <><circle cx="10" cy="10" r="7" /><circle cx="10" cy="10" r="3" fill="currentColor" /></>,
+  Colors: null,
+  Font: <path d="M3 4h14M10 4v13m-4 0h8M3 4v3m14-3v3" />,
+  "Space banner": <><rect x="2" y="4" width="16" height="12" rx="2" /><circle cx="7" cy="8" r="1" /><path d="m3 15 5-5 3 3 3-4 4 6" /></>,
   Kanban: <><rect x="2" y="3" width="4" height="14" rx="1" /><rect x="8" y="3" width="4" height="9" rx="1" /><rect x="14" y="3" width="4" height="12" rx="1" /></>,
   Calendar: <><rect x="3" y="4" width="14" height="13" rx="2" /><path d="M6 2v4m8-4v4M3 8h14M6 11h2m4 0h2m-8 3h2" /></>,
-  Typography: <path d="M3 4h14M10 4v13m-4 0h8M3 4v3m14-3v3" />,
-  "Space banner": <><rect x="2" y="4" width="16" height="12" rx="2" /><circle cx="7" cy="8" r="1" /><path d="m3 15 5-5 3 3 3-4 4 6" /></>,
+  Appearance: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="8" cy="5" r="1.5" fill="var(--sidebar)" /><circle cx="13" cy="10" r="1.5" fill="var(--sidebar)" /><circle cx="6" cy="15" r="1.5" fill="var(--sidebar)" /></>,
+  "Color by property": <><path d="M10 2a8 8 0 1 0 0 16h1.2a1.8 1.8 0 0 0 1.3-3c-.6-.7-.1-1.9.9-1.9H15a3 3 0 0 0 3-3A8 8 0 0 0 10 2Z" /><circle cx="6.5" cy="8" r="1" fill="currentColor" /><circle cx="10" cy="5.5" r="1" fill="currentColor" /><circle cx="13.5" cy="8" r="1" fill="currentColor" /></>,
+  "Kanban Calculations": <><rect x="3" y="2.5" width="14" height="15" rx="2" /><path d="M6 6h8M6 9.5h2m4 0h2M6 13h2m4 0h2" /></>,
   "API key": <><circle cx="7" cy="7" r="4" /><path d="m10 10 7 7m-3-3 2-2m-4 0 2-2" /></>,
   Experiments: <><path d="M7 2.5h6M8 2.5v5.2l-4.3 7.1A2 2 0 0 0 5.4 18h9.2a2 2 0 0 0 1.7-3.2L12 7.7V2.5M6 13h8" /></>,
   "App Settings": <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" /></>,
@@ -32,7 +35,9 @@ function NavigationGroup({ id, label, sections, active, expanded, onNavigate, on
       {sections.map((section, index) =>
         <Button key={section} className="documentation-item documentation-child v21-section-link"
           onClick={() => onSection(id, index)}>
-          <span className="documentation-item-icon"><svg viewBox="0 0 20 20" aria-hidden="true">{icons[section]}</svg></span>
+          <span className="documentation-item-icon">{section === "Colors"
+            ? <span className="settings-emoji-icon" aria-hidden="true">🎨</span>
+            : <svg viewBox="0 0 20 20" aria-hidden="true">{icons[section]}</svg>}</span>
           <span className="documentation-item-label">{section}</span>
         </Button>
       )}
@@ -56,11 +61,16 @@ export function SettingsNavigation({ page, onNavigate, onSection }) {
     <NavigationGroup {...group("preferences")} label="Preferences" sections={preferenceLabels}>
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor" /><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor" /></svg>
     </NavigationGroup>
-    <NavigationGroup {...group("formulas")} label="Kanban View Formulas" hidden>
-      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM8 4v12m4-12v12" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
-    </NavigationGroup>
     <NavigationGroup {...group("accessibility")} label="Accessibility">
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="6" r="1.2" fill="currentColor" /><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </NavigationGroup>
+    <NavigationGroup {...group("calendar-events")} label="Calendar Events" sections={["Appearance", "Color by property"]}>
+      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+        strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{icons.Calendar}</svg>
+    </NavigationGroup>
+    <NavigationGroup {...group("kanban-views")} label="Kanban Views" sections={["Appearance", "Kanban Calculations"]}>
+      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+        strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{icons.Kanban}</svg>
     </NavigationGroup>
     <NavigationGroup {...group("advanced")} label="Advanced Settings" sections={["API key", "App Settings", "Experiments"]}>
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /></svg>

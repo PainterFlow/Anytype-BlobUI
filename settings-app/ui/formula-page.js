@@ -582,9 +582,6 @@
       api = options;
       initialized = true;
       syncDomRefs();
-      const nav = el("formulas-nav"), open = el("open-formulas"), title = el("page-title");
-      if (nav) nav.addEventListener("click", () => api.navigate("formulas"));
-      if (open) open.addEventListener("click", () => { api.navigate("formulas"); if (title) title.focus({ preventScroll: true }); });
       if (UI.AppReload) {
         reloadController = UI.AppReload;
         unregisterReload = reloadController.register(() => discover(true));

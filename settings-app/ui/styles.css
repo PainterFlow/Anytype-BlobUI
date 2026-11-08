@@ -454,6 +454,7 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .documentation-item-icon { display: grid; flex: 0 0 20px; place-items: center; width: 20px; height: 20px; color: color-mix(in srgb, var(--text) 78%, var(--bg)); }
 .documentation-item-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .documentation-item-icon img { display: block; width: 20px; height: 20px; object-fit: contain; }
+.documentation-item-icon .settings-emoji-icon { display: block; font-size: 15px; line-height: 20px; filter: grayscale(1); opacity: .82; }
 .documentation-chevron { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 18px; margin-left: auto; border-radius: 50%; background: transparent; color: var(--text-secondary); transition: background-color 120ms ease, color 120ms ease; }
 .documentation-chevron:hover, .documentation-item:focus-visible .documentation-chevron { background: color-mix(in srgb, var(--text) 12%, transparent); color: var(--text); }
 .documentation-chevron svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transform-origin: 50% 50%; transition: transform 200ms cubic-bezier(.2,.75,.25,1); }

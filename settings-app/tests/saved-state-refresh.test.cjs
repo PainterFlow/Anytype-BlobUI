@@ -102,7 +102,8 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
     await page.evaluate(()=>{window.remote.formulas.configuration.definitions=[];window.remote.formulas.revision='r-deleted';window.publish();});
     await dialog.waitFor({state:'hidden'});
     assert.equal(await page.locator('#log-entries .log-entry.warning').count(),warningCount+1,'Deletion of an incomplete edited calculation logs one conflict');
-    await page.evaluate(()=>document.getElementById('open-calendar-colors').click());
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
     await page.locator('#calendar-type-list').getByRole('button',{name:'Task',exact:false}).first().click();
     const calendarDialog=page.locator('#calendar-rule-dialog');
     const property=calendarDialog.getByRole('button',{name:'Default color property',exact:true});
