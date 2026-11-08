@@ -65,10 +65,12 @@ export function SettingsNavigation({ page, onNavigate, onSection }) {
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="6" r="1.2" fill="currentColor" /><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </NavigationGroup>
     <NavigationGroup {...group("calendar-events")} label="Calendar Events" sections={["Appearance", "Color by property"]}>
-      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="2" /><path d="M6 2v4m8-4v4M3 8h14M6 11h2m4 0h2m-8 3h2" /></svg>
+      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+        strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{icons.Calendar}</svg>
     </NavigationGroup>
     <NavigationGroup {...group("kanban-views")} label="Kanban Views" sections={["Appearance", "Kanban Calculations"]}>
-      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="4" height="14" rx="1" /><rect x="8" y="3" width="4" height="9" rx="1" /><rect x="14" y="3" width="4" height="12" rx="1" /></svg>
+      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+        strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{icons.Kanban}</svg>
     </NavigationGroup>
     <NavigationGroup {...group("advanced")} label="Advanced Settings" sections={["API key", "App Settings", "Experiments"]}>
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /></svg>
