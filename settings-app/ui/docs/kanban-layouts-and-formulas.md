@@ -12,7 +12,7 @@ Board layouts and Collapsed Categories work without API access. Calculations use
 
 ## Choose a board layout
 
-Open Preferences > Kanban. Board layout applies to both inline and full-page boards.
+Open Kanban Views > Appearance. Board layout applies to both inline and full-page boards.
 
 | Layout | Result |
 | --- | --- |
@@ -35,7 +35,7 @@ The recording shows Compact spacing with Collapsed Categories enabled.
 ## Find a view
 
 1. Configure the connection in Advanced Settings > API key.
-2. Open Preferences > Kanban > Kanban View Formulas.
+2. Open Kanban Views > Kanban Calculations.
 3. Use the magnifier to search, the filter to choose a space, or Reload to discover available views.
 4. Select a view. Its space, source name, and source kind help distinguish duplicate names.
 

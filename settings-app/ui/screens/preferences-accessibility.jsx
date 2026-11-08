@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { FormulaPageView } from "../formula-page.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import {
   Button,
@@ -9,11 +10,19 @@ import {
   TextField,
 } from "../shared/settings-controls.jsx";
 import { Tabs } from "../shared/tabs.jsx";
+import { CalendarColors } from "./calendar-colors.jsx";
 
-export const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
-const preferenceTabs = preferenceLabels.map((title, index) => ({
-  title, tabId: `preference-tab-${index}`, panelId: `preference-panel-${index}`,
-}));
+export const preferenceLabels = ["Colors", "Font", "Space banner"];
+
+function tabItems(prefix, labels) {
+  return labels.map((title, index) => ({
+    title, tabId: `${prefix}-tab-${index}`, panelId: `${prefix}-panel-${index}`,
+  }));
+}
+
+const preferenceTabs = tabItems("preference", preferenceLabels);
+const calendarTabs = tabItems("calendar-events", ["Appearance", "Color by property"]);
+const kanbanTabs = tabItems("kanban-views", ["Appearance", "Kanban Calculations"]);
 
 function hasValue(values, key) {
   return Object.prototype.hasOwnProperty.call(values, key);
@@ -76,11 +85,7 @@ function SpaceBannerPreview() {
   </div>;
 }
 
-export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, onOpenCalendar, calendarLocked,
-  kanbanStyle = "default", onKanbanStyleChange, kanbanStyleDisabled, formulaController,
-}) {
-  const [formula, setFormula] = useState(() => formulaController?.getSnapshot());
-  useEffect(() => formulaController?.subscribe(setFormula), [formulaController]);
+export function Preferences({ values = {}, onChange, selectedTab, onSelectTab }) {
   const inputValue = (id, fallbackProps) => {
     if (!hasValue(values, id)) return fallbackProps;
     if (onChange) return { ...fallbackProps, value: values[id], onChange: event => onChange(id, event.currentTarget.value, event) };
@@ -113,37 +118,6 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
       <p className="field-error" id="accent-error" aria-live="polite" />
     </SettingsSection>
 
-    <SettingsSection aria-labelledby="kanban-heading">
-      <SettingsHeading id="kanban-heading" title="Kanban views" description="Choose how boards are displayed." />
-      <SettingsGroup className="settings-list kanban-settings-list">
-        <div className="kanban-setting-row kanban-style-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span></div>
-          <SelectPicker id="kanban-view-style" rootId="kanban-select" menuId="kanban-style-options"
-            label="Board layout" labelId="kanban-style-label" valueId="kanban-style-value" descriptionId="kanban-style-help"
-            options={boardLayouts} value={kanbanStyle} disabled={kanbanStyleDisabled} onChange={onKanbanStyleChange} />
-        </div>
-        <div className="kanban-setting-row formula-display-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description">Choose where category calculation results appear.</span></div>
-          <SelectPicker id="formula-display" rootId="formula-display-select" menuId="formula-display-options"
-            label="Display formulas" labelId="formula-display-label" valueId="formula-display-value" descriptionId="formula-display-help"
-            options={formulaLayouts} value={formula?.display ?? "balanced"} disabled={formula?.locked}
-            onChange={value => formulaController?.setDisplay(value)} />
-        </div>
-        {settingSwitch(values, onChange, "collapsed-categories", "Collapsed Categories", "native-accent-control settings-row kanban-setting-row", undefined, { "aria-describedby": "kanban-collapse-help" })}
-      </SettingsGroup>
-      <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
-      <Button id="open-formulas" className="formula-button view-open-button button-label-centered">Kanban View Formulas</Button>
-    </SettingsSection>
-
-    <SettingsSection aria-labelledby="calendar-heading">
-      <SettingsHeading id="calendar-heading" title="Calendar" description="Color calendar objects by a property or their Calendar Color value." />
-      <SettingsGroup>
-        {settingSwitch(values, onChange, "calendar-colors-enabled", "Calendar Colors", undefined, undefined, { defaultChecked: true, disabled: true, "aria-describedby": "calendar-colors-help" })}
-      </SettingsGroup>
-      <Button id="open-calendar-colors" className="formula-button view-open-button" disabled={calendarLocked} onClick={onOpenCalendar}>Color by Property</Button>
-      <p id="calendar-colors-help" className="kanban-collapse-help" role="status" aria-live="polite" hidden />
-    </SettingsSection>
-
     <SettingsSection className="settings-group typography-group" aria-labelledby="typography-heading">
       <SettingsHeading id="typography-heading" title="Font" description="Use the same fonts as your Anytype workspace." />
       <SettingsGroup className="font-fields">
@@ -165,6 +139,58 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
         <SpaceBannerPreview />
         <p id="banner-image-status" className="space-banner-status" role="status" aria-live="polite" />
       </div>
+    </SettingsSection>
+  </Tabs>;
+}
+
+export function CalendarEvents({ values = {}, onChange, selectedTab, onSelectTab, controller }) {
+  return <Tabs label="Calendar Events" className="advanced-tabs" items={calendarTabs}
+    selected={selectedTab} onSelect={onSelectTab} useChildPanels>
+    <SettingsSection aria-labelledby="calendar-general-heading">
+      <SettingsHeading id="calendar-general-heading" title="General" />
+      <SettingsGroup>
+        {settingSwitch(values, onChange, "calendar-colors-enabled", "Calendar Colors", undefined, undefined, {
+          defaultChecked: true, disabled: true, "aria-describedby": "calendar-colors-help",
+        })}
+      </SettingsGroup>
+      <p id="calendar-colors-help" className="kanban-collapse-help" role="status" aria-live="polite" hidden />
+    </SettingsSection>
+    <SettingsSection aria-label="Color by property">
+      <CalendarColors controller={controller} />
+    </SettingsSection>
+  </Tabs>;
+}
+
+export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, kanbanStyle = "default",
+  onKanbanStyleChange, kanbanStyleDisabled, formulaController,
+}) {
+  const [formula, setFormula] = useState(() => formulaController?.getSnapshot());
+  useEffect(() => formulaController?.subscribe(setFormula), [formulaController]);
+
+  return <Tabs label="Kanban Views" className="advanced-tabs" items={kanbanTabs}
+    selected={selectedTab} onSelect={onSelectTab} useChildPanels>
+    <SettingsSection aria-labelledby="kanban-general-heading">
+      <SettingsHeading id="kanban-general-heading" title="General" />
+      <SettingsGroup className="settings-list kanban-settings-list">
+        <div className="kanban-setting-row kanban-style-row">
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span></div>
+          <SelectPicker id="kanban-view-style" rootId="kanban-select" menuId="kanban-style-options"
+            label="Board layout" labelId="kanban-style-label" valueId="kanban-style-value" descriptionId="kanban-style-help"
+            options={boardLayouts} value={kanbanStyle} disabled={kanbanStyleDisabled} onChange={onKanbanStyleChange} />
+        </div>
+        <div className="kanban-setting-row formula-display-row">
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description">Choose where category calculation results appear.</span></div>
+          <SelectPicker id="formula-display" rootId="formula-display-select" menuId="formula-display-options"
+            label="Display formulas" labelId="formula-display-label" valueId="formula-display-value" descriptionId="formula-display-help"
+            options={formulaLayouts} value={formula?.display ?? "balanced"} disabled={formula?.locked}
+            onChange={value => formulaController?.setDisplay(value)} />
+        </div>
+        {settingSwitch(values, onChange, "collapsed-categories", "Collapsed Categories", "native-accent-control settings-row kanban-setting-row", undefined, { "aria-describedby": "kanban-collapse-help" })}
+      </SettingsGroup>
+      <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
+    </SettingsSection>
+    <SettingsSection aria-label="Kanban Calculations">
+      <FormulaPageView controller={formulaController} />
     </SettingsSection>
   </Tabs>;
 }

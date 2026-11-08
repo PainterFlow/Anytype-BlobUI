@@ -59,7 +59,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(()=>document.querySelector('#status-message').textContent.includes('Settings loaded from this device.'));
     await page.waitForFunction(()=>window.__calls.includes('discover_kanban_views'));
     await page.locator('.formula-view-row').first().waitFor({state:'attached'});
-    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Startup discovery runs before opening the formula page.');
+    assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Startup discovery runs before opening the calculation tab.');
     const initialDiscoveries=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
     await page.evaluate(()=>{
       window.BlobUI.FormulaPage.setLocked(true,false);
@@ -69,7 +69,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,initialDiscoveries);
     await page.waitForFunction(()=>!document.getElementById('formula-reload').disabled);
     assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
-    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Unlock retries queued discovery while the formula page is hidden.');
+    assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Unlock retries queued discovery while the calculation tab is hidden.');
     await openFormulas(page);await page.locator('.formula-view-row').first().waitFor();
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);

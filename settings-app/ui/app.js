@@ -1197,7 +1197,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     const discardDisabled = settingsLocked || bannerReadPending || !saveVisible;
     const saveDisabled = discardDisabled || (!window.appReady && !prototypeDirty);
     view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady, backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady, kanbanStyleDisabled: settingsLocked || !draft });
-    document.querySelectorAll("#preferences-page input, #accessibility-page input, #advanced-page input, #onboarding input").forEach((control) => {
+    document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
       if (control.id === "start-on-login") return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
     });
@@ -1494,34 +1494,48 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     reader.readAsDataURL(file);
   }
 
+  function selectCalendarTab(index) {
+    view.update({ calendarTab: index });
+    window.BlobUI.CalendarPage?.show?.(view.getSnapshot().page === "calendar-events" && index === 1);
+  }
+
+  function selectKanbanTab(index) {
+    view.update({ kanbanTab: index });
+    if (view.getSnapshot().page === "kanban-views" && index === 1) window.BlobUI.FormulaPage.refresh();
+  }
+
   function showSettingsPage(page) {
-    const isFormulas = page === "formulas";
-    const isCalendarColors = page === "calendar-colors";
     const isCodex = page === "codex";
-    const isBrowser = isFormulas || isCalendarColors || isCodex;
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
+    const currentView = view.getSnapshot();
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    if (!isAccessibility && !isAdvanced && !isBrowser && draft) void refreshCalendarApiAvailability();
+    if (!isAccessibility && !isAdvanced && !isCodex && draft) void refreshCalendarApiAvailability();
     view.update({ page });
     window.BlobUI.CodexPage?.show(isCodex);
     pageContent.scrollTop = 0;
     updatePageScrollbar();
-    window.BlobUI.CalendarPage?.show?.(isCalendarColors);
-    if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
+    window.BlobUI.CalendarPage?.show?.(page === "calendar-events" && currentView.calendarTab === 1);
+    if (page === "kanban-views" && currentView.kanbanTab === 1) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
   showSettingsPage("preferences");
 
   function openSection(page, index) {
+    if (page === "preferences") view.update({ preferenceTab: index });
+    else if (page === "calendar-events") selectCalendarTab(index);
+    else if (page === "kanban-views") selectKanbanTab(index);
     showSettingsPage(page);
     let panelId;
     if (page === "preferences") {
-      view.update({ preferenceTab: index });
       panelId = "preference-panel-" + index;
+    } else if (page === "calendar-events") {
+      panelId = "calendar-events-panel-" + index;
+    } else if (page === "kanban-views") {
+      panelId = "kanban-views-panel-" + index;
     } else if (page === "codex") {
       window.BlobUI.CodexPage.select(index);
       panelId = "codex-panel-" + index;
@@ -1529,7 +1543,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       selectAdvancedTab(index);
       panelId = ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
     }
-    const heading = el(panelId)?.querySelector("h2");
+    const panel = el(panelId);
+    const heading = panel?.querySelector("h2") || panel;
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
@@ -2570,7 +2585,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
     onChange: markDirty, onInfo: message => addLog(message, "info") });
-  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
   const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
@@ -2588,6 +2603,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }

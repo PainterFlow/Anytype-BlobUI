@@ -12,7 +12,7 @@ BlobUI can color calendar events from Anytype properties. Set a default rule for
 
 ## Color by property
 
-Open Preferences > Calendar and choose **Color by Property**. Search, reload, or filter the object-type list by space. Select a type to edit its default rule or add an override for a calendar view in the same space. Types without eligible properties still appear.
+Open Calendar Events > Color by property. Search, reload, or filter the object-type list by space. Select a type to edit its default rule or add an override for a calendar view in the same space. Types without eligible properties still appear.
 
 Choose a single-select property to use its selected option's Anytype color. A checkbox property uses green when checked and gray when unchecked. A multi-select property uses the first selected tag's color in the order returned by Anytype. Reordering selections can change the color. Empty selections or an unresolved first tag fall through to the next rule.
 
@@ -30,7 +30,7 @@ Supported color names include Grey, Yellow, Amber, Red, Pink, Purple, Blue, Sky,
 
 ## Save and refresh
 
-The Calendar Colors switch is in Preferences > Calendar. It starts on, including after upgrades. BlobUI locks the switch while it checks API availability or when the API cannot be used.
+The Calendar Colors switch is in Calendar Events > Appearance. It starts on, including after upgrades. BlobUI locks the switch while it checks API availability or when the API cannot be used.
 
 Use the sidebar Save to publish pending rules and rebuild CSS, then press Ctrl+R in Anytype. While Settings is running, Alt+R in Anytype also requests a rebuild; follow it with Ctrl+R to apply the result. Calendar colors are snapshots. Editing an object's property does not change the stylesheet until the next successful rebuild.
 

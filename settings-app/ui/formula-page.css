@@ -1,13 +1,11 @@
 /* Shared Anytype settings tokens. Toolbar uses 20px icons inside 32px circular controls. */
-#formulas-nav { display: none; }
-#open-formulas { display: inline-flex; margin-top: 16px; }
-#formulas-page { max-width: 640px; }
+#kanban-views-panel-1 { max-width: 640px; }
 #formula-storage-message[data-status="success"] { color: var(--color-teal); }
-#formulas-page, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
+#kanban-views-panel-1, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 #formula-fields, .formula-calculator { border: 0; padding: 0; margin: 0; min-width: 0; }
 .formula-button, .formula-variable-button, .formula-remove-calculation, .formula-property-insert { min-height: 32px; border: 0; border-radius: 16px; padding: 4px 10px; background: var(--input-bg); color: var(--text); font-size: 13px; line-height: 20px; cursor: pointer; }
 .formula-button:hover, .formula-variable-button:hover, .formula-remove-calculation:hover, .formula-property-insert:hover, .formula-key:hover { background: var(--hover); }
-#formulas-page button:focus-visible, #formula-calculator-dialog button:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: 2px; }
+#kanban-views-panel-1 button:focus-visible, #formula-calculator-dialog button:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: 2px; }
 .formula-toolbar { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 32px; padding-bottom: 12px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
 .neutral-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 6px; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .neutral-icon-button:hover, .neutral-icon-button[aria-expanded="true"] { background: var(--hover); color: var(--text); }
@@ -64,7 +62,7 @@
 .formula-render-toggle { margin: 0; color: var(--text-secondary); }
 .formula-latex-input { width: 100%; min-height: 76px; padding: 8px 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 18px; line-height: 24px; resize: none; overflow-wrap: anywhere; }
 .formula-rendered { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-#formulas-page button:disabled, #formula-calculator-dialog button:disabled { cursor: default; opacity: .45; }
+#kanban-views-panel-1 button:disabled, #formula-calculator-dialog button:disabled { cursor: default; opacity: .45; }
 :root[data-reduced-motion="true"] .expandable-search, :root[data-reduced-motion="true"] .expandable-search input, :root[data-reduced-motion="true"] .formula-caret { transition: none; animation: none; }
 @media (prefers-reduced-motion: reduce) { .expandable-search, .expandable-search input, .formula-caret { transition: none; animation: none; } }
 @media (max-height: 600px) { .confirm-dialog.formula-calculator-dialog { padding: 14px; } .formula-key { height: 32px; } .formula-display { min-height: 60px; font-size: 20px; } #formula-calculator-dialog .formula-calculator-source { margin-bottom: 4px; } }
@@ -79,10 +77,10 @@
 .formula-property-picker .kanban-select-option-description { display: block; margin-top: 2px; color: var(--text-secondary); font-family: var(--font-code), monospace; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; }
 .formula-key svg { display: block; width: 20px; height: 20px; margin: auto; }
 /* Navigation animation runs when the page leaves the hidden state. */
-#formulas-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+#kanban-views-panel-1:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
 @keyframes formula-page-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-:root[data-reduced-motion="true"] #formulas-page:not([hidden]) { animation: none; }
-@media (prefers-reduced-motion: reduce) { #formulas-page { animation: none !important; } }
+:root[data-reduced-motion="true"] #kanban-views-panel-1:not([hidden]) { animation: none; }
+@media (prefers-reduced-motion: reduce) { #kanban-views-panel-1 { animation: none !important; } }
 
 /* Rendered calculations never expose an editing caret or pointer. */
 .formula-display, .formula-display * { cursor: default; caret-color: transparent; }
@@ -95,9 +93,8 @@
 .formula-keypad-modes [aria-pressed="true"] { background: var(--active); color: var(--text); }
 
 /* Catalog controls share the Kanban browser's measurements and tokens. */
-#calendar-colors-page { max-width: 640px; }
-#calendar-colors-page, .calendar-rule-dialog { font-family: var(--font-interface), "Segoe UI", sans-serif; }
-.view-open-button { margin-top: 16px; min-height: 40px; padding-inline: 18px; border-radius: 20px; font-size: 14px; }
+#calendar-events-panel-1 { max-width: 640px; }
+#calendar-events-panel-1, .calendar-rule-dialog { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 .confirm-dialog.calendar-rule-dialog { display: flex; flex-direction: column; width: min(580px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 16px; box-shadow: none; }
 .calendar-modal-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .calendar-modal-header h2 { flex: 1; min-width: 0; font-size: 20px; overflow-wrap: anywhere; }
@@ -117,10 +114,10 @@
 .calendar-rule-dialog button, .calendar-rule-dialog input { font-family: inherit; }
 .calendar-modal-close { font-size: 24px; }
 .calendar-view-results { min-width: 0; }
-#calendar-colors-page button:focus-visible, .confirm-dialog:focus-visible, .confirm-dialog button:focus-visible { outline: none !important; box-shadow: none !important; }
-#calendar-colors-page:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
-:root[data-reduced-motion="true"] #calendar-colors-page { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { #calendar-colors-page { animation: none !important; } }
+#calendar-events-panel-1 button:focus-visible, .confirm-dialog:focus-visible, .confirm-dialog button:focus-visible { outline: none !important; box-shadow: none !important; }
+#calendar-events-panel-1:not([hidden]) { animation: formula-page-enter 180ms ease-out; }
+:root[data-reduced-motion="true"] #calendar-events-panel-1 { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { #calendar-events-panel-1 { animation: none !important; } }
 
 .calendar-modal-content.has-overflow.is-scrolling { --page-scrollbar-color: var(--scroll-thumb); }
 .calendar-modal-content::-webkit-scrollbar, .calendar-property-menu::-webkit-scrollbar { width: 12px; }

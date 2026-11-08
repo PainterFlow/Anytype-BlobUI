@@ -42,8 +42,8 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     const navigate = async status => {
       await page.evaluate(value => { window.__availability = value; }, status);
       await page.locator('#advanced-nav').click();
-      await page.locator('#preferences-nav').click();
-      await page.locator('#preference-tab-2').click();
+      await page.locator('#calendar-events-nav').click();
+      await page.locator('#calendar-events-tab-0').click();
     };
     assert.equal(await toggle.isChecked(), true);
     await page.waitForFunction(() => document.getElementById('calendar-colors-help').textContent.includes('Add an Anytype API key'));
@@ -79,7 +79,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     assert.equal(await toggle.isChecked(), false);
     for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-      await page.locator('#preference-panel-2').screenshot({ path: path.join(root, theme + '.png') });
+      await page.locator('#calendar-events-panel-0').screenshot({ path: path.join(root, theme + '.png') });
     }
   } finally { await context.close(); }
 });

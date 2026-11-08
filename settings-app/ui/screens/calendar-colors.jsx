@@ -45,7 +45,7 @@ export function CalendarColors({ controller }) {
     if (!backdropRef.current || !dialogRef.current) return undefined;
     const modal = UI().createModalController({ backdrop: backdropRef.current, dialog: dialogRef.current,
       initialFocus: () => closeRef.current,
-      fallbackFocus: () => activeRow.current?.isConnected ? activeRow.current : document.getElementById("open-calendar-colors"),
+      fallbackFocus: () => activeRow.current?.isConnected ? activeRow.current : document.getElementById("calendar-events-tab-1"),
       inertTargets: [document.getElementById("settings-shell"), document.getElementById("title-drag-region")].filter(Boolean),
       onClose() {
         if (controller.getSnapshot().screen === "calendars") { controller.setScreen("type"); modal.open(); }

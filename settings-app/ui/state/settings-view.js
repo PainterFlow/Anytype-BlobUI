@@ -1,16 +1,16 @@
 export const pageTitles = Object.freeze({
   preferences: "Preferences",
   accessibility: "Accessibility",
+  "calendar-events": "Calendar Events",
+  "kanban-views": "Kanban Views",
   advanced: "Advanced Settings",
-  formulas: "Kanban View Formulas",
-  "calendar-colors": "Color by Property",
   codex: "Anyblob",
 });
 
 export function createSettingsView() {
   const listeners = new Set();
   let snapshot = {
-    page: "preferences", preferenceTab: 0, advancedTab: 0,
+    page: "preferences", preferenceTab: 0, calendarTab: 0, kanbanTab: 0, advancedTab: 0,
     documentationOpened: false, releaseNotesMedia: null,
     logRows: [], logSeverity: "info", shortcutRows: [],
     startupMode: "off", startupModeDisabled: true,

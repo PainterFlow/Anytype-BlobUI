@@ -326,14 +326,17 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/saved-state.js'), 'utf8'), context);
   context.createNativeService = require('../ui/native-service.js').createNativeService;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
+  let viewState = { page: 'preferences', calendarTab: 0, kanbanTab: 0 };
   context.view = {
     updateSettingsFields(values) {
       for (const [id, value] of Object.entries(values)) element(id)[typeof value === 'boolean' ? 'checked' : 'value'] = value;
     },
+    getSnapshot() { return viewState; },
     update(patch) {
+      viewState = { ...viewState, ...patch };
       if ('page' in patch) {
-        const pages = { preferences: 'Preferences', accessibility: 'Accessibility', advanced: 'Advanced Settings',
-          formulas: 'Kanban View Formulas', 'calendar-colors': 'Color by Property', codex: 'Anyblob' };
+        const pages = { preferences: 'Preferences', accessibility: 'Accessibility', 'calendar-events': 'Calendar Events',
+          'kanban-views': 'Kanban Views', advanced: 'Advanced Settings', codex: 'Anyblob' };
         for (const name of Object.keys(pages)) {
           const selected = patch.page === name;
           element(name + '-page').hidden = !selected;
