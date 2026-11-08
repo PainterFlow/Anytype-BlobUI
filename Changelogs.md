@@ -1,7 +1,6 @@
 # BlobUI v1.5.0 - What's new?
 
-BlobUI v1.5.0 is coming with the long awaited chats update, implementing chat themes and finally fixing text effects not working in chats.
-Additionally there are also some other UI changes and some additional backend changes as BlobUI is preparing for a bunch of new crazy features that are coming soon.
+*Insert new text.*
 
 ## General
 
@@ -9,6 +8,19 @@ Additionally there are also some other UI changes and some additional backend ch
 
 *Developers Note: I wanted to remove the requirement to press that stupid random button at the bottom of the tab to open kanban calculations / calendar coloring by property.*
 - You can now toggle whether you want to enable the old legacy "Calendar Color" property to color calendars (*default is on*).
+- The "Calendar Events", "Kanban Views" and "Chat Themes" settings tabs now all feature a new child tab called: "Showcase".
+    - Showcase allows you to see a preview of your settings in the app.
+- A variety of labels & titles now feature small help icons that explain restrictions, options, api requirements etc..
+- Removed in-app documentation.
+
+*Developers Note: I don't think we need that much documentation for options this simple, most of the documentations have now been moved to showcase tabs, small help icons and the new developer guide.*
+
+## Custom Themes
+
+- The "Colors" tab now features a new section called: "Custom Themes".
+    - You can choose a color to generate a theme from.
+    - You can also toggle the based theme(*controls text color, etc.*).
+    - There are also 2 built-in themes: "OLED" and "Dark Mode+"
 
 ## Chat Themes
 
@@ -34,13 +46,23 @@ Additionally there are also some other UI changes and some additional backend ch
 
 ## Developer Changelogs
 
-- Settings are now saved at the location of where the app was installed at (*old settings migrate, don't worry*).
+- Settings are now saved at the location of where the app was installed at (*old settings will migrate, don't worry*).
 
 ### Logs refresh
 
 - The copy button now changes to a checkmark for a short amount of time after clicked.
 - Added a clear button.
 - The logs button now changes state depending on whether there are errors or warnings in the logs.
+
+### Developer Guide
+
+- There is now a in-app developer guide which explains:
+    - Programming language requirements, instillation etc..
+    - Compilation script usage.
+    - GitHub rules.
+    - Markdown renderer.
+    - Custom Themes.
+- Explanations are brief and short so you don't have to read that much.
 
 ---
 *Developers Note: All changes without explicitly denoted credits are made by User#PainterFlow*
