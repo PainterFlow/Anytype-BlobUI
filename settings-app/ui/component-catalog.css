@@ -12,11 +12,6 @@
   animation: onboarding-fade-in 450ms ease-out both;
 }
 
-.component-catalog-page.leaving {
-  pointer-events: none;
-  animation: onboarding-fade-out 320ms ease-in both;
-}
-
 .component-catalog-titlebar {
   display: flex;
   flex: 0 0 36px;
@@ -385,7 +380,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .component-catalog-page,
-  .component-catalog-page.leaving,
   .component-catalog-disclosure .documentation-chevron {
     animation: none;
     transition: none;

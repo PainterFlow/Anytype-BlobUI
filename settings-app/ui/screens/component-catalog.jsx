@@ -42,17 +42,17 @@ const searchExamples = [
   { title: "Sidebar", description: "Navigation, Save, Undo, and Logs" },
 ];
 
-function closeCurrentWindow() {
+async function closeCatalogWindow() {
   try {
     const current = window.__TAURI__?.window?.getCurrentWindow?.();
-    if (current && typeof current.close === "function") {
-      Promise.resolve(current.close()).catch(() => window.close());
-      return;
+    if (current) {
+      await current.close();
+    } else {
+      window.close();
     }
-  } catch (_) {
-    // The browser fallback below keeps the preview usable outside Tauri.
+  } catch (error) {
+    console.error("Could not close the component catalog.", error);
   }
-  window.close();
 }
 
 function CatalogSection({ title, description, children, className = "" }) {
@@ -136,7 +136,6 @@ function CatalogModalPreview() {
 }
 
 export function ComponentCatalog({ onClose }) {
-  const [leaving, setLeaving] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [selectedStyle, setSelectedStyle] = useState("balanced");
   const [selectedSources, setSelectedSources] = useState(["types"]);
@@ -144,23 +143,11 @@ export function ComponentCatalog({ onClose }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(true);
   const [message, setMessage] = useState("Controls below use the same components as Settings.");
-  const closeTimer = useRef(null);
-  const closeStarted = useRef(false);
   const disclosureToggle = useRef(null);
   const scrollContainer = useRef(null);
   const pickerSurface = useRef(null);
 
-  function requestClose() {
-    if (closeStarted.current) return;
-    closeStarted.current = true;
-    setLeaving(true);
-    const reducedMotion = document.documentElement.dataset.reducedMotion === "true"
-      || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    closeTimer.current = window.setTimeout(() => {
-      if (onClose) onClose();
-      else closeCurrentWindow();
-    }, reducedMotion ? 0 : 320);
-  }
+  const requestClose = onClose ?? closeCatalogWindow;
 
   useEffect(() => {
     const closeOnEscape = event => {
@@ -170,11 +157,8 @@ export function ComponentCatalog({ onClose }) {
       requestClose();
     };
     document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("keydown", closeOnEscape);
-      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
-    };
-  }, [onClose]);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [requestClose]);
 
   useEffect(() => {
     const visibility = window.VisibilityField?.bind({
@@ -196,7 +180,7 @@ export function ComponentCatalog({ onClose }) {
   const visibleSearchExamples = searchExamples.filter(example =>
     `${example.title} ${example.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
 
-  return <main className={`component-catalog-page${leaving ? " leaving" : ""}`} aria-labelledby="component-catalog-title">
+  return <main className="component-catalog-page" aria-labelledby="component-catalog-title">
     <header className="component-catalog-titlebar" data-tauri-drag-region>
       <span className="component-catalog-window-title" data-tauri-drag-region>BlobUI Settings</span>
       <Button className="window-control window-close component-catalog-close" aria-label="Close component catalog"

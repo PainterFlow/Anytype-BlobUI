@@ -1,5 +1,5 @@
 import React from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComponentCatalog } from "./component-catalog.jsx";
 
@@ -27,7 +27,7 @@ function setMotionApis(matches = false) {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  vi.unstubAllGlobals();
   delete document.documentElement.dataset.reducedMotion;
   Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
   Object.defineProperty(window, "requestAnimationFrame", { configurable: true, value: originalRequestAnimationFrame });
@@ -46,20 +46,15 @@ describe("Component catalog", () => {
     expect(screen.getByRole("navigation", { name: "Catalog preview navigation" })).toBeTruthy();
   });
 
-  it("plays the leaving state before closing the catalog window", async () => {
+  it("requests a native window close when the X is clicked", () => {
     setMotionApis();
-    vi.useFakeTimers();
-    const onClose = vi.fn();
-    render(<ComponentCatalog onClose={onClose} />);
+    const close = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("__TAURI__", { window: { getCurrentWindow: () => ({ close }) } });
+    render(<ComponentCatalog />);
 
     fireEvent.click(screen.getByRole("button", { name: "Close component catalog" }));
-    expect(document.querySelector(".component-catalog-page").classList.contains("leaving")).toBe(true);
-    expect(onClose).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(320);
-    });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("binds the sample secret visibility control to the shared controller", () => {
@@ -112,7 +107,6 @@ describe("Component catalog", () => {
 
     expect(dialog.closest(".confirm-backdrop").hidden).toBe(true);
     expect(page.inert).toBe(false);
-    expect(page.classList.contains("leaving")).toBe(false);
     expect(onClose).not.toHaveBeenCalled();
   });
 

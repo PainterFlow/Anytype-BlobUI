@@ -315,7 +315,7 @@ mod windows {
     use std::ptr::{null, null_mut};
     use std::sync::mpsc::{sync_channel, SyncSender};
     use std::sync::OnceLock;
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
     use windows_sys::Win32::Foundation::{CloseHandle, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::{
@@ -520,8 +520,13 @@ mod windows {
                             let _ = app.emit("blobui-rebuild-custom-css", ());
                         }
                         ShortcutAction::OpenComponentCatalog => {
-                            if let Err(error) = super::super::open_component_catalog_window(&app) {
-                                eprintln!("Could not open the component catalog from F10: {error}");
+                            let result = if let Some(window) = app.get_webview_window("component-catalog") {
+                                window.close().map_err(|error| error.to_string())
+                            } else {
+                                super::super::open_component_catalog_window(&app)
+                            };
+                            if let Err(error) = result {
+                                eprintln!("Could not toggle the component catalog: {error}");
                             }
                         }
                     }
