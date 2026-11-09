@@ -24,7 +24,15 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
       if(name==='load_kanban_formulas')return {configuration:{version:2,display:'balanced',definitions:[]}};
       if(name==='load_calendar_rules')return {version:1,types:[]};
       if(name==='get_calendar_api_availability')return 'available';
-      if(name==='get_keyboard_shortcuts'||name==='save_keyboard_shortcuts')return [{action:'openSettings',code:'KeyS',ctrl:true,alt:false,shift:false,meta:false}];
+      if(name==='get_keyboard_shortcuts')return [
+        {action:'openSettings',code:'KeyS',ctrl:true,alt:false,shift:false,meta:false},
+        {action:'rebuildCss',code:'KeyR',ctrl:false,alt:true,shift:false,meta:false},
+        {action:'openComponentCatalog',code:'F10',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'showOnboarding',code:'F8',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'simulateUpdate',code:'F9',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'quitSettings',code:'KeyQ',ctrl:true,alt:false,shift:false,meta:false},
+      ];
+      if(name==='save_keyboard_shortcuts')return args.shortcuts;
       if(name==='get_updater_state')return {automaticChecksEnabled:false,automaticUpdatesEnabled:false};
       if(name==='anyblob_status')return {enabled:false};
       if(name.startsWith('discover_')&&name!=='discover_codex_projects'){
@@ -116,9 +124,14 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
     const componentCatalogShortcut=page.locator('#keybind-button-openComponentCatalog');
     await componentCatalogShortcut.waitFor({state:'visible'});
+    await page.waitForFunction(()=>document.getElementById('keybind-button-openComponentCatalog')?.tagName==='BUTTON');
     assert.equal(await componentCatalogShortcut.locator('kbd').innerText(),'F10');
     assert.equal(await page.locator('#keybind-label-openComponentCatalog').innerText(),'Open component catalog');
-    assert.equal(await componentCatalogShortcut.evaluate(node=>node.tagName),'SPAN');
+    assert.equal(await componentCatalogShortcut.evaluate(node=>node.tagName),'BUTTON');
+    await componentCatalogShortcut.click();
+    await page.evaluate(()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',code:'F10',ctrlKey:true,bubbles:true,cancelable:true})));
+    await page.waitForFunction(()=>window.calls.some(c=>c.name==='save_keyboard_shortcuts'));
+    assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='save_keyboard_shortcuts').args.shortcuts.find(row=>row.action==='openComponentCatalog').ctrl),true,'The component catalog shortcut can be changed and saved.');
     await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
     await page.screenshot({path:path.join(temp,'keybinds-dark.png')});
     await page.locator('#keybind-button-openSettings').click();

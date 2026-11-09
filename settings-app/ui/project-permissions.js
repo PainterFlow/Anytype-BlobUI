@@ -19,7 +19,7 @@
     return result;
   }
   function createController() {
-    let api, locked=true, projects=[], sources=[], scanned=false, sourcesScanned=false, busy=false, sourceBusy=false, active=null;
+    let api, locked=true, projects=[], sources=[], scanned=false, sourcesScanned=false, busy=false, sourceBusy=false, active=null, openRequested=false;
     let snapshot={projects:[],sources:[],scanned:false,sourcesScanned:false,busy:false,sourceBusy:false,locked:true,active:null,modal:false,projectStatus:'',sourceStatus:''};
     const listeners=new Set();
     const subscribe=listener=>{listeners.add(listener);return()=>listeners.delete(listener);};
@@ -27,7 +27,12 @@
     function publish(patch={}) { snapshot={...snapshot,...patch}; listeners.forEach(listener=>listener()); }
     function configuration() { return api.normalize(api.read()); }
     function selectedSources() { return active && api ? configuration().projects[active.id]?.sources || [] : []; }
-    function setLocked(value) { locked=value===true; publish({locked}); }
+    function setLocked(value) {
+      const wasLocked=locked;
+      locked=value===true;
+      publish({locked});
+      if(wasLocked&&!locked&&openRequested&&!scanned&&!busy)void reloadProjects();
+    }
     function saveSources(nextSources) {
       if (!active || locked) return;
       const next=configuration(), baseline=api.normalize(api.readSaved()).projects[active.id];
@@ -63,7 +68,7 @@
       subscribe,getSnapshot,kinds,
       init(options){api=options;UI.AppReload?.register(()=>reloadSources(true));},
       normalize,identity,kindName,
-      open(){if(!scanned&&!busy)void reloadProjects();},
+      open(){openRequested=true;if(!scanned&&!busy&&!locked)void reloadProjects();},
       reloadProjects(){return reloadProjects();},reloadSources(){return reloadSources(true);},
       setLocked,
       selectProject(project){if(locked)return;active=project;publish({active,modal:true,sourceStatus:''});if(!sourcesScanned&&!sourceBusy)void reloadSources();},

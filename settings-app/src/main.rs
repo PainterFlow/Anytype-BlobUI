@@ -847,7 +847,7 @@ fn calendar_api_availability_at(install: &Path) -> &'static str {
         let ip = normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
         let port = data.pointer("/apiConnection/port").and_then(Value::as_u64)
             .and_then(|port| u16::try_from(port).ok()).filter(|port| *port > 0).unwrap_or(31009);
-        api::verify_connection(&key, &ip, port)
+        api::verify_connection_quick(&key, &ip, port)
     })();
     if result.is_ok() { "available" } else { "unavailable" }
 }
@@ -1446,6 +1446,21 @@ pub(crate) fn load_settings_data(install: &Path) -> Result<Value, String> {
         let root = settings_root_for_install(install)?;
         settings_store::load(&root)
     }
+}
+
+fn normalize_shortcuts_on_launch(install: &Path) -> Option<Vec<hotkey::Shortcut>> {
+    let mut data = load_settings_data(install).ok()?;
+    let saved = data.get("keybinds")?.clone();
+    let normalized_value = hotkey::normalize_shortcut_value(&saved).ok()?;
+    let normalized: Vec<hotkey::Shortcut> = serde_json::from_value(normalized_value.clone()).ok()?;
+    if saved != normalized_value {
+        data["keybinds"] = normalized_value;
+        match settings_root_for_install(install).and_then(|root| settings_store::save(&root, &data)) {
+            Ok(()) => {}
+            Err(error) => eprintln!("Could not save the keyboard shortcut migration: {error}"),
+        }
+    }
+    Some(normalized)
 }
 
 pub(crate) fn persist_split_settings(install: &Path, data: &Value) -> Result<(), String> {
@@ -2346,9 +2361,7 @@ fn main() {
                 .and_then(|install| settings_data_path(&install).ok().map(|path| (install, path)));
             let stored_shortcuts = launch_storage
                 .as_ref()
-                .and_then(|(install, _)| load_settings_data(install).ok())
-                .and_then(|data| data.get("keybinds").cloned())
-                .and_then(|value| serde_json::from_value::<Vec<hotkey::Shortcut>>(value).ok());
+                .and_then(|(install, _)| normalize_shortcuts_on_launch(install));
             if let Some(shortcuts) = stored_shortcuts {
                 hotkey::start_with_saved(app.handle().clone(), Some(shortcuts));
             } else if launch_storage

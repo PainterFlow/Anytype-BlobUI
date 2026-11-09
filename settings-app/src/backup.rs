@@ -88,9 +88,8 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
             &current_data,
         )?;
         if let Some(keybinds) = data.get("keybinds") {
-            let keybinds: Vec<crate::hotkey::Shortcut> = serde_json::from_value(keybinds.clone())
+            data["keybinds"] = crate::hotkey::normalize_shortcut_value(keybinds)
                 .map_err(|_| "The selected Settings backup contains invalid keyboard shortcuts.".to_string())?;
-            crate::hotkey::validate_shortcuts(&keybinds)?;
         }
         validate_updater_preferences(&data)?;
         crate::calendar::configuration(&data)?;
@@ -533,8 +532,13 @@ mod tests {
         fs::create_dir_all(&old_anytype).unwrap();
         fs::create_dir_all(&current_anytype).unwrap();
         fs::create_dir_all(&destination).unwrap();
+        let mut old_shortcuts = crate::hotkey::default_shortcuts();
+        old_shortcuts.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        let mut old_shortcuts = serde_json::to_value(old_shortcuts).unwrap();
+        old_shortcuts[0]["futureShortcutField"] = json!({"keep": true});
         crate::settings_store::save(&source_app, &json!({
             "installDirectory": old_anytype.to_string_lossy(),
+            "keybinds": old_shortcuts,
             "futureTopLevel": {"keep": [1, 2]},
             "settingsV2": {
                 "version": 9,
@@ -560,6 +564,8 @@ mod tests {
         assert_eq!(loaded["settingsV2"]["futureEnvelope"]["keep"], true);
         assert_eq!(loaded["settingsV2"]["settings"]["futureSetting"]["preserve"], "yes");
         assert_eq!(loaded["settingsV2"]["settings"]["codexIntegration"]["spaces"]["space-id"]["future"], true);
+        assert_eq!(loaded["keybinds"].as_array().unwrap().len(), 6);
+        assert_eq!(loaded["keybinds"][0]["futureShortcutField"]["keep"], true);
         assert_eq!(fs::read(current_app.join(SETTINGS_DIR).join("user-state.bin")).unwrap(), [0x10, 0x20]);
         assert_ne!(fs::read(current_anytype.join("custom.css")).unwrap(), b"old stylesheet");
         fs::remove_dir_all(root).unwrap();

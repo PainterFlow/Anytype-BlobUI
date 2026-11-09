@@ -410,6 +410,9 @@ pub fn get_release_notes(
     if current_version(install_directory, Some(runtime_directory))? != version {
         return Ok(None);
     }
+    if let Some(notes) = read_packaged_release_notes(runtime_directory, &version)? {
+        return Ok(Some(notes));
+    }
     fetch_release_notes_for_tag(&tag, None).map(Some)
 }
 
@@ -418,10 +421,19 @@ fn is_development_runtime(runtime: &Path) -> bool {
 }
 
 pub fn get_latest_release_notes(
-    _install_directory: &Path,
+    install_directory: &Path,
     runtime_directory: &Path,
 ) -> Result<Option<ReleaseNotes>, String> {
     if !is_development_runtime(runtime_directory) {
+        let version = current_version(install_directory, Some(runtime_directory))?;
+        if let Some(notes) = read_packaged_release_notes(runtime_directory, &version)? {
+            return Ok(Some(notes));
+        }
+        if let Some(executable_directory) = std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf)) {
+            if let Some(notes) = read_packaged_release_notes(&executable_directory, &version)? {
+                return Ok(Some(notes));
+            }
+        }
         return latest_published_release_notes();
     }
     read_development_release_notes(runtime_directory)
@@ -440,12 +452,15 @@ fn latest_published_release_notes() -> Result<Option<ReleaseNotes>, String> {
 }
 
 fn read_development_release_notes(runtime_directory: &Path) -> Result<Option<ReleaseNotes>, String> {
-    let runtime_directory = if runtime_directory.join("Changelogs.md").is_file() {
-        runtime_directory
-    } else {
+    read_packaged_release_notes(runtime_directory, &env!("BLOBUI_BUILD_VERSION").to_string())
+}
+
+fn read_packaged_release_notes(runtime_directory: &Path, version: &str) -> Result<Option<ReleaseNotes>, String> {
+    let markdown_path = runtime_directory.join("Changelogs.md");
+    if !markdown_path.is_file() {
         return Ok(None);
-    };
-    let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
+    }
+    let markdown = read_release_text(&markdown_path, MAX_RELEASE_NOTES_BYTES)?;
     if markdown.trim().is_empty() {
         return Ok(None);
     }
@@ -455,8 +470,7 @@ fn read_development_release_notes(runtime_directory: &Path) -> Result<Option<Rel
     } else {
         "images: []\n".into()
     };
-    let version = env!("BLOBUI_BUILD_VERSION").to_string();
-    Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
+    Ok(Some(ReleaseNotes { tag: version.to_string(), version: version.to_string(), markdown, image_manifest }))
 }
 
 pub fn get_adjacent_release_notes(version: &str, older: bool) -> Result<Option<ReleaseNotes>, String> {
@@ -1886,9 +1900,12 @@ mod tests {
         };
         save_preferences(&path, &preferences).unwrap();
 
-        // Installed notes come from GitHub; local notes must not be used as a release.
+        // Packaged notes let an installed build show its changelog without a GitHub request.
         assert!(!is_development_runtime(&runtime));
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.0.0"));
+        let notes = get_release_notes(&app_data, &install, &runtime).unwrap().unwrap();
+        assert_eq!(notes.version, "1.0.0");
+        assert_eq!(notes.markdown, "# BlobUI 1.0.0\n\nUpdated settings.\n");
 
         assert!(acknowledge_release_notes(&app_data, &install, &runtime, "1.0.0").unwrap());
         assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
@@ -1911,6 +1928,9 @@ mod tests {
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
         fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
         assert!(!is_development_runtime(&runtime));
+        let packaged = get_latest_release_notes(&install, &runtime).unwrap().unwrap();
+        assert_eq!(packaged.version, "1.0.0");
+        assert_eq!(packaged.markdown, "# Latest notes\n");
         fs::create_dir(runtime.join(".git")).unwrap();
         assert!(is_development_runtime(&runtime));
         let notes = get_latest_release_notes(&install, &runtime).unwrap().unwrap();

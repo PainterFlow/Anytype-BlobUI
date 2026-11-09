@@ -19,6 +19,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
     [
         ("openSettings", "Numpad1", false, false, false, false),
         ("rebuildCss", "KeyR", false, true, false, false),
+        ("openComponentCatalog", "F10", false, false, false, false),
         ("showOnboarding", "F8", false, false, false, false),
         ("simulateUpdate", "F9", false, false, false, false),
         ("quitSettings", "KeyQ", true, false, false, false),
@@ -68,18 +69,65 @@ fn load_shortcuts(path: &Path) -> Result<Vec<Shortcut>, String> {
         Ok(bytes) => {
             let shortcuts: Vec<Shortcut> = serde_json::from_slice(&bytes)
                 .map_err(|_| "The saved keyboard shortcuts are invalid.".to_string())?;
-            validate_shortcuts(&shortcuts)?;
-            Ok(shortcuts)
+            normalize_shortcuts(shortcuts)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_shortcuts()),
         Err(_) => Err("The saved keyboard shortcuts could not be read.".into()),
     }
 }
 
+pub(crate) fn normalize_shortcuts(mut shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
+    if shortcuts.len() == 5 && !shortcuts.iter().any(|shortcut| shortcut.action == "openComponentCatalog") {
+        let mut catalog = default_shortcuts().into_iter()
+            .find(|shortcut| shortcut.action == "openComponentCatalog")
+            .expect("the default component catalog shortcut exists");
+        if shortcuts.iter().any(|shortcut| same_chord(shortcut, &catalog)) {
+            let candidates = [
+                ("F10", false, false, false, false), ("F11", false, false, false, false), ("F12", false, false, false, false),
+                ("F10", true, false, false, false), ("F11", true, false, false, false), ("F12", true, false, false, false),
+                ("F10", false, true, false, false), ("F11", false, true, false, false), ("F12", false, true, false, false),
+                ("F10", false, false, true, false), ("F11", false, false, true, false), ("F12", false, false, true, false),
+                ("F10", false, false, false, true), ("F11", false, false, false, true), ("F12", false, false, false, true),
+            ];
+            let (code, ctrl, alt, shift, meta) = candidates.into_iter()
+                .find(|(code, ctrl, alt, shift, meta)| !shortcuts.iter().any(|shortcut| {
+                    shortcut.code == *code && shortcut.ctrl == *ctrl && shortcut.alt == *alt
+                        && shortcut.shift == *shift && shortcut.meta == *meta
+                }))
+                .ok_or_else(|| "A free default keyboard shortcut could not be added.".to_string())?;
+            catalog.code = code.into();
+            catalog.ctrl = ctrl;
+            catalog.alt = alt;
+            catalog.shift = shift;
+            catalog.meta = meta;
+        }
+        shortcuts.push(catalog);
+    }
+    validate_shortcuts(&shortcuts)?;
+    Ok(shortcuts)
+}
+
+pub(crate) fn normalize_shortcut_value(value: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let shortcuts: Vec<Shortcut> = serde_json::from_value(value.clone())
+        .map_err(|_| "The saved keyboard shortcuts are invalid.".to_string())?;
+    let normalized = normalize_shortcuts(shortcuts.clone())?;
+    if normalized.len() == shortcuts.len() {
+        return Ok(value.clone());
+    }
+    let added = normalized.into_iter()
+        .find(|candidate| !shortcuts.iter().any(|shortcut| shortcut.action == candidate.action))
+        .ok_or_else(|| "A default keyboard shortcut could not be added.".to_string())?;
+    let mut value = value.clone();
+    value.as_array_mut()
+        .ok_or_else(|| "The saved keyboard shortcuts are invalid.".to_string())?
+        .push(serde_json::to_value(added).map_err(|_| "A default keyboard shortcut could not be encoded.".to_string())?);
+    Ok(value)
+}
+
 pub(crate) fn validate_shortcuts(shortcuts: &[Shortcut]) -> Result<(), String> {
-    let expected = ["openSettings", "rebuildCss", "showOnboarding", "simulateUpdate", "quitSettings"];
+    let expected = ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings"];
     if shortcuts.len() != expected.len() {
-        return Err("All five BlobUI keyboard shortcuts must be provided.".into());
+        return Err("All six BlobUI keyboard shortcuts must be provided.".into());
     }
     for (index, shortcut) in shortcuts.iter().enumerate() {
         if !expected.contains(&shortcut.action.as_str())
@@ -130,17 +178,47 @@ impl KeyGate {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_shortcuts, get_shortcuts, load_shortcuts, save_shortcuts, validate_shortcuts, KeyGate};
+    use super::{default_shortcuts, get_shortcuts, load_shortcuts, normalize_shortcuts, save_shortcuts, validate_shortcuts, KeyGate};
     use std::{fs, path::Path};
 
     #[test]
     fn defaults_cover_every_blobui_shortcut_and_are_unique() {
         let shortcuts = default_shortcuts();
-        assert_eq!(shortcuts.len(), 5);
+        assert_eq!(shortcuts.len(), 6);
         validate_shortcuts(&shortcuts).unwrap();
-        for action in ["openSettings", "rebuildCss", "showOnboarding", "simulateUpdate", "quitSettings"] {
+        for action in ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings"] {
             assert!(shortcuts.iter().any(|shortcut| shortcut.action == action));
         }
+    }
+
+    #[test]
+    fn old_shortcut_lists_gain_an_editable_catalog_binding_without_changing_existing_bindings() {
+        let mut old = default_shortcuts();
+        old.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        let normalized = normalize_shortcuts(old.clone()).unwrap();
+        assert_eq!(&normalized[..old.len()], old.as_slice());
+        assert_eq!(normalized.iter().find(|shortcut| shortcut.action == "openComponentCatalog").unwrap().code, "F10");
+
+        old[0].code = "F10".into();
+        old[1].code = "F11".into();
+        old[1].alt = false;
+        old[2].code = "F12".into();
+        let normalized = normalize_shortcuts(old.clone()).unwrap();
+        assert_eq!(&normalized[..old.len()], old.as_slice());
+        let catalog = normalized.iter().find(|shortcut| shortcut.action == "openComponentCatalog").unwrap();
+        assert_eq!(catalog.code, "F10");
+        assert!(catalog.ctrl);
+    }
+
+    #[test]
+    fn normalizing_imported_shortcuts_preserves_unrecognized_fields_on_existing_rows() {
+        let mut old = default_shortcuts();
+        old.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        let mut value = serde_json::to_value(old).unwrap();
+        value[0]["futureShortcutField"] = serde_json::json!({"keep": true});
+        let normalized = super::normalize_shortcut_value(&value).unwrap();
+        assert_eq!(normalized[0]["futureShortcutField"], serde_json::json!({"keep": true}));
+        assert_eq!(normalized.as_array().unwrap().len(), 6);
     }
 
     #[test]
@@ -164,7 +242,7 @@ mod tests {
         let root = workspace.join(".test-run").join(format!("shortcuts-{}-{nonce}", std::process::id()));
         let path = root.join("BlobUI/shortcuts.json");
         let mut shortcuts = default_shortcuts();
-        shortcuts[2].code = "F10".into();
+        shortcuts[2].code = "F11".into();
         assert_eq!(save_shortcuts(&path, shortcuts.clone()).unwrap(), shortcuts);
         assert_eq!(get_shortcuts(), shortcuts);
         assert_eq!(load_shortcuts(&path).unwrap(), shortcuts);
@@ -202,8 +280,11 @@ pub fn start(app: tauri::AppHandle, preferences_path: &Path) {
 pub fn start_with_saved(app: tauri::AppHandle, shortcuts: Option<Vec<Shortcut>>) {
     match shortcuts {
         Some(shortcuts) => {
-            if let Err(error) = set_shortcuts(shortcuts) {
-                let _ = STARTUP_ERROR.set(error);
+            match normalize_shortcuts(shortcuts) {
+                Ok(shortcuts) => {
+                    if let Err(error) = set_shortcuts(shortcuts) { let _ = STARTUP_ERROR.set(error); }
+                }
+                Err(error) => { let _ = STARTUP_ERROR.set(error); }
             }
         }
         None => {
@@ -253,12 +334,14 @@ mod windows {
     thread_local! {
         static NUMPAD_GATE: std::cell::RefCell<KeyGate> = std::cell::RefCell::new(KeyGate::default());
         static REBUILD_GATE: std::cell::RefCell<KeyGate> = std::cell::RefCell::new(KeyGate::default());
+        static CATALOG_GATE: std::cell::RefCell<KeyGate> = std::cell::RefCell::new(KeyGate::default());
     }
 
     #[derive(Clone, Copy)]
     enum ShortcutAction {
         OpenSettings,
         RebuildCustomCss,
+        OpenComponentCatalog,
     }
 
     fn is_anytype_executable(path: &str) -> bool {
@@ -382,6 +465,10 @@ mod windows {
             || (process_id != 0 && process_is_anytype(process_id))
     }
 
+    unsafe fn settings_is_foreground() -> bool {
+        foreground_process_id() == std::process::id()
+    }
+
     unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
         if code >= 0 && data != 0 {
             let key = &*(data as *const KBDLLHOOKSTRUCT);
@@ -395,12 +482,14 @@ mod windows {
                     let in_scope = match shortcut.action.as_str() {
                         "openSettings" => down && anytype_is_foreground(),
                         "rebuildCss" => down && settings_or_anytype_is_foreground(),
+                        "openComponentCatalog" => down && settings_is_foreground(),
                         _ => false,
                     };
                     let matched = modifiers_match(shortcut);
                     let action = match shortcut.action.as_str() {
                         "openSettings" => Some((ShortcutAction::OpenSettings, &NUMPAD_GATE)),
                         "rebuildCss" => Some((ShortcutAction::RebuildCustomCss, &REBUILD_GATE)),
+                        "openComponentCatalog" => Some((ShortcutAction::OpenComponentCatalog, &CATALOG_GATE)),
                         _ => None,
                     };
                     if let Some((action, gate)) = action {
@@ -429,6 +518,12 @@ mod windows {
                         ShortcutAction::OpenSettings => super::super::show_settings_window(&app),
                         ShortcutAction::RebuildCustomCss => {
                             let _ = app.emit("blobui-rebuild-custom-css", ());
+                        }
+                        ShortcutAction::OpenComponentCatalog => {
+                            let handle = app.clone();
+                            let _ = app.run_on_main_thread(move || {
+                                let _ = super::super::open_component_catalog(handle);
+                            });
                         }
                     }
                 }

@@ -396,7 +396,8 @@ export function DocumentationReader({ visible = false }) {
           {articleHtmlReady && <MarkdownView id="documentation-article" className="documentation-article markdown-content"
             aria-label={selectedArticle.name} markdown={currentMarkdown} images={articlePayload.images} videos={articlePayload.videos} />}
           {(!articleHtmlReady || articleBusy) && <p className="documentation-article-loading" role="status">Loading article…</p>}
-        </> : catalog ? <p className="documentation-article">No documentation articles are available.</p> : null}
+        </> : catalog ? <p className="documentation-article">No documentation articles are available.</p>
+          : visible ? <p className="documentation-article-loading" role="status">Loading documentation…</p> : null}
     </main>
   </div>;
 }
