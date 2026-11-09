@@ -38,6 +38,12 @@ pub fn get_shortcuts() -> Vec<Shortcut> {
     shortcut_store().read().map(|shortcuts| shortcuts.clone()).unwrap_or_else(|_| default_shortcuts())
 }
 
+pub fn set_shortcuts(shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
+    validate_shortcuts(&shortcuts)?;
+    *shortcut_store().write().map_err(|_| "The keyboard shortcut settings are unavailable.".to_string())? = shortcuts.clone();
+    Ok(shortcuts)
+}
+
 pub fn set_capture_active(active: bool) {
     CAPTURE_ACTIVE.store(active, Ordering::Release);
 }
@@ -69,7 +75,7 @@ fn load_shortcuts(path: &Path) -> Result<Vec<Shortcut>, String> {
     }
 }
 
-fn validate_shortcuts(shortcuts: &[Shortcut]) -> Result<(), String> {
+pub(crate) fn validate_shortcuts(shortcuts: &[Shortcut]) -> Result<(), String> {
     let expected = ["openSettings", "rebuildCss", "showOnboarding", "simulateUpdate", "quitSettings"];
     if shortcuts.len() != expected.len() {
         return Err("All five BlobUI keyboard shortcuts must be provided.".into());
@@ -189,6 +195,26 @@ pub fn start(app: tauri::AppHandle, preferences_path: &Path) {
         }
         Err(error) => { let _ = STARTUP_ERROR.set(error); }
     }
+    start_runtime(app);
+}
+
+pub fn start_with_saved(app: tauri::AppHandle, shortcuts: Option<Vec<Shortcut>>) {
+    match shortcuts {
+        Some(shortcuts) => {
+            if let Err(error) = set_shortcuts(shortcuts) {
+                let _ = STARTUP_ERROR.set(error);
+            }
+        }
+        None => {
+            if let Ok(mut current) = shortcut_store().write() {
+                *current = default_shortcuts();
+            }
+        }
+    }
+    start_runtime(app);
+}
+
+fn start_runtime(app: tauri::AppHandle) {
     #[cfg(windows)]
     if let Err(error) = windows::start(app) {
         let _ = STARTUP_ERROR.set(error);

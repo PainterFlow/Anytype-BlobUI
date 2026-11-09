@@ -43,13 +43,12 @@ impl Client {
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
         let data = crate::read_json_file(&install.join("blob/data.json"))?;
+        let credential = crate::api_credential_path(&install)?;
         if data
             .pointer("/apiConnection/enabled")
             .and_then(Value::as_bool)
             == Some(false)
-            || !install
-                .join("blob/credentials/anytype-api-key.dpapi")
-                .is_file()
+            || !credential.is_file()
         {
             return Err(
                 "Add an Anytype API key in Advanced Settings to use Kanban formulas.".into(),

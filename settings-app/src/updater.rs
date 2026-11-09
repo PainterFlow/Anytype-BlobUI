@@ -6,6 +6,7 @@ use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -111,6 +112,34 @@ struct PreviousManifest {
 fn default_autoplay_videos() -> bool { true }
 
 pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
+    #[cfg(test)]
+    {
+        return legacy_preferences_path(app_data_directory);
+    }
+    #[cfg(not(test))]
+    {
+        if let Some((app, _)) = locate_app_install(
+            env::current_exe().ok().as_deref(),
+            env::var_os("LOCALAPPDATA").as_deref().map(|value| Path::new(value)),
+        ).ok() {
+            let path = app.join("cache/updater.json");
+            let legacy = legacy_preferences_path(app_data_directory);
+            if !path.exists() {
+                if let Ok(metadata) = fs::symlink_metadata(&legacy) {
+                    if metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse_point(&metadata) {
+                        if let Ok(bytes) = fs::read(&legacy) {
+                            let _ = storage::write_atomic(&path, &bytes);
+                        }
+                    }
+                }
+            }
+            return path;
+        }
+        legacy_preferences_path(app_data_directory)
+    }
+}
+
+fn legacy_preferences_path(app_data_directory: &Path) -> PathBuf {
     app_data_directory
         .parent()
         .unwrap_or(app_data_directory)
@@ -118,8 +147,16 @@ pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
         .join("updater.json")
 }
 
+fn app_root_from_preferences_path(path: &Path) -> Option<PathBuf> {
+    if !path.parent()?.file_name()?.eq_ignore_ascii_case("cache") {
+        return None;
+    }
+    let root = path.parent()?.parent()?.to_path_buf();
+    root.join(".blobui-install.json").is_file().then_some(root)
+}
+
 pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
-    match fs::symlink_metadata(path) {
+    let mut preferences = match fs::symlink_metadata(path) {
         Ok(metadata) => {
             reject_reparse_path(path)?;
             if !metadata.is_file() {
@@ -134,14 +171,56 @@ pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
             Ok(UpdaterPreferences::default())
         }
         Err(_) => Err("The saved BlobUI updater settings could not be inspected safely.".into()),
+    }?;
+    if let Some(root) = app_root_from_preferences_path(path) {
+        let settings_directory = root.join("Settings");
+        if settings_directory.is_dir() {
+            reject_reparse_path(&settings_directory)?;
+            let aggregate = crate::settings_store::load(&root)?;
+            if let Some(saved) = aggregate.get("updaterPreferences") {
+                let saved = saved.as_object().ok_or("The saved updater preferences are malformed.")?;
+                preferences.install_directory = saved.get("installDirectory").and_then(Value::as_str).map(str::to_owned);
+                if let Some(value) = saved.get("autoplayVideos").and_then(Value::as_bool) { preferences.autoplay_videos = value; }
+                if let Some(value) = saved.get("automaticUpdatesEnabled").and_then(Value::as_bool) { preferences.automatic_updates_enabled = value; }
+                if let Some(value) = saved.get("automaticChecksEnabled").and_then(Value::as_bool) { preferences.automatic_checks_enabled = value; }
+            }
+        }
     }
+    Ok(preferences)
 }
 
 fn save_preferences(path: &Path, preferences: &UpdaterPreferences) -> Result<(), String> {
     let mut bytes = serde_json::to_vec_pretty(preferences)
         .map_err(|_| "Could not encode the BlobUI updater settings.".to_string())?;
     bytes.push(b'\n');
-    storage::write_atomic(path, &bytes)
+    let before = storage::snapshot(path, false)?;
+    storage::write_atomic(path, &bytes)?;
+    if let Some(root) = app_root_from_preferences_path(path) {
+        let settings_directory = root.join("Settings");
+        if settings_directory.is_dir() {
+            let result = (|| {
+                let mut aggregate = crate::settings_store::load(&root)?;
+                let mut saved = aggregate
+                    .get("updaterPreferences")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                saved.insert("installDirectory".into(), serde_json::to_value(&preferences.install_directory).unwrap_or(Value::Null));
+                saved.insert("autoplayVideos".into(), Value::Bool(preferences.autoplay_videos));
+                saved.insert("automaticUpdatesEnabled".into(), Value::Bool(preferences.automatic_updates_enabled));
+                saved.insert("automaticChecksEnabled".into(), Value::Bool(preferences.automatic_checks_enabled));
+                aggregate["updaterPreferences"] = Value::Object(saved);
+                crate::settings_store::save(&root, &aggregate)
+            })();
+            if let Err(error) = result {
+                return match storage::restore(&before) {
+                    Ok(()) => Err(error),
+                    Err(rollback) => Err(format!("{error} The updater cache could not be restored: {rollback}")),
+                };
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn saved_install_directory(path: &Path) -> Result<Option<PathBuf>, String> {
@@ -939,6 +1018,52 @@ pub(crate) fn resolve_app_directory(
     }
 }
 
+pub(crate) fn locate_app_install(
+    current_exe: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let mut candidates = Vec::new();
+    if let Some(current_exe) = current_exe {
+        for ancestor in current_exe.parent().into_iter().flat_map(Path::ancestors) {
+            candidates.push(ancestor.to_path_buf());
+        }
+    }
+    if let Some(local_app_data) = local_app_data {
+        let default = local_app_data.join("Programs/BlobUI");
+        if !candidates.contains(&default) {
+            candidates.push(default);
+        }
+    }
+
+    for app in candidates {
+        let pointer_path = app.join(".blobui-install.json");
+        match fs::symlink_metadata(&pointer_path) {
+            Ok(metadata) if metadata.is_file() => {
+                reject_reparse_path(&app)?;
+                reject_reparse_path(&pointer_path)?;
+                let pointer: Value = serde_json::from_slice(&fs::read(&pointer_path).map_err(|_| {
+                    "The installed BlobUI app pointer could not be read safely.".to_string()
+                })?)
+                .map_err(|_| "The installed BlobUI app pointer is invalid.".to_string())?;
+                let stored = pointer
+                    .get("installDirectory")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "The installed BlobUI app pointer is invalid.".to_string())?;
+                let install = validate_install_directory(Path::new(stored))?;
+                if let Some(app) = validate_app_pointer(&app, &pointer_path, &install)? {
+                    return Ok((app, install));
+                }
+            }
+            Ok(_) => return Err("The installed BlobUI app pointer is not a regular file.".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err("The installed BlobUI app pointer could not be inspected safely.".into())
+            }
+        }
+    }
+    Err("The installed BlobUI app folder could not be found. Run the installer once before using Settings.".into())
+}
+
 fn app_directory_from_install_manifest(install: &Path) -> Result<Option<PathBuf>, String> {
     let path = install.join("blob/.blobui-managed-files.json");
     let bytes = match fs::symlink_metadata(&path) {
@@ -1582,6 +1707,11 @@ mod tests {
         let resolved =
             resolve_app_directory(&install, Some(&workspace_exe), Some(&local_app_data)).unwrap();
         assert_eq!(resolved, app.canonicalize().unwrap());
+        let installed_exe = app.join("settings-app/dist/blobui-settings.exe");
+        let (located_app, located_install) =
+            locate_app_install(Some(&installed_exe), Some(&local_app_data)).unwrap();
+        assert_eq!(located_app, app.canonicalize().unwrap());
+        assert_eq!(located_install, install.canonicalize().unwrap());
 
         fs::write(
             app.join(".blobui-install.json"),

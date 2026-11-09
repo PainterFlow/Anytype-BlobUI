@@ -22,9 +22,35 @@ static FLIGHTS: OnceLock<Mutex<BTreeMap<String, Arc<Mutex<Entry>>>>> = OnceLock:
 static DISK: Mutex<()> = Mutex::new(());
 fn path() -> PathBuf {
     let data = crate::app_data_directory();
-    data.parent()
+    let legacy = data
+        .parent()
         .unwrap_or(&data)
-        .join("BlobUI/metadata-cache.json")
+        .join("BlobUI/metadata-cache.json");
+    #[cfg(test)]
+    {
+        return legacy;
+    }
+    #[cfg(not(test))]
+    {
+        let Ok(install) = crate::resolve_install_directory(&data) else { return legacy };
+        let Ok(root) = crate::settings_root_for_install(&install) else { return legacy };
+        let cache = root.join("cache/metadata-cache.json");
+        if crate::reject_reparse_component(&cache).is_err() {
+            return legacy;
+        }
+        if !cache.exists() {
+            if crate::reject_reparse_component(&legacy).is_ok() {
+                if let Ok(metadata) = std::fs::symlink_metadata(&legacy) {
+                    if metadata.is_file() && !metadata.file_type().is_symlink() {
+                    if let Ok(bytes) = std::fs::read(&legacy) {
+                        let _ = crate::storage::write_atomic(&cache, &bytes);
+                    }
+                    }
+                }
+            }
+        }
+        cache
+    }
 }
 fn read(path: &Path) -> File {
     std::fs::read(path)

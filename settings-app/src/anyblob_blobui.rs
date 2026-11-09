@@ -488,7 +488,7 @@ pub(crate) fn execute_at(
         None
     };
     let data_path = install.join("blob/data.json");
-    let mut data = crate::read_json_file(&data_path)?;
+    let mut data = crate::load_settings_data(install)?;
     let old_data = data.clone();
     let mut kanban = if request.calendar() {
         crate::kanban::Configuration::default()
@@ -774,7 +774,35 @@ pub(crate) fn execute_at(
         });
     }
     check()?;
+    let snapshots = changes
+        .iter()
+        .map(|change| crate::storage::snapshot(&change.path, false))
+        .collect::<Result<Vec<_>, _>>()?;
     commit_update(changes)?;
+    let split_save = if request.calendar() {
+        crate::persist_split_settings(install, &data)
+    } else {
+        serde_json::to_value(&kanban)
+            .map_err(|_| "Could not prepare Kanban formulas for Settings storage.".to_string())
+            .and_then(|configuration| {
+                crate::persist_split_settings_with_formula(install, &data, &configuration)
+            })
+    };
+    if let Err(error) = split_save {
+        let mut rollback_errors = Vec::new();
+        for snapshot in snapshots.iter().rev() {
+            if let Err(rollback) = crate::storage::restore(snapshot) {
+                rollback_errors.push(rollback);
+            }
+        }
+        if rollback_errors.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "{error} The previous Anyblob publication could not be fully restored: {}",
+            rollback_errors.join("; ")
+        ));
+    }
     Ok(
         json!({"outcome":"confirmed","revision":next,"published_at":now,"publication_status":"published","manual_reload_needed":true,"warnings":warnings}),
     )

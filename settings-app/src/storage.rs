@@ -248,7 +248,7 @@ fn maybe_fail_after_replace(_destination: &Path, result: std::io::Result<()>) ->
 }
 
 #[cfg(windows)]
-fn restrict_credential_acl(path: &Path) -> Result<(), String> {
+pub(crate) fn restrict_credential_acl(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
@@ -268,7 +268,7 @@ fn restrict_credential_acl(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn restrict_credential_acl(_: &Path) -> Result<(), String> { Ok(()) }
+pub(crate) fn restrict_credential_acl(_: &Path) -> Result<(), String> { Ok(()) }
 
 pub(crate) fn restore(snapshot: &Snapshot) -> Result<(), String> {
     match &snapshot.bytes {

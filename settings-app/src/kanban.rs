@@ -182,11 +182,20 @@ fn load() -> Result<Configuration, String> {
 }
 
 pub(crate) fn prepare_backup(install: &Path) -> Result<(), String> {
-    let _ = load_at(
+    let configuration = load_at(
         &path_for_install(install),
         &workspace().join(".blobui-kanban-formulas.json"),
         &workspace().join(".blobui-formula-prototype.json"),
     )?;
+    #[cfg(test)]
+    let _ = &configuration;
+    #[cfg(not(test))]
+    {
+        let data = crate::load_settings_data(install)?;
+        let formula = serde_json::to_value(configuration)
+            .map_err(|_| "Could not prepare Kanban formulas for Settings backup.")?;
+        crate::persist_split_settings_with_formula(install, &data, &formula)?;
+    }
     Ok(())
 }
 
@@ -233,17 +242,6 @@ pub(crate) fn validate_saved_configuration(path: &Path) -> Result<(), String> {
     migrate_legacy_configuration(&bytes).map(|_| ())
 }
 
-pub(crate) fn initialize_imported_configuration(path: &Path) -> Result<(), String> {
-    crate::storage::reject_reparse_path(path)?;
-    match fs::symlink_metadata(path) {
-        Ok(_) => validate_saved_configuration(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            persist_migrated_configuration(path, &Configuration::default())
-        }
-        Err(error) => Err(format!("Could not inspect the imported Kanban formula file: {error}")),
-    }
-}
-
 fn publish_at(
     configuration: Configuration,
     install: &Path,
@@ -254,7 +252,7 @@ fn publish_at(
     let revision = crate::anyblob_blobui::revision(&json!(configuration));
     let (_, data_path, css_path, _) = crate::save_paths(install)?;
     let runtime = crate::resolve_runtime_directory_for_install(install)?;
-    let mut data = crate::read_json_file(&data_path)?;
+    let mut data = crate::load_settings_data(install)?;
     if !data.is_object() {
         return Err("BlobUI data.json must contain an object.".into());
     }
@@ -277,10 +275,12 @@ fn publish_at(
     let css = crate::css::compile(&runtime, install, &data)?;
     let config_bytes = serde_json::to_vec_pretty(&configuration)
         .map_err(|_| "Could not prepare Kanban formulas.")?;
+    let formula_value = serde_json::to_value(&configuration)
+        .map_err(|_| "Could not prepare Kanban formulas.")?;
     // The snapshot, stylesheet, and saved baseline change together. A failed
     // API read or replacement never publishes half of a calculation set.
     use crate::storage::transaction::{commit_update, FileChange};
-    commit_update(vec![
+    let changes = vec![
         FileChange {
             path: config_path.into(),
             contents: Some(config_bytes),
@@ -297,7 +297,27 @@ fn publish_at(
             path: css_path,
             contents: Some(css.into_bytes()),
         },
-    ])?;
+    ];
+    let snapshots = changes
+        .iter()
+        .map(|change| crate::storage::snapshot(&change.path, false))
+        .collect::<Result<Vec<_>, _>>()?;
+    commit_update(changes)?;
+    if let Err(error) = crate::persist_split_settings_with_formula(install, &data, &formula_value) {
+        let mut rollback_errors = Vec::new();
+        for snapshot in snapshots.iter().rev() {
+            if let Err(rollback) = crate::storage::restore(snapshot) {
+                rollback_errors.push(rollback);
+            }
+        }
+        if rollback_errors.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "{error} The previous Kanban publication could not be fully restored: {}",
+            rollback_errors.join("; ")
+        ));
+    }
     Ok(Published {
         revision,
         calculated_at,
@@ -328,7 +348,7 @@ pub fn load_kanban_formulas() -> Result<Loaded, String> {
     let configuration = load()?;
     let calculated_at = crate::resolve_install_directory(&crate::app_data_directory())
         .ok()
-        .and_then(|install| crate::read_json_file(&install.join("blob/data.json")).ok())
+        .and_then(|install| crate::load_settings_data(&install).ok())
         .and_then(|data| {
             data.pointer("/kanbanFormulaResults/calculatedAt")
                 .and_then(Value::as_str)

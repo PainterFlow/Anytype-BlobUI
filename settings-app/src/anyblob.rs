@@ -10,6 +10,8 @@ use std::{
     },
     time::{Duration, Instant},
 };
+#[cfg(not(test))]
+use std::path::Path;
 
 static PROMPT: Mutex<()> = Mutex::new(());
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -21,7 +23,16 @@ fn install() -> Result<PathBuf, String> {
     crate::resolve_install_directory(&crate::app_data_directory())
 }
 fn bridge_path() -> Result<PathBuf, String> {
-    Ok(install()?.join("blob/anyblob.json"))
+    let install = install()?;
+    #[cfg(test)]
+    {
+        return Ok(install.join("blob/anyblob.json"));
+    }
+    #[cfg(not(test))]
+    {
+        let _ = crate::settings_data_path(&install)?;
+        Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/bridge.json"))
+    }
 }
 fn state() -> Result<Value, String> {
     let path = bridge_path()?;
@@ -114,6 +125,22 @@ fn configure_at(
             ));
         }
         return Err(error);
+    }
+    #[cfg(not(test))]
+    {
+        let settings_root = path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .ok_or("The Anyblob settings folder is incomplete.")?;
+        let aggregate = crate::settings_store::load(settings_root)?;
+        if let Err(error) = crate::settings_store::save_with_anyblob_state(settings_root, &aggregate, &serde_json::from_slice(&state).map_err(|_| "Anyblob state is invalid.")?) {
+            let rollback = [store::restore(&before), store::restore(&secret_before)];
+            if rollback.iter().any(Result::is_err) {
+                return Err(format!("{error} Could not fully restore the previous Anyblob configuration."));
+            }
+            return Err(error);
+        }
     }
     invalidate();
     Ok(())

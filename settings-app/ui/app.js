@@ -1016,6 +1016,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       el("keybind-list").querySelector(`[data-shortcut-action="${shortcutCaptureAction}"]`).focus();
       return;
     }
+    if (event.code === "F10") {
+      el("keybind-status").textContent = "F10 is reserved for the component catalog.";
+      el("keybind-status").classList.add("error");
+      el("keybind-list").querySelector(`[data-shortcut-action="${shortcutCaptureAction}"]`).focus();
+      return;
+    }
     const action = shortcutCaptureAction;
     shortcutCaptureAction = null;
     await invoke("set_shortcut_capture", { active: false }).catch(() => {});
@@ -2468,6 +2474,15 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (event.defaultPrevented) return;
     if (blobFolderBusy || blobRestoreReloadFailed || blobImportModal.isOpen()
       || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
+    if (event.code === "F10") {
+      event.preventDefault();
+      if (!event.repeat) {
+        invoke("open_component_catalog").catch((error) => {
+          setStatus("Could not open the component catalog. " + (error.message || String(error)), "error");
+        });
+      }
+      return;
+    }
     const matches = (action) => {
       const binding = shortcutBindings.find((item) => item.action === action);
       return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
