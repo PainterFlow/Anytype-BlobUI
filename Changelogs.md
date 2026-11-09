@@ -47,6 +47,11 @@
 ## Developer Changelogs
 
 - Settings are now saved at the location of where the app was installed at (*old settings will migrate, don't worry*).
+- Settings are now more structured when saved.
+- When exporting settings it will now only export settings.
+- All internal app files like cache etc. are now inside the apps instillation folder.
+- Added a new F10 hotkey that opens a component catalog.
+- Improved UI re-usability.
 
 ### Logs refresh
 
