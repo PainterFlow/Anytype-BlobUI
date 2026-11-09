@@ -114,6 +114,11 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     assert.equal(await localShortcut.locator('kbd').allTextContents().then(keys=>keys.join('+')),'Ctrl+R');
     assert.equal(await page.locator('#keybind-label-refreshMetadata').innerText(),'Reload BlobUI');
     assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
+    const componentCatalogShortcut=page.locator('#keybind-button-openComponentCatalog');
+    await componentCatalogShortcut.waitFor({state:'visible'});
+    assert.equal(await componentCatalogShortcut.locator('kbd').innerText(),'F10');
+    assert.equal(await page.locator('#keybind-label-openComponentCatalog').innerText(),'Open component catalog');
+    assert.equal(await componentCatalogShortcut.evaluate(node=>node.tagName),'SPAN');
     await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
     await page.screenshot({path:path.join(temp,'keybinds-dark.png')});
     await page.locator('#keybind-button-openSettings').click();

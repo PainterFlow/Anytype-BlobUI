@@ -86,6 +86,8 @@ let recoveryCompleted = false;
 const recoveryRequests = [];
 let deferGeneralSave = false;
 let pendingGeneralSaveResolve = null;
+let deferShortcutLoad = false;
+let pendingShortcutLoadResolve = null;
 let deferUpdateApply = false;
 let pendingUpdateApplyReject = null;
 let rebuildListener = null;
@@ -152,13 +154,16 @@ const context = {
       } },
       core: { async invoke(name, args) {
       calls.push(name);
-      if (name === 'get_keyboard_shortcuts') return [
-        { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
-        { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
-      ];
+      if (name === 'get_keyboard_shortcuts') {
+        if (deferShortcutLoad) return new Promise(resolve => { pendingShortcutLoadResolve = resolve; });
+        return [
+          { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
+          { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
+        ];
+      }
       if (name === 'save_keyboard_shortcuts') {
         savedShortcuts.push(args.shortcuts);
         return args.shortcuts;
@@ -597,8 +602,25 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('help-popup').hidden, false, 'The Help button opens its mini-menu.');
   assert.equal(element('help-button').attributes['aria-expanded'], 'true');
   assert(element('help-whats-new').focused, 'Opening Help moves focus into the menu.');
-  await element('help-keybinds').handlers.click();
-  assert.equal(element('keybind-list').children.length, 6, 'Keybinds lists global shortcuts and the in-app refresh shortcut.');
+  deferShortcutLoad = true;
+  element('help-keybinds').handlers.click();
+  assert.equal(element('keybinds-backdrop').hidden, false, 'Keybinds opens before the shortcut command responds.');
+  assert.equal(element('keybind-status').textContent, 'Loading keyboard shortcuts…');
+  assert.equal(element('keybind-list').children.length, 7, 'Previously loaded shortcuts remain visible while saved bindings refresh.');
+  assert.equal(element('keybind-button-openComponentCatalog').textContent, 'F10');
+  assert.equal(typeof pendingShortcutLoadResolve, 'function');
+  deferShortcutLoad = false;
+  pendingShortcutLoadResolve([
+    { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
+    { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
+    { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
+    { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
+    { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
+  ]);
+  await flush();
+  assert.equal(element('keybind-list').children.length, 7, 'Keybinds lists global shortcuts, F10, and the in-app reload shortcut.');
+  assert.equal(element('keybind-button-openComponentCatalog').textContent, 'F10', 'The fixed component catalog shortcut is listed.');
+  assert.equal(element('keybind-status').textContent, '', 'Shortcut loading clears its status after success.');
   const shortcutButton = element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]');
   await shortcutButton.handlers.click();
   assert.equal(activeElement, element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]'), 'Shortcut capture keeps focus on the active action.');

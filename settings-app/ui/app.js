@@ -950,11 +950,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
     ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
+    ["openComponentCatalog", "Open component catalog", { code: "F10" }],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
   ];
   let shortcutBindings = [];
+  let shortcutBindingsLoaded = false;
   let shortcutCaptureAction = null;
   function showHelpError(message = "This help content could not be found.") {
     el("help-error-message").textContent = message;
@@ -978,14 +980,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       const loaded = await invoke("get_keyboard_shortcuts");
       if (!Array.isArray(loaded)) throw new TypeError("Shortcut settings were invalid.");
       shortcutBindings = loaded;
+      shortcutBindingsLoaded = true;
       renderShortcutBindings();
+      el("keybind-status").textContent = "";
+      el("keybind-status").classList.remove("error");
     } catch (error) {
       el("keybind-status").textContent = error.message || String(error);
       el("keybind-status").classList.add("error");
     }
   }
   function renderShortcutBindings() {
-    view.update({ shortcutRows: shortcutActions.map(([action, label, fixedBinding]) => {
+    const actions = shortcutBindingsLoaded
+      ? shortcutActions
+      : shortcutActions.filter(([, , fixedBinding]) => Boolean(fixedBinding));
+    view.update({ shortcutRows: actions.map(([action, label, fixedBinding]) => {
       const binding = fixedBinding || shortcutBindings.find(item => item.action === action);
       return { action, label, fixed: Boolean(fixedBinding), capturing: shortcutCaptureAction === action,
         shortcut: binding ? formatShortcut(binding) : "" };
@@ -2199,12 +2207,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   listen(el("help-whats-new"), "click", () => { closeHelp(); showLatestReleaseNotes(); });
   listen(el("help-documentation"), "click", () => { closeHelp(); showDocumentation(); });
-  listen(el("help-keybinds"), "click", async () => {
+  listen(el("help-keybinds"), "click", () => {
     closeHelp();
-    el("keybind-status").textContent = "";
+    el("keybind-status").textContent = "Loading keyboard shortcuts…";
     el("keybind-status").classList.remove("error");
-    await loadShortcutBindings();
+    renderShortcutBindings();
     keybindModal.open();
+    void loadShortcutBindings();
   });
   listen(el("help-error-close"), "click", () => helpErrorModal.close());
   listen(el("keybinds-close"), "click", () => keybindModal.close());
