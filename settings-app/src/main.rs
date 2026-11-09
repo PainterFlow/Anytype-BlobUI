@@ -1311,21 +1311,58 @@ pub(crate) fn settings_root_for_install(install: &Path) -> Result<PathBuf, Strin
     #[cfg(not(test))]
     {
         let expected_install = updater::validate_install_directory(install)?;
-        let (app, resolved_install) = updater::locate_app_install(
+        let located = updater::locate_app_install(
             env::current_exe().ok().as_deref(),
             env::var_os("LOCALAPPDATA").as_deref().map(|value| Path::new(value)),
-        )?;
-        let matches = {
-            #[cfg(windows)]
-            { resolved_install.to_string_lossy().eq_ignore_ascii_case(&expected_install.to_string_lossy()) }
-            #[cfg(not(windows))]
-            { resolved_install == expected_install }
-        };
-        if !matches {
-            return Err("The installed BlobUI app belongs to a different Anytype folder.".into());
+        );
+        match located {
+            Ok((app, resolved_install)) => {
+                let matches = {
+                    #[cfg(windows)]
+                    { resolved_install.to_string_lossy().eq_ignore_ascii_case(&expected_install.to_string_lossy()) }
+                    #[cfg(not(windows))]
+                    { resolved_install == expected_install }
+                };
+                if !matches {
+                    return Err("The installed BlobUI app belongs to a different Anytype folder.".into());
+                }
+                Ok(app)
+            }
+            Err(error) => {
+                if error != "The installed BlobUI app folder could not be found. Run the installer once before using Settings." {
+                    return Err(error);
+                }
+                let Some(app) = workspace_app_root_from_executable(env::current_exe().ok().as_deref()) else {
+                    return Err(error);
+                };
+                reject_reparse_component(&app)?;
+                Ok(app)
+            }
         }
-        Ok(app)
     }
+}
+
+fn workspace_app_root_from_executable(current_exe: Option<&Path>) -> Option<PathBuf> {
+    let executable = current_exe?;
+    if !executable
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("blobui-settings.exe"))
+    {
+        return None;
+    }
+    let dist = executable.parent()?;
+    let project = dist.parent()?;
+    let workspace = project.parent()?;
+    if !dist.file_name().is_some_and(|name| name.eq_ignore_ascii_case("dist"))
+        || !project.file_name().is_some_and(|name| name.eq_ignore_ascii_case("settings-app"))
+        || !project.join("Cargo.toml").is_file()
+        || !workspace.join("blobui-release.json").is_file()
+        || !workspace.join("Dev").is_dir()
+        || !executable.is_file()
+    {
+        return None;
+    }
+    dist.canonicalize().ok()
 }
 
 pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
@@ -2379,8 +2416,22 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let app_root = root.join("BlobUI");
+        let workspace_root = root.join("checkout");
+        let settings_project = workspace_root.join("settings-app");
+        let app_root = settings_project.join("dist");
         let legacy_blob = root.join("Anytype/blob");
+        fs::create_dir_all(&app_root).unwrap();
+        fs::create_dir_all(workspace_root.join("Dev")).unwrap();
+        fs::write(settings_project.join("Cargo.toml"), b"[package]\n").unwrap();
+        fs::write(workspace_root.join("blobui-release.json"), b"{}\n").unwrap();
+        let executable = app_root.join("blobui-settings.exe");
+        fs::write(&executable, b"fixture executable").unwrap();
+        assert_eq!(
+            workspace_app_root_from_executable(Some(&executable)).unwrap(),
+            app_root.canonicalize().unwrap()
+        );
+        assert!(workspace_app_root_from_executable(Some(&root.join("other/blobui-settings.exe"))).is_none());
+
         fs::create_dir_all(legacy_blob.join("assets")).unwrap();
         let legacy_data = json!({
             "installDirectory": root.join("Anytype").to_string_lossy(),
