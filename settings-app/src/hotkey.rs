@@ -48,6 +48,7 @@ pub fn set_capture_active(active: bool) {
     CAPTURE_ACTIVE.store(active, Ordering::Release);
 }
 
+#[cfg(test)]
 pub fn save_shortcuts(path: &Path, shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
     validate_shortcuts(&shortcuts)?;
     if let Some(parent) = path.parent() {

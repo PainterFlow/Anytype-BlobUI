@@ -1336,38 +1336,65 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
     #[cfg(not(test))]
     {
         let root = settings_root_for_install(install)?;
-        let settings_directory = root.join("Settings");
-        match fs::symlink_metadata(&settings_directory) {
-            Ok(_) => reject_reparse_component(&settings_directory)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let legacy_blob = install.join("blob");
-                if legacy_blob.join("data.json").is_file() {
-                    settings_store::migrate_legacy_blob(&legacy_blob, &root)?;
-                    let app_data = app_data_directory();
-                    if let Ok(preferences) = updater::load_preferences(&updater::preferences_path(&app_data)) {
-                        let preferences = json!({
-                            "installDirectory": preferences.install_directory,
-                            "autoplayVideos": preferences.autoplay_videos,
-                            "automaticUpdatesEnabled": preferences.automatic_updates_enabled,
-                            "automaticChecksEnabled": preferences.automatic_checks_enabled,
-                        });
-                        settings_store::save_updater_preferences(&root, &preferences)?;
-                    }
-                    let shortcuts_path = app_data.parent().unwrap_or(&app_data).join("BlobUI/shortcuts.json");
-                    if let Ok(bytes) = fs::read(&shortcuts_path) {
-                        if let Ok(shortcuts) = parse_settings_json(&bytes) {
-                            let mut data = settings_store::load(&root)?;
-                            data["keybinds"] = shortcuts;
-                            settings_store::save(&root, &data)?;
-                        }
-                    }
-                } else {
-                    return Ok(legacy_blob.join("data.json"));
+        let legacy_blob = install.join("blob");
+        let migrated = ensure_settings_store_on_launch(&root, &legacy_blob)?;
+        if migrated {
+            let app_data = app_data_directory();
+            if let Ok(preferences) = updater::load_preferences(&updater::preferences_path(&app_data)) {
+                let preferences = json!({
+                    "installDirectory": preferences.install_directory,
+                    "autoplayVideos": preferences.autoplay_videos,
+                    "automaticUpdatesEnabled": preferences.automatic_updates_enabled,
+                    "automaticChecksEnabled": preferences.automatic_checks_enabled,
+                });
+                settings_store::save_updater_preferences(&root, &preferences)?;
+            }
+            let shortcuts_path = app_data.parent().unwrap_or(&app_data).join("BlobUI/shortcuts.json");
+            if let Ok(bytes) = fs::read(&shortcuts_path) {
+                if let Ok(shortcuts) = parse_settings_json(&bytes) {
+                    let mut data = settings_store::load(&root)?;
+                    data["keybinds"] = shortcuts;
+                    settings_store::save(&root, &data)?;
                 }
             }
-            Err(error) => return Err(format!("Could not inspect the Settings folder: {error}")),
+        }
+        let settings_directory = root.join("Settings");
+        if !settings_directory.is_dir() {
+            return Ok(legacy_blob.join("data.json"));
         }
         Ok(settings_directory.join("data.json"))
+    }
+}
+
+fn ensure_settings_store_on_launch(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
+    reject_reparse_component(root)?;
+    let settings_directory = root.join("Settings");
+    match fs::symlink_metadata(&settings_directory) {
+        Ok(metadata) => {
+            reject_reparse_component(&settings_directory)?;
+            if !metadata.is_dir() {
+                return Err("The BlobUI Settings path is not a regular folder.".into());
+            }
+            return Ok(false);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Could not inspect the Settings folder: {error}")),
+    }
+
+    let legacy_data = legacy_blob.join("data.json");
+    reject_reparse_component(legacy_blob)?;
+    match fs::symlink_metadata(&legacy_data) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && !is_windows_reparse_point(&metadata) =>
+        {
+            settings_store::migrate_legacy_blob(legacy_blob, root)?;
+            Ok(true)
+        }
+        Ok(_) => Err("The legacy BlobUI settings file is not a supported regular file.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Could not inspect legacy BlobUI settings: {error}")),
     }
 }
 
@@ -2274,17 +2301,22 @@ fn main() {
                     .name("blobui-staging-cleanup".into())
                     .spawn(move || updater::cleanup_staged_installers(&install_directory));
             }
-            let stored_shortcuts = resolve_install_directory(&app_data)
+            // Resolve the store before starting the shortcut service. This call
+            // migrates an existing Anytype blob into app-root Settings on the
+            // first launch after an update.
+            let launch_storage = resolve_install_directory(&app_data)
                 .ok()
-                .and_then(|install| load_settings_data(&install).ok())
+                .and_then(|install| settings_data_path(&install).ok().map(|path| (install, path)));
+            let stored_shortcuts = launch_storage
+                .as_ref()
+                .and_then(|(install, _)| load_settings_data(install).ok())
                 .and_then(|data| data.get("keybinds").cloned())
                 .and_then(|value| serde_json::from_value::<Vec<hotkey::Shortcut>>(value).ok());
             if let Some(shortcuts) = stored_shortcuts {
                 hotkey::start_with_saved(app.handle().clone(), Some(shortcuts));
-            } else if resolve_install_directory(&app_data)
-                .ok()
-                .and_then(|install| settings_data_path(&install).ok())
-                .is_some_and(|path| path.is_file())
+            } else if launch_storage
+                .as_ref()
+                .is_some_and(|(_, path)| path.is_file())
             {
                 // A valid Settings store can intentionally have no saved keybinds.
                 hotkey::start_with_saved(app.handle().clone(), None);
@@ -2335,6 +2367,50 @@ mod save_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_migrates_legacy_settings_once_and_preserves_the_source() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let root = workspace.join(".test-run").join(format!(
+            "launch-settings-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app_root = root.join("BlobUI");
+        let legacy_blob = root.join("Anytype/blob");
+        fs::create_dir_all(legacy_blob.join("assets")).unwrap();
+        let legacy_data = json!({
+            "installDirectory": root.join("Anytype").to_string_lossy(),
+            "futureField": {"preserve": true},
+            "settings": {"fontFamily": "Inter"}
+        });
+        let legacy_bytes = serde_json::to_vec_pretty(&legacy_data).unwrap();
+        fs::write(legacy_blob.join("data.json"), &legacy_bytes).unwrap();
+        fs::write(legacy_blob.join("assets/banner.png"), [0x89, b'P', b'N', b'G']).unwrap();
+
+        assert!(ensure_settings_store_on_launch(&app_root, &legacy_blob).unwrap());
+        let migrated = settings_store::load(&app_root).unwrap();
+        assert_eq!(migrated["settings"]["fontFamily"], "Inter");
+        assert_eq!(migrated["futureField"]["preserve"], true);
+        assert_eq!(
+            fs::read(app_root.join("Settings/assets/banner.png")).unwrap(),
+            [0x89, b'P', b'N', b'G']
+        );
+
+        let mut changed = migrated.clone();
+        changed["settings"]["fontFamily"] = json!("Serif");
+        settings_store::save(&app_root, &changed).unwrap();
+        assert!(!ensure_settings_store_on_launch(&app_root, &legacy_blob).unwrap());
+        assert_eq!(
+            settings_store::load(&app_root).unwrap()["settings"]["fontFamily"],
+            "Serif"
+        );
+        assert_eq!(fs::read(legacy_blob.join("data.json")).unwrap(), legacy_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn pending_launch_requests_are_independent_and_consumed_once() {
