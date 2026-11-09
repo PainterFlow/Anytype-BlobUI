@@ -6,6 +6,7 @@ use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -111,6 +112,34 @@ struct PreviousManifest {
 fn default_autoplay_videos() -> bool { true }
 
 pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
+    #[cfg(test)]
+    {
+        return legacy_preferences_path(app_data_directory);
+    }
+    #[cfg(not(test))]
+    {
+        if let Some((app, _)) = locate_app_install(
+            env::current_exe().ok().as_deref(),
+            env::var_os("LOCALAPPDATA").as_deref().map(|value| Path::new(value)),
+        ).ok() {
+            let path = app.join("cache/updater.json");
+            let legacy = legacy_preferences_path(app_data_directory);
+            if !path.exists() {
+                if let Ok(metadata) = fs::symlink_metadata(&legacy) {
+                    if metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse_point(&metadata) {
+                        if let Ok(bytes) = fs::read(&legacy) {
+                            let _ = storage::write_atomic(&path, &bytes);
+                        }
+                    }
+                }
+            }
+            return path;
+        }
+        legacy_preferences_path(app_data_directory)
+    }
+}
+
+fn legacy_preferences_path(app_data_directory: &Path) -> PathBuf {
     app_data_directory
         .parent()
         .unwrap_or(app_data_directory)
@@ -118,8 +147,16 @@ pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
         .join("updater.json")
 }
 
+fn app_root_from_preferences_path(path: &Path) -> Option<PathBuf> {
+    if !path.parent()?.file_name()?.eq_ignore_ascii_case("cache") {
+        return None;
+    }
+    let root = path.parent()?.parent()?.to_path_buf();
+    root.join(".blobui-install.json").is_file().then_some(root)
+}
+
 pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
-    match fs::symlink_metadata(path) {
+    let mut preferences = match fs::symlink_metadata(path) {
         Ok(metadata) => {
             reject_reparse_path(path)?;
             if !metadata.is_file() {
@@ -134,14 +171,55 @@ pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
             Ok(UpdaterPreferences::default())
         }
         Err(_) => Err("The saved BlobUI updater settings could not be inspected safely.".into()),
+    }?;
+    if let Some(root) = app_root_from_preferences_path(path) {
+        let settings_directory = root.join("Settings");
+        if settings_directory.is_dir() {
+            reject_reparse_path(&settings_directory)?;
+            let aggregate = crate::settings_store::load(&root)?;
+            if let Some(saved) = aggregate.get("updaterPreferences") {
+                let saved = saved.as_object().ok_or("The saved updater preferences are malformed.")?;
+                preferences.install_directory = saved.get("installDirectory").and_then(Value::as_str).map(str::to_owned);
+                if let Some(value) = saved.get("autoplayVideos").and_then(Value::as_bool) { preferences.autoplay_videos = value; }
+                if let Some(value) = saved.get("automaticUpdatesEnabled").and_then(Value::as_bool) { preferences.automatic_updates_enabled = value; }
+                if let Some(value) = saved.get("automaticChecksEnabled").and_then(Value::as_bool) { preferences.automatic_checks_enabled = value; }
+            }
+        }
     }
+    Ok(preferences)
 }
 
 fn save_preferences(path: &Path, preferences: &UpdaterPreferences) -> Result<(), String> {
-    let mut bytes = serde_json::to_vec_pretty(preferences)
+    let root = app_root_from_preferences_path(path)
+        .filter(|root| root.join("Settings").is_dir());
+    let mut cached = serde_json::to_value(preferences)
+        .map_err(|_| "Could not encode the BlobUI updater settings.".to_string())?;
+    let mut settings = serde_json::Map::new();
+    if root.is_some() {
+        if let Some(fields) = cached.as_object_mut() {
+            for key in ["installDirectory", "autoplayVideos", "automaticUpdatesEnabled", "automaticChecksEnabled"] {
+                if let Some(value) = fields.remove(key) {
+                    settings.insert(key.into(), value);
+                }
+            }
+        }
+    }
+    let mut bytes = serde_json::to_vec_pretty(&cached)
         .map_err(|_| "Could not encode the BlobUI updater settings.".to_string())?;
     bytes.push(b'\n');
-    storage::write_atomic(path, &bytes)
+    let before = storage::snapshot(path, false)?;
+    storage::write_atomic(path, &bytes)?;
+    if let Some(root) = root {
+        if let Err(error) = crate::settings_store::save_updater_preferences(
+            &root, &Value::Object(settings), preferences.latest_version.as_deref(),
+        ) {
+            return match storage::restore(&before) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(format!("{error} The updater cache could not be restored: {rollback}")),
+            };
+        }
+    }
+    Ok(())
 }
 
 pub fn saved_install_directory(path: &Path) -> Result<Option<PathBuf>, String> {
@@ -319,7 +397,22 @@ pub fn simulate_update(
 pub fn get_release_notes(
     app_data_directory: &Path,
     install_directory: &Path,
-    runtime_directory: &Path,
+    runtime_directory: Option<&Path>,
+) -> Result<Option<ReleaseNotes>, String> {
+    let executable_directory = current_executable_directory();
+    get_release_notes_from_paths(
+        app_data_directory,
+        install_directory,
+        runtime_directory,
+        executable_directory.as_deref(),
+    )
+}
+
+fn get_release_notes_from_paths(
+    app_data_directory: &Path,
+    install_directory: &Path,
+    runtime_directory: Option<&Path>,
+    executable_directory: Option<&Path>,
 ) -> Result<Option<ReleaseNotes>, String> {
     let preferences = load_preferences(&preferences_path(app_data_directory))?;
     let Some(version) = preferences.pending_changelog_version else {
@@ -328,8 +421,23 @@ pub fn get_release_notes(
     let Some(tag) = release_tag_for_version(&version) else {
         return Ok(None);
     };
-    if current_version(install_directory, Some(runtime_directory))? != version {
+    if current_version(install_directory, runtime_directory)? != version {
         return Ok(None);
+    }
+    if let Some(runtime) = runtime_directory {
+        if let Some(notes) = read_packaged_release_notes(runtime, &version)? {
+            return Ok(Some(notes));
+        }
+    }
+    if let Some(executable_directory) = executable_directory {
+        if let Some(package_root) = installed_app_root(executable_directory) {
+            if let Some(notes) = read_packaged_release_notes(&package_root, &version)? {
+                return Ok(Some(notes));
+            }
+        }
+        if let Some(notes) = read_packaged_release_notes(executable_directory, &version)? {
+            return Ok(Some(notes));
+        }
     }
     fetch_release_notes_for_tag(&tag, None).map(Some)
 }
@@ -339,13 +447,77 @@ fn is_development_runtime(runtime: &Path) -> bool {
 }
 
 pub fn get_latest_release_notes(
-    _install_directory: &Path,
-    runtime_directory: &Path,
+    install_directory: Option<&Path>,
+    runtime_directory: Option<&Path>,
 ) -> Result<Option<ReleaseNotes>, String> {
-    if !is_development_runtime(runtime_directory) {
-        return latest_published_release_notes();
+    let executable_directory = current_executable_directory();
+    get_latest_release_notes_from_paths(
+        install_directory,
+        runtime_directory,
+        executable_directory.as_deref(),
+    )
+}
+
+fn get_latest_release_notes_from_paths(
+    install_directory: Option<&Path>,
+    runtime_directory: Option<&Path>,
+    executable_directory: Option<&Path>,
+) -> Result<Option<ReleaseNotes>, String> {
+    if runtime_directory.map_or(true, is_development_runtime) {
+        if let Some(runtime) = runtime_directory {
+            if let Some(notes) = read_development_release_notes(runtime)? {
+                return Ok(Some(notes));
+            }
+        }
+        if let Some(executable_directory) = executable_directory {
+            if let Some(package_root) = installed_app_root(executable_directory) {
+                if let Some(notes) = read_packaged_release_notes(&package_root, &app_package_version(&package_root)?)? {
+                    return Ok(Some(notes));
+                }
+            }
+            let version = current_executable_release_version(executable_directory)
+                .unwrap_or_else(|| env!("BLOBUI_BUILD_VERSION").to_string());
+            if let Some(notes) = read_packaged_release_notes(executable_directory, &version)? {
+                return Ok(Some(notes));
+            }
+        }
+        return Ok(None);
     }
-    read_development_release_notes(runtime_directory)
+
+    if let Some(runtime) = runtime_directory {
+        let version = current_version_for_optional_install(install_directory, Some(runtime))?;
+        if let Some(notes) = read_packaged_release_notes(runtime, &version)? {
+            return Ok(Some(notes));
+        }
+        if let Some(executable_directory) = executable_directory {
+            if let Some(notes) = read_packaged_release_notes(executable_directory, &version)? {
+                return Ok(Some(notes));
+            }
+        }
+    }
+    latest_published_release_notes()
+}
+
+fn current_executable_directory() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf))
+}
+
+fn installed_app_root(executable_directory: &Path) -> Option<PathBuf> {
+    executable_directory.ancestors()
+        .find(|directory| directory.join(".blobui-install.json").is_file())
+        .map(Path::to_path_buf)
+}
+
+fn app_package_version(app_directory: &Path) -> Result<String, String> {
+    version_from_runtime(app_directory)
+        .map(|version| version.to_string())
+        .ok_or_else(|| "The installed BlobUI app has invalid release metadata.".to_string())
+}
+
+fn current_executable_release_version(executable_directory: &Path) -> Option<String> {
+    executable_directory.ancestors()
+        .find_map(version_from_runtime)
+        .map(|version| version.to_string())
 }
 
 fn latest_published_release_notes() -> Result<Option<ReleaseNotes>, String> {
@@ -361,12 +533,15 @@ fn latest_published_release_notes() -> Result<Option<ReleaseNotes>, String> {
 }
 
 fn read_development_release_notes(runtime_directory: &Path) -> Result<Option<ReleaseNotes>, String> {
-    let runtime_directory = if runtime_directory.join("Changelogs.md").is_file() {
-        runtime_directory
-    } else {
+    read_packaged_release_notes(runtime_directory, &env!("BLOBUI_BUILD_VERSION").to_string())
+}
+
+fn read_packaged_release_notes(runtime_directory: &Path, version: &str) -> Result<Option<ReleaseNotes>, String> {
+    let markdown_path = runtime_directory.join("Changelogs.md");
+    if !markdown_path.is_file() {
         return Ok(None);
-    };
-    let markdown = read_release_text(&runtime_directory.join("Changelogs.md"), MAX_RELEASE_NOTES_BYTES)?;
+    }
+    let markdown = read_release_text(&markdown_path, MAX_RELEASE_NOTES_BYTES)?;
     if markdown.trim().is_empty() {
         return Ok(None);
     }
@@ -376,8 +551,7 @@ fn read_development_release_notes(runtime_directory: &Path) -> Result<Option<Rel
     } else {
         "images: []\n".into()
     };
-    let version = env!("BLOBUI_BUILD_VERSION").to_string();
-    Ok(Some(ReleaseNotes { tag: version.clone(), version, markdown, image_manifest }))
+    Ok(Some(ReleaseNotes { tag: version.to_string(), version: version.to_string(), markdown, image_manifest }))
 }
 
 pub fn get_adjacent_release_notes(version: &str, older: bool) -> Result<Option<ReleaseNotes>, String> {
@@ -676,26 +850,33 @@ fn current_version(
     install_directory: &Path,
     fallback_runtime: Option<&Path>,
 ) -> Result<String, String> {
-    let blob = install_directory.join("blob");
-    let manifest_path = blob.join(".blobui-managed-files.json");
-    if fs::symlink_metadata(&manifest_path).is_ok() {
-        reject_reparse_path(&manifest_path)?;
-        let manifest = read_manifest(&manifest_path)?;
-        if let Some(version) = manifest.release_version {
-            let version = parse_version(&version).ok_or_else(|| {
-                "The saved BlobUI install manifest has an invalid release version.".to_string()
-            })?;
+    current_version_for_optional_install(Some(install_directory), fallback_runtime)
+}
+
+fn current_version_for_optional_install(
+    install_directory: Option<&Path>,
+    fallback_runtime: Option<&Path>,
+) -> Result<String, String> {
+    if let Some(install_directory) = install_directory {
+        let blob = install_directory.join("blob");
+        let manifest_path = blob.join(".blobui-managed-files.json");
+        if fs::symlink_metadata(&manifest_path).is_ok() {
+            reject_reparse_path(&manifest_path)?;
+            let manifest = read_manifest(&manifest_path)?;
+            if let Some(version) = manifest.release_version {
+                let version = parse_version(&version).ok_or_else(|| {
+                    "The saved BlobUI install manifest has an invalid release version.".to_string()
+                })?;
+                return Ok(version.to_string());
+            }
+        }
+        let installed_runtime = blob.join("runtime");
+        if let Some(version) = version_from_runtime(&installed_runtime) {
             return Ok(version.to_string());
         }
     }
-    let installed_runtime = blob.join("runtime");
-    for root in [Some(installed_runtime.as_path()), fallback_runtime]
-        .into_iter()
-        .flatten()
-    {
-        if let Some(version) = version_from_runtime(root) {
-            return Ok(version.to_string());
-        }
+    if let Some(version) = fallback_runtime.and_then(version_from_runtime) {
+        return Ok(version.to_string());
     }
     version_from_metadata(RELEASE_METADATA)
         .map(|version| version.to_string())
@@ -937,6 +1118,52 @@ pub(crate) fn resolve_app_directory(
                 .into(),
         )
     }
+}
+
+pub(crate) fn locate_app_install(
+    current_exe: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let mut candidates = Vec::new();
+    if let Some(current_exe) = current_exe {
+        for ancestor in current_exe.parent().into_iter().flat_map(Path::ancestors) {
+            candidates.push(ancestor.to_path_buf());
+        }
+    }
+    if let Some(local_app_data) = local_app_data {
+        let default = local_app_data.join("Programs/BlobUI");
+        if !candidates.contains(&default) {
+            candidates.push(default);
+        }
+    }
+
+    for app in candidates {
+        let pointer_path = app.join(".blobui-install.json");
+        match fs::symlink_metadata(&pointer_path) {
+            Ok(metadata) if metadata.is_file() => {
+                reject_reparse_path(&app)?;
+                reject_reparse_path(&pointer_path)?;
+                let pointer: Value = serde_json::from_slice(&fs::read(&pointer_path).map_err(|_| {
+                    "The installed BlobUI app pointer could not be read safely.".to_string()
+                })?)
+                .map_err(|_| "The installed BlobUI app pointer is invalid.".to_string())?;
+                let stored = pointer
+                    .get("installDirectory")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "The installed BlobUI app pointer is invalid.".to_string())?;
+                let install = validate_install_directory(Path::new(stored))?;
+                if let Some(app) = validate_app_pointer(&app, &pointer_path, &install)? {
+                    return Ok((app, install));
+                }
+            }
+            Ok(_) => return Err("The installed BlobUI app pointer is not a regular file.".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err("The installed BlobUI app pointer could not be inspected safely.".into())
+            }
+        }
+    }
+    Err("The installed BlobUI app folder could not be found. Run the installer once before using Settings.".into())
 }
 
 fn app_directory_from_install_manifest(install: &Path) -> Result<Option<PathBuf>, String> {
@@ -1582,6 +1809,11 @@ mod tests {
         let resolved =
             resolve_app_directory(&install, Some(&workspace_exe), Some(&local_app_data)).unwrap();
         assert_eq!(resolved, app.canonicalize().unwrap());
+        let installed_exe = app.join("settings-app/dist/blobui-settings.exe");
+        let (located_app, located_install) =
+            locate_app_install(Some(&installed_exe), Some(&local_app_data)).unwrap();
+        assert_eq!(located_app, app.canonicalize().unwrap());
+        assert_eq!(located_install, install.canonicalize().unwrap());
 
         fs::write(
             app.join(".blobui-install.json"),
@@ -1698,8 +1930,9 @@ mod tests {
 
     #[test]
     fn release_metadata_validates_schema_and_semantic_version() {
+        assert!(version_from_metadata(RELEASE_METADATA).is_some());
         assert_eq!(
-            version_from_metadata(RELEASE_METADATA).unwrap().to_string(),
+            version_from_metadata(r#"{"formatVersion":1,"version":"1.2.0"}"#).unwrap().to_string(),
             "1.2.0"
         );
         for invalid in [
@@ -1756,17 +1989,20 @@ mod tests {
         };
         save_preferences(&path, &preferences).unwrap();
 
-        // Installed notes come from GitHub; local notes must not be used as a release.
+        // Packaged notes let an installed build show its changelog without a GitHub request.
         assert!(!is_development_runtime(&runtime));
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.0.0"));
+        let notes = get_release_notes(&app_data, &install, Some(&runtime)).unwrap().unwrap();
+        assert_eq!(notes.version, "1.0.0");
+        assert_eq!(notes.markdown, "# BlobUI 1.0.0\n\nUpdated settings.\n");
 
         assert!(acknowledge_release_notes(&app_data, &install, &runtime, "1.0.0").unwrap());
-        assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
+        assert!(get_release_notes(&app_data, &install, Some(&runtime)).unwrap().is_none());
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version, None);
 
         preferences.pending_changelog_version = Some("1.1.0".into());
         save_preferences(&path, &preferences).unwrap();
-        assert!(get_release_notes(&app_data, &install, &runtime).unwrap().is_none());
+        assert!(get_release_notes(&app_data, &install, Some(&runtime)).unwrap().is_none());
         assert!(!acknowledge_release_notes(&app_data, &install, &runtime, "1.1.0").unwrap());
         assert_eq!(load_preferences(&path).unwrap().pending_changelog_version.as_deref(), Some("1.1.0"));
         fs::remove_dir_all(root).unwrap();
@@ -1781,22 +2017,68 @@ mod tests {
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
         fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
         assert!(!is_development_runtime(&runtime));
+        let packaged = get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap();
+        assert_eq!(packaged.version, "1.0.0");
+        assert_eq!(packaged.markdown, "# Latest notes\n");
         fs::create_dir(runtime.join(".git")).unwrap();
         assert!(is_development_runtime(&runtime));
-        let notes = get_latest_release_notes(&install, &runtime).unwrap().unwrap();
+        let notes = get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap();
         assert_eq!(notes.version, env!("BLOBUI_BUILD_VERSION"));
         assert_eq!(notes.markdown, "# Latest notes\n");
         assert_eq!(notes.image_manifest, "images: []\n");
         assert_eq!(load_preferences(&preferences_path(&app_data)).unwrap().pending_changelog_version, None);
         fs::remove_file(runtime.join("Changelogs.yaml")).unwrap();
-        assert_eq!(get_latest_release_notes(&install, &runtime).unwrap().unwrap().image_manifest, "images: []\n");
+        assert_eq!(get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap().image_manifest, "images: []\n");
         fs::write(runtime.join("Changelogs.md"), "  \n").unwrap();
-        assert!(get_latest_release_notes(&install, &runtime).unwrap().is_none());
+        assert!(get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().is_none());
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
         fs::remove_file(runtime.join("Changelogs.md")).unwrap();
-        assert!(get_latest_release_notes(&install, &runtime).unwrap().is_none());
+        assert!(get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().is_none());
         fs::write(runtime.join(".blobui-install.json"), "{}").unwrap();
         assert!(!is_development_runtime(&runtime));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn release_notes_load_from_the_app_package_when_runtime_is_missing() {
+        let root = fixture_root("release-notes-without-runtime");
+        let (install, _, _, _) = install_fixture(&root);
+        let runtime = install.join("blob/runtime");
+        fs::remove_dir_all(&runtime).unwrap();
+        let app_directory = root.join("Programs/BlobUI");
+        let executable_directory = app_directory.join("settings-app/dist");
+        fs::create_dir_all(&executable_directory).unwrap();
+        fs::write(app_directory.join(".blobui-install.json"), "{}\n").unwrap();
+        fs::write(app_directory.join("blobui-release.json"), r#"{"formatVersion":1,"version":"1.0.0"}"#).unwrap();
+        fs::write(app_directory.join("Changelogs.md"), "# Packaged notes\n\nLoaded beside the app.\n").unwrap();
+        fs::write(app_directory.join("Changelogs.yaml"), "images: []\n").unwrap();
+
+        let app_data = root.join("APPDATA/anytype");
+        let mut preferences = UpdaterPreferences {
+            pending_changelog_version: Some("1.0.0".into()),
+            ..UpdaterPreferences::default()
+        };
+        save_preferences(&preferences_path(&app_data), &preferences).unwrap();
+
+        let pending = get_release_notes_from_paths(&app_data, &install, None, Some(&executable_directory))
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.version, "1.0.0");
+        assert_eq!(pending.markdown, "# Packaged notes\n\nLoaded beside the app.\n");
+        assert_eq!(pending.image_manifest, "images: []\n");
+
+        let latest = get_latest_release_notes_from_paths(Some(&install), None, Some(&executable_directory))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.version, "1.0.0");
+        assert_eq!(latest.markdown, "# Packaged notes\n\nLoaded beside the app.\n");
+        let latest_without_install = get_latest_release_notes_from_paths(None, None, Some(&executable_directory))
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest_without_install.version, "1.0.0");
+
+        preferences.pending_changelog_version = None;
+        save_preferences(&preferences_path(&app_data), &preferences).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 

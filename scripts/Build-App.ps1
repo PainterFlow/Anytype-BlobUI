@@ -24,6 +24,7 @@ $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
 $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
 $releaseExecutable = Join-Path $projectDirectory 'target\release\blobui-settings.exe'
+$frontendOutputDirectory = Join-Path $projectDirectory 'frontend-dist'
 $distributionDirectory = Join-Path $projectDirectory 'dist'
 $distributionExecutable = Join-Path $distributionDirectory 'blobui-settings.exe'
 $buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
@@ -107,6 +108,41 @@ if ($null -ne $distributionItem -and
     throw "The settings app distribution folder is a reparse point: $distributionDirectory"
 }
 [System.IO.Directory]::CreateDirectory($distributionDirectory) | Out-Null
+
+$sourceDocumentationDirectory = Join-Path $projectDirectory 'ui\docs'
+$bundledDocumentationDirectory = Join-Path $frontendOutputDirectory 'docs'
+$sourceArticles = @(Get-ChildItem -LiteralPath $sourceDocumentationDirectory -Filter '*.md' -File | ForEach-Object Name | Sort-Object)
+$bundledArticles = @(Get-ChildItem -LiteralPath $bundledDocumentationDirectory -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object Name | Sort-Object)
+if ($sourceArticles.Count -eq 0 -or $sourceArticles.Count -ne $bundledArticles.Count -or
+    @($sourceArticles | Where-Object { $_ -notin $bundledArticles }).Count -gt 0) {
+    throw 'The Settings frontend did not bundle every documentation article.'
+}
+
+$distributionDocumentationDirectory = Join-Path $distributionDirectory 'docs'
+$existingDocumentation = Get-Item -LiteralPath $distributionDocumentationDirectory -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingDocumentation -and
+    (($existingDocumentation.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app documentation folder is a reparse point: $distributionDocumentationDirectory"
+}
+[System.IO.Directory]::CreateDirectory($distributionDocumentationDirectory) | Out-Null
+Copy-Item -Path (Join-Path $bundledDocumentationDirectory '*') -Destination $distributionDocumentationDirectory -Recurse -Force
+
+foreach ($releaseNotesFile in @('Changelogs.md', 'Changelogs.yaml')) {
+    $sourceReleaseNotes = Join-Path $workspaceRoot $releaseNotesFile
+    if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
+        throw "The Settings app build is missing its release notes file: $sourceReleaseNotes"
+    }
+    $frontendReleaseNotes = Join-Path $frontendOutputDirectory $releaseNotesFile
+    Copy-Item -LiteralPath $sourceReleaseNotes -Destination $frontendReleaseNotes -Force
+    $distributionReleaseNotes = Join-Path $distributionDirectory $releaseNotesFile
+    $existingReleaseNotes = Get-Item -LiteralPath $distributionReleaseNotes -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existingReleaseNotes -and
+        (($existingReleaseNotes.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The Settings app release notes path is a reparse point: $distributionReleaseNotes"
+    }
+    Copy-Item -LiteralPath $sourceReleaseNotes -Destination $distributionReleaseNotes -Force
+}
+
 try {
     Copy-Item -LiteralPath $releaseExecutable -Destination $distributionExecutable -Force
 }

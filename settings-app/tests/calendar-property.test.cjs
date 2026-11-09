@@ -145,6 +145,43 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   } finally { await browser.close(); }
 });
 
+test('opening Calendar Colors while rules load starts discovery after the rules load', async () => {
+  fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
+  process.env.TEMP = process.env.TMP = path.join(root, 'temp');
+  const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 }, colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    window.__discoveryCalls = 0;
+    window.__TAURI__ = { core: { invoke: async command => {
+      if (command === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: {} };
+      if (command === 'get_calendar_api_availability') return 'missing';
+      if (command === 'load_kanban_formulas') return { configuration: { version: 2, display: 'balanced', definitions: [] } };
+      if (command === 'load_calendar_rules') return new Promise(resolve => { window.__resolveCalendarRules = resolve; });
+      if (command === 'discover_calendar_colors') {
+        window.__discoveryCalls++;
+        return { types: [{ spaceId: 'space-a', key: 'task', name: 'Task', space: 'Work', properties: [] }], views: [] };
+      }
+      return null;
+    } } };
+  });
+  try {
+    await loadSettings(page);
+    await page.waitForFunction(() => window.__resolveCalendarRules);
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
+    assert.match(await page.locator('#calendar-type-list').textContent(), /Loading object types/);
+    assert.equal(await page.evaluate(() => window.__discoveryCalls), 0, 'Discovery waits until the saved rules request finishes.');
+    await page.evaluate(() => {
+      const resolve = window.__resolveCalendarRules;
+      window.__resolveCalendarRules = null;
+      resolve({ version: 1, types: [] });
+    });
+    await page.locator('#calendar-type-list').getByRole('button', { name: 'Task Work' }).waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => window.__discoveryCalls), 1, 'The visible catalog refresh starts after saved rules load.');
+    assert.doesNotMatch(await page.locator('#calendar-type-list').textContent(), /Loading object types/);
+  } finally { await browser.close(); }
+});
+
 test('calendar CSS scopes overrides and suppression to their exact view while overflow keeps defaults', async () => {
   const css = fs.readFileSync(path.join(root, 'scoped.css'), 'utf8');
   const browser = await chromium.launch({ executablePath, headless: true });

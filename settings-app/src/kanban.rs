@@ -108,7 +108,8 @@ fn workspace() -> &'static Path {
 fn path_for_install(install: &Path) -> PathBuf {
     install.join("blob/.blobui-kanban-formulas.json")
 }
-pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,true)}
+#[cfg(test)]
+fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,true)}
 pub(crate) fn read_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,false)}
 fn load_at_mode(path: &Path, legacy: &Path, prototype: &Path, persist: bool) -> Result<Configuration, String> {
     crate::storage::reject_reparse_path(path)?;
@@ -174,25 +175,53 @@ fn load_at_mode(path: &Path, legacy: &Path, prototype: &Path, persist: bool) -> 
 }
 fn load() -> Result<Configuration, String> {
     let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-    load_at(
-        &path_for_install(&install),
+    load_for_install(&install)
+}
+
+pub(crate) fn load_for_install(install: &Path) -> Result<Configuration, String> {
+    #[cfg(not(test))]
+    {
+        let _ = crate::settings_data_path(install)?;
+        let root = crate::settings_root_for_install(install)?;
+        if let Some(configuration) = crate::settings_store::read_formula(&root)? {
+            return decode_configuration(configuration);
+        }
+    }
+    #[cfg(test)]
+    return read_at(
+        &path_for_install(install),
+        &install.join(".blobui-kanban-formulas.json"),
+        &install.join(".blobui-formula-prototype.json"),
+    );
+    #[cfg(not(test))]
+    read_at(
+        &path_for_install(install),
         &workspace().join(".blobui-kanban-formulas.json"),
         &workspace().join(".blobui-formula-prototype.json"),
     )
 }
 
 pub(crate) fn prepare_backup(install: &Path) -> Result<(), String> {
-    let _ = load_at(
-        &path_for_install(install),
-        &workspace().join(".blobui-kanban-formulas.json"),
-        &workspace().join(".blobui-formula-prototype.json"),
-    )?;
+    let configuration = load_for_install(install)?;
+    #[cfg(test)]
+    let _ = &configuration;
+    #[cfg(not(test))]
+    {
+        let data = crate::load_settings_data(install)?;
+        let formula = serde_json::to_value(configuration)
+            .map_err(|_| "Could not prepare Kanban formulas for Settings backup.")?;
+        crate::persist_split_settings_with_formula(install, &data, &formula)?;
+    }
     Ok(())
 }
 
 fn migrate_legacy_configuration(bytes: &[u8]) -> Result<Configuration, String> {
     let value: Value = serde_json::from_slice(bytes)
         .map_err(|_| "The legacy Kanban formula file is malformed. It has been left unchanged.".to_string())?;
+    decode_configuration(value)
+}
+
+pub(crate) fn decode_configuration(value: Value) -> Result<Configuration, String> {
     if value.get("version").and_then(Value::as_u64) == Some(1) {
         let mut configuration = Configuration::default();
         match value.get("display").and_then(Value::as_str) {
@@ -233,17 +262,6 @@ pub(crate) fn validate_saved_configuration(path: &Path) -> Result<(), String> {
     migrate_legacy_configuration(&bytes).map(|_| ())
 }
 
-pub(crate) fn initialize_imported_configuration(path: &Path) -> Result<(), String> {
-    crate::storage::reject_reparse_path(path)?;
-    match fs::symlink_metadata(path) {
-        Ok(_) => validate_saved_configuration(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            persist_migrated_configuration(path, &Configuration::default())
-        }
-        Err(error) => Err(format!("Could not inspect the imported Kanban formula file: {error}")),
-    }
-}
-
 fn publish_at(
     configuration: Configuration,
     install: &Path,
@@ -254,7 +272,7 @@ fn publish_at(
     let revision = crate::anyblob_blobui::revision(&json!(configuration));
     let (_, data_path, css_path, _) = crate::save_paths(install)?;
     let runtime = crate::resolve_runtime_directory_for_install(install)?;
-    let mut data = crate::read_json_file(&data_path)?;
+    let mut data = crate::load_settings_data(install)?;
     if !data.is_object() {
         return Err("BlobUI data.json must contain an object.".into());
     }
@@ -275,15 +293,18 @@ fn publish_at(
         results
     });
     let css = crate::css::compile(&runtime, install, &data)?;
-    let config_bytes = serde_json::to_vec_pretty(&configuration)
+    let formula_value = serde_json::to_value(&configuration)
         .map_err(|_| "Could not prepare Kanban formulas.")?;
     // The snapshot, stylesheet, and saved baseline change together. A failed
     // API read or replacement never publishes half of a calculation set.
     use crate::storage::transaction::{commit_update, FileChange};
-    commit_update(vec![
+    #[cfg(not(test))]
+    let _ = config_path;
+    let changes = vec![
+        #[cfg(test)]
         FileChange {
             path: config_path.into(),
-            contents: Some(config_bytes),
+            contents: Some(crate::serialize_data(&formula_value)?),
         },
         FileChange {
             path: install.join("blob/blob.meta.json"),
@@ -291,13 +312,33 @@ fn publish_at(
         },
         FileChange {
             path: data_path,
-            contents: Some(crate::serialize_data(&data)?),
+            contents: Some(crate::serialize_runtime_data(&data)?),
         },
         FileChange {
             path: css_path,
             contents: Some(css.into_bytes()),
         },
-    ])?;
+    ];
+    let snapshots = changes
+        .iter()
+        .map(|change| crate::storage::snapshot(&change.path, false))
+        .collect::<Result<Vec<_>, _>>()?;
+    commit_update(changes)?;
+    if let Err(error) = crate::persist_split_settings_with_formula(install, &data, &formula_value) {
+        let mut rollback_errors = Vec::new();
+        for snapshot in snapshots.iter().rev() {
+            if let Err(rollback) = crate::storage::restore(snapshot) {
+                rollback_errors.push(rollback);
+            }
+        }
+        if rollback_errors.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "{error} The previous Kanban publication could not be fully restored: {}",
+            rollback_errors.join("; ")
+        ));
+    }
     Ok(Published {
         revision,
         calculated_at,
@@ -328,7 +369,7 @@ pub fn load_kanban_formulas() -> Result<Loaded, String> {
     let configuration = load()?;
     let calculated_at = crate::resolve_install_directory(&crate::app_data_directory())
         .ok()
-        .and_then(|install| crate::read_json_file(&install.join("blob/data.json")).ok())
+        .and_then(|install| crate::load_settings_data(&install).ok())
         .and_then(|data| {
             data.pointer("/kanbanFormulaResults/calculatedAt")
                 .and_then(Value::as_str)

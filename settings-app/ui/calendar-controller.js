@@ -8,7 +8,8 @@ export function createCalendarController() {
   let catalog = { types: [], views: [] };
   let api = {}, invoke, revision = null, loading = true, loadFailed = false;
   let locked = false, discovering = false, discovered = false, hasCatalog = false;
-  let discoveryError = false, generation = 0, status = "", modal = false;
+  let discoveryError = false, discoveryRequested = false, discoveryForceRequested = false;
+  let generation = 0, status = "", modal = false;
   let screen = "type", active = null, shown = false, loadEpoch = 0, disposed = false, unregisterReload;
   const listeners = new Set();
   let snapshot;
@@ -48,8 +49,17 @@ export function createCalendarController() {
     return { options: result, value };
   }
   async function discover(forceRefresh = false) {
-    if (!invoke || disposed || discovering || locked || loading) return;
+    if (!invoke || disposed) return;
+    if (loading || locked) {
+      discoveryRequested = true;
+      discoveryForceRequested ||= forceRefresh;
+      return;
+    }
+    if (discovering) return;
     const request = ++generation;
+    forceRefresh ||= discoveryForceRequested;
+    discoveryRequested = false;
+    discoveryForceRequested = false;
     discovering = true; discoveryError = false; publish();
     try {
       const result = await invoke("discover_calendar_colors", { forceRefresh });
@@ -110,7 +120,11 @@ export function createCalendarController() {
         loadFailed = true;
         status = "Could not load calendar rules. Reload Settings to retry. " + String(error.message || error);
       }
-      loading = false; publish(); return !loadFailed;
+      loading = false; publish();
+      if (!loadFailed && !locked && !discovered && (shown || discoveryRequested)) {
+        void discover(discoveryForceRequested);
+      }
+      return !loadFailed;
     },
     async save(bridge, configuration, settings) {
       const result = await bridge("save_calendar_rules", { configuration, settings, revision });
@@ -122,7 +136,7 @@ export function createCalendarController() {
       if (locked === value) return;
       locked = value;
       publish();
-      if (!locked && !loading && !loadFailed && !discovered && shown) void discover();
+      if (!locked && !loading && !loadFailed && !discovered && (shown || discoveryRequested)) void discover(discoveryForceRequested);
     },
     show(value) { shown = value; if (shown && !discovered) return discover(); },
     reload() { generation++; discovering = false; discovered = false; publish(); if (shown) return discover(); },

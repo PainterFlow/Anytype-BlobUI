@@ -21,7 +21,16 @@ fn install() -> Result<PathBuf, String> {
     crate::resolve_install_directory(&crate::app_data_directory())
 }
 fn bridge_path() -> Result<PathBuf, String> {
-    Ok(install()?.join("blob/anyblob.json"))
+    let install = install()?;
+    #[cfg(test)]
+    {
+        return Ok(install.join("blob/anyblob.json"));
+    }
+    #[cfg(not(test))]
+    {
+        let _ = crate::settings_data_path(&install)?;
+        Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json"))
+    }
 }
 fn state() -> Result<Value, String> {
     let path = bridge_path()?;
@@ -73,10 +82,15 @@ fn configure_at(
     } else {
         None
     };
-    let state = serde_json::to_vec(
-        &json!({"enabled":enabled,"verifier":if enabled {digest(&token)}else{String::new()}}),
-    )
-    .unwrap();
+    let mut state = if path.is_file() {
+        crate::read_json_file(path)?
+    } else {
+        json!({})
+    };
+    let fields = state.as_object_mut().ok_or("Anyblob settings must contain an object.")?;
+    fields.insert("enabled".into(), json!(enabled));
+    fields.insert("verifier".into(), json!(if enabled { digest(&token) } else { String::new() }));
+    let state = serde_json::to_vec(&state).map_err(|_| "Could not encode Anyblob settings.")?;
     let state_temp = store::prepare_temp(path, &state, None, false)?;
     let secret_temp = match encrypted
         .as_ref()
@@ -151,7 +165,7 @@ pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     Ok(json!({"enabled":enabled}))
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
-    let data = crate::read_json_file(&install()?.join("blob/data.json"))?;
+    let data = crate::load_settings_data(&install()?)?;
     Ok(crate::settings_from_data(&data).codex_integration)
 }
 pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> bool {

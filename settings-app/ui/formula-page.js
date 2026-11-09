@@ -495,9 +495,10 @@
     records = [];
     const supported = catalog.filter(view => !view.unsupported);
     const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(supported).views : supported.slice();
-    for (const saved of state.definitions) {
+    if (discovered) for (const saved of state.definitions) {
+      // Only a successful catalog can confirm that a saved view is missing.
       // Keep hidden unsupported definitions in the draft without recreating
-      // them as unavailable rows. Missing views still offer manual removal.
+      // them as unavailable rows.
       if (catalog.some(view => view.unsupported && identity(view.target) === identity(saved.target))) continue;
       if (!views.some(view => identity(view.target) === identity(saved.target)) && !UI.ViewCatalog?.findViewForTarget(views,saved.target)) {
         views.push({

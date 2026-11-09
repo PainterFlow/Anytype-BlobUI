@@ -24,6 +24,7 @@
   const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   const articleFields = new Set(["category", "parent", "icon", "name", "index"]);
   const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+  let bundledSources = null;
 
   function fail(id, message) {
     throw new TypeError(`Documentation article ${id}: ${message}`);
@@ -160,12 +161,31 @@
 
   async function load() {
     const ids = ["introduction", "installation-and-removal", "features", "anyblob-codex-integration", "anyblob-setup", "anyblob-configuration", "appearance", "kanban-layouts-and-formulas", "calendar-colors", "text-effects-and-previews", "api-guide", "settings-ui-refresh", "updating", "setup-and-architecture", "theme-and-documentation-development", "testing-and-releases"];
-    const entries = await Promise.all(ids.map(async (id) => {
-      const response = await root.fetch(`./docs/${id}.md`);
-      if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);
-      return { id, source: await response.text() };
-    }));
+    const entries = bundledSources
+      ? ids.map((id) => {
+        const source = bundledSources[id];
+        if (typeof source !== "string") throw new Error(`Could not load bundled documentation article ${id}.`);
+        return { id, source };
+      })
+      : await Promise.all(ids.map(async (id) => {
+        const response = await root.fetch(`./docs/${id}.md`);
+        if (!response.ok) throw new Error(`Could not load documentation article ${id} (${response.status}).`);
+        return { id, source: await response.text() };
+      }));
     return buildCatalog(entries);
+  }
+
+  function setBundledSources(sources) {
+    if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+      throw new TypeError("Bundled documentation sources must be an object.");
+    }
+    const result = Object.create(null);
+    for (const [path, source] of Object.entries(sources)) {
+      const match = /^\.\/docs\/([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/.exec(path);
+      if (!match || typeof source !== "string") throw new TypeError(`Invalid bundled documentation source "${path}".`);
+      result[match[1]] = source;
+    }
+    bundledSources = Object.freeze(result);
   }
 
   function resolveImage(alias) {
@@ -173,5 +193,5 @@
     return Object.prototype.hasOwnProperty.call(imagePaths, key) ? imagePaths[key] : "";
   }
 
-  BlobUI.DocsData = Object.freeze({ load, parseArticle, buildCatalog, resolveImage, imageAliases: imagePaths, videoAliases: videoPaths });
+  BlobUI.DocsData = Object.freeze({ load, parseArticle, buildCatalog, setBundledSources, resolveImage, imageAliases: imagePaths, videoAliases: videoPaths });
 })(typeof window !== "undefined" ? window : globalThis);

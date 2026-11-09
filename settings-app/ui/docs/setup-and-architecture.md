@@ -49,7 +49,9 @@ The frontend invokes Rust through Tauri. Rust performs API requests and saves di
 
 ## Settings and credentials
 
-The default data root is `%APPDATA%\anytype`. Local state lives beneath `blob` and generated `custom.css` lives in the data root. Appearance choices use `settingsV2` in `blob/data.json`. The first save migrates legacy font and accent choices; later saves use local settings rather than legacy Anytype Settings objects.
+BlobUI saves preferences, Kanban calculations, Calendar rules, and Anyblob permissions under `Settings` in the BlobUI installation folder. Settings backups contain that folder's contents. You can also import an older backup made from the Anytype `blob` folder.
+
+The default Anytype data folder is `%APPDATA%\anytype`. BlobUI writes the generated `custom.css` there and uses `blob` for assets that Anytype needs to render.
 
 Credentials use Windows DPAPI for the current account. Replacement prepares a private encrypted temporary file and commits it after configuration and CSS operations succeed. Saves use transactional rollback and preserve managed assets and the installation manifest. Calendar refresh can fail independently of a valid connection; a saved cache supports later saves when the API is unavailable.
 

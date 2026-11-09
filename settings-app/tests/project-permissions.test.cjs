@@ -4,7 +4,31 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadSettings } = require('./frontend-fixture.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const vm = require('node:vm');
 const workspace = path.resolve(__dirname,'../..');
+
+test('opening local projects while settings load defers discovery until the controller unlocks', async()=>{
+  const source=fs.readFileSync(path.join(workspace,'settings-app/ui/project-permissions.js'),'utf8');
+  const window={BlobUI:{}};
+  window.window=window;
+  vm.runInNewContext(source,{window});
+  const controller=window.BlobUI.ProjectPermissions.createController();
+  const calls=[];
+  controller.init({
+    invoke:async name=>{calls.push(name);return [{id:'local',name:'Local project',rootPaths:['C:\\work']}];},
+    normalize:value=>value,
+    read:()=>({projects:{}}),
+    readSaved:()=>({projects:{}}),
+    onChange:()=>{},
+  });
+  controller.open();
+  assert.deepEqual(calls,[],'A project page opened before settings unlock does not issue a partial scan.');
+  controller.setLocked(false);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(calls,['discover_codex_projects']);
+  assert.equal(controller.getSnapshot().projects[0].id,'local');
+});
+
 test('project catalogs and source drafts survive search, refresh, modal dismissal, Save and Undo in dark layouts', async()=>{
   const fixture=path.join(workspace,'.test-run/project-permissions');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});

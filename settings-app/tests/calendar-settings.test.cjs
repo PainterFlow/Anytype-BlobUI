@@ -19,6 +19,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await page.addInitScript(() => {
       window.__availability = 'missing';
       window.__pending = [];
+      window.__connections = [];
       window.__saves = [];
       window.__failSave = false;
       window.__TAURI__ = { core: { invoke: async (name, args) => {
@@ -27,6 +28,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
           if (window.__availability === 'pending') return new Promise(resolve => window.__pending.push(resolve));
           return window.__availability;
         }
+        if (name === 'configure_connection') { window.__connections.push(args.connection); return {}; }
         if (name === 'save_settings') {
           if (window.__failSave) throw new Error('Save fixture failed');
           window.__saves.push(args.settings);
@@ -39,16 +41,25 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
     const toggle = page.locator('#calendar-colors-enabled');
-    const navigate = async status => {
+    let nextPort = 31010;
+    const saveConnection = async status => {
       await page.evaluate(value => { window.__availability = value; }, status);
+      const before = await page.evaluate(() => window.__connections.length);
       await page.locator('#advanced-nav').click();
+      if (before === 0) await page.locator('#advanced-api-key').fill('fixture-api-key');
+      await page.locator('#advanced-api-port').fill(String(nextPort++));
+      await page.locator('#save-button').click();
+      await page.waitForFunction(count => window.__connections.length === count + 1, before);
+    };
+    const navigateToCalendar = async () => {
       await page.locator('#calendar-events-nav').click();
       await page.locator('#calendar-events-tab-0').click();
     };
     assert.equal(await toggle.isChecked(), true);
     await page.waitForFunction(() => document.getElementById('calendar-colors-help').textContent.includes('Add an Anytype API key'));
     assert.equal(await toggle.isDisabled(), true);
-    await navigate('available');
+    await saveConnection('available');
+    await navigateToCalendar();
     await toggle.waitFor({ state: 'visible' });
     await page.waitForFunction(() => !document.getElementById('calendar-colors-enabled').disabled);
     await toggle.focus();
@@ -65,14 +76,17 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__saves[0].calendarColorsEnabled), false);
-    await navigate('unavailable');
+    await saveConnection('unavailable');
+    await navigateToCalendar();
     await page.waitForFunction(() => document.getElementById('calendar-colors-help').textContent.includes('unavailable'));
     assert.equal(await toggle.isDisabled(), true);
     assert.equal(await toggle.isChecked(), false);
-    await navigate('pending');
+    await saveConnection('pending');
+    await navigateToCalendar();
     await page.waitForFunction(() => window.__pending.length > 0);
     assert.equal(await toggle.isDisabled(), true);
-    await navigate('available');
+    await saveConnection('available');
+    await navigateToCalendar();
     await page.waitForFunction(() => !document.getElementById('calendar-colors-enabled').disabled);
     await page.evaluate(() => { window.__pending.splice(0).forEach(resolve => resolve('unavailable')); });
     assert.equal(await toggle.isDisabled(), false);

@@ -70,7 +70,7 @@ export function FormulaPageView({
             {view.unsupported && <span className="formula-view-warning">{view.unsupported}</span>}
           </button>
         </section>)}
-        {!matching.length && <p className="input-hint formula-empty-message">{query || space ? "No matching Kanban views." : data.loading ? "Loading Kanban views…" : "No accessible Kanban views found."}</p>}
+        {!matching.length && <p className="input-hint formula-empty-message">{query || space ? "No matching Kanban views." : data.loading || data.discovering ? "Loading Kanban views…" : "No accessible Kanban views found."}</p>}
       </div>
     </fieldset>
   </>;

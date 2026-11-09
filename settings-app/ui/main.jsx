@@ -30,7 +30,10 @@ import { createSettingsView, pageTitles } from "./state/settings-view.js";
 import { startSettingsApp } from "./app.js";
 import { createNativeService } from "./native-service.js";
 import { DocumentationReader, MarkdownImageViewer, MarkdownView } from "./screens/documentation.jsx";
+import { ComponentCatalog } from "./screens/component-catalog.jsx";
 
+const bundledDocumentation = import.meta.glob("./docs/*.md", { eager: true, query: "?raw", import: "default" });
+window.BlobUI.DocsData.setBundledSources(bundledDocumentation);
 window.marked = marked;
 const calendarController = createCalendarController();
 window.BlobUI.CalendarPage = calendarController;
@@ -87,14 +90,20 @@ function SettingsScreens() {
 }
 
 const root = createRoot(document.getElementById("settings-react-root"));
-flushSync(() => root.render(<SettingsScreens />));
-await import("./sidebar-resize.js");
-app = startSettingsApp({ createNativeService, view: {
-  getSnapshot: view.getSnapshot,
-  update: updateView,
-  updateSettingsFields: patch => flushSync(() => view.updateSettingsFields(patch)),
-} });
-window.addEventListener("unload", () => {
-  app.dispose();
-  root.unmount();
-}, { once: true });
+const requestedWindow = new URLSearchParams(window.location.search).get("window");
+if (requestedWindow === "component-catalog") {
+  flushSync(() => root.render(<ComponentCatalog />));
+  window.addEventListener("unload", () => root.unmount(), { once: true });
+} else {
+  flushSync(() => root.render(<SettingsScreens />));
+  await import("./sidebar-resize.js");
+  app = startSettingsApp({ createNativeService, view: {
+    getSnapshot: view.getSnapshot,
+    update: updateView,
+    updateSettingsFields: patch => flushSync(() => view.updateSettingsFields(patch)),
+  } });
+  window.addEventListener("unload", () => {
+    app.dispose();
+    root.unmount();
+  }, { once: true });
+}
