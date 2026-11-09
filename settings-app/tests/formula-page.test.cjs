@@ -277,6 +277,42 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
   } finally {await browser.close();}
 });
 
+test('saved calculations are not marked unavailable before a successful view discovery', async () => {
+  fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
+  process.env.TEMP = process.env.TMP = path.join(root, 'temp');
+  const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 }, colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    const target = { spaceId: 'saved-space', objectId: 'saved-object', blockId: 'saved-board', viewId: 'saved-view' };
+    const configuration = { version: 2, display: 'balanced', definitions: [{ target, tokens: [{ kind: 'number', value: 7 }] }] };
+    window.__savedTarget = target;
+    window.__TAURI__ = { core: { invoke: async command => {
+      if (command === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: {} };
+      if (command === 'load_kanban_formulas') return { configuration };
+      if (command === 'discover_kanban_views') return new Promise((resolve, reject) => { window.__pendingDiscovery = { resolve, reject }; });
+      if (command === 'load_calendar_rules') return { version: 1, types: [] };
+      if (command === 'get_calendar_api_availability') return 'missing';
+      return null;
+    } } };
+  });
+  try {
+    await loadSettings(page);
+    await page.waitForFunction(() => window.__pendingDiscovery);
+    await openFormulas(page);
+    const unavailable = page.locator('.formula-view-row').filter({ hasText: 'Unavailable view' });
+    assert.equal(await unavailable.count(), 0, 'Pending discovery must not label a saved calculation unavailable.');
+    assert.match(await page.locator('.formula-empty-message').textContent(), /Loading Kanban views/);
+    await page.evaluate(() => {
+      const pending = window.__pendingDiscovery;
+      window.__pendingDiscovery = null;
+      pending.reject(new Error('Fixture connection unavailable'));
+    });
+    await page.waitForFunction(() => document.querySelector('#formula-storage-message').textContent.includes('Fixture connection unavailable'));
+    assert.equal(await unavailable.count(), 0, 'A failed discovery cannot confirm that the saved view is missing.');
+    assert.deepEqual(await page.evaluate(() => window.BlobUI.FormulaPage.read().definitions[0].target), await page.evaluate(() => window.__savedTarget));
+  } finally { await browser.close(); }
+});
+
 test('native-generated CSS scopes exact view/category IDs and wraps results on narrow headers', async () => {
   const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   const page = await browser.newPage();

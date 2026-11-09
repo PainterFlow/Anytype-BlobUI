@@ -172,6 +172,7 @@ test('React documentation renders every bundled article offline in dark mode', {
     const page = await browser.newPage({ viewport: { width: 960, height: 740 } });
     const errors = [];
     const externalRequests = [];
+    const blockedArticleRequests = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => {
       if (!request.url().startsWith('http://blobui.test/') && !request.url().startsWith('blob:')) externalRequests.push(request.url());
@@ -186,6 +187,10 @@ test('React documentation renders every bundled article offline in dark mode', {
       } } };
     });
     await loadSettings(page);
+    await page.route('http://blobui.test/docs/**', route => {
+      blockedArticleRequests.push(route.request().url());
+      return route.abort();
+    });
     await page.waitForTimeout(1000);
     const startup = await page.evaluate(() => ({ ready: window.appReady, bridge: typeof window.__TAURI__?.core?.invoke,
       status: document.getElementById('status-message')?.textContent, html: document.getElementById('settings-react-root')?.innerText.slice(0, 300) }));
@@ -232,6 +237,7 @@ test('React documentation renders every bundled article offline in dark mode', {
       await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
       await page.screenshot({ path: path.join(testRoot, id + '-dark.png') });
     }
+    assert.deepEqual(blockedArticleRequests, [], 'Documentation text should come from the bundled module, not runtime file requests.');
     assert.deepEqual(externalRequests, [], 'Bundled articles should not request external resources.');
     await page.screenshot({ path: screenshot });
     assert.deepEqual(errors, []);

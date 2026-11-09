@@ -520,10 +520,9 @@ mod windows {
                             let _ = app.emit("blobui-rebuild-custom-css", ());
                         }
                         ShortcutAction::OpenComponentCatalog => {
-                            let handle = app.clone();
-                            let _ = app.run_on_main_thread(move || {
-                                let _ = super::super::open_component_catalog(handle);
-                            });
+                            if let Err(error) = super::super::open_component_catalog_window(&app) {
+                                eprintln!("Could not open the component catalog from F10: {error}");
+                            }
                         }
                     }
                 }

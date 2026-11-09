@@ -259,6 +259,7 @@ fn save_keyboard_shortcuts(shortcuts: Vec<hotkey::Shortcut>) -> Result<Vec<hotke
     }
     #[cfg(not(test))]
     {
+        let _guard = acquire_save_guard("Wait for the current settings save to finish.")?;
         let _ = settings_data_path(&install)?;
         let root = settings_root_for_install(&install)?;
         let mut data = settings_store::load(&root)?;
@@ -410,8 +411,8 @@ async fn get_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
-        let runtime = resolve_runtime_directory_for_install(&install)?;
-        updater::get_release_notes(&app_data, &install, &runtime)
+        let runtime = resolve_runtime_directory_for_install_optional(Some(&install))?;
+        updater::get_release_notes(&app_data, &install, runtime.as_deref())
     })
     .await
     .map_err(|_| "The release notes task stopped unexpectedly.".to_string())?
@@ -421,9 +422,11 @@ async fn get_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
 async fn get_latest_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let app_data = app_data_directory();
-        let install = resolve_install_directory(&app_data)?;
-        let runtime = resolve_runtime_directory_for_install(&install)?;
-        updater::get_latest_release_notes(&install, &runtime)
+        // The current changelog ships with the Settings app, so viewing it does not
+        // depend on a valid Anytype install path or a populated runtime folder.
+        let install = resolve_install_directory(&app_data).ok();
+        let runtime = resolve_runtime_directory_for_install_optional(install.as_deref())?;
+        updater::get_latest_release_notes(install.as_deref(), runtime.as_deref())
     })
     .await
     .map_err(|_| "The latest release notes task stopped unexpectedly.".to_string())?
@@ -916,7 +919,6 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         "port": port,
     });
     let css = css::compile(&runtime, &install, &data)?;
-    let serialized = serialize_data(&data)?;
     let credential = match protected_key.as_deref() {
         Some(value) => storage::CredentialChange::Replace(value),
         None if !connection.enabled => storage::CredentialChange::Remove,
@@ -929,7 +931,7 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         &data_path,
         &credential_path,
         css.as_bytes(),
-        &serialized,
+        &data,
         credential,
     )?;
     Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
@@ -1052,7 +1054,13 @@ fn minimize_window(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_component_catalog(app: tauri::AppHandle) -> Result<(), String> {
+async fn open_component_catalog(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || open_component_catalog_window(&app))
+        .await
+        .map_err(|_| "The component catalog task stopped unexpectedly.".to_string())?
+}
+
+fn open_component_catalog_window(app: &tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("component-catalog") {
         window.show().map_err(|error| error.to_string())?;
         window.unminimize().map_err(|error| error.to_string())?;
@@ -1060,7 +1068,7 @@ fn open_component_catalog(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html?window=component-catalog".into());
-    let window = tauri::WebviewWindowBuilder::new(&app, "component-catalog", url)
+    let window = tauri::WebviewWindowBuilder::new(app, "component-catalog", url)
         .title("BlobUI component catalog")
         .inner_size(1120.0, 820.0)
         .min_inner_size(880.0, 640.0)
@@ -1253,7 +1261,6 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
 
     if rules.is_some() && calendar_status == "cached" { return Err("Calendar colors could not be refreshed. Your rules and previous snapshot are unchanged.".into()); }
     let css = css::compile(&runtime, &install, &data)?;
-    let serialized = serialize_data(&data)?;
     anyblob::invalidate();
     commit_settings_with_store(
         &install,
@@ -1261,7 +1268,7 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
         &data_path,
         &credential_path,
         css.as_bytes(),
-        &serialized,
+        &data,
         storage::CredentialChange::Keep,
     )?;
     Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
@@ -1378,13 +1385,14 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
         if migrated {
             let app_data = app_data_directory();
             if let Ok(preferences) = updater::load_preferences(&updater::preferences_path(&app_data)) {
+                let latest_version = preferences.latest_version;
                 let preferences = json!({
                     "installDirectory": preferences.install_directory,
                     "autoplayVideos": preferences.autoplay_videos,
                     "automaticUpdatesEnabled": preferences.automatic_updates_enabled,
                     "automaticChecksEnabled": preferences.automatic_checks_enabled,
                 });
-                settings_store::save_updater_preferences(&root, &preferences)?;
+                settings_store::save_updater_preferences(&root, &preferences, latest_version.as_deref())?;
             }
             let shortcuts_path = app_data.parent().unwrap_or(&app_data).join("BlobUI/shortcuts.json");
             if let Ok(bytes) = fs::read(&shortcuts_path) {
@@ -1404,35 +1412,7 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
 }
 
 fn ensure_settings_store_on_launch(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
-    reject_reparse_component(root)?;
-    let settings_directory = root.join("Settings");
-    match fs::symlink_metadata(&settings_directory) {
-        Ok(metadata) => {
-            reject_reparse_component(&settings_directory)?;
-            if !metadata.is_dir() {
-                return Err("The BlobUI Settings path is not a regular folder.".into());
-            }
-            return Ok(false);
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("Could not inspect the Settings folder: {error}")),
-    }
-
-    let legacy_data = legacy_blob.join("data.json");
-    reject_reparse_component(legacy_blob)?;
-    match fs::symlink_metadata(&legacy_data) {
-        Ok(metadata)
-            if metadata.is_file()
-                && !metadata.file_type().is_symlink()
-                && !is_windows_reparse_point(&metadata) =>
-        {
-            settings_store::migrate_legacy_blob(legacy_blob, root)?;
-            Ok(true)
-        }
-        Ok(_) => Err("The legacy BlobUI settings file is not a supported regular file.".into()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("Could not inspect legacy BlobUI settings: {error}")),
-    }
+    settings_store::ensure(root, legacy_blob)
 }
 
 pub(crate) fn load_settings_data(install: &Path) -> Result<Value, String> {
@@ -1513,13 +1493,14 @@ fn commit_settings_with_store(
     data_path: &Path,
     credential_path: &Path,
     css: &[u8],
-    data_bytes: &[u8],
+    data: &Value,
     credential: storage::CredentialChange<'_>,
 ) -> Result<(), String> {
+    let runtime_data = serialize_runtime_data(data)?;
     #[cfg(test)]
     {
         let _ = install;
-        return storage::commit_settings(css_path, data_path, credential_path, css, data_bytes, credential);
+        return storage::commit_settings(css_path, data_path, credential_path, css, &runtime_data, credential);
     }
     #[cfg(not(test))]
     {
@@ -1533,11 +1514,9 @@ fn commit_settings_with_store(
             storage::snapshot(&metadata_path, false)?,
             storage::snapshot(credential_path, true)?,
         ];
-        storage::commit_settings(css_path, data_path, credential_path, css, data_bytes, credential)?;
         let root = settings_root_for_install(install)?;
-        let aggregate = parse_settings_json(data_bytes)
-            .map_err(|_| "BlobUI data.json is not valid JSON.".to_string())?;
-        if let Err(error) = settings_store::save(&root, &aggregate) {
+        storage::commit_settings(css_path, data_path, credential_path, css, &runtime_data, credential)?;
+        if let Err(error) = settings_store::save(&root, data) {
             let mut rollback_errors = Vec::new();
             for snapshot in before.iter().rev() {
                 if let Err(rollback) = storage::restore(snapshot) {
@@ -1566,6 +1545,9 @@ fn load_settings_data_for_path(path: &Path) -> Result<Value, String> {
 }
 
 fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
+    if let Some(fields) = data.as_object_mut() {
+        consolidate_legacy_settings(fields);
+    }
     data["installDirectory"] = Value::String(install.to_string_lossy().into_owned());
     let accent = if settings.accent_mode == "native" {
         "var(--color-system-accent-100)"
@@ -1576,6 +1558,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "fontFamily": settings.font_family,
         "codeFontFamily": settings.code_font_family,
         "accentColor": accent,
+        "accentMode": settings.accent_mode,
+        "accentPreset": settings.accent_preset,
         "includeSelections": settings.include_selections,
         "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
@@ -1590,16 +1574,18 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "backgroundExperiment": settings.background_experiment,
     });
     let mut codex_values = json!(settings.codex_integration);
-    preserve_unknown_object_fields(
-        data.pointer("/settings/codexIntegration"),
-        &mut codex_values,
-    );
-    preserve_unknown_object_fields(
-        data.pointer("/settingsV2/settings/codexIntegration"),
-        &mut codex_values,
-    );
+    if let Some(mut previous) = data.pointer("/settings/codexIntegration").and_then(Value::as_object).cloned() {
+        for key in ["spaces", "projects"] {
+            if let (Some(old), Some(new)) = (previous.remove(key), codex_values[key].as_object_mut()) {
+                for (id, entry) in new {
+                    preserve_unknown_object_fields(old.get(id), entry);
+                }
+            }
+        }
+        preserve_unknown_object_fields(Some(&Value::Object(previous)), &mut codex_values);
+    }
     if let Some(values) = values.as_object_mut() {
-        values.insert("codexIntegration".into(), codex_values.clone());
+        values.insert("codexIntegration".into(), codex_values);
     }
     if !data.get("settings").is_some_and(Value::is_object) {
         data["settings"] = json!({});
@@ -1609,51 +1595,37 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
             target.insert(name.clone(), value.clone());
         }
     }
-    let mut v2_values = json!({
-            "fontFamily": settings.font_family,
-            "codeFontFamily": settings.code_font_family,
-            "accentColor": accent,
-            "includeSelections": settings.include_selections,
-            "accentMode": settings.accent_mode,
-            "accentPreset": settings.accent_preset,
-            "bannerImage": settings.banner_image,
-            "reducedMotion": settings.reduced_motion,
-            "tabHoverEffect": settings.tab_hover_effect,
-            "linkHoverEffect": settings.link_hover_effect,
-            "objectMentionHoverEffect": settings.object_mention_hover_effect,
-            "kanbanViewStyle": settings.kanban_view_style,
-            "collapsedCategories": settings.collapsed_categories,
-            "codexIntegration": settings.codex_integration,
-        "calendarColorsEnabled": settings.calendar_colors_enabled,
-        "sidebarResizeMode": settings.sidebar_resize_mode,
-        "backgroundExperiment": settings.background_experiment,
-    });
-    if let Some(values) = v2_values.as_object_mut() {
-        values.insert("codexIntegration".into(), codex_values);
-    }
-    let mut settings_v2 = data
-        .get("settingsV2")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    match settings_v2.get("version").and_then(Value::as_u64) {
-        Some(version) if version > 2 => {}
-        Some(_) | None => {
-            settings_v2.insert("version".into(), json!(2));
+}
+
+/// Preserve the old reader's precedence and keep unknown envelope metadata.
+fn consolidate_legacy_settings(data: &mut serde_json::Map<String, Value>) {
+    let Some(Value::Object(mut envelope)) = data.remove("settingsV2") else { return };
+    if let Some(Value::Object(newer)) = envelope.remove("settings") {
+        let mut settings = match data.remove("settings") {
+            Some(Value::Object(settings)) => settings,
+            _ => serde_json::Map::new(),
+        };
+        for (key, value) in newer {
+            let valid = match key.as_str() {
+                "fontFamily" | "codeFontFamily" | "accentColor" | "bannerImage"
+                | "kanbanViewStyle" | "sidebarResizeMode" | "backgroundExperiment" => value.is_string(),
+                "reducedMotion" | "includeSelections" | "tabHoverEffect" | "linkHoverEffect"
+                | "objectMentionHoverEffect" | "collapsedCategories" | "calendarColorsEnabled" => value.is_boolean(),
+                _ => true,
+            };
+            if valid || !settings.contains_key(&key) {
+                // Permission maps are replaced as a unit. The older map may contain revoked access.
+                settings.insert(key, value);
+            }
         }
+        data.insert("settings".into(), Value::Object(settings));
     }
-    let mut v2_settings = settings_v2
-        .get("settings")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    if let Some(values) = v2_values.as_object() {
-        for (name, value) in values {
-            v2_settings.insert(name.clone(), value.clone());
-        }
+    if envelope.get("version").and_then(Value::as_u64) == Some(2) {
+        envelope.remove("version");
     }
-    settings_v2.insert("settings".into(), Value::Object(v2_settings));
-    data["settingsV2"] = Value::Object(settings_v2);
+    if !envelope.is_empty() {
+        data.insert("legacySettingsMetadata".into(), Value::Object(envelope));
+    }
 }
 
 fn preserve_unknown_object_fields(original: Option<&Value>, current: &mut Value) {
@@ -1675,6 +1647,38 @@ fn serialize_data(data: &Value) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("Could not encode BlobUI settings: {error}"))?;
     serialized.push(b'\n');
     Ok(serialized)
+}
+
+// The installer needs these inputs to regenerate custom.css on update.
+fn serialize_runtime_data(data: &Value) -> Result<Vec<u8>, String> {
+    #[cfg(test)]
+    return serialize_data(data);
+    #[cfg(not(test))]
+    serialize_data(&runtime_css_data(data))
+}
+
+fn runtime_css_data(data: &Value) -> Value {
+    let mut runtime = json!({});
+    for key in ["installDirectory", "calendarObjectColors", "calendarViewColors", "kanbanFormulaResults"] {
+        if let Some(value) = data.get(key) {
+            runtime[key] = value.clone();
+        }
+    }
+    if let Some(enabled) = data.pointer("/apiConnection/enabled") {
+        runtime["apiConnection"] = json!({ "enabled": enabled });
+    }
+    let mut appearance = serde_json::Map::new();
+    for key in [
+        "fontFamily", "codeFontFamily", "accentColor", "bannerImage", "reducedMotion",
+        "includeSelections", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect",
+        "kanbanViewStyle", "collapsedCategories", "calendarColorsEnabled",
+    ] {
+        if let Some(value) = data["settings"].get(key) {
+            appearance.insert(key.into(), value.clone());
+        }
+    }
+    runtime["settings"] = Value::Object(appearance);
+    runtime
 }
 
 fn read_saved_api_key_at(install: &Path) -> Result<String, String> {
@@ -1792,15 +1796,16 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         .or_else(|| read_bool(Some(normalized), "collapsedCategories"))
         .unwrap_or(false);
 
-    let local_mode = read_string(local, "accentMode");
-    let local_preset = read_string(local, "accentPreset");
+    let local_mode = read_string(local, "accentMode").or_else(|| read_string(Some(normalized), "accentMode"));
+    let local_preset = read_string(local, "accentPreset").or_else(|| read_string(Some(normalized), "accentPreset"));
     let (accent_mode, accent_preset, accent_color) = match local_mode.as_deref() {
         Some("native") => ("native".into(), String::new(), accent_color),
-        Some("preset") => (
-            "preset".into(),
-            local_preset.unwrap_or_default(),
-            accent_color,
-        ),
+        Some("preset") => {
+            let (mode, preset, color) = accent_for_ui(&accent_color);
+            let saved_preset = local_preset.unwrap_or_default();
+            let accent_color = if mode == "preset" && preset == saved_preset { color } else { accent_color };
+            ("preset".into(), saved_preset, accent_color)
+        }
         Some("custom") => ("custom".into(), String::new(), accent_color),
         _ => accent_for_ui(&accent_color),
     };
@@ -2110,36 +2115,64 @@ fn resolve_runtime_directory_for_install_from(
     source_override: Option<&Path>,
     executable: Option<&Path>,
 ) -> Result<PathBuf, String> {
+    resolve_runtime_directory_for_install_from_optional(Some(install), source_override, executable)?
+        .ok_or_else(|| "BlobUI's CSS source and assets could not be found beside the app or in its source folder.".into())
+}
+
+fn resolve_runtime_directory_for_install_optional(
+    install: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    let source_override = non_empty_path(env::var_os("BLOBUI_SOURCE_DIRECTORY"));
+    let executable = env::current_exe().ok();
+    resolve_runtime_directory_for_install_from_optional(
+        install,
+        source_override.as_deref(),
+        executable.as_deref(),
+    )
+}
+
+fn resolve_runtime_directory_for_install_from_optional(
+    install: Option<&Path>,
+    source_override: Option<&Path>,
+    executable: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
     if let Some(root) = source_override {
-        return validate_runtime_source_override(root);
+        return validate_runtime_source_override(root).map(Some);
     }
 
     let executable_runtime = executable_runtime_directory(executable);
+    if executable_runtime.as_deref().is_some_and(is_installed_app_directory) {
+        let root = executable_runtime.as_deref().unwrap();
+        reject_reparse_component(root)?;
+        return Ok(executable_runtime);
+    }
     if executable_runtime
         .as_deref()
         .is_some_and(|root| {
             !is_installed_runtime_directory(root) && !is_installed_app_directory(root)
         })
     {
-        return Ok(executable_runtime.unwrap());
+        return Ok(executable_runtime);
     }
 
     // Installed Settings builds keep using the selected Anytype folder's runtime,
     // which is also where update checks and updates read their package metadata.
-    let installed = install.join("blob/runtime");
-    if has_runtime_files(&installed) {
-        reject_reparse_component(&installed)?;
-        return Ok(installed);
+    if let Some(install) = install {
+        let installed = install.join("blob/runtime");
+        if has_runtime_files(&installed) {
+            reject_reparse_component(&installed)?;
+            return Ok(Some(installed));
+        }
     }
 
     if let Some(root) = executable_runtime {
         if is_installed_runtime_directory(&root) {
             reject_reparse_component(&root)?;
         }
-        return Ok(root);
+        return Ok(Some(root));
     }
 
-    Err("BlobUI's CSS source and assets could not be found beside the app or in its source folder.".into())
+    Ok(None)
 }
 
 fn validate_runtime_source_override(root: &Path) -> Result<PathBuf, String> {
@@ -2510,9 +2543,7 @@ mod tests {
             apply_settings(&mut data, Path::new("fixture"), &draft);
             let saved = serialize_data(&data).unwrap();
             let saved: Value = serde_json::from_slice(&saved).unwrap();
-            assert_eq!(saved["settings"]["backgroundExperiment"], name);
-            assert_eq!(saved["settingsV2"]["settings"]["backgroundExperiment"], name);
-            assert_eq!(settings_from_data(&saved).background_experiment, mode);
+            assert_eq!(saved["settings"]["backgroundExperiment"], name);            assert_eq!(settings_from_data(&saved).background_experiment, mode);
             assert_eq!(serde_json::from_value::<SettingsDraft>(serde_json::to_value(&draft).unwrap()).unwrap().background_experiment, mode);
             assert_eq!(settings_from_data(&json!({"settings": {"backgroundExperiment": name}})).background_experiment, mode);
         }
@@ -2543,9 +2574,7 @@ mod tests {
             let mut data = json!({});
             apply_settings(&mut data, Path::new("fixture"), &settings);
             assert_eq!(settings_from_data(&data).sidebar_resize_mode, mode);
-            assert_eq!(data["settings"]["sidebarResizeMode"], name);
-            assert_eq!(data["settingsV2"]["settings"]["sidebarResizeMode"], name);
-        }
+            assert_eq!(data["settings"]["sidebarResizeMode"], name);        }
         for invalid in [json!("invalid"), json!(42), Value::Null, json!({})] {
             let mut draft = serde_json::to_value(SettingsDraft::default()).unwrap();
             draft["sidebarResizeMode"] = invalid.clone();
@@ -2583,9 +2612,7 @@ mod tests {
             let draft = SettingsDraft { include_selections: enabled, ..SettingsDraft::default() };
             let mut data = json!({});
             apply_settings(&mut data, Path::new("fixture"), &draft);
-            assert_eq!(data["settings"]["includeSelections"], enabled);
-            assert_eq!(data["settingsV2"]["settings"]["includeSelections"], enabled);
-            assert_eq!(settings_from_data(&data).include_selections, enabled);
+            assert_eq!(data["settings"]["includeSelections"], enabled);            assert_eq!(settings_from_data(&data).include_selections, enabled);
             assert_eq!(serde_json::from_value::<SettingsDraft>(serde_json::to_value(draft).unwrap()).unwrap().include_selections, enabled);
         }
         assert!(!settings_from_data(&json!({"settings": {"includeSelections": false}})).include_selections);
@@ -2645,17 +2672,45 @@ mod tests {
                 }
             }
         });
-        let settings = validate_settings(SettingsDraft::default()).unwrap();
+        let settings = SettingsDraft {
+            codex_integration: settings_from_data(&data).codex_integration,
+            ..SettingsDraft::default()
+        };
 
         apply_settings(&mut data, Path::new("fixture"), &settings);
 
         assert_eq!(data["futureRootField"]["kept"], true);
         assert_eq!(data["settings"]["futureLegacyField"], "kept");
-        assert_eq!(data["settingsV2"]["version"], 9);
-        assert_eq!(data["settingsV2"]["futureEnvelopeField"][0], "kept");
-        assert_eq!(data["settingsV2"]["settings"]["futureSetting"]["kept"], true);
-        assert_eq!(data["settingsV2"]["settings"]["codexIntegration"]["futureCodexField"]["kept"], true);
-        assert_eq!(data["settingsV2"]["settings"]["codexIntegration"]["spaces"]["existing"]["access"], "read");
+        assert!(data.get("settingsV2").is_none());
+        assert_eq!(data["legacySettingsMetadata"]["version"], 9);
+        assert_eq!(data["legacySettingsMetadata"]["futureEnvelopeField"][0], "kept");
+        assert_eq!(data["settings"]["futureSetting"]["kept"], true);
+        assert_eq!(data["settings"]["codexIntegration"]["futureCodexField"]["kept"], true);
+        assert_eq!(data["settings"]["codexIntegration"]["spaces"]["existing"]["access"], "read");
+    }
+
+    #[test]
+    fn installer_css_inputs_exclude_private_settings() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let install = workspace.join(".test-run/runtime-css-projection");
+        let mut data = json!({
+            "apiConnection": {"enabled": false, "ip": "127.0.0.1", "port": 31010},
+            "keybinds": [{"key":"F10"}]
+        });
+        let mut settings = SettingsDraft {
+            accent_color: "Blob Pink".into(),
+            ..SettingsDraft::default()
+        };
+        settings.codex_integration = codex::normalize(&json!({"spaces": {"private": {"access":"read"}}}));
+        apply_settings(&mut data, &install, &settings);
+        let runtime = runtime_css_data(&data);
+        assert_eq!(runtime["apiConnection"], json!({"enabled": false}));
+        assert!(runtime["settings"].get("codexIntegration").is_none());
+        assert!(runtime.get("keybinds").is_none());
+        assert_eq!(
+            css::compile(workspace, &install, &runtime).unwrap(),
+            css::compile(workspace, &install, &data).unwrap(),
+        );
     }
 
     #[test]
@@ -2972,6 +3027,35 @@ mod tests {
         assert_eq!(
             resolve_runtime_directory_for_install_from(&install, None, Some(&executable)).unwrap(),
             selected_runtime
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_app_runtime_precedes_the_selected_install_runtime() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = workspace
+            .join(".test-run")
+            .join(format!("installed-app-runtime-resolution-{}-{nonce}", std::process::id()));
+        let install = root.join("Anytype data");
+        let legacy_runtime = install.join("blob/runtime");
+        let app = root.join("Programs/BlobUI");
+        fs::create_dir_all(legacy_runtime.join("Dev")).unwrap();
+        fs::create_dir_all(legacy_runtime.join("assets")).unwrap();
+        fs::create_dir_all(app.join("Dev")).unwrap();
+        fs::create_dir_all(app.join("assets")).unwrap();
+        fs::write(app.join(".blobui-install.json"), "{}").unwrap();
+
+        let executable = app.join("settings-app/dist/blobui-settings.exe");
+        assert_eq!(
+            resolve_runtime_directory_for_install_from_optional(Some(&install), None, Some(&executable))
+                .unwrap()
+                .as_deref(),
+            Some(app.as_path())
         );
         fs::remove_dir_all(root).unwrap();
     }

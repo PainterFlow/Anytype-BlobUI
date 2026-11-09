@@ -52,7 +52,7 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
     }
     reject_tree_links(&backup)?;
 
-    let stage_root = unique_sibling(&settings_root, "import-root");
+    let stage_root = unique_sibling(&current_settings, "import-root");
     fs::create_dir(&stage_root).map_err(|error| format!("Could not stage imported Settings: {error}"))?;
     let stage_result = (|| {
         let split_backup = has_split_settings_marker(&backup)?;
@@ -93,27 +93,33 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
         }
         validate_updater_preferences(&data)?;
         crate::calendar::configuration(&data)?;
-        let mut settings = crate::settings_from_data(&data);
-        let (mode, preset, color) = crate::accent_for_ui(&settings.accent_color);
-        if settings.accent_mode == "preset" && mode == "preset" && preset == settings.accent_preset {
-            settings.accent_color = color;
-        }
-        let settings = crate::validate_settings(settings)?;
+        let settings = crate::validate_settings(crate::settings_from_data(&data))?;
         crate::apply_settings(&mut data, &anytype_data_root, &settings);
         if data.pointer("/updaterPreferences/installDirectory").and_then(Value::as_str).is_some() {
             data["updaterPreferences"]["installDirectory"] = Value::String(anytype_data_root.to_string_lossy().into_owned());
         }
-        let formula_configuration = validate_saved_formula_configuration(&stage_root)?;
+        let formula_configuration = crate::settings_store::read_formula(&stage_root)?
+            .map(crate::kanban::decode_configuration)
+            .transpose()?
+            .unwrap_or_default();
+        let formula = serde_json::to_value(&formula_configuration)
+            .map_err(|_| "Could not encode the imported Kanban formulas.")?;
         // Normalize supported settings in the staged copy. The store preserves
         // unknown top-level, nested, and future fields while it writes.
-        crate::settings_store::save(&stage_root, &data)?;
+        crate::settings_store::save_with_formula(&stage_root, &data, &formula)?;
 
         let runtime = crate::resolve_runtime_directory_for_install(&anytype_data_root)?;
         let css = crate::css::compile(&runtime, &anytype_data_root, &data)?;
-        let serialized = crate::serialize_data(&data)?;
+        let serialized = crate::serialize_runtime_data(&data)?;
         let staged_settings = stage_root.join(SETTINGS_DIR);
+        let banner_path = staged_settings.join("assets/banner.png");
+        let banner = if banner_path.is_file() {
+            Some(fs::read(&banner_path).map_err(|_| "Could not read the imported space banner.")?)
+        } else {
+            None
+        };
         swap_directory_with(&current_settings, &staged_settings, || {
-            publish_import_files(&anytype_data_root, css.as_bytes(), &serialized, formula_configuration.as_deref())
+            publish_import_files(&anytype_data_root, css.as_bytes(), &serialized, banner)
         })
     })();
     let _ = fs::remove_dir_all(&stage_root);
@@ -222,13 +228,13 @@ fn publish_import_files(
     anytype_data_root: &Path,
     css: &[u8],
     data: &[u8],
-    formula_configuration: Option<&[u8]>,
+    banner: Option<Vec<u8>>,
 ) -> Result<(), String> {
     let blob = anytype_data_root.join("blob");
     let css_path = anytype_data_root.join("custom.css");
     let data_path = blob.join(DATA_FILE);
     let metadata_path = blob.join(META_FILE);
-    crate::storage::transaction::commit_update(vec![
+    let mut changes = vec![
         crate::storage::transaction::FileChange {
             path: css_path,
             contents: Some(css.to_vec()),
@@ -241,11 +247,14 @@ fn publish_import_files(
             path: metadata_path,
             contents: Some(metadata_bytes()?),
         },
-        crate::storage::transaction::FileChange {
-            path: blob.join(".blobui-kanban-formulas.json"),
-            contents: formula_configuration.map(|bytes| bytes.to_vec()),
-        },
-    ])
+    ];
+    if let Some(banner) = banner {
+        changes.push(crate::storage::transaction::FileChange {
+            path: blob.join("assets/spacebanner/banner.png"),
+            contents: Some(banner),
+        });
+    }
+    crate::storage::transaction::commit_update(changes)
 }
 
 fn has_split_settings_marker(backup: &Path) -> Result<bool, String> {
@@ -271,27 +280,6 @@ fn has_split_settings_marker(backup: &Path) -> Result<bool, String> {
     Ok(data.get("formatVersion").and_then(Value::as_u64) == Some(1)
         && data.get("fields").is_some_and(Value::is_object)
         && data.get("shape").is_some_and(Value::is_object))
-}
-
-fn validate_saved_formula_configuration(settings_root: &Path) -> Result<Option<Vec<u8>>, String> {
-    let path = settings_root.join(SETTINGS_DIR).join("kanban-calc.json");
-    let document = read_regular_json(&path, MAX_SETTINGS_BYTES, "Kanban settings")?;
-    let Some(value) = document.get("legacyConfiguration") else {
-        return Ok(None);
-    };
-    let version = value.get("version").and_then(Value::as_u64).unwrap_or_default();
-    if version == 1 {
-        return serde_json::to_vec_pretty(value)
-            .map(Some)
-            .map_err(|_| "The selected Settings backup contains an invalid Kanban formula configuration.".into());
-    }
-    let configuration: crate::kanban::Configuration = serde_json::from_value(value.clone())
-        .map_err(|_| "The selected Settings backup contains an invalid Kanban formula configuration.".to_string())?;
-    configuration.validate()
-        .map_err(|error| error.to_string())?;
-    serde_json::to_vec_pretty(value)
-        .map(Some)
-        .map_err(|_| "The selected Settings backup contains an invalid Kanban formula configuration.".into())
 }
 
 fn read_regular_json(path: &Path, limit: u64, label: &str) -> Result<Value, String> {
@@ -560,10 +548,11 @@ mod tests {
         let loaded = crate::settings_store::load(&current_app).unwrap();
         assert_eq!(loaded["installDirectory"], current_anytype.canonicalize().unwrap().to_string_lossy().as_ref());
         assert_eq!(loaded["futureTopLevel"]["keep"], json!([1, 2]));
-        assert_eq!(loaded["settingsV2"]["version"], 9);
-        assert_eq!(loaded["settingsV2"]["futureEnvelope"]["keep"], true);
-        assert_eq!(loaded["settingsV2"]["settings"]["futureSetting"]["preserve"], "yes");
-        assert_eq!(loaded["settingsV2"]["settings"]["codexIntegration"]["spaces"]["space-id"]["future"], true);
+        assert!(loaded.get("settingsV2").is_none());
+        assert_eq!(loaded["legacySettingsMetadata"]["version"], 9);
+        assert_eq!(loaded["legacySettingsMetadata"]["futureEnvelope"]["keep"], true);
+        assert_eq!(loaded["settings"]["futureSetting"]["preserve"], "yes");
+        assert_eq!(loaded["settings"]["codexIntegration"]["spaces"]["space-id"]["future"], true);
         assert_eq!(loaded["keybinds"].as_array().unwrap().len(), 6);
         assert_eq!(loaded["keybinds"][0]["futureShortcutField"]["keep"], true);
         assert_eq!(fs::read(current_app.join(SETTINGS_DIR).join("user-state.bin")).unwrap(), [0x10, 0x20]);
@@ -641,6 +630,7 @@ mod tests {
         assert_eq!(loaded["futureLegacyField"]["preserve"], true);
         assert_eq!(loaded["installDirectory"], anytype.canonicalize().unwrap().to_string_lossy().as_ref());
         assert_eq!(fs::read(app.join(SETTINGS_DIR).join("assets/banner.png")).unwrap(), [0x89, b'P', b'N', b'G']);
+        assert_eq!(fs::read(anytype.join("blob/assets/spacebanner/banner.png")).unwrap(), [0x89, b'P', b'N', b'G']);
         let metadata: Value = serde_json::from_slice(&fs::read(app.join(SETTINGS_DIR).join(META_FILE)).unwrap()).unwrap();
         assert_eq!(metadata["futureMeta"], true);
         assert_eq!(fs::read(backup.join(DATA_FILE)).unwrap(), original_data);

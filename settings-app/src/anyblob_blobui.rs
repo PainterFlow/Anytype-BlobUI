@@ -20,11 +20,7 @@ pub(crate) fn revision(value: &Value) -> String {
     )
 }
 pub(crate) fn kanban_configuration(install: &Path) -> Result<crate::kanban::Configuration, String> {
-    crate::kanban::read_at(
-        &install.join("blob/.blobui-kanban-formulas.json"),
-        &install.join(".blobui-kanban-formulas.json"),
-        &install.join(".blobui-formula-prototype.json"),
-    )
+    crate::kanban::load_for_install(install)
 }
 
 pub(crate) fn calendar_revision(data: &Value) -> Result<String, String> {
@@ -487,7 +483,6 @@ pub(crate) fn execute_at(
     } else {
         None
     };
-    let data_path = install.join("blob/data.json");
     let mut data = crate::load_settings_data(install)?;
     let old_data = data.clone();
     let mut kanban = if request.calendar() {
@@ -744,26 +739,28 @@ pub(crate) fn execute_at(
     data["blobuiPublications"][&publication_key] =
         json!({"published_at":now,"revision":next,"warnings":warnings});
     // Compile before committing anything. API and CSS errors preserve every prior file.
-    let (_, _, css_path, _) = crate::save_paths(install)?;
+    let (_, data_path, css_path, _) = crate::save_paths(install)?;
     let runtime = crate::resolve_runtime_directory_for_install(install)?;
     let css = crate::css::compile(&runtime, install, &data)?;
     check()?;
-    if crate::read_json_file(&data_path)? != old_data
+    if crate::load_settings_data(install)? != old_data
         || (!request.calendar() && revision(&json!(kanban_configuration(install)?)) != current)
     {
         return Err("Configuration changed during publication. Reread before retrying.".into());
     }
     use crate::storage::transaction::{commit_update, FileChange};
+    #[allow(unused_mut)]
     let mut changes = vec![
         FileChange {
             path: data_path,
-            contents: Some(crate::serialize_data(&data)?),
+            contents: Some(crate::serialize_runtime_data(&data)?),
         },
         FileChange {
             path: css_path,
             contents: Some(css.into_bytes()),
         },
     ];
+    #[cfg(test)]
     if !request.calendar() {
         changes.push(FileChange {
             path: install.join("blob/.blobui-kanban-formulas.json"),

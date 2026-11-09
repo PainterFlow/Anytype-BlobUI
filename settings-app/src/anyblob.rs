@@ -10,8 +10,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-#[cfg(not(test))]
-use std::path::Path;
 
 static PROMPT: Mutex<()> = Mutex::new(());
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -31,7 +29,7 @@ fn bridge_path() -> Result<PathBuf, String> {
     #[cfg(not(test))]
     {
         let _ = crate::settings_data_path(&install)?;
-        Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/bridge.json"))
+        Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json"))
     }
 }
 fn state() -> Result<Value, String> {
@@ -84,10 +82,15 @@ fn configure_at(
     } else {
         None
     };
-    let state = serde_json::to_vec(
-        &json!({"enabled":enabled,"verifier":if enabled {digest(&token)}else{String::new()}}),
-    )
-    .unwrap();
+    let mut state = if path.is_file() {
+        crate::read_json_file(path)?
+    } else {
+        json!({})
+    };
+    let fields = state.as_object_mut().ok_or("Anyblob settings must contain an object.")?;
+    fields.insert("enabled".into(), json!(enabled));
+    fields.insert("verifier".into(), json!(if enabled { digest(&token) } else { String::new() }));
+    let state = serde_json::to_vec(&state).map_err(|_| "Could not encode Anyblob settings.")?;
     let state_temp = store::prepare_temp(path, &state, None, false)?;
     let secret_temp = match encrypted
         .as_ref()
@@ -126,22 +129,6 @@ fn configure_at(
         }
         return Err(error);
     }
-    #[cfg(not(test))]
-    {
-        let settings_root = path
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .ok_or("The Anyblob settings folder is incomplete.")?;
-        let aggregate = crate::settings_store::load(settings_root)?;
-        if let Err(error) = crate::settings_store::save_with_anyblob_state(settings_root, &aggregate, &serde_json::from_slice(&state).map_err(|_| "Anyblob state is invalid.")?) {
-            let rollback = [store::restore(&before), store::restore(&secret_before)];
-            if rollback.iter().any(Result::is_err) {
-                return Err(format!("{error} Could not fully restore the previous Anyblob configuration."));
-            }
-            return Err(error);
-        }
-    }
     invalidate();
     Ok(())
 }
@@ -178,7 +165,7 @@ pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     Ok(json!({"enabled":enabled}))
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
-    let data = crate::read_json_file(&install()?.join("blob/data.json"))?;
+    let data = crate::load_settings_data(&install()?)?;
     Ok(crate::settings_from_data(&data).codex_integration)
 }
 pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> bool {

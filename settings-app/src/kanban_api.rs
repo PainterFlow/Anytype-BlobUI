@@ -42,7 +42,7 @@ impl Client {
     }
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-        let data = crate::read_json_file(&install.join("blob/data.json"))?;
+        let data = crate::load_settings_data(&install)?;
         let credential = crate::api_credential_path(&install)?;
         if data
             .pointer("/apiConnection/enabled")

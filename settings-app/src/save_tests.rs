@@ -273,16 +273,16 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
     let saved_data = read_json_file(&data_path).unwrap();
-    assert_eq!(saved_data["settingsV2"]["version"], 2);
-    assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
-    assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
-    assert_eq!(saved_data["settingsV2"]["settings"]["kanbanViewStyle"], "compact");
-    assert_eq!(saved_data["settingsV2"]["settings"]["collapsedCategories"], true);
+    assert!(saved_data.get("settingsV2").is_none());
+    assert_eq!(saved_data["settings"]["accentColor"], "#27A879");
+    assert_eq!(saved_data["settings"]["reducedMotion"], false);
+    assert_eq!(saved_data["settings"]["kanbanViewStyle"], "compact");
+    assert_eq!(saved_data["settings"]["collapsedCategories"], true);
     let restored = settings_from_data(&saved_data);
     assert_eq!(restored.kanban_view_style, "compact");
     assert!(restored.collapsed_categories);
-    assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
-    assert_eq!(saved_data["settingsV2"]["settings"]["bannerImage"], draft.banner_image);
+    assert_eq!(saved_data["settings"]["tabHoverEffect"], true);
+    assert_eq!(saved_data["settings"]["bannerImage"], draft.banner_image);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");
     assert_eq!(saved_data["calendarObjectColors"]["fixture-event"], "Green");
     let saved_css = fs::read_to_string(&css_path).unwrap();
@@ -477,7 +477,7 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
 
     // Calendar opt-out still verifies a connection but never fetches colors.
     let mut off_data = read_json_file(&data_path).unwrap();
-    off_data["settingsV2"]["settings"]["calendarColorsEnabled"] = json!(false);
+    off_data["settings"]["calendarColorsEnabled"] = json!(false);
     fs::write(&data_path, serde_json::to_vec(&off_data).unwrap()).unwrap();
     let (port, server) = mock_api_server("127.0.0.2", "fixture-key-two", vec![(200, json!({"data": []}))]);
     let off_result = configure_connection_blocking(ConnectionDraft {

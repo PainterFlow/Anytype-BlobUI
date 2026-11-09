@@ -32,6 +32,8 @@ import { createNativeService } from "./native-service.js";
 import { DocumentationReader, MarkdownImageViewer, MarkdownView } from "./screens/documentation.jsx";
 import { ComponentCatalog } from "./screens/component-catalog.jsx";
 
+const bundledDocumentation = import.meta.glob("./docs/*.md", { eager: true, query: "?raw", import: "default" });
+window.BlobUI.DocsData.setBundledSources(bundledDocumentation);
 window.marked = marked;
 const calendarController = createCalendarController();
 window.BlobUI.CalendarPage = calendarController;

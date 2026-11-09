@@ -108,7 +108,8 @@ fn workspace() -> &'static Path {
 fn path_for_install(install: &Path) -> PathBuf {
     install.join("blob/.blobui-kanban-formulas.json")
 }
-pub(crate) fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,true)}
+#[cfg(test)]
+fn load_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,true)}
 pub(crate) fn read_at(path: &Path, legacy: &Path, prototype: &Path) -> Result<Configuration, String> {load_at_mode(path,legacy,prototype,false)}
 fn load_at_mode(path: &Path, legacy: &Path, prototype: &Path, persist: bool) -> Result<Configuration, String> {
     crate::storage::reject_reparse_path(path)?;
@@ -174,19 +175,34 @@ fn load_at_mode(path: &Path, legacy: &Path, prototype: &Path, persist: bool) -> 
 }
 fn load() -> Result<Configuration, String> {
     let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-    load_at(
-        &path_for_install(&install),
+    load_for_install(&install)
+}
+
+pub(crate) fn load_for_install(install: &Path) -> Result<Configuration, String> {
+    #[cfg(not(test))]
+    {
+        let _ = crate::settings_data_path(install)?;
+        let root = crate::settings_root_for_install(install)?;
+        if let Some(configuration) = crate::settings_store::read_formula(&root)? {
+            return decode_configuration(configuration);
+        }
+    }
+    #[cfg(test)]
+    return read_at(
+        &path_for_install(install),
+        &install.join(".blobui-kanban-formulas.json"),
+        &install.join(".blobui-formula-prototype.json"),
+    );
+    #[cfg(not(test))]
+    read_at(
+        &path_for_install(install),
         &workspace().join(".blobui-kanban-formulas.json"),
         &workspace().join(".blobui-formula-prototype.json"),
     )
 }
 
 pub(crate) fn prepare_backup(install: &Path) -> Result<(), String> {
-    let configuration = load_at(
-        &path_for_install(install),
-        &workspace().join(".blobui-kanban-formulas.json"),
-        &workspace().join(".blobui-formula-prototype.json"),
-    )?;
+    let configuration = load_for_install(install)?;
     #[cfg(test)]
     let _ = &configuration;
     #[cfg(not(test))]
@@ -202,6 +218,10 @@ pub(crate) fn prepare_backup(install: &Path) -> Result<(), String> {
 fn migrate_legacy_configuration(bytes: &[u8]) -> Result<Configuration, String> {
     let value: Value = serde_json::from_slice(bytes)
         .map_err(|_| "The legacy Kanban formula file is malformed. It has been left unchanged.".to_string())?;
+    decode_configuration(value)
+}
+
+pub(crate) fn decode_configuration(value: Value) -> Result<Configuration, String> {
     if value.get("version").and_then(Value::as_u64) == Some(1) {
         let mut configuration = Configuration::default();
         match value.get("display").and_then(Value::as_str) {
@@ -273,17 +293,18 @@ fn publish_at(
         results
     });
     let css = crate::css::compile(&runtime, install, &data)?;
-    let config_bytes = serde_json::to_vec_pretty(&configuration)
-        .map_err(|_| "Could not prepare Kanban formulas.")?;
     let formula_value = serde_json::to_value(&configuration)
         .map_err(|_| "Could not prepare Kanban formulas.")?;
     // The snapshot, stylesheet, and saved baseline change together. A failed
     // API read or replacement never publishes half of a calculation set.
     use crate::storage::transaction::{commit_update, FileChange};
+    #[cfg(not(test))]
+    let _ = config_path;
     let changes = vec![
+        #[cfg(test)]
         FileChange {
             path: config_path.into(),
-            contents: Some(config_bytes),
+            contents: Some(crate::serialize_data(&formula_value)?),
         },
         FileChange {
             path: install.join("blob/blob.meta.json"),
@@ -291,7 +312,7 @@ fn publish_at(
         },
         FileChange {
             path: data_path,
-            contents: Some(crate::serialize_data(&data)?),
+            contents: Some(crate::serialize_runtime_data(&data)?),
         },
         FileChange {
             path: css_path,

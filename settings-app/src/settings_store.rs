@@ -1,8 +1,7 @@
-//! Split, lossless storage for the legacy BlobUI settings aggregate.
+//! App settings stored under the installation root.
 //!
 //! `root` is the app installation root. The aggregate is stored under
-//! `root/Settings`; its original object shape is described by `data.json` so
-//! old and future fields can pass through without normalization.
+//! `root/Settings`, with one copy of each preference.
 
 use serde_json::{json, Map, Value};
 use std::fs::{self, OpenOptions};
@@ -12,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SETTINGS_DIR: &str = "Settings";
-const FORMAT_VERSION: u64 = 1;
+const FORMAT_VERSION: u64 = 2;
 const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 const DATA_FILE: &str = "data.json";
 const META_FILE: &str = "blob.meta.json";
@@ -29,35 +28,45 @@ const PRIVATE_CONNECTION_FILE: &str = "DO-NOT-SHARE/connection.json";
 const PRIVATE_CREDENTIAL_FILE: &str = "DO-NOT-SHARE/anytype-api-key.dpapi";
 
 static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
+static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Load the split settings files and reconstruct the legacy aggregate value.
 ///
 /// A missing or malformed component is an error. Returning a partial aggregate
 /// could make a later save erase settings that were absent from an import.
 pub fn load(root: &Path) -> Result<Value, String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    load_unlocked(root)
+}
+
+fn load_unlocked(root: &Path) -> Result<Value, String> {
     let directory = root.join(SETTINGS_DIR);
     reject_directory_link(&directory)?;
+    reject_directory_link(&directory.join("anyblob"))?;
+    reject_directory_link(&directory.join("DO-NOT-SHARE"))?;
 
     let metadata = read_json(&directory.join(META_FILE), "settings metadata")?;
-    require_format(&metadata, "settings metadata")?;
+    let version = metadata.get("formatVersion").and_then(Value::as_u64)
+        .filter(|version| matches!(*version, 1 | FORMAT_VERSION))
+        .ok_or("The settings metadata file has an unsupported format version.")?;
     let data = read_json(&directory.join(DATA_FILE), "settings data")?;
-    require_format(&data, "settings data")?;
+    require_format(&data, version, "settings data")?;
     let basic = read_json(&directory.join(BASIC_FILE), "basic settings")?;
-    require_format(&basic, "basic settings")?;
+    require_format(&basic, version, "basic settings")?;
     let advanced = read_json(&directory.join(ADVANCED_FILE), "advanced settings")?;
-    require_format(&advanced, "advanced settings")?;
+    require_format(&advanced, version, "advanced settings")?;
     let calendar = read_json(&directory.join(CALENDAR_FILE), "calendar settings")?;
-    require_format(&calendar, "calendar settings")?;
+    require_format(&calendar, version, "calendar settings")?;
     let kanban = read_json(&directory.join(KANBAN_FILE), "Kanban settings")?;
-    require_format(&kanban, "Kanban settings")?;
+    require_format(&kanban, version, "Kanban settings")?;
     let keybinds = read_json(&directory.join(KEYBINDS_FILE), "keyboard shortcuts")?;
-    require_format(&keybinds, "keyboard shortcuts")?;
+    require_format(&keybinds, version, "keyboard shortcuts")?;
     let anyblob_settings = read_json(&directory.join(ANYBLOB_SETTINGS_FILE), "Anyblob settings")?;
-    require_format(&anyblob_settings, "Anyblob settings")?;
+    require_format(&anyblob_settings, version, "Anyblob settings")?;
     let anyblob_projects = read_json(&directory.join(ANYBLOB_PROJECTS_FILE), "Anyblob projects")?;
-    require_format(&anyblob_projects, "Anyblob projects")?;
+    require_format(&anyblob_projects, version, "Anyblob projects")?;
     let anyblob_permissions = read_json(&directory.join(ANYBLOB_PERMISSIONS_FILE), "Anyblob permissions")?;
-    require_format(&anyblob_permissions, "Anyblob permissions")?;
+    require_format(&anyblob_permissions, version, "Anyblob permissions")?;
 
     let mut aggregate = object_field(&data, "fields", "settings data")?.clone();
     merge_object_fields(&mut aggregate, object_field(&calendar, "fields", "calendar settings")?);
@@ -75,8 +84,43 @@ pub fn load(root: &Path) -> Result<Value, String> {
     }
 
     let shape = object_field(&data, "shape", "settings data")?;
-    let basic_locations = object_field(&basic, "locations", "basic settings")?;
-    let advanced_locations = object_field(&advanced, "locations", "advanced settings")?;
+    if version == 1 {
+        restore_legacy_locations(&mut aggregate, shape, &basic, &advanced, &anyblob_settings, &anyblob_projects, &anyblob_permissions)?;
+        crate::consolidate_legacy_settings(&mut aggregate);
+    } else if let Some(settings) = restore_setting_value(
+        shape.get("settings").ok_or("The settings shape is missing.")?,
+        Some(&basic["settings"]),
+        Some(&advanced["settings"]),
+        anyblob_settings.get("integration"),
+        anyblob_projects.get("projects"),
+        anyblob_permissions.get("spaces"),
+    )? {
+        aggregate.insert("settings".into(), settings);
+    }
+
+    if keybinds.get("present").and_then(Value::as_bool) == Some(true) {
+        let value = keybinds
+            .get("value")
+            .ok_or("The keyboard shortcut value is missing.")?;
+        aggregate.insert("keybinds".into(), value.clone());
+    }
+
+    // `blob.meta.json` is intentionally not copied into the returned legacy
+    // aggregate. It describes the on-disk split format rather than user data.
+    Ok(Value::Object(aggregate))
+}
+
+fn restore_legacy_locations(
+    aggregate: &mut Map<String, Value>,
+    shape: &Map<String, Value>,
+    basic: &Value,
+    advanced: &Value,
+    anyblob_settings: &Value,
+    anyblob_projects: &Value,
+    anyblob_permissions: &Value,
+) -> Result<(), String> {
+    let basic_locations = object_field(basic, "locations", "basic settings")?;
+    let advanced_locations = object_field(advanced, "locations", "advanced settings")?;
     let projects_by_location = anyblob_projects
         .pointer("/aggregate/locations")
         .and_then(Value::as_object)
@@ -115,19 +159,32 @@ pub fn load(root: &Path) -> Result<Value, String> {
         aggregate.insert("settingsV2".into(), settings_v2);
     }
 
-    if keybinds.get("present").and_then(Value::as_bool) == Some(true) {
-        let value = keybinds
-            .get("value")
-            .ok_or("The keyboard shortcut value is missing.")?;
-        aggregate.insert("keybinds".into(), value.clone());
-    }
-
-    // `blob.meta.json` is intentionally not copied into the returned legacy
-    // aggregate. It describes the on-disk split format rather than user data.
-    Ok(Value::Object(aggregate))
+    Ok(())
 }
 
-/// Save a legacy aggregate into `root/Settings` with a staged directory swap.
+/// Upgrade the split layout or migrate the original Anytype blob on first use.
+pub fn ensure(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    reject_directory_link(root)?;
+    let directory = root.join(SETTINGS_DIR);
+    reject_directory_link(&directory)?;
+    if directory.is_dir() {
+        let metadata = read_json(&directory.join(META_FILE), "settings metadata")?;
+        if metadata.get("formatVersion").and_then(Value::as_u64) == Some(1) {
+            let data = load_unlocked(root)?;
+            save_unlocked(root, &data, MigrationSeed::default())?;
+        }
+        return Ok(false);
+    }
+    reject_directory_link(legacy_blob)?;
+    if read_optional_json(&legacy_blob.join(DATA_FILE), "legacy BlobUI settings")?.is_none() {
+        return Ok(false);
+    }
+    migrate_legacy_blob_unlocked(legacy_blob, root)?;
+    Ok(true)
+}
+
+/// Save a settings aggregate into `root/Settings` with a staged directory swap.
 ///
 /// Non-JSON files already in Settings are copied into the staged directory and
 /// remain untouched. The `apiConnection` object is written under
@@ -136,8 +193,19 @@ pub fn save(root: &Path, data: &Value) -> Result<(), String> {
     save_internal(root, data, MigrationSeed::default())
 }
 
+pub fn read_formula(root: &Path) -> Result<Option<Value>, String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    let directory = root.join(SETTINGS_DIR);
+    reject_directory_link(&directory)?;
+    let document = read_json(&directory.join(KANBAN_FILE), "Kanban settings")?;
+    match document.get("formatVersion").and_then(Value::as_u64) {
+        Some(1) => Ok(document.get("legacyConfiguration").cloned()),
+        Some(FORMAT_VERSION) => Ok(document.get("configuration").cloned()),
+        _ => Err("The Kanban settings file has an unsupported format version.".into()),
+    }
+}
+
 /// Save the aggregate and the current Kanban formula configuration together.
-#[cfg(not(test))]
 pub fn save_with_formula(root: &Path, data: &Value, configuration: &Value) -> Result<(), String> {
     save_internal(
         root,
@@ -149,30 +217,28 @@ pub fn save_with_formula(root: &Path, data: &Value, configuration: &Value) -> Re
     )
 }
 
-/// Save the aggregate and Anyblob's opaque verifier state together.
-#[cfg(not(test))]
-pub fn save_with_anyblob_state(root: &Path, data: &Value, state: &Value) -> Result<(), String> {
-    save_internal(
-        root,
-        data,
-        MigrationSeed {
-            anyblob_state: Some(state.clone()),
+/// Store updater choices and the latest public version with the current settings.
+pub fn save_updater_preferences(root: &Path, preferences: &Value, latest_version: Option<&str>) -> Result<(), String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    let mut data = load_unlocked(root)?;
+    let mut saved = data["updaterPreferences"].as_object().cloned().unwrap_or_default();
+    merge_object_fields(&mut saved, preferences.as_object().ok_or("Updater preferences must be a JSON object.")?);
+    let saved = Value::Object(saved);
+    if data.get("updaterPreferences") != Some(&saved) {
+        data["updaterPreferences"] = saved;
+        save_unlocked(root, &data, MigrationSeed {
+            latest_public_version: latest_version.map(str::to_owned),
             ..MigrationSeed::default()
-        },
-    )
-}
-
-/// Save updater choices in `advanced-settings.json` while keeping other settings intact.
-#[cfg(not(test))]
-pub fn save_updater_preferences(root: &Path, preferences: &Value) -> Result<(), String> {
-    let mut data = load(root)?;
-    data["updaterPreferences"] = Value::Object(
-        preferences
-            .as_object()
-            .cloned()
-            .ok_or("Updater preferences must be a JSON object.")?,
-    );
-    save(root, &data)
+        })?;
+    } else if let Some(version) = latest_version {
+        let path = root.join(SETTINGS_DIR).join(META_FILE);
+        let mut metadata = read_json(&path, "settings metadata")?;
+        if metadata["latestPublicVersion"].as_str() != Some(version) {
+            metadata["latestPublicVersion"] = json!(version);
+            crate::storage::write_atomic(&path, &crate::serialize_data(&metadata)?)?;
+        }
+    }
+    Ok(())
 }
 
 /// Migrate a legacy Anytype `blob` directory into `root/Settings`.
@@ -182,6 +248,11 @@ pub fn save_updater_preferences(root: &Path, preferences: &Value) -> Result<(), 
 /// The source directory is never changed. Credential bytes are copied without
 /// parsing or decrypting them.
 pub fn migrate_legacy_blob(source_blob: &Path, root: &Path) -> Result<(), String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    migrate_legacy_blob_unlocked(source_blob, root)
+}
+
+fn migrate_legacy_blob_unlocked(source_blob: &Path, root: &Path) -> Result<(), String> {
     reject_directory_link(source_blob)?;
     if !source_blob.is_dir() {
         return Err("The legacy BlobUI folder does not exist.".into());
@@ -210,7 +281,7 @@ pub fn migrate_legacy_blob(source_blob: &Path, root: &Path) -> Result<(), String
         "legacy Kanban configuration",
     )?;
     seed.credential = read_optional_bytes(&source.join("credentials/anytype-api-key.dpapi"))?;
-    save_internal(root, &data, seed)
+    save_unlocked(root, &data, seed)
 }
 
 #[derive(Default)]
@@ -219,11 +290,21 @@ struct MigrationSeed {
     metadata: Option<Value>,
     anyblob_state: Option<Value>,
     formula_configuration: Option<Value>,
+    latest_public_version: Option<String>,
     credential: Option<Vec<u8>>,
 }
 
 fn save_internal(root: &Path, data: &Value, seed: MigrationSeed) -> Result<(), String> {
-    let original = data
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    save_unlocked(root, data, seed)
+}
+
+fn save_unlocked(root: &Path, data: &Value, seed: MigrationSeed) -> Result<(), String> {
+    let mut canonical = data.clone();
+    if let Some(fields) = canonical.as_object_mut() {
+        crate::consolidate_legacy_settings(fields);
+    }
+    let original = canonical
         .as_object()
         .ok_or("BlobUI settings must contain a JSON object.")?;
     fs::create_dir_all(root).map_err(|error| format!("Could not prepare the app folder: {error}"))?;
@@ -288,9 +369,9 @@ fn prepare_staged(
     let mut basic_settings = Map::new();
     let mut advanced_settings = Map::new();
     let mut updater_preferences = None;
-    let mut anyblob_descriptors = Map::new();
-    let mut anyblob_projects = Map::new();
-    let mut anyblob_permissions = Map::new();
+    let mut anyblob_integration = None;
+    let mut anyblob_projects = None;
+    let mut anyblob_permissions = None;
     let mut connection_present = false;
     let mut connection_value = None;
     let mut keybinds_present = false;
@@ -299,25 +380,25 @@ fn prepare_staged(
     for (key, value) in original {
         match key.as_str() {
             "settings" => {
-                let _ = split_settings(
-                    Some(value),
-                    "settings",
-                    &mut basic_settings,
-                    &mut advanced_settings,
-                    &mut anyblob_descriptors,
-                    &mut anyblob_projects,
-                    &mut anyblob_permissions,
-                );
-            }
-            "settingsV2" => {
-                let _ = split_settings_v2(
-                    Some(value),
-                    &mut basic_settings,
-                    &mut advanced_settings,
-                    &mut anyblob_descriptors,
-                    &mut anyblob_projects,
-                    &mut anyblob_permissions,
-                );
+                if let Some(settings) = value.as_object() {
+                    for (name, setting) in settings {
+                        if name == "codexIntegration" {
+                            anyblob_integration = Some(match setting.as_object() {
+                                Some(integration) => {
+                                    let mut fields = integration.clone();
+                                    anyblob_projects = fields.remove("projects");
+                                    anyblob_permissions = fields.remove("spaces");
+                                    json!({ "kind": "object", "base": fields })
+                                }
+                                None => json!({ "kind": "value", "value": setting }),
+                            });
+                        } else if is_advanced_setting(name) {
+                            advanced_settings.insert(name.clone(), setting.clone());
+                        } else {
+                            basic_settings.insert(name.clone(), setting.clone());
+                        }
+                    }
+                }
             }
             "apiConnection" => {
                 connection_present = true;
@@ -348,72 +429,69 @@ fn prepare_staged(
         .get("settings")
         .map(shape_for_settings)
         .unwrap_or_else(shape_missing);
-    let settings_v2_shape = original
-        .get("settingsV2")
-        .map(shape_for_settings_v2)
-        .unwrap_or_else(shape_missing);
-
-    let mut data_file = json!({
+    let data_file = json!({
         "formatVersion": FORMAT_VERSION,
         "fields": residual,
-        "shape": { "settings": settings_shape, "settingsV2": settings_v2_shape },
+        "shape": { "settings": settings_shape },
         "privateFields": { "apiConnectionPresent": connection_present },
     });
 
     let mut meta = existing_metadata(staged, seed.metadata.as_ref())?;
     set_field(&mut meta, "formatVersion", json!(FORMAT_VERSION));
-    set_field(&mut meta, "blobuiVersion", json!(env!("CARGO_PKG_VERSION")));
-    if meta.get("anyblobVersion").is_none() {
-        set_field(&mut meta, "anyblobVersion", Value::Null);
-    }
-    if meta.get("latestPublicVersion").is_none() {
+    set_field(&mut meta, "blobuiVersion", json!(env!("BLOBUI_BUILD_VERSION")));
+    let plugin: Value = serde_json::from_str(include_str!("../../codex-plugin/src/.codex-plugin/plugin.json"))
+        .map_err(|_| "The bundled Anyblob version could not be read.")?;
+    set_field(&mut meta, "anyblobVersion", plugin["version"].clone());
+    if let Some(version) = seed.latest_public_version {
+        set_field(&mut meta, "latestPublicVersion", json!(version));
+    } else if meta.get("latestPublicVersion").is_none() {
         set_field(&mut meta, "latestPublicVersion", Value::Null);
     }
 
-    let bridge_state = seed.anyblob_state.clone();
-    let prior_anyblob = read_optional_json(&staged.join(ANYBLOB_SETTINGS_FILE), "Anyblob settings")?;
-    let prior_kanban = read_optional_json(&staged.join(KANBAN_FILE), "Kanban settings")?;
-    let mut anyblob_settings = merge_managed_file(
-        prior_anyblob,
-        "aggregate",
-        json!({ "locations": anyblob_descriptors }),
-    );
-    if let Some(state) = seed.anyblob_state {
-        set_field(&mut anyblob_settings, "legacyState", state);
+    let mut anyblob_settings = read_optional_json(&staged.join(ANYBLOB_SETTINGS_FILE), "Anyblob settings")?
+        .unwrap_or_else(empty_object);
+    let legacy_state = anyblob_settings.as_object_mut().and_then(|fields| {
+        fields.remove("aggregate");
+        fields.remove("integration");
+        fields.remove("legacyState")
+    });
+    let bridge = staged.join(ANYBLOB_BRIDGE_FILE);
+    let previous_bridge = read_optional_json(&bridge, "legacy Anyblob bridge")?;
+    if let Some(state) = seed.anyblob_state.or(previous_bridge).or(legacy_state) {
+        if let Some(fields) = state.as_object() {
+            merge_object_fields(anyblob_settings.as_object_mut().ok_or("The Anyblob settings file is malformed.")?, fields);
+        } else {
+            return Err("The legacy Anyblob bridge file is malformed.".into());
+        }
+        remove_managed_file(&bridge)?;
+    }
+    if let Some(integration) = anyblob_integration {
+        set_field(&mut anyblob_settings, "integration", integration);
+    }
+    if anyblob_settings.get("enabled").is_none() {
+        set_field(&mut anyblob_settings, "enabled", Value::Bool(false));
     }
     set_field(&mut anyblob_settings, "formatVersion", json!(FORMAT_VERSION));
 
-    let mut projects_file = merged_locations_file(
-        read_optional_json(&staged.join(ANYBLOB_PROJECTS_FILE), "Anyblob projects")?,
-        anyblob_projects,
-    );
-    set_field(&mut projects_file, "formatVersion", json!(FORMAT_VERSION));
-    let mut permissions_file = merged_locations_file(
-        read_optional_json(&staged.join(ANYBLOB_PERMISSIONS_FILE), "Anyblob permissions")?,
-        anyblob_permissions,
-    );
-    set_field(&mut permissions_file, "formatVersion", json!(FORMAT_VERSION));
-
-    let mut advanced_file = merge_managed_file(
-        read_optional_json(&staged.join(ADVANCED_FILE), "advanced settings")?,
-        "locations",
-        json!({
-            "settings": advanced_settings.get("settings").cloned().unwrap_or_else(empty_object),
-            "settingsV2.settings": advanced_settings.get("settingsV2.settings").cloned().unwrap_or_else(empty_object),
-        }),
-    );
+    let projects_file = section_file("projects", anyblob_projects);
+    let permissions_file = section_file("spaces", anyblob_permissions);
+    let mut advanced_file = json!({ "formatVersion": FORMAT_VERSION, "settings": advanced_settings });
     if let Some(preferences) = updater_preferences {
         set_field(&mut advanced_file, "updaterPreferences", preferences);
     }
-    set_field(&mut advanced_file, "formatVersion", json!(FORMAT_VERSION));
 
+    let mut prior_kanban = read_optional_json(&staged.join(KANBAN_FILE), "Kanban settings")?;
+    let legacy_formula = prior_kanban.as_mut().and_then(Value::as_object_mut)
+        .and_then(|fields| fields.remove("legacyConfiguration"));
     let mut kanban_file = merge_managed_file(
         prior_kanban,
         "aggregateFields",
         json!(kanban_fields),
     );
-    if let Some(configuration) = seed.formula_configuration {
-        set_field(&mut kanban_file, "legacyConfiguration", configuration);
+    if let Some(configuration) = seed.formula_configuration
+        .or_else(|| legacy_formula.filter(|_| kanban_file.get("configuration").is_none()))
+    {
+        set_field(&mut kanban_file, "configuration", configuration);
     }
     set_field(&mut kanban_file, "formatVersion", json!(FORMAT_VERSION));
 
@@ -425,6 +503,12 @@ fn prepare_staged(
             copy_tree_contents(&source_assets, &staged.join("assets"))?;
         }
     }
+    let banner = staged.join("assets/banner.png");
+    let legacy_banner = staged.join("assets/spacebanner/banner.png");
+    if !banner.exists() && legacy_banner.is_file() {
+        fs::rename(&legacy_banner, &banner)
+            .map_err(|error| format!("Could not migrate the saved space banner: {error}"))?;
+    }
     if let Some(credential) = seed.credential {
         write_bytes(&staged.join(PRIVATE_CREDENTIAL_FILE), &credential)?;
     }
@@ -432,24 +516,17 @@ fn prepare_staged(
     if private_credential.is_file() {
         crate::storage::restrict_credential_acl(&private_credential)?;
     }
-    if let Some(state) = bridge_state {
-        write_json(&staged.join(ANYBLOB_BRIDGE_FILE), &state)?;
-    }
     if let Some(connection) = connection_value {
         write_json(&staged.join(PRIVATE_CONNECTION_FILE), &connection)?;
     } else if !connection_present {
         remove_managed_file(&staged.join(PRIVATE_CONNECTION_FILE))?;
     }
 
-    set_field(&mut data_file, "formatVersion", json!(FORMAT_VERSION));
     write_json(&staged.join(META_FILE), &meta)?;
     write_json(&staged.join(DATA_FILE), &data_file)?;
     write_json(
         &staged.join(BASIC_FILE),
-        &json!({ "formatVersion": FORMAT_VERSION, "locations": {
-            "settings": basic_settings.get("settings").cloned().unwrap_or_else(empty_object),
-            "settingsV2.settings": basic_settings.get("settingsV2.settings").cloned().unwrap_or_else(empty_object),
-        }}),
+        &json!({ "formatVersion": FORMAT_VERSION, "settings": basic_settings }),
     )?;
     write_json(&staged.join(ADVANCED_FILE), &advanced_file)?;
     write_json(
@@ -467,105 +544,9 @@ fn prepare_staged(
     Ok(())
 }
 
-fn split_settings(
-    value: Option<&Value>,
-    location: &str,
-    basic: &mut Map<String, Value>,
-    advanced: &mut Map<String, Value>,
-    anyblob: &mut Map<String, Value>,
-    projects: &mut Map<String, Value>,
-    permissions: &mut Map<String, Value>,
-) -> Value {
-    let Some(value) = value else { return shape_missing() };
-    let Some(fields) = value.as_object() else {
-        return json!({ "kind": "value", "value": value });
-    };
-    for (key, setting) in fields {
-        if key == "codexIntegration" {
-            split_codex_integration(
-                setting,
-                location,
-                anyblob,
-                projects,
-                permissions,
-            );
-        } else if is_advanced_setting(key) {
-            let section = merge_member(advanced.get(location), key, setting);
-            advanced.insert(location.into(), section);
-        } else {
-            let section = merge_member(basic.get(location), key, setting);
-            basic.insert(location.into(), section);
-        }
-    }
-    json!({ "kind": "object" })
-}
-
-fn split_settings_v2(
-    value: Option<&Value>,
-    basic: &mut Map<String, Value>,
-    advanced: &mut Map<String, Value>,
-    anyblob: &mut Map<String, Value>,
-    projects: &mut Map<String, Value>,
-    permissions: &mut Map<String, Value>,
-) -> Value {
-    let Some(value) = value else { return shape_missing() };
-    let Some(container) = value.as_object() else {
-        return json!({ "kind": "value", "value": value });
-    };
-    let Some(settings) = container.get("settings") else {
-        return json!({ "kind": "object", "rest": value, "settings": shape_missing() });
-    };
-    let settings_shape = split_settings(
-        Some(settings),
-        "settingsV2.settings",
-        basic,
-        advanced,
-        anyblob,
-        projects,
-        permissions,
-    );
-    let mut rest = container.clone();
-    rest.remove("settings");
-    json!({ "kind": "object", "rest": rest, "settings": settings_shape })
-}
-
 fn shape_for_settings(value: &Value) -> Value {
     if value.is_object() { json!({ "kind": "object" }) }
     else { json!({ "kind": "value", "value": value }) }
-}
-
-fn shape_for_settings_v2(value: &Value) -> Value {
-    let Some(container) = value.as_object() else {
-        return json!({ "kind": "value", "value": value });
-    };
-    let mut rest = container.clone();
-    let setting = rest.remove("settings");
-    let settings_shape = match setting {
-        Some(settings) => shape_for_settings(&settings),
-        None => shape_missing(),
-    };
-    json!({ "kind": "object", "rest": rest, "settings": settings_shape })
-}
-
-fn split_codex_integration(
-    value: &Value,
-    location: &str,
-    anyblob: &mut Map<String, Value>,
-    projects: &mut Map<String, Value>,
-    permissions: &mut Map<String, Value>,
-) {
-    let Some(integration) = value.as_object() else {
-        anyblob.insert(location.into(), json!({ "kind": "value", "value": value }));
-        return;
-    };
-    let mut base = integration.clone();
-    if let Some(value) = base.remove("projects") {
-        projects.insert(location.into(), value);
-    }
-    if let Some(value) = base.remove("spaces") {
-        permissions.insert(location.into(), value);
-    }
-    anyblob.insert(location.into(), json!({ "kind": "object", "base": base }));
 }
 
 fn restore_setting_value(
@@ -664,22 +645,12 @@ fn shape_missing() -> Value {
     json!({ "kind": "missing" })
 }
 
-fn merge_member(existing: Option<&Value>, key: &str, value: &Value) -> Value {
-    let mut map = existing
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    map.insert(key.into(), value.clone());
-    Value::Object(map)
-}
-
-fn merged_locations_file(existing: Option<Value>, locations: Map<String, Value>) -> Value {
-    let mut result = existing
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default();
-    result.insert("formatVersion".into(), json!(FORMAT_VERSION));
-    result.insert("aggregate".into(), json!({ "locations": locations }));
-    Value::Object(result)
+fn section_file(key: &str, value: Option<Value>) -> Value {
+    let mut section = json!({ "formatVersion": FORMAT_VERSION });
+    if let Some(value) = value {
+        set_field(&mut section, key, value);
+    }
+    section
 }
 
 fn merge_managed_file(existing: Option<Value>, managed_key: &str, managed_value: Value) -> Value {
@@ -747,8 +718,8 @@ fn set_field(value: &mut Value, key: &str, field: Value) {
     }
 }
 
-fn require_format(value: &Value, label: &str) -> Result<(), String> {
-    if value.get("formatVersion").and_then(Value::as_u64) == Some(FORMAT_VERSION) {
+fn require_format(value: &Value, version: u64, label: &str) -> Result<(), String> {
+    if value.get("formatVersion").and_then(Value::as_u64) == Some(version) {
         Ok(())
     } else {
         Err(format!("The {label} file has an unsupported format version."))
@@ -987,19 +958,69 @@ mod tests {
         });
 
         save(root, &original).unwrap();
-        assert_eq!(load(root).unwrap(), original);
+        let mut expected = original.clone();
+        crate::consolidate_legacy_settings(expected.as_object_mut().unwrap());
+        assert_eq!(load(root).unwrap(), expected);
 
         let directory = root.join(SETTINGS_DIR);
         let basic = read_json(&directory.join(BASIC_FILE), "basic").unwrap();
         let advanced = read_json(&directory.join(ADVANCED_FILE), "advanced").unwrap();
         let projects = read_json(&directory.join(ANYBLOB_PROJECTS_FILE), "projects").unwrap();
         let permissions = read_json(&directory.join(ANYBLOB_PERMISSIONS_FILE), "permissions").unwrap();
-        assert_eq!(basic["locations"]["settings"]["fontFamily"], "Inter");
-        assert_eq!(advanced["locations"]["settings"]["backgroundExperiment"], "normal");
-        assert_eq!(projects["aggregate"]["locations"]["settings"]["stable-project"]["futureProjectField"], json!([1, 2]));
-        assert_eq!(permissions["aggregate"]["locations"]["settingsV2.settings"]["full-space-id"]["future"], 1);
+        assert_eq!(basic["settings"]["fontFamily"], "Inter");
+        assert_eq!(advanced["settings"]["backgroundExperiment"], "autostart-background");
+        assert_eq!(projects["projects"]["stable-id"]["future"], true);
+        assert_eq!(permissions, json!({"formatVersion":2,"spaces":{"full-space-id":{"access":"createDelete","future":1}}}));
         assert!(directory.join(PRIVATE_CONNECTION_FILE).is_file());
         assert!(directory.join(PRIVATE_CREDENTIAL_FILE).parent().unwrap().is_dir());
+    }
+
+    #[test]
+    fn upgrades_a_split_store_without_restoring_revoked_permissions() {
+        let temp = TempDir::new();
+        let root = &temp.0;
+        let directory = root.join(SETTINGS_DIR);
+        for (file, content) in [
+            (META_FILE, json!({"futureMetadata": true})),
+            (DATA_FILE, json!({"fields": {}, "privateFields": {}, "shape": {
+                "settings": {"kind": "object"},
+                "settingsV2": {"kind": "object", "rest": {"version": 2}, "settings": {"kind": "object"}}
+            }})),
+            (BASIC_FILE, json!({"locations": {
+                "settings": {"fontFamily": "Inter", "includeSelections": true},
+                "settingsV2.settings": {"includeSelections": false}
+            }})),
+            (ADVANCED_FILE, json!({"locations": {}})),
+            (CALENDAR_FILE, json!({"fields": {}})),
+            (KANBAN_FILE, json!({"aggregateFields": {}, "legacyConfiguration": {"version": 2, "definitions": [], "display": "balanced"}})),
+            (KEYBINDS_FILE, json!({"present": false})),
+            (ANYBLOB_SETTINGS_FILE, json!({"aggregate": {"locations": {
+                "settings": {"kind": "object", "base": {}},
+                "settingsV2.settings": {"kind": "object", "base": {}}
+            }}, "legacyState": {"enabled": true}})),
+            (ANYBLOB_PROJECTS_FILE, json!({"aggregate": {"locations": {}}})),
+            (ANYBLOB_PERMISSIONS_FILE, json!({"aggregate": {"locations": {
+                "settings": {"revoked": {"access": "createDelete"}},
+                "settingsV2.settings": {"kept": {"access": "read"}}
+            }}})),
+        ] {
+            let mut content = content;
+            content["formatVersion"] = json!(1);
+            write_json(&directory.join(file), &content).unwrap();
+        }
+
+        ensure(root, &root.join("legacy")).unwrap();
+        let settings = load(root).unwrap();
+        assert_eq!(settings["settings"]["fontFamily"], "Inter");
+        assert_eq!(settings["settings"]["includeSelections"], false);
+        assert!(settings.get("settingsV2").is_none());
+        assert_eq!(
+            read_json(&directory.join(ANYBLOB_PERMISSIONS_FILE), "permissions").unwrap(),
+            json!({"formatVersion": 2, "spaces": {"kept": {"access": "read"}}})
+        );
+        assert_eq!(read_formula(root).unwrap().unwrap()["version"], 2);
+        assert_eq!(read_json(&directory.join(ANYBLOB_SETTINGS_FILE), "Anyblob settings").unwrap()["enabled"], true);
+        assert_eq!(read_json(&directory.join(META_FILE), "metadata").unwrap()["futureMetadata"], true);
     }
 
     #[test]
@@ -1025,8 +1046,8 @@ mod tests {
         assert_eq!(fs::read(settings.join("assets/banner.png")).unwrap(), vec![0x89, b'P', b'N', b'G']);
         assert_eq!(read_json(&settings.join(META_FILE), "meta").unwrap()["futureMeta"], "kept");
         assert_eq!(read_json(&settings.join(META_FILE), "meta").unwrap()["latestPublicVersion"], "9.9.9");
-        assert_eq!(read_json(&settings.join(ANYBLOB_SETTINGS_FILE), "anyblob").unwrap()["legacyState"]["verifier"], "opaque-hash");
-        assert_eq!(read_json(&settings.join(KANBAN_FILE), "kanban").unwrap()["legacyConfiguration"]["version"], 2);
+        assert_eq!(read_json(&settings.join(ANYBLOB_SETTINGS_FILE), "anyblob").unwrap()["verifier"], "opaque-hash");
+        assert_eq!(read_formula(&root).unwrap().unwrap()["version"], 2);
         assert!(source.join("credentials/anytype-api-key.dpapi").is_file());
     }
 

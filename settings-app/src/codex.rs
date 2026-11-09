@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(crate::settings_from_data(&data).codex_integration, config);
         assert_eq!(data["unrelated"]["keep"],42);
         assert_eq!(data["settings"]["other"],true);
-        assert_eq!(data["settings"]["codexIntegration"],data["settingsV2"]["settings"]["codexIntegration"]);
+        assert!(data.get("settingsV2").is_none());
         assert!(normalize(&Value::Null).spaces.is_empty());
         for access in ["none","read","readWrite","createDelete"] { for approval in ["alwaysAsk","approveForMe","fullAccess"] {
             let config = normalize(&json!({"spaces":{"id":{"access":access,"approval":approval,"filesEnabled":true}}}));

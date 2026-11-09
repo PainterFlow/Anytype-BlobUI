@@ -1,4 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import "../modal.js";
+import "../scrollbar.js";
+import "../visibility-field.js";
 import {
   Button,
   DeleteIcon,
@@ -15,12 +19,27 @@ import { DisclosurePanel } from "../shared/disclosure.jsx";
 import { ExpandableSearch } from "../shared/search.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
+import { FilterIcon, ReloadIcon, SearchIcon } from "../shared/catalog-icons.jsx";
 import { Sidebar } from "./shell.jsx";
 
 const pickerOptions = [
   { value: "balanced", label: "Balanced" },
   { value: "spacious", label: "Spacious" },
   { value: "compact", label: "Compact" },
+];
+
+const sourceOptions = [
+  { value: "types", label: "Object types", description: "Types and their properties" },
+  { value: "collections", label: "Collections", description: "Saved groups of objects" },
+  { value: "queries", label: "Queries", description: "Filtered object lists" },
+];
+
+const searchExamples = [
+  { title: "Buttons", description: "Neutral, accent, and icon actions" },
+  { title: "Settings rows", description: "Labels, descriptions, and switches" },
+  { title: "Text fields and pickers", description: "Text, secret, and select controls" },
+  { title: "Tabs", description: "Keyboard selection and animated indicator" },
+  { title: "Sidebar", description: "Navigation, Save, Undo, and Logs" },
 ];
 
 function closeCurrentWindow() {
@@ -70,10 +89,57 @@ function SidebarPreview({ onMessage }) {
   </div>;
 }
 
+function CatalogModalPreview() {
+  const backdrop = useRef(null);
+  const dialog = useRef(null);
+  const trigger = useRef(null);
+  const closeButton = useRef(null);
+  const modal = useRef(null);
+
+  useEffect(() => {
+    if (!backdrop.current || !dialog.current) return undefined;
+    const controller = window.BlobUI?.createModalController?.({
+      backdrop: backdrop.current,
+      dialog: dialog.current,
+      initialFocus: () => closeButton.current,
+      fallbackFocus: () => trigger.current,
+      inertTargets: [document.querySelector(".component-catalog-page")].filter(Boolean),
+    });
+    modal.current = controller;
+    return () => {
+      controller?.destroy();
+      modal.current = null;
+    };
+  }, []);
+
+  const dialogContent = <div ref={backdrop} className="confirm-backdrop" hidden>
+    <section ref={dialog} className="confirm-dialog component-catalog-dialog" role="dialog" aria-modal="true"
+      aria-labelledby="catalog-dialog-title" aria-describedby="catalog-dialog-description" tabIndex={-1}>
+      <Button ref={closeButton} className="confirm-close" aria-label="Close sample dialog" title="Close"
+        onClick={() => modal.current?.close()}>
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
+      </Button>
+      <h2 id="catalog-dialog-title">Apply sample change?</h2>
+      <p id="catalog-dialog-description">This dialog uses the same focus, Escape, backdrop, and reduced-motion behavior as Settings.</p>
+      <div className="confirm-actions">
+        <Button className="confirm-cancel" onClick={() => modal.current?.close()}>Cancel</Button>
+        <Button className="confirm-save" onClick={() => modal.current?.close()}>Apply</Button>
+      </div>
+    </section>
+  </div>;
+
+  return <>
+    <Button className="confirm-cancel component-catalog-modal-trigger" ref={trigger}
+      onClick={() => modal.current?.open()}>Open sample dialog</Button>
+    {createPortal(dialogContent, document.body)}
+  </>;
+}
+
 export function ComponentCatalog({ onClose }) {
   const [leaving, setLeaving] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0);
   const [selectedStyle, setSelectedStyle] = useState("balanced");
+  const [selectedSources, setSelectedSources] = useState(["types"]);
   const [enabled, setEnabled] = useState(true);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState(true);
@@ -81,6 +147,8 @@ export function ComponentCatalog({ onClose }) {
   const closeTimer = useRef(null);
   const closeStarted = useRef(false);
   const disclosureToggle = useRef(null);
+  const scrollContainer = useRef(null);
+  const pickerSurface = useRef(null);
 
   function requestClose() {
     if (closeStarted.current) return;
@@ -97,6 +165,7 @@ export function ComponentCatalog({ onClose }) {
   useEffect(() => {
     const closeOnEscape = event => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.target?.closest?.(".confirm-backdrop:not([hidden])")) return;
       event.preventDefault();
       requestClose();
     };
@@ -108,7 +177,7 @@ export function ComponentCatalog({ onClose }) {
   }, [onClose]);
 
   useEffect(() => {
-    const visibility = window.BlobUI?.VisibilityField?.bind({
+    const visibility = window.VisibilityField?.bind({
       input: document.getElementById("catalog-secret"),
       button: document.getElementById("catalog-secret-toggle"),
       field: document.getElementById("catalog-secret-field"),
@@ -119,6 +188,14 @@ export function ComponentCatalog({ onClose }) {
     return () => visibility?.destroy();
   }, []);
 
+  useEffect(() => {
+    const scrollbar = scrollContainer.current && window.BlobUI?.Scrollbar?.attach(scrollContainer.current, ".component-catalog-content");
+    return () => scrollbar?.destroy();
+  }, []);
+
+  const visibleSearchExamples = searchExamples.filter(example =>
+    `${example.title} ${example.description}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+
   return <main className={`component-catalog-page${leaving ? " leaving" : ""}`} aria-labelledby="component-catalog-title">
     <header className="component-catalog-titlebar" data-tauri-drag-region>
       <span className="component-catalog-window-title" data-tauri-drag-region>BlobUI Settings</span>
@@ -127,7 +204,7 @@ export function ComponentCatalog({ onClose }) {
         <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>
       </Button>
     </header>
-    <div className="component-catalog-scroll app-scrollbar">
+    <div ref={scrollContainer} className="component-catalog-scroll app-scrollbar">
       <div className="component-catalog-content">
         <header className="component-catalog-heading">
           <h1 id="component-catalog-title">Component catalog</h1>
@@ -135,14 +212,20 @@ export function ComponentCatalog({ onClose }) {
         </header>
 
         <div className="component-catalog-grid">
-          <CatalogSection title="Buttons" description="Shared buttons with the current Settings styles.">
+          <CatalogSection title="Buttons and icon controls" description="Neutral and accent actions, disabled state, and toolbar icons.">
             <SettingsGroup className="settings-list component-catalog-button-list">
               <div className="component-catalog-button-row">
                 <Button className="confirm-cancel" onClick={() => setMessage("The neutral button works.")}>Neutral action</Button>
                 <Button className="confirm-save" onClick={() => setMessage("The accent button works.")}>Save sample</Button>
+                <Button className="confirm-cancel" disabled>Unavailable</Button>
                 <IconButton aria-label="Remove sample item" title="Remove sample item" onClick={() => setMessage("The icon button works.")}>
                   <DeleteIcon />
                 </IconButton>
+              </div>
+              <div className="component-catalog-icon-row" role="group" aria-label="Toolbar icon controls">
+                <IconButton aria-label="Search examples" title="Search examples" onClick={() => setMessage("Search toolbar control selected.")}><SearchIcon /></IconButton>
+                <IconButton aria-label="Filter examples" title="Filter examples" onClick={() => setMessage("Filter toolbar control selected.")}><FilterIcon /></IconButton>
+                <IconButton aria-label="Reload examples" title="Reload examples" onClick={() => setMessage("Reload toolbar control selected.")}><ReloadIcon /></IconButton>
               </div>
               <p className="component-catalog-feedback" role="status">{message}</p>
             </SettingsGroup>
@@ -159,17 +242,25 @@ export function ComponentCatalog({ onClose }) {
             </SettingsGroup>
           </CatalogSection>
 
-          <CatalogSection title="Text fields and pickers" description="Reusable text, secret, and select controls.">
-            <SettingsGroup className="settings-list component-catalog-fields">
-              <TextField label="Interface font" inputAttributes={{ id: "catalog-font", defaultValue: "Inter" }} />
-              <VisibilityTextField label="Sample secret" inputAttributes={{ id: "catalog-secret", type: "password", defaultValue: "sample-key-1234" }}
-                buttonAttributes={{ id: "catalog-secret-toggle", type: "button", className: "visibility-toggle", "aria-pressed": "false", "aria-label": "Show sample value", title: "Show sample value" }} />
-              <div className="component-catalog-picker-row">
-                <span id="catalog-style-label">Board layout</span>
-                <SelectPicker id="catalog-style" label="Board layout" labelId="catalog-style-label" valueId="catalog-style-value"
-                  options={pickerOptions} value={selectedStyle} onChange={setSelectedStyle} />
-              </div>
-            </SettingsGroup>
+          <CatalogSection title="Text fields and pickers" description="Editable text, secret visibility, single select, and multi-select controls.">
+            <div ref={pickerSurface} className="component-catalog-picker-surface">
+              <SettingsGroup className="settings-list component-catalog-fields">
+                <TextField label="Interface font" inputAttributes={{ id: "catalog-font", defaultValue: "Inter" }} />
+                <VisibilityTextField label="Sample secret" inputAttributes={{ id: "catalog-secret", type: "password", defaultValue: "sample-key-1234" }}
+                  buttonAttributes={{ id: "catalog-secret-toggle", type: "button", className: "visibility-toggle", "aria-pressed": "false", "aria-label": "Show sample value", title: "Show sample value" }} />
+                <div className="component-catalog-picker-row">
+                  <span id="catalog-style-label">Board layout</span>
+                  <SelectPicker id="catalog-style" label="Board layout" labelId="catalog-style-label" valueId="catalog-style-value"
+                    portalRef={pickerSurface} options={pickerOptions} value={selectedStyle} onChange={setSelectedStyle} />
+                </div>
+                <div className="component-catalog-picker-row">
+                  <span id="catalog-sources-label">Source categories</span>
+                  <SelectPicker id="catalog-sources" label="Source categories" labelId="catalog-sources-label" valueId="catalog-sources-value"
+                    portalRef={pickerSurface} options={sourceOptions} value={selectedSources} multiple closeOnSelect={false}
+                    caption={`${selectedSources.length} selected`} onChange={setSelectedSources} />
+                </div>
+              </SettingsGroup>
+            </div>
           </CatalogSection>
 
           <CatalogSection title="Tabs" description="Keyboard navigation, selection, and the animated indicator.">
@@ -188,8 +279,15 @@ export function ComponentCatalog({ onClose }) {
           <CatalogSection title="Search and disclosure" description="Expanding search and the Docs-style disclosure panel.">
             <div className="component-catalog-search-row">
               <ExpandableSearch id="catalog-search" label="Search examples" value={search} onChange={setSearch} />
-              <span className="component-catalog-search-result">{search ? `Filtering for ${search}` : "Search examples"}</span>
+              <span className="component-catalog-search-result">{search ? `${visibleSearchExamples.length} matches` : "Search the examples"}</span>
             </div>
+            <ul className="component-catalog-search-results" aria-label="Searchable examples">
+              {visibleSearchExamples.map(example => <li key={example.title}><Button className="component-catalog-search-result-item"
+                onClick={() => setMessage(`${example.title} example selected.`)}>
+                <span>{example.title}</span><small>{example.description}</small>
+              </Button></li>)}
+              {!visibleSearchExamples.length && <li className="component-catalog-search-empty" role="status">No examples match this search.</li>}
+            </ul>
             <div className="component-catalog-disclosure">
               <Button ref={disclosureToggle} className="documentation-item component-catalog-disclosure-toggle"
                 aria-expanded={expanded} aria-controls="catalog-disclosure-panel" onClick={() => setExpanded(value => !value)}>
@@ -200,6 +298,10 @@ export function ComponentCatalog({ onClose }) {
                 <Button className="documentation-item documentation-child" onClick={() => setMessage("The disclosure child button works.")}>Example child action</Button>
               </DisclosurePanel>
             </div>
+          </CatalogSection>
+
+          <CatalogSection title="Dialogs" description="Shared confirmation styling, focus handling, Escape, and backdrop dismissal.">
+            <div className="component-catalog-dialog-preview"><CatalogModalPreview /></div>
           </CatalogSection>
 
           <CatalogSection title="Sidebar" description="The production Settings sidebar with sample navigation and actions." className="component-catalog-wide-card">
