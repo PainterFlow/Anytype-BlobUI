@@ -8,6 +8,7 @@
 - Make sure to always test and build/compile the app after you finished implementing the feature.
 - Anytypes v1 API is completely banned.
 - Never modify `Changelogs.md` unless I explicitly request it in my prompt.
+- Never modify `dev-guide.md` unless I explicitly request it in my prompt.
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.
