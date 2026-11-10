@@ -11,16 +11,16 @@ a[href^="blob://"]:active {
     box-shadow: none !important;
 }
 
-/* Keep editor blob markers out of Anytype's hover and click hit testing. */
-.pageMain .editor .blockText .editable a[href^="blob://"],
-.pageMain .editor .blockText .editable a[href^="blob://"] * {
+/* Keep editor and chat blob markers out of Anytype's hover and click hit testing. */
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href^="blob://"],
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href^="blob://"] * {
     pointer-events: none !important;
 }
 
 /* Anytype splits formatted phrases into separate links. Equally tall
    inline blocks join those runs and isolate inherited strike decorations.
    Their positioned backgrounds also cover markupunderline's outer border. */
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/spoiler"] {
     display: inline-block;
     position: relative;
     z-index: 0;
@@ -36,19 +36,19 @@ a[href^="blob://"]:active {
 }
 
 /* Round the phrase ends while keeping adjoining formatting runs seamless. */
-.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ a[href="blob://text.sfx/spoiler"]),
-.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ * a[href="blob://text.sfx/spoiler"]) {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ a[href="blob://text.sfx/spoiler"]),
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])):has(+ * a[href="blob://text.sfx/spoiler"]) {
     --blobui-spoiler-right-radius: 0px;
 }
 
-.pageMain .editor .blockText .editable > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) + :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) > :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) + :is(a[href="blob://text.sfx/spoiler"], :has(a[href="blob://text.sfx/spoiler"])) {
     --blobui-spoiler-left-radius: 0px;
 }
 
-/* The editable block receives hover because blob links never receive pointer
-   events. This reveals all spoilers in that block without Anytype's preview. */
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible),
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
+/* The editor or chat text block receives hover because blob links never receive
+   pointer events. This reveals its spoilers without Anytype's preview. */
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible),
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
     text-shadow: none !important;
@@ -61,39 +61,39 @@ a[href^="blob://"]:active {
 
 /* Browser spelling highlights paint above the spoiler background and can
    restore flagged glyphs. Hide them only while the spoiler is concealed. */
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible)::spelling-error,
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) *::spelling-error {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible)::spelling-error,
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) *::spelling-error {
     color: transparent !important;
     text-decoration: none !important;
 }
 
-.pageMain .editor .blockText .editable:not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):not(:hover) a[href="blob://text.sfx/spoiler"]:not(:focus-visible) * {
     background-color: transparent !important;
     background-image: none !important;
     background-clip: border-box !important;
     -webkit-background-clip: border-box !important;
 }
 
-.pageMain .editor .blockText .editable:hover a[href="blob://text.sfx/spoiler"],
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):hover a[href="blob://text.sfx/spoiler"],
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/spoiler"]:focus-visible {
     color: inherit !important;
     -webkit-text-fill-color: currentColor !important;
     background-color: color-mix(in srgb, var(--color-shape-highlight-light-solid, #1e1e1e) 70%, black) !important;
 }
 
-.pageMain .editor .blockText .editable:hover a[href="blob://text.sfx/spoiler"] *,
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/spoiler"]:focus-visible * {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):hover a[href="blob://text.sfx/spoiler"] *,
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/spoiler"]:focus-visible * {
     -webkit-text-fill-color: currentColor !important;
 }
 
 /* Atomic inline blocks do not inherit an ancestor's strike decoration. */
-.pageMain .editor .blockText .editable:hover markupstrike a[href="blob://text.sfx/spoiler"],
-.pageMain .editor .blockText .editable markupstrike a[href="blob://text.sfx/spoiler"]:focus-visible {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner):hover markupstrike a[href="blob://text.sfx/spoiler"],
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) markupstrike a[href="blob://text.sfx/spoiler"]:focus-visible {
     text-decoration-line: line-through !important;
 }
 
 /* A continuous rainbow sweep colors only the marked link text. */
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/rgb"] {
     color: inherit !important;
     caret-color: currentColor !important;
     -webkit-text-fill-color: transparent !important;
@@ -121,7 +121,7 @@ a[href^="blob://"]:active {
 }
 
 /* A neon gradient sweep colors only the marked link text. */
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/neon"] {
     color: inherit !important;
     caret-color: currentColor !important;
     -webkit-text-fill-color: transparent !important;
@@ -159,16 +159,16 @@ a[href^="blob://"]:active {
 
 /* Chromium paints spelling underlines above text-clipped gradients. Hide the
    underline on gradient effects so a misspelled word cannot break the sweep. */
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::spelling-error,
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::spelling-error {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::spelling-error,
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::spelling-error {
     color: transparent !important;
     text-decoration: none !important;
 }
 
 /* Chromium repaints selected strikethrough glyphs with the selection color.
    Keep that fill transparent so the animated gradient remains visible. */
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::selection,
-.pageMain .editor .blockText .editable a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::selection {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"])::selection,
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a:is([href="blob://text.sfx/rgb"], [href="blob://text.sfx/neon"]) *::selection {
     color: transparent !important;
 }
 
@@ -185,7 +185,7 @@ a[href^="blob://"]:active {
 }
 
 /* Transform only the marked link to keep its movement smooth. */
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/jumping"] {
     display: inline-block;
     max-width: 100%;
     vertical-align: baseline;
@@ -193,7 +193,7 @@ a[href^="blob://"]:active {
 }
 
 /* Anytype wraps struck links in markupstrike. Restore the line on the inline-block link. */
-.pageMain .editor .blockText .editable markupstrike a[href="blob://text.sfx/jumping"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) markupstrike a[href="blob://text.sfx/jumping"] {
     text-decoration-line: line-through !important;
 }
 
@@ -208,7 +208,7 @@ a[href^="blob://"]:active {
 }
 
 /* Independent cycles let the glitch components drift into and out of overlap. */
-.pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
+:is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/glitchy"] {
     position: relative;
     left: 0;
     top: 0;
@@ -357,17 +357,17 @@ a[href^="blob://"]:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pageMain .editor .blockText .editable a[href="blob://text.sfx/rgb"] {
+    :is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/rgb"] {
         animation: none !important;
         background-position: 50% 50%;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://text.sfx/neon"] {
+    :is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/neon"] {
         animation: none !important;
         background-position: 50% 50%;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://text.sfx/glitchy"] {
+    :is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/glitchy"] {
         animation: none !important;
         left: 0;
         top: 0;
@@ -379,7 +379,7 @@ a[href^="blob://"]:active {
         -webkit-text-stroke-width: 0;
     }
 
-    .pageMain .editor .blockText .editable a[href="blob://text.sfx/jumping"] {
+    :is(.pageMain .editor .blockText .editable, .block.blockChat .message .bubbleInner) a[href="blob://text.sfx/jumping"] {
         animation: none !important;
         display: inline;
         transform: none;
