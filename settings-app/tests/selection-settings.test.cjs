@@ -42,7 +42,21 @@ test('Include selections sits inside the accent box and supports migration, Save
       } } };
     });
     await loadSettings(page);
+    await page.bringToFront();
     await page.waitForFunction(() => window.appReady);
+    const heading = page.locator('#accent-heading');
+    const selection = () => heading.evaluate(el => {
+      const selected = getComputedStyle(el, '::selection');
+      return { background: selected.backgroundColor, text: selected.color, normal: getComputedStyle(el).color };
+    });
+    const focusedSelection = await selection();
+    assert.notEqual(focusedSelection.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(focusedSelection.text, focusedSelection.normal);
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    const unfocusedSelection = await selection();
+    assert.deepEqual(unfocusedSelection, focusedSelection, 'The app keeps its selection color when its window loses focus');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.deepEqual(await selection(), focusedSelection);
     assert.equal(await page.locator("#accent-heading").innerText(), "Accent Color");
     const toggle = page.locator('#include-selections');
     assert.equal(await toggle.isChecked(), true);
@@ -73,7 +87,7 @@ test('Include selections sits inside the accent box and supports migration, Save
     const customSelection = await appSelection();
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
     await toggle.uncheck();
-    assert.notEqual(await appSelection(), customSelection, 'Disabling selections restores the Settings default');
+    assert.equal(await appSelection(), customSelection, 'The Settings app keeps its accent selection color when Anytype selection styling is disabled');
     await page.evaluate(() => window.BlobUI.discardChanges());
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
