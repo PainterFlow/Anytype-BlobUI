@@ -281,6 +281,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .update-now-button { grid-row: 3; color: #de50de; }
 .log-button[data-severity="error"] { color: var(--color-red); }
 .log-button[data-severity="warning"] { color: var(--color-yellow); }
+.log-button[data-severity="warning"] .action-icon { transform: translateY(-1px); }
 .log-control { position: relative; grid-row: 3; }
 .help-control { position: relative; grid-row: 4; }
 .sidebar-actions.has-update { grid-template-rows: repeat(5, 28px); }
