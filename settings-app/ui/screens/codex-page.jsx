@@ -13,7 +13,7 @@ export function CodexPage() {
     window.BlobUI.CodexPage.attach({ root: root.current });
   }, []);
   return <div className="codex-react-page" ref={root}>
-    <Tabs id="codex-tabs" label="Anyblob (Codex Integration)" selected={selected} onSelect={index=>controller.select(index)} useChildPanels items={[
+    <Tabs id="codex-tabs" label="Anyblob" selected={selected} onSelect={index=>controller.select(index)} useChildPanels items={[
       {tabId:"codex-tab-0",panelId:"codex-panel-0",title:"Settings"},
       {tabId:"codex-tab-1",panelId:"codex-panel-1",title:"Permissions"},
       {tabId:"codex-tab-2",panelId:"codex-panel-2",title:"Projects"},
