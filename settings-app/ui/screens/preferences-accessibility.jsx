@@ -12,7 +12,7 @@ import {
 import { Tabs } from "../shared/tabs.jsx";
 import { CalendarColors } from "./calendar-colors.jsx";
 
-export const preferenceLabels = ["Colors", "Font", "Space banner"];
+export const preferenceLabels = ["Colors", "Font", "Space Banner"];
 
 function tabItems(prefix, labels) {
   return labels.map((title, index) => ({
@@ -128,7 +128,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab })
     </SettingsSection>
 
     <SettingsSection className="settings-group space-banner-group" aria-labelledby="space-banner-heading">
-      <SettingsHeading id="space-banner-heading" title="Space banner" description="Choose an image to show at the top of your Anytype sidebar." />
+      <SettingsHeading id="space-banner-heading" title="Space Banner" description="Choose an image to show at the top of your Anytype sidebar." />
       <div className="space-banner-controls">
         <div className="space-banner-actions">
           <Button id="choose-banner-image" className="banner-image-button">Choose image</Button>
