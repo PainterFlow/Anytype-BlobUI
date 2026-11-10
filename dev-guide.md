@@ -42,7 +42,7 @@ Use `scripts/Build-Installer.ps1` to package the app as a Windows installer afte
 
 `Changelogs.md` contains release notes. `Changelogs.yaml` declares the local images and videos used by those notes. Add release entries when preparing a release, and use Markdown for headings, lists, links, code blocks, and images.
 
-The Dev Guide also uses Markdown. Local guide images use aliases registered in `settings-app/ui/docs-data.js`, for example `![BlobUI mark](@blobui-mark)`. The app loads these files through its sanitized Markdown renderer.
+The Dev Guide also uses Markdown. Local guide images use aliases registered in `settings-app/ui/markdown-media.js`, for example `![BlobUI mark](@blobui-mark)`. The app loads these files through its sanitized Markdown renderer.
 
 ## GitHub workflow
 

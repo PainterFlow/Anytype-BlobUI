@@ -12,33 +12,9 @@ Made by @PainterFlow11.
 4. Open BlobUI from the Start menu and complete onboarding. The API key is optional.
 5. In Anytype, enable File > Apply Custom CSS. Save your appearance choices in BlobUI, then reload Anytype with Ctrl+R.
 
-Read [Installation and removal](settings-app/ui/docs/installation-and-removal.md) for folder choices, API setup, reinstalling, and uninstalling.
+## Developer guide
 
-## Documentation
-
-The same articles are bundled in Settings under Help > Documentation for offline reading.
-
-### User guide
-
-- [Introduction](settings-app/ui/docs/introduction.md)
-- [Installation and removal](settings-app/ui/docs/installation-and-removal.md)
-- [Features](settings-app/ui/docs/features.md)
-  - [Appearance](settings-app/ui/docs/appearance.md)
-  - [Kanban](settings-app/ui/docs/kanban-layouts-and-formulas.md)
-  - [Calendar Colors](settings-app/ui/docs/calendar-colors.md)
-  - [QoL Features](settings-app/ui/docs/text-effects-and-previews.md)
-- [Anyblob (Codex Integration)](settings-app/ui/docs/anyblob-codex-integration.md)
-  - [Setup](settings-app/ui/docs/anyblob-setup.md)
-  - [Configuration](settings-app/ui/docs/anyblob-configuration.md)
-- [API Guide](settings-app/ui/docs/api-guide.md)
-  - [Settings UI](settings-app/ui/docs/settings-ui-refresh.md)
-- [Updating](settings-app/ui/docs/updating.md)
-
-### Development
-
-- [Setup and architecture](settings-app/ui/docs/setup-and-architecture.md)
-- [Theme & docs dev](settings-app/ui/docs/theme-and-documentation-development.md)
-- [Testing and releases](settings-app/ui/docs/testing-and-releases.md)
+The in-app [Dev Guide](dev-guide.md) covers local setup, build commands, release notes, and the GitHub workflow.
 
 ## Build from source
 
@@ -49,7 +25,7 @@ On Windows with Rust and the Windows C++ build tools installed, run these comman
 .\scripts\Build-Installer.ps1
 ```
 
-See the development articles for workspace isolation, tests, packaging, and releases.
+See the [Dev Guide](dev-guide.md) for local setup, build commands, and the GitHub workflow.
 
 ## License
 
@@ -68,7 +44,7 @@ in their contributions and must have permission to submit them.
 
 ## Anyblob integration
 
-Anyblob connects Codex to Anytype through the running BlobUI Settings app. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the in-app [Anyblob guide](settings-app/ui/docs/anyblob-codex-integration.md) for setup and configuration details, or the [plugin reference](codex-plugin/src/README.md) for the complete tool list.
+Anyblob connects Codex to Anytype through the running BlobUI Settings app. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the [plugin reference](codex-plugin/src/README.md) for the complete tool list.
 
 ## Background development launches
 

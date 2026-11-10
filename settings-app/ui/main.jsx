@@ -5,7 +5,7 @@ import "./saved-state.js";
 import "./edit-session.js";
 import "./video-player.js";
 import "./markdown.js";
-import "./docs-data.js";
+import "./markdown-media.js";
 import "./scrollbar.js";
 import "./log-store.js";
 import "./external-links.js";
