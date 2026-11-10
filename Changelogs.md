@@ -32,12 +32,9 @@
 
 *Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
 
-## Advanced Features
+## Anyblob (0.2.25 -> 0.2.26)
 
-### Streamer Mode
-
-- You can now hide Anytype from screen capture software in advanced settings.
-- You can also toggle whether you want BlobUI to automatically toggle streamer mode, depending on whether you're recording/streaming.
+- I hope I fixed a few stale mcp server that could spawn when re-compiling the app.
 
 ## Bugfixes
 
