@@ -159,8 +159,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const logButton = el("log-button");
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
+  const logStore = window.BlobUI.LogStore.create();
+  let copyConfirmationTimer = null;
+  let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
-  const logs = [];
   const root = document.documentElement;
   const toggleSettings = {
     "include-selections": "includeSelections",
@@ -889,6 +891,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   async function checkForUpdates(automatic = false) {
     if (automatic && (simulationActive || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed)) return;
     if (!updaterSettingsLoaded || !window.appReady || updaterBusyOperation) return;
+    if (!automatic) beginLogAttempt();
     updaterBusyOperation = "checking";
     mergeUpdaterState({ status: "checking", message: "Checking for updates…" });
     renderUpdaterState();
@@ -935,6 +938,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
       return;
     }
+    if (!fromAutomaticCheck) beginLogAttempt();
     updaterBusyOperation = "updating";
     mergeUpdaterState({ status: "updating", message: "Downloading the update. Settings will close and reopen automatically." });
     renderUpdaterState();
@@ -969,16 +973,21 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     addLog(message, kind);
   }
 
-  function addLog(message, kind) {
-    if (disposed) return;
-    const level = kind === "error" || kind === "warning" ? kind : "info";
-    const entry = { message: String(message), level, time: new Date().toLocaleTimeString() };
-    logs.push(entry);
-    const severity = logs.some((item) => item.level === "error") ? "error"
-      : logs.some((item) => item.level === "warning") ? "warning" : "info";
-    view.update({ logRows: logs.map(item => ({ level: item.level, text: formatLog(item) })), logSeverity: severity });
+  function beginLogAttempt() {
+    logStore.beginAttempt();
+  }
+
+  function updateLogView() {
+    const entries = logStore.entries();
+    view.update({ logRows: entries.map(item => ({ level: item.level, text: formatLog(item) })), logSeverity: logStore.severity() });
     updateLogsScrollbar();
     logEntries.scrollTop = logEntries.scrollHeight;
+  }
+
+  function addLog(message, kind) {
+    if (disposed) return;
+    if (!hasSavedApiKey && window.BlobUI.LogStore.isConnectionFailure(message)) return;
+    if (logStore.add(message, kind)) updateLogView();
   }
 
   function formatLog(entry) {
@@ -1387,6 +1396,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   async function loadState({ refreshMetadata = false, waitForUpdater = false } = {}) {
+    beginLogAttempt();
     const loadGeneration = ++appStateLoadGeneration;
     let state = null;
     let stateError = null;
@@ -1446,11 +1456,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
-    if (refreshOnStart) void window.BlobUI.AppReload.run({ checkUpdates: false });
+    if (refreshOnStart) {
+      const startupDelay = ["foreground", "background"].includes(state.startupMode) ? 1600 : 0;
+      if (startupDelay) {
+        startupRefreshTimer = window.setTimeout(() => {
+          startupRefreshTimer = null;
+          if (!disposed) void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
+        }, startupDelay);
+      } else void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
+    }
     if (state.ready && !needsOnboarding) void showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
+    beginLogAttempt();
     savedRefreshEpoch++;
     savedRefresh.invalidate();
     let state;
@@ -1727,6 +1746,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   async function save(options = {}) {
     if (!draft || saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
+    beginLogAttempt();
     // Let the formula page report missing connection/setup requirements inline.
     if (!window.appReady) {
       const formulas = window.BlobUI.FormulaPage.read();
@@ -2306,17 +2326,36 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!el("log-control").contains(event.target)) closeLogs();
   });
   listen(el("copy-logs"), "click", async () => {
+    beginLogAttempt();
     try {
-      await navigator.clipboard.writeText(logs.map(formatLog).join("\n"));
+      await navigator.clipboard.writeText(logStore.entries().map(formatLog).join("\n"));
       el("copy-status").textContent = "All logs copied.";
-      el("copy-logs").title = "All logs copied";
+      view.update({ copyLogsCopied: true });
+      if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+      copyConfirmationTimer = window.setTimeout(() => {
+        copyConfirmationTimer = null;
+        view.update({ copyLogsCopied: false });
+        el("copy-status").textContent = "";
+      }, 1400);
     } catch (error) {
+      view.update({ copyLogsCopied: false });
       setStatus("Could not copy logs. " + (error.message || String(error)), "error");
       el("copy-status").textContent = "Could not copy logs.";
     }
   });
+  listen(el("clear-logs"), "click", () => {
+    logStore.clear();
+    if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+    copyConfirmationTimer = null;
+    view.update({ copyLogsCopied: false });
+    el("copy-status").textContent = "";
+    closeLogs();
+    updateLogView();
+    el("help-button").focus();
+  });
 
   async function windowAction(command) {
+    beginLogAttempt();
     try {
       await invoke(command);
     } catch (error) {
@@ -2647,6 +2686,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     setStatus(error.message || String(error), "error");
   });
   const backgroundErrorSubscription = subscribeNativeEvent("blobui-background-error", event => {
+    beginLogAttempt();
     const message = String(event.payload || "Could not run BlobUI in background.");
     setStatus(message, "error");
     addLog(message, "error");
@@ -2654,6 +2694,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function dispose() {
     if (disposed) return;
     disposed = true;
+    if (startupRefreshTimer !== null) window.clearTimeout(startupRefreshTimer);
+    if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+    startupRefreshTimer = null;
+    copyConfirmationTimer = null;
     nativeEventsDisposed = true;
     nativeService.dispose();
     eventUnsubscribers.splice(0).forEach(unlisten => {
@@ -2678,7 +2722,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   window.BlobUI.AppReload = window.BlobUI.ReloadController.create({
-    onReload: () => addLog("Reloading app metadata. Refreshing Anytype lists and pickers.", "info"),
+    onReload: ({ startup = false } = {}) => {
+      if (!startup && startupRefreshTimer !== null) {
+        window.clearTimeout(startupRefreshTimer);
+        startupRefreshTimer = null;
+      }
+      if (!startup) beginLogAttempt();
+      addLog("Reloading app metadata and refreshing Anytype lists and pickers.", "info");
+    },
     isCapturing: () => !!shortcutCaptureAction,
     beforeRun: async () => {
       try { await refreshSavedState(); }
@@ -2690,8 +2741,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
-    onChange: markDirty, onInfo: message => addLog(message, "info") });
-  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+    onChange: markDirty, onInfo: message => addLog(message, "info"), onAttempt: beginLogAttempt });
+  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: message => addLog(message, "info"), onAttempt: beginLogAttempt, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
   const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {

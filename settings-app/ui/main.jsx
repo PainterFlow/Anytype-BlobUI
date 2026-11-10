@@ -8,6 +8,7 @@ import "./markdown.js";
 import "./docs-data.js";
 import "./docs.js";
 import "./scrollbar.js";
+import "./log-store.js";
 import "./external-links.js";
 import "./calculator-math.js";
 import "./view-catalog.js";
@@ -43,7 +44,7 @@ let app;
 
 function SettingsScreens() {
   const { page, preferenceTab, calendarTab, kanbanTab, advancedTab, settingsFields, saveVisible, saveDisabled, discardDisabled, saveBusy,
-    documentationOpened, releaseNotesMedia, logRows, logSeverity, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, backgroundExperiment, backgroundExperimentDisabled } =
+    documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, backgroundExperiment, backgroundExperimentDisabled } =
     useSyncExternalStore(view.subscribe, view.getSnapshot);
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
   return <>
@@ -54,7 +55,7 @@ function SettingsScreens() {
       <Sidebar navigation={<SettingsNavigation page={page} onNavigate={name => app?.showSettingsPage(name)}
         onSection={(name, index) => app?.openSection(name, index)} />}
         saveVisible={saveVisible} saveDisabled={saveDisabled} discardDisabled={discardDisabled} saveBusy={saveBusy}
-        logRows={logRows} logSeverity={logSeverity}
+        logRows={logRows} logSeverity={logSeverity} copyLogsCopied={copyLogsCopied}
         onSave={() => app?.save()} onDiscard={() => app?.openDiscardConfirmation()} />
       <main className="main-content">
         <section className="page-content" aria-labelledby="page-title">

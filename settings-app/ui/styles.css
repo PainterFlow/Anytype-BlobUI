@@ -279,7 +279,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 .discard-button { grid-row: 2; color: var(--text-secondary); }
 .discard-button:hover:not(:disabled) { color: var(--color-red); }
 .update-now-button { grid-row: 3; color: #de50de; }
-.log-button[data-severity="error"], .log-button[data-severity="warning"] { color: var(--text-secondary); }
+.log-button[data-severity="error"] { color: var(--color-red); }
+.log-button[data-severity="warning"] { color: var(--color-yellow); }
 .log-control { position: relative; grid-row: 3; }
 .help-control { position: relative; grid-row: 4; }
 .sidebar-actions.has-update { grid-template-rows: repeat(5, 28px); }
@@ -313,10 +314,17 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .keybinds-content .keybind-status:empty { margin: 0; }
 .keybind-status.error { color: var(--color-red); }
 .log-heading { display: flex; align-items: center; justify-content: space-between; padding-left: 8px; }
+.log-heading-actions { display: flex; align-items: center; gap: 4px; }
 .log-heading h2 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
-.copy-logs { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.copy-logs, .clear-logs { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 6px; color: var(--text-secondary); background: transparent; line-height: 0; cursor: pointer; }
 .copy-logs:hover { background: var(--active); color: var(--text); }
-.copy-logs svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.copy-logs[data-copied="true"]:hover { background: color-mix(in srgb, var(--color-green) 16%, transparent); color: var(--color-green); }
+.copy-logs svg, .clear-logs svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.copy-logs .copy-success-icon { display: none; color: var(--color-green); }
+.copy-logs[data-copied="true"] .copy-icon { display: none; }
+.copy-logs[data-copied="true"] .copy-success-icon { display: block; }
+.clear-logs { color: var(--color-red); }
+.clear-logs:hover { background: color-mix(in srgb, var(--color-red) 16%, transparent); color: var(--color-red); }
 .log-entries { overflow-y: auto; min-height: 0; padding: 4px 8px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .log-entry { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-code); font-size: 12px; line-height: 18px; }
 .log-entry.error { color: var(--color-red); }

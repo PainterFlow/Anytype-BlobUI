@@ -64,6 +64,8 @@ const savedUpdaterSettings = [];
 const savedShortcuts = [];
 const releaseNotesScenarioArg = process.argv.find(argument => argument.startsWith('--release-notes-scenario='));
 const releaseNotesScenario = releaseNotesScenarioArg ? releaseNotesScenarioArg.split('=', 2)[1] : null;
+const startupModeScenarioArg = process.argv.find(argument => argument.startsWith('--startup-mode='));
+const startupModeScenario = startupModeScenarioArg ? startupModeScenarioArg.split('=', 2)[1] : null;
 const loadErrorScenarioArg = process.argv.find(argument => argument.startsWith('--load-error-scenario='));
 const loadErrorScenario = loadErrorScenarioArg ? loadErrorScenarioArg.split('=', 2)[1] : null;
 const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'parse-error'
@@ -189,7 +191,7 @@ const context = {
         if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
         return {
         ready: true, theme: 'dark',
-        apiPort: 31009, apiIp: '', hasSavedApiKey: true,
+        apiPort: 31009, apiIp: '', hasSavedApiKey: true, startupMode: startupModeScenario || 'off',
         defaultBannerPreview: 'data:image/png;base64,default-preview',
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
@@ -347,6 +349,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/saved-state.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/log-store.js'), 'utf8'), context);
   context.createNativeService = require('../ui/native-service.js').createNativeService;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
   let viewState = { page: 'preferences', calendarTab: 0, kanbanTab: 0 };
@@ -375,6 +378,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         element('save-button.save-label').textContent = patch.saveBusy ? 'Saving…' : 'Save changes';
       }
       if ('backgroundExperiment' in patch) { element('background-experiment').value = patch.backgroundExperiment; element('window-background').hidden = patch.backgroundExperiment === 'disabled'; }
+      if ('copyLogsCopied' in patch) element('copy-logs').dataset.copied = String(patch.copyLogsCopied);
       if ('startupMode' in patch) element('startup-mode').value = patch.startupMode;
       if ('startupModeDisabled' in patch) element('startup-mode').disabled = patch.startupModeDisabled;
       if ('kanbanStyle' in patch) element('kanban-view-style').value = patch.kanbanStyle;
@@ -446,6 +450,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await flush();
   for (let turn = 0; turn < 10 && element('autoplay-videos').disabled; turn += 1) await flush();
   assert.equal(element('autoplay-videos').disabled, false, 'Updater controls unlock after saved App Settings load.');
+  if (startupModeScenario) {
+    for (let turn = 0; turn < 10 && ![...timers.values()].some(timer => timer.delay === 1600); turn += 1) await flush();
+    assert([...timers.values()].some(timer => timer.delay === 1600), 'Autostart delays the initial metadata refresh by 1.6 seconds.');
+    const startupTimer = [...timers.entries()].find(([, timer]) => timer.delay === 1600);
+    timers.delete(startupTimer[0]);
+  }
   if (loadErrorScenario) {
     assert.match(status(), /not valid JSON/, 'The original state-load failure remains visible.');
     assert.equal(element('install-directory').disabled, false, 'The folder picker remains available after a profile load error.');
@@ -985,6 +995,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('copy-logs').handlers.click();
   assert(copiedLogs.includes('Rebuild failed.'));
   assert.equal(copiedLogs.split('\n').length, element('log-entries').children.length);
+  assert.equal(element('copy-logs').dataset.copied, 'true', 'Copying logs shows the checkmark state.');
+  const copyFeedback = [...timers.entries()].find(([, timer]) => timer.delay === 1400);
+  assert(copyFeedback, 'The copied state has a short reset timer.');
+  timers.delete(copyFeedback[0]);
+  copyFeedback[1].callback();
+  assert.equal(element('copy-logs').dataset.copied, 'false');
   context.document.handlers.pointerdown({ target: element('log-control') });
   assert.equal(element('log-popup').hidden, false);
   context.document.handlers.pointerdown({ target: element('font-family') });
@@ -1000,6 +1016,13 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('copy-logs').handlers.click();
   assert.match(element('copy-status').textContent, /Could not copy/);
   assert.match(element('log-entries').children.at(-1).textContent, /Clipboard unavailable/);
+  element('clear-logs').handlers.click();
+  assert.equal(element('log-entries').children.length, 0, 'Clear removes every log entry.');
+  assert.equal(element('log-button').hidden, true, 'Clear hides the Logs control after resetting it.');
+  assert.equal(element('log-button').dataset.severity, 'info', 'Clear restores the default severity.');
+  assert.equal(element('log-popup').hidden, true, 'Clear closes the now-empty Logs popup.');
+  assert.equal(element('copy-status').textContent, '');
+  assert(element('help-button').focused, 'Focus moves to a visible control when clearing hides Logs.');
 
   for (const [id, command] of [
     ['window-minimize', 'minimize_window'], ['window-close', 'hide_window'],
