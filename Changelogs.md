@@ -41,6 +41,8 @@
 
 ## Bugfixes
 
+*Developers Note: Fixed a variety of undocumented backend issues with settings, you shouldn't notice any difference though.*
+
 - Issue#103: There can sometimes be duplicate blob ui mcp servers.
 - Issue#100: Rename "Accent color" section to "Accent Color".
 - Issue#99: The in-app text selection color uses windows default color.
