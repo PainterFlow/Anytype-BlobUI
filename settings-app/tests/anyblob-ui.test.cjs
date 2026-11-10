@@ -26,7 +26,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]').first(),install=panel.getByRole('button',{name:'Install',exact:true});
     assert.equal(await page.locator('#codex-nav .nav-label').count() ? await page.locator('#codex-nav .nav-label').innerText() : await page.locator('#codex-nav').innerText(),'Anyblob');
     assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),5);
-    assert.equal(await panel.locator('#enable-anyblob').evaluate(el=>getComputedStyle(el.querySelector('span:first-child')).fontSize),'16px');
+    assert.equal(await panel.locator('#enable-anyblob').evaluate(el=>getComputedStyle(el.closest('label').querySelector('span:first-child')).fontSize),'16px');
     assert.equal(await panel.locator('.object-mention-row .kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
     assert.equal(await panel.locator('.kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
