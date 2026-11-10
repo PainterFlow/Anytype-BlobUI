@@ -986,6 +986,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   function addLog(message, kind) {
     if (disposed) return;
+    if (!hasSavedApiKey && window.BlobUI.LogStore.isConnectionFailure(message)) return;
     if (logStore.add(message, kind)) updateLogView();
   }
 

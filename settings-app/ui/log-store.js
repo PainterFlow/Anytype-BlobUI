@@ -3,18 +3,24 @@
   const UI = root.BlobUI = root.BlobUI || {};
   const severity = { info: 0, warning: 1, error: 2 };
 
-  function normalizeLevel(message, kind) {
+  function isConnectionFailure(message) {
     const text = String(message).toLowerCase();
-    if (/anytype(?:'s)? local api/.test(text)
-      && /(could not reach|timed out|timeout|unavailable)/.test(text)) return "warning";
+    return /anytype(?:'s)? local api/.test(text)
+      && /(could not reach|timed out|timeout|unavailable)/.test(text);
+  }
+
+  function normalizeLevel(message, kind) {
+    if (isConnectionFailure(message)) return "warning";
     return kind === "error" || kind === "warning" ? kind : "info";
   }
 
   function messageKey(message) {
+    if (isConnectionFailure(message)) return "anytype-local-api-unavailable";
     return String(message).trim().replace(/\s+/g, " ").toLocaleLowerCase();
   }
 
   UI.LogStore = Object.freeze({
+    isConnectionFailure,
     create() {
       const entries = [];
       let currentAttempt = new Map();

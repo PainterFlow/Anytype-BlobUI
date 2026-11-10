@@ -19,7 +19,14 @@ test('log store reports Anytype connection failures once per attempt as warnings
 
   store.beginAttempt();
   assert.equal(store.add(message, 'info', '10:00:02'), true);
-  assert.equal(store.entries().length, 2, 'A later refresh can record the failure again.');
+  assert.equal(store.add("The request to Anytype's Local API timed out. Confirm that Anytype is open and Local API is enabled.", 'info', '10:00:03'), false,
+    'Different connection failure messages collapse into one warning per attempt.');
+  assert.equal(store.entries().length, 2);
+
+  store.beginAttempt();
+  assert.equal(store.add(message, 'info', '10:00:04'), true, 'A later refresh can record the failure again.');
+  assert.equal(window.BlobUI.LogStore.isConnectionFailure(message), true);
+  assert.equal(window.BlobUI.LogStore.isConnectionFailure('Enter an Anytype API key.'), false);
 });
 
 test('log store upgrades duplicate messages and clear resets rows, severity, and deduplication', () => {
