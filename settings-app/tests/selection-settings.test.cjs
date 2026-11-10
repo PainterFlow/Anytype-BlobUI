@@ -49,9 +49,18 @@ test('Include selections controls Settings selection and supports migration, Sav
       const selected = getComputedStyle(el, '::selection');
       return { background: selected.backgroundColor, text: selected.color, normal: getComputedStyle(el).color };
     });
+    const anytypeSelection = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--color-system-selection)';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
     const focusedSelection = await selection();
     assert.notEqual(focusedSelection.background, 'rgba(0, 0, 0, 0)');
     assert.equal(focusedSelection.text, focusedSelection.normal);
+    assert.equal(focusedSelection.background, anytypeSelection);
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
     const unfocusedSelection = await selection();
     assert.deepEqual(unfocusedSelection, focusedSelection, 'The app keeps its selection color when its window loses focus');
@@ -78,7 +87,7 @@ test('Include selections controls Settings selection and supports migration, Sav
     await page.waitForFunction(() => window.appReady);
     assert.equal(await toggle.isChecked(), false);
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'false');
-    assert.notEqual((await selection()).background, focusedSelection.background, 'Saved Include selections off restores the default selection color');
+    assert.equal((await selection()).background, anytypeSelection, 'Saved Include selections off keeps Anytype selection color');
     await toggle.check();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
@@ -90,7 +99,8 @@ test('Include selections controls Settings selection and supports migration, Sav
     const customSelection = await appSelection();
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
     await toggle.uncheck();
-    assert.notEqual(await appSelection(), customSelection, 'The Settings app restores native selection styling when Include selections is off');
+    assert.notEqual(await appSelection(), customSelection);
+    assert.equal(await appSelection(), anytypeSelection, 'Include selections off restores Anytype selection color');
     await page.evaluate(() => window.BlobUI.discardChanges());
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
