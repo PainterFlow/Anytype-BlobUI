@@ -3,17 +3,24 @@ markupsearch {
     color: var(--color-blob-accent) !important;
 }
 
+/* Text highlights keep Anytype's system color and preserve the selected glyph color. */
+*:not(br)::selection {
+    background-color: var(--color-system-selection) !important;
+    color: currentColor !important;
+}
+
+@media (forced-colors: active) {
+    *:not(br)::selection {
+        background-color: Highlight !important;
+        color: HighlightText !important;
+    }
+}
+
 /* @blobui-if includeSelections */
 /* Keep these colors local. Anytype also uses its selection tokens for notices. */
 :root {
     --blobui-selection-fill: color-mix(in srgb, var(--color-blob-accent) 25%, transparent);
     --blobui-selection-border: color-mix(in srgb, var(--color-blob-accent) 75%, white);
-}
-
-/* Include code themes and outgoing chat bubbles without changing selected glyphs.
-   PDF line breaks deliberately keep their transparent native selection. */
-*:not(br)::selection {
-    background-color: var(--blobui-selection-fill) !important;
 }
 
 .selectionTarget.isSelectionSelected::after,
@@ -83,10 +90,6 @@ markupsearch.active {
 
 /* Ordinary Windows carets follow text color. Do not replace them with an accent. */
 @media (forced-colors: active) {
-    *:not(br)::selection {
-        background-color: Highlight !important;
-        color: HighlightText;
-    }
     :root {
         --blobui-selection-fill: Highlight;
         --blobui-selection-border: Highlight;

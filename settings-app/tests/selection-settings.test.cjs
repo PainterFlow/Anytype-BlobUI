@@ -155,6 +155,8 @@ test('Real compiler output recolors selection indicators and preserves unrelated
               choice: style('choice', 'border-top-color'), focus: style('focus', 'border-top-color'),
               notice: style('notice', 'background-color'), code: style('code', 'background-color', '::selection'),
               chat: style('chat', 'background-color', '::selection'), pdf: style('pdf', 'background-color', '::selection'),
+              codeTextColor: style('code', 'color', '::selection'), codeColor: style('code', 'color'),
+              chatTextColor: style('chat', 'color', '::selection'), chatColor: style('chat', 'color'),
               pdfBreak: style('pdf-break', 'background-color', '::selection'), caret: style('caret', 'caret-color'),
             };
           });
@@ -168,8 +170,11 @@ test('Real compiler output recolors selection indicators and preserves unrelated
           }
         }
         for (const key of ['notice', 'pdfBreak', 'caret']) assert.equal(values.true[key], values.false[key], `${theme}/${accent} changed ${key}`);
+        for (const key of ['code', 'chat', 'pdf']) assert.equal(values.true[key], values.false[key], `${theme}/${accent} changed the Anytype text selection color for ${key}`);
+        assert.equal(values.true.codeTextColor, values.true.codeColor, `${theme}/${accent} changed the selected code text color`);
+        assert.equal(values.true.chatTextColor, values.true.chatColor, `${theme}/${accent} changed the selected chat text color`);
         if (accent !== 'native') {
-          for (const key of ['rowHandle', 'columnHandle', 'cellMenu', 'menuProperty', 'inlineProperty', 'block', 'record', 'frame', 'frameFill', 'edit', 'drop', 'line', 'choice', 'focus', 'code', 'chat', 'pdf']) {
+          for (const key of ['rowHandle', 'columnHandle', 'cellMenu', 'menuProperty', 'inlineProperty', 'block', 'record', 'frame', 'frameFill', 'edit', 'drop', 'line', 'choice', 'focus']) {
             assert.notEqual(values.true[key], values.false[key], `${theme}/${accent} failed to recolor ${key}`);
           }
         }
