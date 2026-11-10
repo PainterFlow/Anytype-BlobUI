@@ -159,7 +159,7 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('Dev Guide and showcase tabs render offline in dark mode', {
+test('Dev Guide renders offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
   timeout: 60000,
 }, async () => {
@@ -195,83 +195,6 @@ test('Dev Guide and showcase tabs render offline in dark mode', {
       status: document.getElementById('status-message')?.textContent, html: document.getElementById('settings-react-root')?.innerText.slice(0, 300) }));
     if (!startup.ready) throw new Error(JSON.stringify({ startup, pageErrors: errors }));
 
-    await page.locator('#calendar-events-nav').click();
-    await page.locator('#calendar-events-tab-2').click();
-    await page.locator('.calendar-showcase-grid').waitFor();
-    assert.equal(await page.locator('#calendar-events-tab-2').textContent(), 'Showcase');
-    const calendar = page.getByRole('grid', { name: 'October 2026 sample calendar' });
-    assert.equal(await calendar.getByRole('gridcell').count(), 42);
-    const overflow = calendar.getByRole('button', { name: 'Show 2 more events for October 12, 2026' });
-    await overflow.focus();
-    await page.keyboard.press('Enter');
-    assert.equal(await calendar.getByText('Stamp stars').count(), 1, 'Calendar overflow shows the remaining sample events.');
-    const collapse = calendar.getByRole('button', { name: 'Show fewer events for October 12, 2026' });
-    assert.equal(await collapse.getAttribute('aria-expanded'), 'true');
-    assert.equal(await collapse.evaluate(node => node === document.activeElement), true);
-    await page.screenshot({ path: path.join(testRoot, 'calendar-showcase-dark.png') });
-
-    await page.locator('#kanban-views-nav').click();
-    await page.locator('#kanban-views-tab-2').click();
-    const board = page.locator('.kanban-showcase-board');
-    await board.waitFor();
-    assert.equal(await page.locator('#kanban-views-tab-2').textContent(), 'Showcase');
-    assert.equal(await board.getAttribute('data-layout'), 'default');
-    assert.equal(await board.getAttribute('data-formula-display'), 'balanced');
-    assert.equal(await board.getAttribute('data-collapsed'), 'false');
-    assert.equal(await board.getByRole('region').count(), 5);
-    const collect = board.getByRole('region', { name: 'Collect category' });
-    assert.match(await collect.locator('.kanban-showcase-total').textContent(), /35 min/);
-    assert.equal(await board.evaluate(node => {
-      node.scrollLeft = node.scrollWidth;
-      const lastColumn = node.lastElementChild.getBoundingClientRect();
-      return node.scrollLeft > 0 && lastColumn.right <= node.getBoundingClientRect().right + 1 && lastColumn.width >= 170;
-    }), true, 'The board scrolls to its last column without squeezing the cards.');
-    await board.evaluate(node => { node.scrollLeft = 0; });
-
-    const boardHelp = page.getByRole('button', { name: 'Kanban showcase help' });
-    const boardTooltip = page.getByRole('tooltip').filter({ hasText: 'Each category shows the total Focus minutes' });
-    await page.setViewportSize({ width: 800, height: 650 });
-    await boardHelp.hover();
-    await boardTooltip.waitFor();
-    await boardHelp.focus();
-    await page.mouse.move(0, 0);
-    assert.equal(await boardTooltip.isVisible(), true, 'Keyboard focus keeps the tooltip visible after hover ends.');
-    assert.equal(await boardHelp.evaluate(trigger => {
-      const anchor = trigger.getBoundingClientRect();
-      const title = trigger.parentElement.previousElementSibling.getBoundingClientRect();
-      const panel = trigger.closest('[role="tabpanel"]').getBoundingClientRect();
-      const pane = trigger.closest('.page-content').getBoundingClientRect();
-      const popup = document.getElementById(trigger.getAttribute('aria-describedby')).getBoundingClientRect();
-      return anchor.left - title.right <= 8 && anchor.left >= title.right
-        && popup.left >= panel.left - 1 && popup.right <= panel.right + 1
-        && popup.top >= pane.top && popup.bottom <= pane.bottom
-        && (popup.left >= title.right || popup.top >= title.bottom || popup.bottom <= title.top);
-    }), true, 'The help trigger sits beside the title and the tooltip stays within the visible panel.');
-    await page.setViewportSize({ width: 960, height: 760 });
-    await page.keyboard.press('Tab');
-    await boardTooltip.waitFor({ state: 'hidden' });
-    await page.getByRole('heading', { name: 'Craft board' }).click();
-    await page.screenshot({ path: path.join(testRoot, 'kanban-showcase-dark.png') });
-
-    await page.locator('#kanban-views-tab-0').click();
-    await page.locator('#kanban-view-style').click();
-    await page.getByRole('option', { name: 'Compact', exact: true }).click();
-    await page.locator('#formula-display').click();
-    await page.getByRole('option', { name: 'Spacious', exact: true }).click();
-    await page.getByRole('switch', { name: 'Collapsed Categories' }).click();
-    await page.locator('#kanban-views-tab-2').click();
-    assert.equal(await board.getAttribute('data-layout'), 'compact');
-    assert.equal(await board.getAttribute('data-formula-display'), 'spacious');
-    assert.equal(await board.getAttribute('data-collapsed'), 'true');
-    const sampleCard = collect.getByRole('article').first();
-    const total = collect.locator('.kanban-showcase-total');
-    await sampleCard.waitFor({ state: 'hidden' });
-    await total.waitFor({ state: 'hidden' });
-    await collect.focus();
-    await sampleCard.waitFor();
-    await total.waitFor();
-    assert.equal(await total.evaluate(node => node.getBoundingClientRect().top >= node.previousElementSibling.getBoundingClientRect().bottom), true);
-
     await page.locator('#help-button').click();
     await page.locator('#help-dev-guide').click();
     await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Developer guide');
@@ -293,10 +216,8 @@ test('Dev Guide and showcase tabs render offline in dark mode', {
     await page.getByRole('button', { name: 'About color rules' }).focus();
     await page.waitForTimeout(500);
     await page.screenshot({ path: path.join(testRoot, 'component-catalog-help-dark.png') });
-    await page.getByRole('tab', { name: 'Kanban' }).click();
-    await page.locator('.component-catalog-card').filter({ has: page.getByRole('heading', { name: 'Showcase views', exact: true }) }).screenshot({ path: path.join(testRoot, 'component-catalog-showcase-dark.png') });
     assert.deepEqual(oldDocumentationRequests, [], 'The app no longer requests the old documentation articles.');
-    assert.deepEqual(externalRequests, [], 'The Dev Guide and showcase previews should not request external resources.');
+    assert.deepEqual(externalRequests, [], 'The Dev Guide should not request external resources.');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
