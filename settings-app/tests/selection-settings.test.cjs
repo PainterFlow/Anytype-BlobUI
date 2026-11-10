@@ -19,7 +19,7 @@ async function browserFixture(name, run) {
   try { await run(await context.newPage(), root); } finally { await context.close(); }
 }
 
-test('Include selections sits inside the accent box and supports migration, Save, Undo and native mode', { skip }, async () => {
+test('Include selections controls Settings selection and supports migration, Save, Undo and native mode', { skip }, async () => {
   await browserFixture('selection-settings', async (page, root) => {
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('selection-fixture-started')) {
@@ -77,20 +77,24 @@ test('Include selections sits inside the accent box and supports migration, Save
     await page.reload();
     await page.waitForFunction(() => window.appReady);
     assert.equal(await toggle.isChecked(), false);
+    assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'false');
+    assert.notEqual((await selection()).background, focusedSelection.background, 'Saved Include selections off restores the default selection color');
     await toggle.check();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__saves[0].includeSelections), true);
+    assert.deepEqual(await selection(), focusedSelection, 'Turning Include selections back on restores the accent color');
     await page.locator('#native-accent').uncheck();
     await page.locator('#accent-value').fill('#27a879');
     const appSelection = () => page.locator('#accent-value').evaluate(el => getComputedStyle(el, '::selection').backgroundColor);
     const customSelection = await appSelection();
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
     await toggle.uncheck();
-    assert.equal(await appSelection(), customSelection, 'The Settings app keeps its accent selection color when Anytype selection styling is disabled');
+    assert.notEqual(await appSelection(), customSelection, 'The Settings app restores native selection styling when Include selections is off');
     await page.evaluate(() => window.BlobUI.discardChanges());
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
+    assert.equal(await appSelection(), focusedSelection.background, 'Undo restores the saved selection color');
     await page.locator('#native-accent').uncheck();
     await page.locator('#accent-value').fill('#27a879');
     await page.locator('#save-button').click();

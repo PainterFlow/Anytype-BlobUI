@@ -14,7 +14,7 @@ Preferences controls for accents, fonts, and the space banner work without an AP
 
 In Preferences, use the accent picker, hue control, or Hex or CSS color field. Anytype Accent Color follows Anytype's accent. BlobUI applies accents to controls including dates, properties, dataview hover states, toggles, publishing, and membership controls.
 
-Include selections is the first switch inside the Accent color box, above Anytype Accent Color. It starts on, including after upgrades. It applies the chosen accent to text and code selections, table ranges and handles, selected cell menus, selected blocks and records, drag selection and drop indicators, selected choices, and blue focus outlines, including inline and menu text-property editors. Selected text inside BlobUI Settings always follows the current accent, even when the Settings window loses focus. Turning Include selections off restores default selection styling in Anytype while keeping other BlobUI accents. Save and reload Anytype to apply the change there.
+Include selections is the first switch inside the Accent color box, above Anytype Accent Color. It starts on, including after upgrades. It applies the chosen accent to text and code selections, table ranges and handles, selected cell menus, selected blocks and records, drag selection and drop indicators, selected choices, and blue focus outlines, including inline and menu text-property editors. Text selected in BlobUI Settings follows the current accent only while Include selections is on, even when the Settings window loses focus. Turning it off restores default selection styling in Settings and Anytype while keeping other BlobUI accents. Save and reload Anytype to apply the change there.
 
 ## Fonts
 
