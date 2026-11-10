@@ -43,6 +43,7 @@ test('Include selections sits inside the accent box and supports migration, Save
     });
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
+    assert.equal(await page.locator("#accent-heading").innerText(), "Accent Color");
     const toggle = page.locator('#include-selections');
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await toggle.isEnabled(), true, 'Native accent must not disable this control');

@@ -95,7 +95,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab })
   return <Tabs label="Preferences" className="advanced-tabs preference-tabs" items={preferenceTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection className="settings-group accent-group" aria-labelledby="accent-heading">
-      <SettingsHeading id="accent-heading" title="Accent color" description="Choose a color for highlights and active controls." />
+      <SettingsHeading id="accent-heading" title="Accent Color" description="Choose a color for highlights and active controls." />
       <SettingsGroup>
         {settingSwitch(values, onChange, "include-selections", "Include selections", undefined, {
           id: "include-selections-help",
