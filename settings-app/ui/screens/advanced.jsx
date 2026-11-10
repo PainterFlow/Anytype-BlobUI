@@ -12,7 +12,7 @@ import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 
 const advancedTabs = [
-  { title: "API key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
+  { title: "API Key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
   { title: "App Settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
   { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
