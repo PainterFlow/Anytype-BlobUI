@@ -17,6 +17,14 @@ a[href^="blob://"]:active {
     pointer-events: none !important;
 }
 
+/* Anytype styles chat blob links like ordinary links. Keep their text inherited. */
+.block.blockChat .message .bubbleInner a[href^="blob://"],
+.block.blockChat .message .bubbleInner a[href^="blob://"] * {
+    color: inherit !important;
+    font-weight: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+}
+
 /* Anytype splits formatted phrases into separate links. Equally tall
    inline blocks join those runs and isolate inherited strike decorations.
    Their positioned backgrounds also cover markupunderline's outer border. */
