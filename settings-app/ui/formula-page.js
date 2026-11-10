@@ -603,7 +603,7 @@
       record.row = row || null;
       openCalculator(record);
     },
-    reloadViews() { return discover(true); },
+    reloadViews() { api?.onAttempt?.(); return discover(true); },
     setCalculatorSourceInput(input) { if (activeRecord) activeRecord.sourceInput = input || null; },
     setCalculatorDisplay(display) { if (activeRecord) activeRecord.display = display || null; },
     calculatorSourceChanged(input) { handleSourceInput(activeRecord, input); },

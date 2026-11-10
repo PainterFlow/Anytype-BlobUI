@@ -12,7 +12,7 @@ export function createSettingsView() {
   let snapshot = {
     page: "preferences", preferenceTab: 0, calendarTab: 0, kanbanTab: 0, advancedTab: 0,
     documentationOpened: false, releaseNotesMedia: null,
-    logRows: [], logSeverity: "info", shortcutRows: [],
+    logRows: [], logSeverity: "info", copyLogsCopied: false, shortcutRows: [],
     startupMode: "off", startupModeDisabled: true,
     backgroundExperiment: "disabled", backgroundExperimentDisabled: true,
     kanbanStyle: "default", kanbanStyleDisabled: true,

@@ -56,6 +56,13 @@ test('native events are injectable and metadata errors reach the caller', async 
   assert.equal(listener, null);
 });
 
+test('rejected metadata requests report one bridge error for the log store to deduplicate', async () => {
+  const errors = [];
+  const service = serviceFor({ core: { invoke: async () => { throw new Error('metadata unavailable'); } } }, message => errors.push(message));
+  await assert.rejects(service.invoke('discover_calendar_colors'), /metadata unavailable/);
+  assert.deepEqual(errors, ['metadata unavailable']);
+});
+
 test('missing Tauri bridge rejects invocations and event subscriptions become no-ops', async () => {
   const service = serviceFor(null);
   await assert.rejects(service.invoke('get_app_state'), /bridge is unavailable/);

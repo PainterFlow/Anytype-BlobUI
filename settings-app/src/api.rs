@@ -268,9 +268,9 @@ fn http_error(status: u16) -> String {
 
 fn network_error(error: &std::io::Error) -> String {
     if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) {
-        "The request to Anytype Local API timed out. Confirm Anytype is open and Local API is enabled.".into()
+        "The request to Anytype's Local API timed out. Confirm that Anytype is open and Local API is enabled.".into()
     } else {
-        "Could not reach Anytype Local API. Confirm Anytype is open and Local API is enabled.".into()
+        "Could not reach Anytype's Local API. Confirm that Anytype is open and Local API is enabled.".into()
     }
 }
 

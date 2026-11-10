@@ -191,6 +191,7 @@ struct AppState {
     api_port: u16,
     api_ip: String,
     has_saved_api_key: bool,
+    startup_mode: autostart::AutostartMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -1204,6 +1205,7 @@ fn load_app_state() -> Result<AppState, String> {
         api_port,
         api_ip,
         has_saved_api_key,
+        startup_mode: autostart::get_mode().unwrap_or_default(),
     })
 }
 
@@ -3164,6 +3166,7 @@ mod tests {
             api_port: 31009,
             api_ip: String::new(),
             has_saved_api_key: true,
+            startup_mode: autostart::AutostartMode::Disabled,
         };
         let serialized = serde_json::to_value(state).unwrap();
         assert_eq!(serialized["hasSavedApiKey"], true);
