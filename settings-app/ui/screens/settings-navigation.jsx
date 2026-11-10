@@ -6,7 +6,7 @@ import { preferenceLabels } from "./preferences-accessibility.jsx";
 const icons = {
   Colors: null,
   Font: <path d="M3 4h14M10 4v13m-4 0h8M3 4v3m14-3v3" />,
-  "Space banner": <><rect x="2" y="4" width="16" height="12" rx="2" /><circle cx="7" cy="8" r="1" /><path d="m3 15 5-5 3 3 3-4 4 6" /></>,
+  "Space Banner": <><rect x="2" y="4" width="16" height="12" rx="2" /><circle cx="7" cy="8" r="1" /><path d="m3 15 5-5 3 3 3-4 4 6" /></>,
   Kanban: <><rect x="2" y="3" width="4" height="14" rx="1" /><rect x="8" y="3" width="4" height="9" rx="1" /><rect x="14" y="3" width="4" height="12" rx="1" /></>,
   Calendar: <><rect x="3" y="4" width="14" height="13" rx="2" /><path d="M6 2v4m8-4v4M3 8h14M6 11h2m4 0h2m-8 3h2" /></>,
   Appearance: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="8" cy="5" r="1.5" fill="var(--sidebar)" /><circle cx="13" cy="10" r="1.5" fill="var(--sidebar)" /><circle cx="6" cy="15" r="1.5" fill="var(--sidebar)" /></>,

@@ -439,7 +439,7 @@ fn prepare_staged(
     let mut meta = existing_metadata(staged, seed.metadata.as_ref())?;
     set_field(&mut meta, "formatVersion", json!(FORMAT_VERSION));
     set_field(&mut meta, "blobuiVersion", json!(env!("BLOBUI_BUILD_VERSION")));
-    let plugin: Value = serde_json::from_str(include_str!("../../codex-plugin/src/.codex-plugin/plugin.json"))
+    let plugin: Value = serde_json::from_str(include_str!("../../codex-plugin/src/plugin.json"))
         .map_err(|_| "The bundled Anyblob version could not be read.")?;
     set_field(&mut meta, "anyblobVersion", plugin["version"].clone());
     if let Some(version) = seed.latest_public_version {

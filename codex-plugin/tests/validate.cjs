@@ -4,15 +4,28 @@ const assert = require('node:assert/strict');
 const root = path.resolve(process.argv[2]);
 const plugin = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json')));
 const mcp = JSON.parse(fs.readFileSync(path.join(root, '.mcp.json')));
+const portablePlugin = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json')));
+const portableMcp = JSON.parse(fs.readFileSync(path.join(root, 'mcp.json')));
 assert.equal(plugin.name, 'anyblob');
 assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
 assert.equal(plugin.version, JSON.parse(fs.readFileSync(path.resolve(__dirname, '../src/.codex-plugin/plugin.json'))).version);
 assert.equal(plugin.interface.displayName, 'Anyblob');
 assert.equal(plugin.requires_local_executor, true);
+assert.equal(portablePlugin.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
+assert.equal(portablePlugin.name, plugin.name);
+assert.equal(portablePlugin.version, plugin.version);
+assert.equal(portablePlugin.extensions['com.openai'].requires_local_executor, true);
+assert.deepEqual(portablePlugin.extensions['com.openai'].interface, plugin.interface);
+assert.equal(portableMcp.$schema, 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json');
+assert.deepEqual(Object.keys(portableMcp.mcpServers), ['anyblob']);
+assert.deepEqual(portableMcp.mcpServers.anyblob, {
+  type: 'stdio', command: './bin/blobui-mcp.exe', args: [],
+});
 const server = mcp.mcpServers.anyblob;
+assert.deepEqual(Object.keys(mcp.mcpServers), ['anyblob']);
 assert.equal(plugin.mcpServers, './.mcp.json');
 assert.equal(server.command, 'cmd.exe');
-assert.deepEqual(server.args, ['/d','/c','.\\bin\\blobui-mcp.exe']);
+assert.deepEqual(server.args, ['/d', '/c', '.\\bin\\blobui-mcp.exe']);
 assert.equal(server.cwd, '.');
 assert(server.tool_timeout_sec > 120);
 assert.equal(server.env_vars, undefined);
@@ -23,6 +36,8 @@ const icon=fs.readFileSync(path.join(root,'assets/icon.png'));
 assert.equal(icon.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
 assert(icon.readUInt32BE(16)>=256);
 const allowed = new Set([
+  "plugin.json",
+  "mcp.json",
   ".codex-plugin/plugin.json",
   ".mcp.json",
   "README.md",

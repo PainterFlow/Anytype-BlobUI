@@ -12,7 +12,7 @@ import {
 import { Tabs } from "../shared/tabs.jsx";
 import { CalendarColors } from "./calendar-colors.jsx";
 
-export const preferenceLabels = ["Colors", "Font", "Space banner"];
+export const preferenceLabels = ["Colors", "Font", "Space Banner"];
 
 function tabItems(prefix, labels) {
   return labels.map((title, index) => ({
@@ -95,7 +95,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab })
   return <Tabs label="Preferences" className="advanced-tabs preference-tabs" items={preferenceTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection className="settings-group accent-group" aria-labelledby="accent-heading">
-      <SettingsHeading id="accent-heading" title="Accent color" description="Choose a color for highlights and active controls." />
+      <SettingsHeading id="accent-heading" title="Accent Color" description="Choose a color for highlights and active controls." />
       <SettingsGroup>
         {settingSwitch(values, onChange, "include-selections", "Include selections", undefined, {
           id: "include-selections-help",
@@ -128,7 +128,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab })
     </SettingsSection>
 
     <SettingsSection className="settings-group space-banner-group" aria-labelledby="space-banner-heading">
-      <SettingsHeading id="space-banner-heading" title="Space banner" description="Choose an image to show at the top of your Anytype sidebar." />
+      <SettingsHeading id="space-banner-heading" title="Space Banner" description="Choose an image to show at the top of your Anytype sidebar." />
       <div className="space-banner-controls">
         <div className="space-banner-actions">
           <Button id="choose-banner-image" className="banner-image-button">Choose image</Button>
@@ -173,13 +173,13 @@ export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, k
       <SettingsHeading id="kanban-general-heading" title="General" />
       <SettingsGroup className="settings-list kanban-settings-list">
         <div className="kanban-setting-row kanban-style-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span></div>
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description settings-row-description">Choose the spacing used on inline and full-page boards.</span></div>
           <SelectPicker id="kanban-view-style" rootId="kanban-select" menuId="kanban-style-options"
             label="Board layout" labelId="kanban-style-label" valueId="kanban-style-value" descriptionId="kanban-style-help"
             options={boardLayouts} value={kanbanStyle} disabled={kanbanStyleDisabled} onChange={onKanbanStyleChange} />
         </div>
         <div className="kanban-setting-row formula-display-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description">Choose where category calculation results appear.</span></div>
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description settings-row-description">Choose where category calculation results appear.</span></div>
           <SelectPicker id="formula-display" rootId="formula-display-select" menuId="formula-display-options"
             label="Display formulas" labelId="formula-display-label" valueId="formula-display-value" descriptionId="formula-display-help"
             options={formulaLayouts} value={formula?.display ?? "balanced"} disabled={formula?.locked}

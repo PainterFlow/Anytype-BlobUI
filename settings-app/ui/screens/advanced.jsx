@@ -12,8 +12,8 @@ import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 
 const advancedTabs = [
-  { title: "API key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
-  { title: "App settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
+  { title: "API Key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
+  { title: "App Settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
   { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
 
@@ -21,7 +21,7 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
-      <SettingsHeading id="advanced-api-heading" title="API key" description="Configure the local API connection used by BlobUI." />
+      <SettingsHeading id="advanced-api-heading" title="API Key" description="Configure the local API connection used by BlobUI." />
       <SettingsGroup className="settings-list advanced-fields">
         <VisibilityTextField label="Anytype API key" inputAttributes={{
           id: "advanced-api-key",

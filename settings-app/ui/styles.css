@@ -12,6 +12,7 @@
   --text-secondary: #a3a3a3;
   --text-muted: #5c5c5c;
   --accent: #de50de;
+  --color-system-selection: color-mix(in srgb, #377aff 25%, transparent);
   --font-interface: "Inter", "Segoe UI", sans-serif;
   --font-code: "Consolas", "Cascadia Code", monospace;
   --color-grey: #a8a8a8;
@@ -152,9 +153,16 @@ button:focus-visible, input:focus-visible { outline: none; }
 .native-accent-control input:checked + .switch-track::after { transform: translateX(16px); }
 .native-accent-control input:focus-visible + .switch-track { outline: none; }
 #include-selections:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
-:root[data-include-selections="true"] ::selection { background-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+:root ::selection {
+  background-color: var(--color-system-selection) !important;
+  color: currentColor !important;
+}
+:root[data-include-selections="true"] ::selection {
+  background-color: color-mix(in srgb, var(--accent) 25%, transparent) !important;
+  color: currentColor !important;
+}
 @media (forced-colors: active) {
-  :root[data-include-selections="true"] ::selection { background-color: Highlight; color: HighlightText; }
+  :root ::selection { background-color: Highlight !important; color: HighlightText !important; }
 }
 .native-accent-control input:disabled + .switch-track { opacity: .4; }
 .accessibility-row:not(:last-child) { border-bottom: 1px solid var(--line); }
@@ -189,7 +197,9 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-setting-row.native-accent-control { border-bottom: 0; cursor: default; }
 .kanban-setting-row + .kanban-setting-row { border-top: 1px solid var(--line); }
 .kanban-setting-copy { display: grid; gap: 2px; min-width: 0; }
-.kanban-setting-title { font-size: 14px; line-height: 20px; }
+.kanban-setting-title { font-size: 16px; line-height: 24px; }
+.kanban-setting-copy:has(> .kanban-setting-title + .settings-row-description:not([hidden])) > .kanban-setting-title,
+.kanban-setting-copy:has(> .kanban-setting-title + .kanban-setting-description:not([hidden])) > .kanban-setting-title { font-size: 14px; line-height: 20px; }
 .kanban-setting-description, .kanban-collapse-help { color: var(--text-secondary); font-size: 12px; line-height: 18px; }
 .kanban-select { position: relative; flex: 0 0 auto; }
 .kanban-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 7px; min-width: 100px; height: 32px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 22px; cursor: pointer; transition: background .15s ease; }
@@ -206,6 +216,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-select-option:hover, .kanban-select-option:focus-visible, .kanban-select-option[aria-selected="true"] { background: var(--active); color: var(--text); }
 .kanban-option-copy { display: grid; gap: 0; flex: 1; min-width: 0; }
 .kanban-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; line-height: 22px; }
+.kanban-select-option:has(.kanban-select-option-description:not([hidden])) .kanban-option-label { font-size: 14px; line-height: 20px; }
 .kanban-select-option > svg { flex: 0 0 15px; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
 .kanban-select-option[aria-selected="true"] > svg { opacity: 1; }
 .kanban-collapse-help { margin: 8px 0 0; }
@@ -823,7 +834,9 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 .sidebar .nav-item, .documentation-item { min-width: 0; }
 
 .kanban-select-option-description { color: var(--text-secondary); font-size: 12px; line-height: 16px; }
-.kanban-select-option:has(.kanban-select-option-description) { height: auto; min-height: 52px; padding-block: 6px; }
+.kanban-select-option:has(.kanban-select-option-description:not([hidden])) { height: auto; min-height: 52px; padding-block: 6px; }
+.formula-view-row:has(.formula-view-warning:not([hidden])) .formula-view-name,
+.codex-space:has(.formula-view-warning:not([hidden])) .codex-space-top .formula-view-name { font-size: 14px; line-height: 20px; }
 
 .section-heading .experiments-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--color-amber); }
 .experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

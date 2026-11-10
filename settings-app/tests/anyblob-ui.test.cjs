@@ -26,6 +26,32 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]').first(),install=panel.getByRole('button',{name:'Install',exact:true});
     assert.equal(await page.locator('#codex-nav .nav-label').count() ? await page.locator('#codex-nav .nav-label').innerText() : await page.locator('#codex-nav').innerText(),'Anyblob');
     assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),5);
+    assert.equal(await panel.locator('#enable-anyblob').evaluate(el=>getComputedStyle(el.closest('label').querySelector('span:first-child')).fontSize),'16px');
+    assert.equal(await panel.locator('.object-mention-row .kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
+    assert.equal(await panel.locator('.kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
+    const helperLabelSizes=await page.evaluate(()=>{
+      const measure=(className,copyClass,helperClass,titleClass,helperVisible)=>{
+        const row=document.createElement('button');row.className=className;
+        const copy=copyClass?document.createElement('span'):row;if(copyClass)copy.className=copyClass;
+        const title=document.createElement('span');title.className=titleClass;title.textContent='Title';copy.append(title);
+        if(helperClass){const helper=document.createElement('span');helper.className=helperClass;helper.textContent='Helper text';if(!helperVisible)helper.hidden=true;copy.append(helper);}
+        if(copyClass)row.append(copy);
+        document.body.append(row);const size=getComputedStyle(title).fontSize;row.remove();return size;
+      };
+      return {
+        settingWithoutHelper:measure('settings-row kanban-setting-row','kanban-setting-copy','settings-row-description','kanban-setting-title',false),
+        settingWithHelper:measure('settings-row kanban-setting-row','kanban-setting-copy','settings-row-description','kanban-setting-title',true),
+        optionWithoutHelper:measure('kanban-select-option','kanban-option-copy','kanban-select-option-description','kanban-option-label',false),
+        optionWithHelper:measure('kanban-select-option','kanban-option-copy','kanban-select-option-description','kanban-option-label',true),
+        warningWithoutHelper:measure('formula-view-row',null,'formula-view-warning','formula-view-name',false),
+        warningWithHelper:measure('formula-view-row',null,'formula-view-warning','formula-view-name',true),
+      };
+    });
+    assert.deepEqual(helperLabelSizes,{
+      settingWithoutHelper:'16px',settingWithHelper:'14px',
+      optionWithoutHelper:'16px',optionWithHelper:'14px',
+      warningWithoutHelper:'16px',warningWithHelper:'14px',
+    });
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
     assert.equal(await toggle.isChecked(),false);await toggle.check();await page.waitForFunction(()=>window.enabled);await toggle.uncheck();await page.waitForFunction(()=>!window.enabled);
     await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);
@@ -34,6 +60,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const complete=page.getByRole('dialog',{name:'Anyblob marketplace installed'});await complete.waitFor();assert.match(await complete.innerText(),/Plugins Directory/);await page.keyboard.press('Escape');await complete.waitFor({state:'hidden'});
     assert.equal((await panel.getByRole('button',{name:'Installed',exact:true}).boundingBox()).width,original.width);
     assert.equal(await page.locator('#codex-panel-0 .anyblob-version').innerText(),'v0.1.0');
+    assert.equal(await panel.locator('.kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'14px');
     await page.locator('#preferences-nav').click();await page.evaluate(()=>window.updateAvailable=true);await page.locator('#codex-nav').click();
     const update=panel.getByRole('button',{name:'Update',exact:true});await update.waitFor();
     assert.equal(await page.locator('#codex-panel-0 .anyblob-version').innerText(),'v0.1.0 → v0.1.1');

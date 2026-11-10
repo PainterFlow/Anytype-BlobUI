@@ -44,10 +44,28 @@ test('images expand at source resolution, restore focus, and preserve the releas
     await viewer.getByRole('button', { name: 'Show image at actual size' }).click();
     assert.equal(await preview.evaluate(node => node.getBoundingClientRect().width), 2028);
     const stage = viewer.locator('.markdown-image-viewer-stage');
-    assert.equal(await stage.evaluate(node => {
+    const naturalSize = await preview.evaluate(node => ({ width: node.naturalWidth, height: node.naturalHeight }));
+    const centeredPoint = await stage.evaluate(node => ({
+      x: node.scrollLeft + node.clientWidth / 2,
+      y: node.scrollTop + node.clientHeight / 2,
+    }));
+    assert(Math.abs(centeredPoint.x - naturalSize.width / 2) < 2, 'Zoom should keep the clicked image center in view.');
+    assert(Math.abs(centeredPoint.y - naturalSize.height / 2) < 2, 'Zoom should keep the clicked image center in view.');
+    const beforeResize = await stage.evaluate(node => {
       node.scrollLeft = 150;
-      return node.scrollWidth > node.clientWidth && node.scrollLeft > 0;
-    }), true);
+      node.scrollTop = 100;
+      return {
+        x: node.scrollLeft + node.clientWidth / 2,
+        y: node.scrollTop + node.clientHeight / 2,
+      };
+    });
+    await page.setViewportSize({ width: 1100, height: 820 });
+    await page.waitForFunction(([x, y]) => {
+      const node = document.querySelector('.markdown-image-viewer-stage');
+      return Math.abs(node.scrollLeft + node.clientWidth / 2 - x) < 2
+        && Math.abs(node.scrollTop + node.clientHeight / 2 - y) < 2;
+    }, [beforeResize.x, beforeResize.y]);
+    assert.equal(await stage.evaluate(node => node.scrollWidth > node.clientWidth && node.scrollLeft > 0), true);
     await page.screenshot({ path: path.resolve(__dirname, '../../.test-run/image-viewer-native-dark.png') });
     await viewer.getByRole('button', { name: 'Fit image to window' }).click();
     await page.keyboard.press('Tab');

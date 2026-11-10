@@ -9,7 +9,7 @@ use std::{
 };
 static INSTALL: Mutex<()> = Mutex::new(());
 const PAYLOAD: &[u8] = include_bytes!("../../codex-plugin/dist/marketplace-payload.json");
-const FILES: [&str; 28] = [
+const FILES: [&str; 30] = [
     ".codex-plugin/plugin.json",
     ".mcp.json",
     "README.md",
@@ -38,6 +38,8 @@ const FILES: [&str; 28] = [
     "skills/configure-calendar-colors/agents/openai.yaml",
     "skills/audit-organization/SKILL.md",
     "skills/audit-organization/agents/openai.yaml",
+    "plugin.json",
+    "mcp.json",
 ];
 fn profile() -> Result<PathBuf, String> {
     if cfg!(test) {
@@ -95,7 +97,24 @@ fn payload(bytes: &[u8]) -> Result<(Value, Vec<(String, Vec<u8>)>), String> {
         .collect::<Result<Vec<_>, String>>()?;
     let manifest: Value =
         serde_json::from_slice(&files[0].1).map_err(|_| "Invalid Anyblob manifest.")?;
-    if manifest["name"] != "anyblob" || !files[4].1.starts_with(b"MZ") {
+    let portable_plugin: Value = serde_json::from_slice(
+        &files.iter().find(|(path, _)| path == "plugin.json").unwrap().1,
+    )
+    .map_err(|_| "Invalid portable Anyblob manifest.")?;
+    let portable_mcp: Value = serde_json::from_slice(
+        &files.iter().find(|(path, _)| path == "mcp.json").unwrap().1,
+    )
+    .map_err(|_| "Invalid portable Anyblob MCP configuration.")?;
+    let executable = files.iter().find(|(path, _)| path == "bin/blobui-mcp.exe").unwrap();
+    if manifest["name"] != "anyblob"
+        || portable_plugin["name"] != manifest["name"]
+        || portable_plugin["version"] != manifest["version"]
+        || portable_plugin["$schema"] != "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+        || portable_mcp["$schema"] != "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+        || portable_mcp["mcpServers"]["anyblob"]["type"] != "stdio"
+        || portable_mcp["mcpServers"]["anyblob"]["command"] != "./bin/blobui-mcp.exe"
+        || !executable.1.starts_with(b"MZ")
+    {
         return Err("Invalid Anyblob executable or manifest.".into());
     }
     Ok((template, files))
@@ -171,7 +190,14 @@ fn installed(root: &Path, bytes: &[u8]) -> Result<bool, String> {
     Ok(true)
 }
 fn package_version(package: &Path) -> Result<Option<String>, String> {
-    let path = package.join(".codex-plugin/plugin.json");
+    let portable = package.join("plugin.json");
+    let path = match fs::symlink_metadata(&portable) {
+        Ok(_) => portable,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            package.join(".codex-plugin/plugin.json")
+        }
+        Err(_) => return Err("Could not inspect the installed Anyblob version.".into()),
+    };
     storage::reject_reparse_path(&path)?;
     match fs::read(&path) {
         Ok(bytes) => {
@@ -335,7 +361,7 @@ mod tests {
         let current = installation_status(&root, PAYLOAD).unwrap();
         assert_eq!(current["updateAvailable"], false);
         assert_eq!(current["installedVersion"], current["bundledVersion"]);
-        let manifest_path = root.join(".codex/plugins/anyblob/.codex-plugin/plugin.json");
+        let manifest_path = root.join(".codex/plugins/anyblob/plugin.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
         manifest["version"] = json!("0.0.1");
         fs::write(&manifest_path, manifest.to_string()).unwrap();

@@ -202,6 +202,7 @@ export function MarkdownImageViewer() {
   const previewRef = useRef(null);
   const modalRef = useRef(null);
   const sourceRef = useRef(null);
+  const zoomAnchorRef = useRef(null);
   useLayoutEffect(() => {
     const layer = layerRef.current;
     const backdrop = backdropRef.current;
@@ -260,18 +261,70 @@ export function MarkdownImageViewer() {
   useLayoutEffect(() => {
     if (image && !modalRef.current?.isOpen()) modalRef.current?.open();
   }, [image]);
-  useEffect(() => {
-    if (!image) return;
+  const toggleActualSize = event => {
     const stage = stageRef.current;
-    if (stage) { stage.scrollTop = 0; stage.scrollLeft = 0; }
+    const preview = previewRef.current;
+    if (stage && preview && !actualSize) {
+      const stageBounds = stage.getBoundingClientRect();
+      const imageBounds = preview.getBoundingClientRect();
+      const usePointer = event?.type === "click" && event.detail > 0;
+      const clientX = usePointer ? event.clientX : imageBounds.left + imageBounds.width / 2;
+      const clientY = usePointer ? event.clientY : imageBounds.top + imageBounds.height / 2;
+      const sourceWidth = preview.naturalWidth || imageBounds.width;
+      const sourceHeight = preview.naturalHeight || imageBounds.height;
+      zoomAnchorRef.current = {
+        imageX: Math.max(0, Math.min(sourceWidth, (clientX - imageBounds.left) * sourceWidth / imageBounds.width)),
+        imageY: Math.max(0, Math.min(sourceHeight, (clientY - imageBounds.top) * sourceHeight / imageBounds.height)),
+        viewportX: clientX - stageBounds.left,
+        viewportY: clientY - stageBounds.top,
+      };
+    } else {
+      zoomAnchorRef.current = null;
+    }
+    setActualSize(value => !value);
+  };
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const anchor = zoomAnchorRef.current;
+    if (image && actualSize && anchor) {
+      const stageBounds = stage.getBoundingClientRect();
+      const imageBounds = previewRef.current?.getBoundingClientRect();
+      if (imageBounds) {
+        const imageOriginX = imageBounds.left - stageBounds.left + stage.scrollLeft;
+        const imageOriginY = imageBounds.top - stageBounds.top + stage.scrollTop;
+        stage.scrollLeft = imageOriginX + anchor.imageX - anchor.viewportX;
+        stage.scrollTop = imageOriginY + anchor.imageY - anchor.viewportY;
+      }
+    } else {
+      stage.scrollTop = 0;
+      stage.scrollLeft = 0;
+    }
+    zoomAnchorRef.current = null;
+  }, [actualSize, image]);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !actualSize || typeof ResizeObserver === "undefined") return;
+    let width = stage.clientWidth;
+    let height = stage.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = stage.clientWidth;
+      const nextHeight = stage.clientHeight;
+      stage.scrollLeft += (width - nextWidth) / 2;
+      stage.scrollTop += (height - nextHeight) / 2;
+      width = nextWidth;
+      height = nextHeight;
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
   }, [actualSize]);
   const layer = <div ref={layerRef} className="markdown-image-viewer-layer">
     <div ref={backdropRef} className="confirm-backdrop markdown-image-viewer-backdrop" hidden>
       <section ref={dialogRef} className="confirm-dialog markdown-image-viewer-dialog" role="dialog" aria-modal="true" aria-label={image?.alt || "Image preview"} tabIndex={-1}>
         <div ref={stageRef} className={`markdown-image-viewer-stage${actualSize ? " is-actual-size" : ""}`} role="region" aria-label="Image preview; scroll to inspect the actual-size image" tabIndex={0}>
           {image && <img ref={previewRef} className="markdown-image-viewer-image" src={image.src} alt={image.alt} draggable={false} tabIndex={0} onError={() => modalRef.current?.close()}
-            role="button" aria-pressed={String(actualSize)} aria-label={actualSize ? "Fit image to window" : "Show image at actual size"} onClick={() => setActualSize(value => !value)}
-            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActualSize(value => !value); } }} />}
+            role="button" aria-pressed={String(actualSize)} aria-label={actualSize ? "Fit image to window" : "Show image at actual size"} onClick={toggleActualSize}
+            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleActualSize(event); } }} />}
         </div>
       </section>
     </div>
