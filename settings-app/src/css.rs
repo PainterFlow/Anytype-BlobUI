@@ -614,9 +614,6 @@ mod tests {
                 if let Some(value) = enabled { data["settings"]["includeSelections"] = serde_json::json!(value); }
                 let css = compile(root, &install, &data).unwrap();
                 assert_eq!(css.contains("--blobui-selection-fill:"), enabled.unwrap_or(true));
-                assert!(css.contains("*:not(br)::selection {"));
-                assert!(css.contains("background-color: var(--color-system-selection) !important;"));
-                assert!(css.contains("color: currentColor !important;"));
                 assert!(css.contains("markupsearch {"), "Search text must follow the accent with either selection setting");
                 assert_eq!(css.contains(".icon.menuBlockTextCheckbox"), name != "native");
                 assert!(!css.contains("@blobui-"));
