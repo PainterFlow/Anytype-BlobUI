@@ -189,7 +189,8 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-setting-row.native-accent-control { border-bottom: 0; cursor: default; }
 .kanban-setting-row + .kanban-setting-row { border-top: 1px solid var(--line); }
 .kanban-setting-copy { display: grid; gap: 2px; min-width: 0; }
-.kanban-setting-title { font-size: 14px; line-height: 20px; }
+.kanban-setting-title { font-size: 16px; line-height: 24px; }
+.kanban-setting-copy:has(> .kanban-setting-title + :not([hidden])) .kanban-setting-title { font-size: 14px; line-height: 20px; }
 .kanban-setting-description, .kanban-collapse-help { color: var(--text-secondary); font-size: 12px; line-height: 18px; }
 .kanban-select { position: relative; flex: 0 0 auto; }
 .kanban-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 7px; min-width: 100px; height: 32px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 22px; cursor: pointer; transition: background .15s ease; }
