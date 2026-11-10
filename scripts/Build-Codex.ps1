@@ -41,6 +41,8 @@ Compress-Archive -Path (Join-Path $package '*') -DestinationPath $zip
 $archive=[IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $expected=@(
+        'plugin.json',
+        'mcp.json',
         '.codex-plugin/plugin.json',
         '.mcp.json',
         'README.md',

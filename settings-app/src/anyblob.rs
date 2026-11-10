@@ -1316,10 +1316,13 @@ mod tests {
         let package =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../codex-plugin/dist/anyblob");
         let manifest: Value = serde_json::from_slice(
-            &std::fs::read(package.join(".mcp.json")).expect("Build the plugin before this test."),
+            &std::fs::read(package.join("mcp.json")).expect("Build the plugin before this test."),
         )
         .unwrap();
         let launch = &manifest["mcpServers"]["anyblob"];
+        assert_eq!(launch["type"], "stdio");
+        assert_eq!(launch["command"], "./bin/blobui-mcp.exe");
+        assert!(launch["cwd"].is_null());
         let (client, api) = mock(
             vec![
                 (
@@ -1408,7 +1411,8 @@ mod tests {
             }
             outcomes
         });
-        let mut child = Command::new(launch["command"].as_str().unwrap())
+        let command = package.join("bin/blobui-mcp.exe").canonicalize().unwrap();
+        let mut child = Command::new(command)
             .args(
                 launch["args"]
                     .as_array()
@@ -1416,7 +1420,7 @@ mod tests {
                     .iter()
                     .map(|a| a.as_str().unwrap()),
             )
-            .current_dir(package.join(launch["cwd"].as_str().unwrap()))
+            .current_dir(&package)
             .env("ANYBLOB_CREDENTIAL_FILE", {
                 let path = package.join("../../../.test-run/anyblob-handoff/fixture.dpapi");
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
