@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComponentCatalog } from "./component-catalog.jsx";
 
@@ -44,7 +44,9 @@ describe("Component catalog", () => {
     expect(screen.getByRole("switch", { name: /Enable sample setting/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Board layout/ })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "Catalog preview navigation" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "About color rules" }).getAttribute("aria-describedby")).toBeTruthy();
+    const help = screen.getByRole("button", { name: "About color rules" });
+    expect(document.getElementById(help.getAttribute("aria-describedby")).getAttribute("role")).toBe("tooltip");
+    expect(help.querySelector("svg").getAttribute("viewBox")).toBe("0 0 20 20");
     expect(screen.getByRole("tablist", { name: "Showcase examples" })).toBeTruthy();
   });
 
@@ -52,11 +54,26 @@ describe("Component catalog", () => {
     setMotionApis();
     render(<ComponentCatalog onClose={() => {}} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 2 more events for June 12" }));
+    const calendar = screen.getByRole("grid", { name: "October 2026 sample calendar" });
+    expect(within(calendar).getAllByRole("columnheader")).toHaveLength(7);
+    expect(within(calendar).getAllByRole("gridcell")).toHaveLength(42);
+    expect(within(calendar).getByRole("gridcell", { name: "September 28, 2026" })).toBeTruthy();
+    expect(within(calendar).getByRole("gridcell", { name: "November 8, 2026" })).toBeTruthy();
 
-    expect(screen.getByText("Pick up a parcel")).toBeTruthy();
-    expect(screen.getByText("Evening walk")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show fewer events for June 12" })).toBeTruthy();
+    const overflow = within(calendar).getByRole("button", { name: "Show 2 more events for October 12, 2026" });
+    const eventList = document.getElementById(overflow.getAttribute("aria-controls"));
+    expect(overflow.getAttribute("aria-expanded")).toBe("false");
+    expect(within(eventList).queryByText("Stamp stars")).toBeNull();
+    overflow.focus();
+    fireEvent.click(overflow);
+
+    expect(within(eventList).getByText("Stamp stars")).toBeTruthy();
+    expect(within(eventList).getByText("Dry herbs")).toBeTruthy();
+    expect(within(calendar).getByRole("button", { name: "Show fewer events for October 12, 2026" })).toBe(overflow);
+    expect(document.activeElement).toBe(overflow);
+    expect(overflow.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(overflow);
+    expect(within(eventList).queryByText("Stamp stars")).toBeNull();
   });
 
   it("uses the selected Showcase tab to display the Kanban preview", () => {
@@ -69,7 +86,11 @@ describe("Component catalog", () => {
     expect(board.dataset.layout).toBe("balanced");
     expect(board.dataset.formulaDisplay).toBe("balanced");
     expect(board.dataset.collapsed).toBe("false");
-    expect(screen.getByText(String.raw`\property{"Points"}{"sum"}`)).toBeTruthy();
+    const collect = screen.getByRole("region", { name: "Collect category" });
+    expect(within(collect).getByText("35 min")).toBeTruthy();
+    expect(within(collect).getByText("Gather pebbles")).toBeTruthy();
+    const help = screen.getByRole("button", { name: "Kanban showcase help" });
+    expect(help.parentElement.previousElementSibling).toBe(screen.getByRole("heading", { name: "Craft board" }));
   });
 
   it("requests a native window close when the X is clicked", () => {

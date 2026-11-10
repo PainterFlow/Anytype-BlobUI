@@ -1,9 +1,40 @@
-.help-tooltip { position: relative; display: inline-flex; flex: 0 0 auto; vertical-align: middle; }
-.help-tooltip-trigger { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--text-secondary); border-radius: 50%; background: transparent; color: var(--text-secondary); font: 600 12px/1 var(--font-interface); cursor: help; transition: color .14s ease, border-color .14s ease, background-color .14s ease; }
-.help-tooltip-trigger:hover, .help-tooltip-trigger:focus-visible { border-color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.help-tooltip { position: relative; display: inline-flex; flex: none; vertical-align: middle; }
+.help-tooltip-trigger {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: help;
+  transition: color .14s ease, background-color .14s ease;
+}
+.help-tooltip-trigger svg { display: block; width: 18px; height: 18px; }
+.help-tooltip-large .help-tooltip-trigger svg { width: 20px; height: 20px; }
+.help-tooltip-trigger:hover, .help-tooltip-trigger:focus-visible { background: var(--active); color: var(--text); }
 .help-tooltip-trigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
-.help-tooltip-popover { position: absolute; z-index: 60; top: calc(100% + 7px); left: 50%; width: max-content; max-width: min(240px, calc(100vw - 32px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--sidebar); color: var(--text); font: 12px/17px var(--font-interface); overflow-wrap: anywhere; opacity: 0; visibility: hidden; transform: translate(-50%, -3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; pointer-events: none; }
-.help-tooltip:hover .help-tooltip-popover, .help-tooltip:focus-within .help-tooltip-popover { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
-.help-tooltip-large .help-tooltip-trigger { width: 20px; height: 20px; font-size: 13px; }
+.help-tooltip-popover {
+  position: absolute;
+  z-index: 60;
+  top: var(--help-top, 100%);
+  left: var(--help-left, 0px);
+  width: max-content;
+  max-width: min(240px, var(--help-max-width, calc(100vw - 32px)));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sidebar);
+  color: var(--text);
+  font: 12px/17px var(--font-interface);
+  overflow-wrap: anywhere;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .14s ease, visibility .14s ease;
+  pointer-events: none;
+}
+.help-tooltip[data-open="true"][data-positioned] .help-tooltip-popover { opacity: 1; visibility: visible; }
 @media (prefers-reduced-motion: reduce) { .help-tooltip-trigger, .help-tooltip-popover { transition: none; } }
-:root[data-reduced-motion="true"] .help-tooltip-trigger, :root[data-reduced-motion="true"] .help-tooltip-popover { transition: none; }
+:root[data-reduced-motion="true"] :is(.help-tooltip-trigger, .help-tooltip-popover) { transition: none; }
