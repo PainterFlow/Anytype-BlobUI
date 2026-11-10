@@ -20,7 +20,9 @@ import { ExpandableSearch } from "../shared/search.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 import { FilterIcon, ReloadIcon, SearchIcon } from "../shared/catalog-icons.jsx";
+import { HelpTooltip } from "../shared/help-tooltip.jsx";
 import { Sidebar } from "./shell.jsx";
+import { CalendarShowcase, KanbanShowcase } from "./showcases.jsx";
 
 const pickerOptions = [
   { value: "balanced", label: "Balanced" },
@@ -39,6 +41,8 @@ const searchExamples = [
   { title: "Settings rows", description: "Labels, descriptions, and switches" },
   { title: "Text fields and pickers", description: "Text, secret, and select controls" },
   { title: "Tabs", description: "Keyboard selection and animated indicator" },
+  { title: "Help tooltips", description: "Short hover and focus explanations" },
+  { title: "Showcase views", description: "Calendar and Kanban previews" },
   { title: "Sidebar", description: "Navigation, Save, Undo, and Logs" },
 ];
 
@@ -137,6 +141,7 @@ function CatalogModalPreview() {
 
 export function ComponentCatalog({ onClose }) {
   const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedShowcaseTab, setSelectedShowcaseTab] = useState(0);
   const [selectedStyle, setSelectedStyle] = useState("balanced");
   const [selectedSources, setSelectedSources] = useState(["types"]);
   const [enabled, setEnabled] = useState(true);
@@ -286,6 +291,24 @@ export function ComponentCatalog({ onClose }) {
 
           <CatalogSection title="Dialogs" description="Shared confirmation styling, focus handling, Escape, and backdrop dismissal.">
             <div className="component-catalog-dialog-preview"><CatalogModalPreview /></div>
+          </CatalogSection>
+
+          <CatalogSection title="Help tooltips" description="Short help appears on hover or keyboard focus.">
+            <div className="component-catalog-help-preview">
+              <span className="kanban-setting-title">Color by property</span>
+              <HelpTooltip label="About color rules" text="Rules use the optional Anytype Local API v2 connection." />
+            </div>
+          </CatalogSection>
+
+          <CatalogSection title="Showcase views" description="Sample Calendar and Kanban previews." className="component-catalog-wide-card">
+            <Tabs id="catalog-showcase-tabs" label="Showcase examples" className="advanced-tabs component-catalog-showcase-tabs"
+              items={[
+                { tabId: "catalog-showcase-calendar-tab", panelId: "catalog-showcase-calendar-panel", title: "Calendar" },
+                { tabId: "catalog-showcase-kanban-tab", panelId: "catalog-showcase-kanban-panel", title: "Kanban" },
+              ]} selected={selectedShowcaseTab} onSelect={setSelectedShowcaseTab}>
+              <CalendarShowcase compact />
+              <KanbanShowcase compact layout="balanced" formulaDisplay="balanced" />
+            </Tabs>
           </CatalogSection>
 
           <CatalogSection title="Sidebar" description="The production Settings sidebar with sample navigation and actions." className="component-catalog-wide-card">

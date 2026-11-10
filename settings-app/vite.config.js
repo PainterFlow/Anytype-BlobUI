@@ -1,4 +1,4 @@
-import { cp, mkdir } from 'node:fs/promises';
+import { cp, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
@@ -29,15 +29,27 @@ export default defineConfig({
   plugins: [
     {
       name: 'copy-settings-static-assets',
+      configureServer(server) {
+        server.middlewares.use('/dev-guide.md', async (_request, response, next) => {
+          try {
+            const guide = await readFile(path.resolve(projectDirectory, '..', 'dev-guide.md'));
+            response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+            response.end(guide);
+          } catch (error) {
+            next(error);
+          }
+        });
+      },
       async closeBundle() {
         const outputDirectory = path.join(projectDirectory, 'frontend-dist');
         await mkdir(outputDirectory, { recursive: true });
-        for (const directory of ['docs', 'cdn']) {
+        for (const directory of ['cdn']) {
           await cp(path.join(uiDirectory, directory), path.join(outputDirectory, directory), {
             recursive: true,
             force: true
           });
         }
+        await cp(path.resolve(projectDirectory, '..', 'dev-guide.md'), path.join(outputDirectory, 'dev-guide.md'));
         await cp(path.join(uiDirectory, 'vendor', 'MARKED-LICENSE.txt'), path.join(outputDirectory, 'MARKED-LICENSE.txt'));
       }
     }

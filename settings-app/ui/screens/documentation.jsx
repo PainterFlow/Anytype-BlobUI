@@ -125,6 +125,53 @@ export function MarkdownView({ markdown = "", images, videos, id, className = "m
   </>;
 }
 
+export function DeveloperGuideReader({ visible = false }) {
+  const contentRef = useRef(null);
+  const [attempt, setAttempt] = useState(0);
+  const [payload, setPayload] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    if (!visible || payload) return undefined;
+    let active = true;
+    fetch("./dev-guide.md").then(response => {
+      if (!response.ok) throw new Error(`Dev Guide request failed (${response.status}).`);
+      return response.text();
+    }).then(async markdown => {
+      const text = String(markdown || "").trim();
+      if (!text) throw new Error("Dev Guide is empty.");
+      const media = await mediaForMarkdown(text);
+      if (!active) return;
+      setPayload({ markdown: text, ...media });
+      setLoadError(false);
+    }).catch(() => {
+      if (active) setLoadError(true);
+    });
+    return () => { active = false; };
+  }, [visible, attempt, payload]);
+
+  useEffect(() => {
+    if (!visible || !contentRef.current) return undefined;
+    const scrollbar = window.BlobUI.Scrollbar.attach(contentRef.current);
+    return () => scrollbar.destroy();
+  }, [visible]);
+
+  return <div className="documentation-layout dev-guide-layout">
+    <main ref={contentRef} id="documentation-content" className="documentation-content" aria-label="Developer guide" tabIndex={-1}>
+      {loadError ? <div id="documentation-load-error" className="documentation-load-error" role="alert">
+        <p>Dev Guide could not be loaded.</p>
+        <button id="documentation-retry" type="button" className="banner-image-button" onClick={() => {
+          setPayload(null);
+          setLoadError(false);
+          setAttempt(value => value + 1);
+        }}>Try again</button>
+      </div> : payload ? <MarkdownView id="documentation-article" className="documentation-article dev-guide-article markdown-content"
+        aria-label="Developer guide" markdown={payload.markdown} images={payload.images} videos={payload.videos} />
+        : <p className="documentation-article-loading" role="status">Loading Dev Guide…</p>}
+    </main>
+  </div>;
+}
+
 const videoIconPaths = {
   play: "m7 4 10 6-10 6Z",
   pause: "M7 4v12M13 4v12",

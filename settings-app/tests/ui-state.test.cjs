@@ -415,7 +415,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         element('release-notes-content').innerHTML = patch.releaseNotesMedia
           ? context.window.BlobUI.Markdown.render(patch.releaseNotesMedia.markdown, patch.releaseNotesMedia) : '';
       }
-      if (patch.documentationOpened) context.window.BlobUI.DocsUI.load();
     },
   };
   const appSource = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');

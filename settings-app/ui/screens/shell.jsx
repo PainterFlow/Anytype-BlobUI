@@ -49,7 +49,7 @@ export function Titlebar({ backgroundExperiment = "disabled" }) {
 }
 
 export function Documentation({ children }) {
-  return <section id="documentation" className="documentation" aria-label="Documentation" hidden>{children}</section>;
+  return <section id="documentation" className="documentation" aria-label="Dev Guide" hidden>{children}</section>;
 }
 
 export function Onboarding() {
@@ -144,7 +144,7 @@ export function Sidebar({ navigation, saveVisible, saveDisabled, discardDisabled
         <Button id="help-button" className="sidebar-action help-button" title="Help" aria-label="Help" aria-expanded="false" aria-controls="help-popup"><svg className="action-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25" /><circle cx="10" cy="6.4" r=".85" fill="currentColor" stroke="none" /><path d="M10 9v5" /></svg></Button>
         <section id="help-popup" className="help-popup" aria-label="Help" hidden>
           <Button id="help-whats-new" className="help-item"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 12 7l4.8.5-3.6 3.2 1 4.8-4.2-2.5-4.2 2.5 1-4.8-3.6-3.2L8 7z" /></svg><span>What’s New?</span></Button>
-          <Button id="help-documentation" className="help-item"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h8l4 4v9H4zM12 3.5v4h4M7 11h6M7 14h6" /></svg><span>Documentation</span></Button>
+          <Button id="help-dev-guide" className="help-item"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.9 3.5a5.2 5.2 0 0 0-6.7 6.3l-5.8 5.8a1.6 1.6 0 0 0 2.3 2.3l5.8-5.8a5.2 5.2 0 0 0 6.3-6.7l-3.2 3.2-2.6-2.6z" /></svg><span>Dev Guide</span></Button>
           <Button id="help-keybinds" className="help-item"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" /><path d="M5 8h.01M8 8h.01M11 8h.01M14 8h.01M5 11h.01M8 11h4M14 11h.01M6 14h8" /></svg><span>Keybinds</span></Button>
           <div className="help-divider" aria-hidden="true" /><div className="help-meta"><span id="blobui-version">BlobUI version</span><span id="anytype-version">Anytype version</span></div>
           <Button id="open-author" className="help-credit" aria-label="Made by @PainterFlow11" title="https://github.com/PainterFlow/Anytype-BlobUI">Made by @PainterFlow11</Button>

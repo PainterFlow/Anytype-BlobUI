@@ -2308,7 +2308,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!el("help-control").contains(event.target)) closeHelp();
   });
   listen(el("help-whats-new"), "click", () => { closeHelp(); showLatestReleaseNotes(); });
-  listen(el("help-documentation"), "click", () => { closeHelp(); showDocumentation(); });
+  listen(el("help-dev-guide"), "click", () => { closeHelp(); showDocumentation(); });
   listen(el("help-keybinds"), "click", () => {
     closeHelp();
     el("keybind-status").textContent = shortcutBindingsLoaded ? "" : "Loading keyboard shortcuts…";

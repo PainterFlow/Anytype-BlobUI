@@ -70,7 +70,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
-    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata. Refreshing Anytype lists and pickers.'}).count(),2);
+    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),2);
     const calls=await page.evaluate(()=>window.calls);
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');

@@ -11,6 +11,7 @@ import {
 } from "../shared/settings-controls.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 import { CalendarColors } from "./calendar-colors.jsx";
+import { CalendarShowcase, KanbanShowcase } from "./showcases.jsx";
 
 export const preferenceLabels = ["Colors", "Font", "Space Banner"];
 
@@ -21,8 +22,8 @@ function tabItems(prefix, labels) {
 }
 
 const preferenceTabs = tabItems("preference", preferenceLabels);
-const calendarTabs = tabItems("calendar-events", ["Appearance", "Color by property"]);
-const kanbanTabs = tabItems("kanban-views", ["Appearance", "Kanban Calculations"]);
+const calendarTabs = tabItems("calendar-events", ["Appearance", "Color by property", "Showcase"]);
+const kanbanTabs = tabItems("kanban-views", ["Appearance", "Kanban Calculations", "Showcase"]);
 
 function hasValue(values, key) {
   return Object.prototype.hasOwnProperty.call(values, key);
@@ -158,6 +159,9 @@ export function CalendarEvents({ values = {}, onChange, selectedTab, onSelectTab
     <SettingsSection aria-label="Color by property">
       <CalendarColors controller={controller} />
     </SettingsSection>
+    <SettingsSection aria-label="Calendar showcase">
+      <CalendarShowcase />
+    </SettingsSection>
   </Tabs>;
 }
 
@@ -189,8 +193,13 @@ export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, k
       </SettingsGroup>
       <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
     </SettingsSection>
-    <SettingsSection aria-label="Kanban Calculations">
+    <SettingsSection className="settings-group kanban-calculations-page" aria-label="Kanban Calculations">
+      <SettingsHeading title="Kanban calculations" help="Calculations use the optional Anytype Local API v2 connection. Saved results are snapshots until you save again and rebuild in Anytype." />
       <FormulaPageView controller={formulaController} />
+    </SettingsSection>
+    <SettingsSection aria-label="Kanban showcase">
+      <KanbanShowcase layout={kanbanStyle} formulaDisplay={formula?.display ?? "balanced"}
+        collapsedCategories={Boolean(values["collapsed-categories"])} />
     </SettingsSection>
   </Tabs>;
 }

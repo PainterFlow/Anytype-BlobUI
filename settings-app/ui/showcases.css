@@ -1,0 +1,71 @@
+.showcase-heading-row { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; color: var(--text); }
+.showcase-heading-row h3 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
+.showcase-heading-row > .help-tooltip { margin-top: 1px; }
+.calendar-showcase, .kanban-showcase { min-width: 0; color: var(--text); }
+.calendar-showcase-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 10px; padding: 0; list-style: none; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.calendar-showcase-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.calendar-showcase-legend-dot, .calendar-showcase-event-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.event-work { color: #8ca8ff; }
+.event-personal { color: #d7a1f8; }
+.event-home { color: #e9bd73; }
+.event-health { color: #7fd2b0; }
+.calendar-showcase-grid { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--sidebar); }
+.calendar-showcase-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-showcase-weekday { min-width: 0; padding: 7px 5px; border-bottom: 1px solid var(--line); color: var(--text-secondary); font-size: 11px; line-height: 16px; text-align: center; }
+.calendar-showcase-day { display: flex; flex-direction: column; min-width: 0; min-height: 92px; padding: 5px 4px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); }
+.calendar-showcase-day:nth-child(7) { border-right: 0; }
+.calendar-showcase-empty { background: color-mix(in srgb, var(--sidebar) 62%, var(--bg)); }
+.calendar-showcase-week:last-child .calendar-showcase-day { border-bottom: 0; }
+.calendar-showcase-date { flex: 0 0 auto; margin-bottom: 3px; color: var(--text-secondary); font-size: 11px; line-height: 15px; }
+.calendar-showcase-events { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.calendar-showcase-event { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--text); font-size: 10px; line-height: 15px; }
+.calendar-showcase-event-dot { flex-basis: 5px; width: 5px; height: 5px; }
+.calendar-showcase-event > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-showcase-event.event-work .calendar-showcase-event-dot, .calendar-showcase-legend-dot.event-work { background: #8ca8ff; }
+.calendar-showcase-event.event-personal .calendar-showcase-event-dot, .calendar-showcase-legend-dot.event-personal { background: #d7a1f8; }
+.calendar-showcase-event.event-home .calendar-showcase-event-dot, .calendar-showcase-legend-dot.event-home { background: #e9bd73; }
+.calendar-showcase-event.event-health .calendar-showcase-event-dot, .calendar-showcase-legend-dot.event-health { background: #7fd2b0; }
+.calendar-showcase-more { align-self: flex-start; margin: 2px 0 0; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: 10px/15px var(--font-interface); cursor: pointer; }
+.calendar-showcase-more:hover, .calendar-showcase-more:focus-visible { color: var(--text); text-decoration: underline; }
+.calendar-showcase-more:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: 2px; }
+.calendar-showcase-compact .calendar-showcase-day { min-height: 78px; padding: 4px 3px; }
+.calendar-showcase-compact .calendar-showcase-event { font-size: 9px; }
+.kanban-showcase-heading { justify-content: space-between; align-items: center; }
+.kanban-showcase-heading > div { display: grid; gap: 3px; min-width: 0; }
+.kanban-showcase-formula { overflow: hidden; color: var(--text-secondary); font: 11px/16px var(--font-code); text-overflow: ellipsis; white-space: nowrap; }
+.kanban-showcase-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; min-width: 0; overflow-x: auto; padding: 1px 1px 8px; }
+.kanban-showcase-column { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--sidebar); }
+.kanban-showcase-column:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
+.kanban-showcase-column-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; margin-bottom: 8px; }
+.kanban-showcase-column-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-size: 13px; line-height: 18px; font-weight: 600; }
+.kanban-showcase-count { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--active); color: var(--text-secondary); font-size: 10px; font-weight: 400; }
+.kanban-showcase-total { flex: 0 0 auto; color: var(--text-secondary); font-size: 11px; line-height: 18px; }
+.kanban-showcase-board[data-formula-display="spacious"] .kanban-showcase-column-heading { display: grid; justify-content: initial; gap: 2px; }
+.kanban-showcase-board[data-layout="balanced"] { gap: 8px; }
+.kanban-showcase-board[data-layout="compact"] { gap: 5px; }
+.kanban-showcase-board[data-layout="compact"] .kanban-showcase-column { padding: 6px; }
+.kanban-showcase-board[data-layout="compact"] .kanban-showcase-column-heading { gap: 4px; margin-bottom: 5px; }
+.kanban-showcase-cards { display: grid; gap: 6px; }
+.kanban-showcase-card { display: grid; gap: 8px; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.kanban-showcase-card-title { overflow: hidden; color: var(--text); font-size: 12px; line-height: 17px; text-overflow: ellipsis; }
+.kanban-showcase-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 5px; min-width: 0; color: var(--text-secondary); font-size: 10px; line-height: 15px; }
+.kanban-showcase-tag { overflow: hidden; max-width: 65%; padding: 1px 6px; border-radius: 7px; background: var(--active); text-overflow: ellipsis; white-space: nowrap; }
+.kanban-showcase-tag.tag-ui { color: #9eb4ff; }
+.kanban-showcase-tag.tag-docs { color: #dfb3fa; }
+.kanban-showcase-tag.tag-build { color: #edc885; }
+.kanban-showcase-board[data-collapsed="true"] .kanban-showcase-cards { max-height: 0; overflow: hidden; opacity: 0; transition: max-height .2s ease, opacity .16s ease; }
+.kanban-showcase-board[data-collapsed="true"] .kanban-showcase-column:hover .kanban-showcase-cards,
+.kanban-showcase-board[data-collapsed="true"] .kanban-showcase-column:focus-within .kanban-showcase-cards { max-height: 600px; opacity: 1; }
+.kanban-showcase-compact .kanban-showcase-board { gap: 7px; }
+.kanban-showcase-compact .kanban-showcase-column { padding: 7px; }
+.kanban-showcase-compact .kanban-showcase-card { padding: 7px; }
+@media (hover: none) { .kanban-showcase-board[data-collapsed="true"] .kanban-showcase-cards { max-height: none; opacity: 1; } }
+@media (max-width: 700px) {
+  .calendar-showcase-day { min-height: 78px; padding-inline: 3px; }
+  .calendar-showcase-event { font-size: 9px; }
+  .kanban-showcase-board { gap: 7px; }
+  .kanban-showcase-column { padding: 7px; }
+  .kanban-showcase-card { padding: 7px; }
+}
+@media (prefers-reduced-motion: reduce) { .kanban-showcase-board[data-collapsed="true"] .kanban-showcase-cards { transition: none; } }
+:root[data-reduced-motion="true"] .kanban-showcase-board[data-collapsed="true"] .kanban-showcase-cards { transition: none; }

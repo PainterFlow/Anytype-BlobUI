@@ -44,6 +44,32 @@ describe("Component catalog", () => {
     expect(screen.getByRole("switch", { name: /Enable sample setting/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Board layout/ })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "Catalog preview navigation" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "About color rules" }).getAttribute("aria-describedby")).toBeTruthy();
+    expect(screen.getByRole("tablist", { name: "Showcase examples" })).toBeTruthy();
+  });
+
+  it("shows the remaining sample calendar events when expanded", () => {
+    setMotionApis();
+    render(<ComponentCatalog onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more events for June 12" }));
+
+    expect(screen.getByText("Pick up a parcel")).toBeTruthy();
+    expect(screen.getByText("Evening walk")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show fewer events for June 12" })).toBeTruthy();
+  });
+
+  it("uses the selected Showcase tab to display the Kanban preview", () => {
+    setMotionApis();
+    render(<ComponentCatalog onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Kanban" }));
+
+    const board = document.querySelector(".kanban-showcase-board");
+    expect(board.dataset.layout).toBe("balanced");
+    expect(board.dataset.formulaDisplay).toBe("balanced");
+    expect(board.dataset.collapsed).toBe("false");
+    expect(screen.getByText(String.raw`\property{"Points"}{"sum"}`)).toBeTruthy();
   });
 
   it("requests a native window close when the X is clicked", () => {

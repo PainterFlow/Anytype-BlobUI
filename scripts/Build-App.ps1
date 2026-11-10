@@ -109,23 +109,38 @@ if ($null -ne $distributionItem -and
 }
 [System.IO.Directory]::CreateDirectory($distributionDirectory) | Out-Null
 
-$sourceDocumentationDirectory = Join-Path $projectDirectory 'ui\docs'
-$bundledDocumentationDirectory = Join-Path $frontendOutputDirectory 'docs'
-$sourceArticles = @(Get-ChildItem -LiteralPath $sourceDocumentationDirectory -Filter '*.md' -File | ForEach-Object Name | Sort-Object)
-$bundledArticles = @(Get-ChildItem -LiteralPath $bundledDocumentationDirectory -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEach-Object Name | Sort-Object)
-if ($sourceArticles.Count -eq 0 -or $sourceArticles.Count -ne $bundledArticles.Count -or
-    @($sourceArticles | Where-Object { $_ -notin $bundledArticles }).Count -gt 0) {
-    throw 'The Settings frontend did not bundle every documentation article.'
+$sourceDeveloperGuide = Join-Path $workspaceRoot 'dev-guide.md'
+$bundledDeveloperGuide = Join-Path $frontendOutputDirectory 'dev-guide.md'
+if (-not (Test-Path -LiteralPath $sourceDeveloperGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledDeveloperGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle dev-guide.md.'
 }
-
 $distributionDocumentationDirectory = Join-Path $distributionDirectory 'docs'
 $existingDocumentation = Get-Item -LiteralPath $distributionDocumentationDirectory -Force -ErrorAction SilentlyContinue
-if ($null -ne $existingDocumentation -and
-    (($existingDocumentation.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
-    throw "The Settings app documentation folder is a reparse point: $distributionDocumentationDirectory"
+if ($null -ne $existingDocumentation) {
+    $resolvedDistribution = [System.IO.Path]::GetFullPath($distributionDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $resolvedDocumentation = [System.IO.Path]::GetFullPath($distributionDocumentationDirectory)
+    if (-not $resolvedDocumentation.StartsWith($resolvedDistribution, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a documentation folder outside the app distribution: $resolvedDocumentation"
+    }
+    if (($existingDocumentation.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The obsolete Settings documentation folder is a reparse point: $distributionDocumentationDirectory"
+    }
+    $nestedReparsePoints = @(Get-ChildItem -LiteralPath $distributionDocumentationDirectory -Force -Recurse | Where-Object {
+        ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+    })
+    if ($nestedReparsePoints.Count -gt 0) {
+        throw "The obsolete Settings documentation folder contains a reparse point: $($nestedReparsePoints[0].FullName)"
+    }
+    Remove-Item -LiteralPath $distributionDocumentationDirectory -Recurse -Force
 }
-[System.IO.Directory]::CreateDirectory($distributionDocumentationDirectory) | Out-Null
-Copy-Item -Path (Join-Path $bundledDocumentationDirectory '*') -Destination $distributionDocumentationDirectory -Recurse -Force
+$distributionDeveloperGuide = Join-Path $distributionDirectory 'dev-guide.md'
+$existingDeveloperGuide = Get-Item -LiteralPath $distributionDeveloperGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingDeveloperGuide -and
+    (($existingDeveloperGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app Dev Guide path is a reparse point: $distributionDeveloperGuide"
+}
+Copy-Item -LiteralPath $bundledDeveloperGuide -Destination $distributionDeveloperGuide -Force
 
 foreach ($releaseNotesFile in @('Changelogs.md', 'Changelogs.yaml')) {
     $sourceReleaseNotes = Join-Path $workspaceRoot $releaseNotesFile
