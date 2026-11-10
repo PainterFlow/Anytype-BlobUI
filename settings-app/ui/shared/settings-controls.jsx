@@ -30,10 +30,11 @@ export function SettingsGroup({ className = "settings-list", children, ...attrib
 }
 
 export function SettingsRow({ className = "settings-row", label, description, descriptionAttributes, children, ...attributes }) {
+  const descriptionClassName = ["settings-row-description", descriptionAttributes?.className].filter(Boolean).join(" ");
   return <div className={className} {...attributes}>
     {label != null && <div className="kanban-setting-copy">
       <span className="kanban-setting-title">{label}</span>
-      {description != null && <span {...descriptionAttributes}>{description}</span>}
+      {description != null && <span {...descriptionAttributes} className={descriptionClassName}>{description}</span>}
     </div>}
     {children}
   </div>;

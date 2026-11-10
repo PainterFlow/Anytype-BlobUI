@@ -29,6 +29,29 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await panel.locator('#enable-anyblob').evaluate(el=>getComputedStyle(el.closest('label').querySelector('span:first-child')).fontSize),'16px');
     assert.equal(await panel.locator('.object-mention-row .kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
     assert.equal(await panel.locator('.kanban-setting-title').first().evaluate(el=>getComputedStyle(el).fontSize),'16px');
+    const helperLabelSizes=await page.evaluate(()=>{
+      const measure=(className,copyClass,helperClass,titleClass,helperVisible)=>{
+        const row=document.createElement('button');row.className=className;
+        const copy=copyClass?document.createElement('span'):row;if(copyClass)copy.className=copyClass;
+        const title=document.createElement('span');title.className=titleClass;title.textContent='Title';copy.append(title);
+        if(helperClass){const helper=document.createElement('span');helper.className=helperClass;helper.textContent='Helper text';if(!helperVisible)helper.hidden=true;copy.append(helper);}
+        if(copyClass)row.append(copy);
+        document.body.append(row);const size=getComputedStyle(title).fontSize;row.remove();return size;
+      };
+      return {
+        settingWithoutHelper:measure('settings-row kanban-setting-row','kanban-setting-copy','settings-row-description','kanban-setting-title',false),
+        settingWithHelper:measure('settings-row kanban-setting-row','kanban-setting-copy','settings-row-description','kanban-setting-title',true),
+        optionWithoutHelper:measure('kanban-select-option','kanban-option-copy','kanban-select-option-description','kanban-option-label',false),
+        optionWithHelper:measure('kanban-select-option','kanban-option-copy','kanban-select-option-description','kanban-option-label',true),
+        warningWithoutHelper:measure('formula-view-row',null,'formula-view-warning','formula-view-name',false),
+        warningWithHelper:measure('formula-view-row',null,'formula-view-warning','formula-view-name',true),
+      };
+    });
+    assert.deepEqual(helperLabelSizes,{
+      settingWithoutHelper:'16px',settingWithHelper:'14px',
+      optionWithoutHelper:'16px',optionWithHelper:'14px',
+      warningWithoutHelper:'16px',warningWithHelper:'14px',
+    });
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
     assert.equal(await toggle.isChecked(),false);await toggle.check();await page.waitForFunction(()=>window.enabled);await toggle.uncheck();await page.waitForFunction(()=>!window.enabled);
     await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);
