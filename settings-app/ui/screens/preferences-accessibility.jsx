@@ -172,9 +172,8 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, c
         </div>
       </SettingsGroup>
       <p className="field-error" id="accent-error" aria-live="polite" />
+      <CustomThemes values={values} onChange={onChange} themes={customThemes} directory={themeDirectory} disabled={customThemeDisabled} />
     </SettingsSection>
-
-    <CustomThemes values={values} onChange={onChange} themes={customThemes} directory={themeDirectory} disabled={customThemeDisabled} />
 
     <SettingsSection className="settings-group typography-group" aria-labelledby="typography-heading">
       <SettingsHeading id="typography-heading" title="Font" description="Use the same fonts as your Anytype workspace." />

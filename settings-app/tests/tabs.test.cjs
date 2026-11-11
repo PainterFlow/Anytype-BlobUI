@@ -129,7 +129,7 @@ test('real settings tabs keep their width and open panels at the top across heig
     for (const size of [{ width: 800, height: 650 }, { width: 920, height: 740 }, { width: 960, height: 740 }]) {
       await page.setViewportSize(size);
       for (const [nav, ids] of [
-        ['preferences', ['preference-tab-0', 'preference-tab-2', 'preference-tab-0', 'preference-tab-2']],
+        ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2', 'preference-tab-0', 'preference-tab-2']],
         ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-experiments-tab', 'advanced-app-tab', 'advanced-api-tab']],
       ]) {
         await page.locator(`#${nav}-nav`).click();
