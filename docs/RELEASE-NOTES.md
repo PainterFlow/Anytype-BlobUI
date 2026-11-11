@@ -24,7 +24,7 @@ images:
     alt: Completed settings
 ```
 
-The same `images` list contains Dev Guide aliases. Those entries use paths under `./cdn/`, such as `./cdn/calendar-event-colors.png`. The app bundles those files from `settings-app/ui/cdn/`.
+The same `images` list can contain Dev Guide aliases. Those entries use paths under `./cdn/`, and the app bundles those files from `settings-app/ui/cdn/`.
 
 Use the id as an at-mention in Markdown or as a Markdown image target:
 

@@ -22,7 +22,7 @@ import { createRoot } from "react-dom/client";
 import { Accessibility, CalendarEvents, KanbanViews, Preferences } from "./screens/preferences-accessibility.jsx";
 import { Advanced } from "./screens/advanced.jsx";
 import { FormulaCalculatorView } from "./formula-page.jsx";
-import { AppDialogs, Documentation, Onboarding, Sidebar, Titlebar } from "./screens/shell.jsx";
+import { AppDialogs, Onboarding, Sidebar, Titlebar } from "./screens/shell.jsx";
 import { SettingsNavigation } from "./screens/settings-navigation.jsx";
 import { CodexPage } from "./screens/codex-page.jsx";
 import { createCalendarController } from "./calendar-controller.js";
@@ -46,7 +46,6 @@ function SettingsScreens() {
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
   return <>
     <Titlebar backgroundExperiment={backgroundExperiment} />
-    <Documentation><DeveloperGuideReader visible={documentationOpened} /></Documentation>
     <Onboarding />
     <div className="app-shell" id="settings-shell">
       <Sidebar navigation={<SettingsNavigation page={page} onNavigate={name => app?.showSettingsPage(name)}
@@ -81,6 +80,7 @@ function SettingsScreens() {
     </div>
     <AppDialogs formulaContent={<FormulaCalculatorView controller={window.BlobUI.FormulaPage} />}
       shortcutRows={shortcutRows} onShortcutCapture={action => app?.beginShortcutCapture(action)}
+      guideContent={documentationOpened ? <DeveloperGuideReader visible /> : null}
       releaseContent={<MarkdownView id="release-notes-content" className="release-notes-content markdown-content"
         role="region" aria-label="Release notes" tabIndex={0} {...releaseNotesMedia} />} />
     <MarkdownImageViewer />

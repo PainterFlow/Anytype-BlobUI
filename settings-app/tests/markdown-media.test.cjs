@@ -21,20 +21,13 @@ const Markdown = context.BlobUI.Markdown;
 const MarkdownMedia = context.BlobUI.MarkdownMedia;
 const imageManifest = Markdown.parseMediaManifest(manifestText).images;
 
-test('Markdown image aliases come from md-images.yaml and resolve only to bundled local files', async () => {
-  assert.equal(imageManifest['calendar-event-colors'].src, './cdn/calendar-event-colors.png');
-  assert.equal(imageManifest['blobui-mark'].src, './cdn/blobui-mark.svg');
+test('Markdown keeps local image loading and video aliases available with no registered image aliases', async () => {
+  assert.deepEqual(Object.keys(imageManifest), [], 'The current Markdown has no registered image aliases.');
   assert.equal(imageManifest.__proto__, undefined);
   assert.throws(() => Markdown.parseImageManifest('images:\n  - id: escape\n    src: ./cdn/../secret.png\n'));
 
-  for (const image of Object.values(imageManifest)) {
-    if (!image.src.startsWith('./cdn/')) continue;
-    assert.match(image.src, /^\.\/cdn\/[A-Za-z0-9_-]+\.(?:svg|png|jpe?g|gif|webp)$/i);
-    assert.equal(fs.existsSync(path.join(uiRoot, image.src)), true, `${image.src} exists`);
-  }
-
   assert.equal((await MarkdownMedia.loadImage('../secret.png')), null);
-  const loaded = await MarkdownMedia.loadImage('./cdn/calendar-event-colors.png');
+  const loaded = await MarkdownMedia.loadImage('./cdn/test-fixture.png');
   assert.equal(loaded.src, 'data:image/png;base64,AQIDBA==');
   assert.equal(MarkdownMedia.videoAliases['kanban-compact-collapsing'], './cdn/kanban-compact-collapsing.mp4');
   assert.equal(MarkdownMedia.videoAliases.__proto__, undefined);

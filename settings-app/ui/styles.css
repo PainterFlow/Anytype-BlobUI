@@ -80,7 +80,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .window-control { display: grid; place-items: center; width: 44px; padding: 0; border-radius: 0; background: transparent; color: var(--text-secondary); }
 .window-control svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; pointer-events: none; }
 #window-background svg { stroke-width: 1.5; }
-#documentation-back svg { width: 14px; height: 14px; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .window-control:hover { background: var(--active); color: var(--text); }
 .window-control:focus-visible { outline: 1px solid var(--text-secondary); outline-offset: -3px; }
 .window-close:hover { background: #c42b1c; color: #fff; }
@@ -348,7 +347,7 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .confirm-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .56); animation: confirm-backdrop-in .16s ease-out both; }
-#keybinds-backdrop, #help-error-backdrop, #release-notes-backdrop { backdrop-filter: blur(3px); }
+#keybinds-backdrop, #help-error-backdrop, #documentation-backdrop, #release-notes-backdrop { backdrop-filter: blur(3px); }
 .confirm-dialog { position: relative; width: min(100%, 440px); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: 0 18px 48px rgba(0, 0, 0, .36); animation: confirm-dialog-in .2s cubic-bezier(.2, .75, .25, 1) .02s both; }
 .confirm-dialog h2 { max-width: calc(100% - 24px); margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: -.2px; }
 .confirm-dialog p { margin: 12px 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 22px; }
@@ -371,6 +370,9 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .help-error-code { padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--color-red) 35%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--color-red) 12%, var(--bg)); color: var(--color-red); font-size: 14px; line-height: 22px; letter-spacing: 0; }
 .help-error-dialog p { margin: 14px 0 0; padding-right: 20px; }
 .release-notes-dialog { width: min(100%, 720px); max-height: min(82vh, 760px); overflow-y: auto; padding: 28px; border-radius: 16px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
+.documentation-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(100%, 720px); height: min(82vh, 760px); padding: 28px; overflow: hidden; border-radius: 16px; }
+.documentation-dialog-heading { min-width: 0; padding: 0 36px 0 0; }
+.documentation-dialog-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
 .release-notes-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-right: 36px; }
 .release-notes-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
 .release-notes-status { margin: 16px 0 0; color: var(--text-secondary); }
@@ -435,8 +437,9 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 @media (max-height: 700px) {
   .settings-content { padding-top: 26px; padding-bottom: 24px; }
   .color-plane { height: 152px; }
-  .keybinds-dialog, .release-notes-dialog { max-height: 90vh; }
+  .keybinds-dialog, .release-notes-dialog, .documentation-dialog { max-height: 90vh; }
   .release-notes-dialog { padding: 20px; }
+  .documentation-dialog { padding: 20px; }
 }
 
 @media (max-width: 850px) {
@@ -459,8 +462,6 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 :root.onboarding-active .window-titlebar::before { display: none; }
 .onboarding { position: fixed; inset: 36px 0 0; z-index: 20; background: var(--bg); }
 .onboarding[hidden], .onboarding-welcome[hidden], .onboarding-api[hidden] { display: none; }
-.documentation { position: fixed; inset: 36px 0 0; z-index: 20; background: var(--bg); animation: onboarding-fade-in 450ms ease-out both; }
-.documentation[hidden] { display: none; }
 .documentation-layout { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; }
 .documentation-content { --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .documentation-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 3px 8px; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
@@ -487,14 +488,13 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .documentation-children[data-disclosure-state="closed"]::before { top: 0; bottom: 0; }
 .documentation-children-inner { display: grid; gap: 1px; }
 .documentation-child { padding-left: 8px; }
-.documentation-content { min-width: 0; min-height: 0; overflow: auto; padding: 36px clamp(24px, 6vw, 88px) 56px; scroll-behavior: smooth; }
+.documentation-content { min-width: 0; min-height: 0; overflow: auto; padding: 18px 0 8px; scroll-behavior: smooth; }
 .documentation-article { width: min(100%, 760px); margin: 0 auto; }
 .dev-guide-article img { max-height: 260px; margin-inline: auto; }
 .documentation-article:empty { display: none; }
 .documentation-load-error { display: grid; justify-items: start; gap: 12px; width: min(100%, 760px); margin: 20px auto; color: var(--text-secondary); }
 .documentation-load-error[hidden] { display: none; }
 .documentation-load-error p { margin: 0; }
-.documentation.leaving { pointer-events: none; animation: onboarding-fade-out 320ms ease-in both; }
 .onboarding-welcome { display: grid; place-items: center; width: 100%; height: 100%; padding: 32px; background: var(--bg); color: var(--text); cursor: pointer; }
 .onboarding-welcome:focus-visible { outline: none; }
 .onboarding-copy { display: grid; justify-items: center; gap: 24px; text-align: center; }
@@ -687,11 +687,10 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
   .onboarding-option, .recommended-panel { padding: 28px 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-title, .onboarding-hint, .onboarding .leaving, .onboarding-api, .documentation, .documentation.leaving, .app-shell.onboarding-entering { animation: none; }
+  .onboarding-title, .onboarding-hint, .onboarding .leaving, .onboarding-api, .app-shell.onboarding-entering { animation: none; }
   .onboarding-option, .recommended-panel { transition: none; }
   .onboarding-option:hover { transform: none; }
 }
-:root[data-reduced-motion="true"] .documentation, :root[data-reduced-motion="true"] .documentation.leaving { animation: none; }
 
 .connection-content { max-width: 640px; margin: 0 auto; }
 .connection-content .onboarding-api-heading { margin-bottom: 32px; }

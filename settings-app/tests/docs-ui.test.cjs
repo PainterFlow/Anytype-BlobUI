@@ -159,7 +159,7 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('Dev Guide renders offline in dark mode', {
+test('Dev Guide opens in a popup offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
   timeout: 60000,
 }, async () => {
@@ -189,7 +189,7 @@ test('Dev Guide renders offline in dark mode', {
     const guideMarkdown = await fs.promises.readFile(path.join(workspace, 'dev-guide.md'), 'utf8');
     await page.route('http://blobui.test/dev-guide.md', route => route.fulfill({
       contentType: 'text/markdown; charset=utf-8',
-      body: `${guideMarkdown}\n\n![Calendar color example](@calendar-event-colors)\n`,
+      body: guideMarkdown,
     }));
     await page.route('http://blobui.test/docs/**', route => {
       oldDocumentationRequests.push(route.request().url());
@@ -202,20 +202,37 @@ test('Dev Guide renders offline in dark mode', {
 
     await page.locator('#help-button').click();
     await page.locator('#help-dev-guide').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Developer guide');
-    assert.equal(await page.locator('#documentation-navigation').count(), 0, 'The Dev Guide is a single page.');
+    assert.equal(await page.locator('#documentation-dialog').getAttribute('role'), 'dialog');
+    assert.equal(await page.locator('#documentation').count(), 0, 'The Dev Guide opens in a dialog instead of a full-page view.');
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true, 'The settings stay inert while the guide dialog is open.');
     const guideText = await page.locator('#documentation-article').textContent();
-    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'GitHub workflow']) {
+    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'GitHub Guidelines']) {
       assert.ok(guideText.includes(section), `The Dev Guide includes ${section}.`);
     }
     assert.match(guideText, /Markdown formatting|Release notes and Markdown/);
-    const image = page.locator('#documentation-article img').first();
-    await image.waitFor();
-    assert.match(await image.getAttribute('src'), /^data:image\/png;base64,/);
     assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.setViewportSize({ width: 800, height: 650 });
+    const dialogBounds = await page.locator('#documentation-dialog').boundingBox();
+    assert.ok(dialogBounds.width <= 800 && dialogBounds.height <= 650, 'The Dev Guide dialog fits the smallest supported Settings window.');
+    assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.setViewportSize({ width: 960, height: 760 });
     await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
     await page.waitForTimeout(500);
     await page.screenshot({ path: screenshot });
+
+    await page.keyboard.press('Escape');
+    await page.locator('#documentation-backdrop').waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), false, 'Closing the guide restores the settings.');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'help-button', 'Closing the guide returns focus to Help.');
+
+    await page.locator('#help-button').click();
+    await page.locator('#help-dev-guide').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
+    await page.locator('#documentation-close').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'help-button', 'The close button also returns focus to Help.');
 
     await page.goto('http://blobui.test/?window=component-catalog');
     await page.getByRole('main', { name: 'Component catalog' }).waitFor();

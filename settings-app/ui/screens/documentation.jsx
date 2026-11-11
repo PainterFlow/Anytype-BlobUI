@@ -213,7 +213,7 @@ export function MarkdownImageViewer() {
     const backdrop = backdropRef.current;
     const dialog = dialogRef.current;
     const modal = window.BlobUI.createModalController({ backdrop, dialog, initialFocus: () => previewRef.current,
-      fallbackFocus: () => document.querySelector("#documentation:not([hidden]) #documentation-content")
+      fallbackFocus: () => document.querySelector("#documentation-backdrop:not([hidden]) #documentation-content")
         || document.querySelector("#release-notes-backdrop:not([hidden]) #release-notes-content")
         || document.getElementById("help-button"),
       inertTargets: Array.from(document.body.children).filter(element => element !== layer),

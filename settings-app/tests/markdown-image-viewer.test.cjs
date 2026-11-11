@@ -11,7 +11,7 @@ test('images expand at source resolution, restore focus, and preserve the releas
     const page = await browser.newPage({ viewport: { width: 960, height: 740 }, colorScheme: 'dark' });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const source = 'data:image/png;base64,' + fs.readFileSync(path.resolve(__dirname, '../ui/cdn/calendar-event-colors.png')).toString('base64');
+    const source = 'data:image/png;base64,' + fs.readFileSync(path.resolve(__dirname, 'fixtures/markdown-image.png')).toString('base64');
     await page.addInitScript(src => {
       window.__TAURI__ = { core: { invoke: async name => {
         if (name === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: { reducedMotion: true } };

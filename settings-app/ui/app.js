@@ -83,6 +83,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
+  let documentationPreviousFocus = null;
+  const documentationModal = window.BlobUI.createModalController({
+    backdrop: el("documentation-backdrop"),
+    dialog: el("documentation-dialog"),
+    initialFocus: el("documentation-dialog"),
+    fallbackFocus: el("help-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+    onClose: () => {
+      documentationPreviousFocus = null;
+      if (!disposed) view.update({ documentationOpened: false });
+    },
+  });
   const releaseNotesPrevious = el("release-notes-previous");
   const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
@@ -2375,8 +2387,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
   const onboardingApi = el("onboarding-api");
-  const documentation = el("documentation");
-  const documentationBack = el("documentation-back");
   const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
   // Add future pages here. Every page advances through the same transition;
   // reaching the end always reveals the main app.
@@ -2388,55 +2398,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
-  let documentationPreviousFocus = null;
-  let documentationTransition = null;
-
-  function resetDocumentationTransition() {
-    window.clearTimeout(documentationTransition);
-    documentationTransition = null;
-    documentation.classList.remove("leaving");
-    settingsShell.classList.remove("onboarding-entering");
-  }
-
-  function hideDocumentationImmediately() {
-    const previousFocus = documentationPreviousFocus;
-    resetDocumentationTransition();
-    documentation.hidden = true;
-    documentationBack.hidden = true;
-    settingsShell.inert = false;
-    documentationPreviousFocus = null;
-    return previousFocus;
-  }
+  let onboardingAfterGuideClose = false;
 
   function showDocumentation() {
-    if (!onboarding.hidden || !documentation.hidden) return;
-    resetDocumentationTransition();
+    if (!onboarding.hidden || documentationModal.isOpen()) return;
     closeLogs();
     documentationPreviousFocus = document.activeElement;
-    settingsShell.inert = true;
-    documentation.hidden = false;
-    documentationBack.hidden = false;
-    documentationBack.focus();
     view.update({ documentationOpened: true });
+    documentationModal.open();
   }
 
-  function closeDocumentation() {
-    if (documentation.hidden || documentationTransition !== null) return;
-    documentation.classList.add("leaving");
-    const reducedMotion = root.dataset.reducedMotion === "true"
-      || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    documentationTransition = window.setTimeout(() => {
-      documentationTransition = null;
-      documentation.classList.remove("leaving");
-      documentation.hidden = true;
-      documentationBack.hidden = true;
-      settingsShell.inert = false;
-      if (documentationPreviousFocus) documentationPreviousFocus.focus();
-      documentationPreviousFocus = null;
-    }, reducedMotion ? 0 : 320);
-  }
-
-  listen(documentationBack, "click", closeDocumentation);
+  listen(el("documentation-close"), "click", () => documentationModal.close());
 
   function resetOnboardingTransition() {
     window.clearTimeout(onboardingTransition);
@@ -2453,10 +2425,23 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     onboardingSteps[index].focus.focus();
   }
 
-  function showOnboarding() {
+  function showOnboarding(previousFocus = null) {
     if (connectionBusy || isInstallingUpdate()) return;
-    const documentationFocus = documentation.hidden ? null : hideDocumentationImmediately();
-    if (onboarding.hidden) onboardingPreviousFocus = documentationFocus || document.activeElement;
+    if (documentationModal.isOpen()) {
+      if (onboardingAfterGuideClose) return;
+      onboardingAfterGuideClose = true;
+      const guideFocus = documentationPreviousFocus;
+      documentationModal.close({ restoreFocus: false });
+      window.setTimeout(() => {
+        onboardingAfterGuideClose = false;
+        if (!disposed && onboarding.hidden) showOnboarding(guideFocus);
+      }, 150);
+      return;
+    }
+    if (onboarding.hidden) {
+      if (!previousFocus) onboardingPreviousFocus = document.activeElement;
+      else onboardingPreviousFocus = previousFocus.closest("[hidden], [inert]") ? el("help-button") : previousFocus;
+    }
     resetOnboardingTransition();
     closeLogs();
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
@@ -2709,14 +2694,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     removeListeners.splice(0).reverse().forEach(remove => remove());
     [themeInterval, updateInterval].forEach(timer => window.clearInterval?.(timer));
     resetOnboardingTransition();
-    resetDocumentationTransition();
     invalidateBannerRead();
     savedRefresh.invalidate();
     void savedRefresh.setReady(false);
     scrollbars.forEach(controller => controller.destroy());
     Object.values(visibilityFields).forEach(controller => controller.destroy?.());
     externalLinkController.destroy();
-    [apiKeyRemovalModal, discardConfirmationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
+    [apiKeyRemovalModal, discardConfirmationModal, documentationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
       .forEach(controller => controller.destroy?.());
     window.BlobUI.CalendarPage?.destroy?.();
     window.BlobUI.FormulaPage?.destroy?.();
