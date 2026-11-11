@@ -1,0 +1,13 @@
+/*
+author: PainterFlow11
+name: Dark Mode+
+based-theme: Dark Mode
+accent-color: #DE50DE
+accent-color-selections: true
+*/
+/* Dark Mode+ keeps the background near black while preserving Anytype's surface contrast. */
+html, html.themeDark {
+  --color-bg-primary: #191918;
+  --color-bg-primary-90: rgba(25, 25, 24, 0.9);
+  --color-bg-secondary: #1c1c1b;
+}

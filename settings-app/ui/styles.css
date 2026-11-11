@@ -121,6 +121,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .section-heading h2 { margin: 0; font-size: 16px; line-height: 24px; letter-spacing: -.2px; font-weight: 600; }
 .section-heading p { margin: 10px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 22px; }
 .settings-list, .font-fields { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
+.custom-theme-list { overflow: visible; border-radius: 10px; }
 .settings-row { padding: 14px 16px; font-size: 16px; line-height: 24px; letter-spacing: -.2px; }
 .settings-page[hidden] { display: none; }
 .advanced-tabs { position: relative; display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--line); }
@@ -178,6 +179,11 @@ button:focus-visible, input:focus-visible { outline: none; }
 .color-text-input:hover, .color-text-input:focus, .input-field input:hover, .input-field input:focus { background: var(--active); }
 .color-text-input:focus-visible, .input-field input:focus-visible { outline: none; }
 .color-text-input.invalid, .input-field input.invalid { outline: 1px solid #f07878; }
+.custom-theme-color-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; padding: 14px 14px 16px; border-top: 1px solid var(--line); }
+.custom-theme-color-editor { grid-column: 1 / -1; padding: 0; }
+.custom-theme-color-row .field-error { grid-column: 1 / -1; margin: -8px 0 0; }
+.custom-theme-help { margin: 10px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
+.custom-theme-help code { color: var(--text); font-family: var(--font-code); overflow-wrap: anywhere; }
 .field-error { margin: 8px 0 0; color: #f07878; font-size: 12px; line-height: 18px; }
 .field-error:empty { display: none; }
 

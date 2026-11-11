@@ -28,6 +28,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const hueInput = el("accent-hue");
   const saturationInput = el("accent-saturation");
   const brightnessInput = el("accent-brightness");
+  const themePlane = el("theme-color-plane");
+  const themeHueInput = el("theme-color-hue");
+  const themeSaturationInput = el("theme-color-saturation");
+  const themeBrightnessInput = el("theme-color-brightness");
+  const themeColorSwatch = el("theme-color-swatch");
+  const themeColorValue = el("theme-color-value");
   const nativeAccent = el("native-accent");
   const swatch = el("accent-swatch");
   const accentValue = el("accent-value");
@@ -251,6 +257,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let connectionBusy = false;
   let simulationActive = false;
   let hsv = { h: 300, s: 64, v: 87 };
+  let themeHsv = { h: 12, s: 7, v: 10 };
   let lastCustomAccent = null;
   let lastTheme = "";
   let defaultBannerPreview = "";
@@ -438,6 +445,43 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     setAccentPreview(value);
   }
 
+  function renderThemePicker(syncColor) {
+    if (!draft) return;
+    const color = toHexColor(draft.themeColor) || "#191918";
+    if (syncColor) themeHsv = hexToHsv(color);
+    themeHueInput.value = String(Math.round(themeHsv.h) % 360);
+    themeHueInput.setAttribute("aria-valuetext", themeHueInput.value + " degrees");
+    themeSaturationInput.value = String(Math.round(themeHsv.s));
+    themeBrightnessInput.value = String(Math.round(themeHsv.v));
+    themePlane.style.setProperty("--picker-hue", hsvToHex(themeHsv.h, 100, 100));
+    el("theme-color-cursor").style.left = themeHsv.s + "%";
+    el("theme-color-cursor").style.top = (100 - themeHsv.v) + "%";
+    themeColorSwatch.style.background = color;
+  }
+
+  function chooseThemeColor() {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    const value = hsvToHex(themeHsv.h, themeHsv.s, themeHsv.v);
+    draft.themeColor = value;
+    presentSettingsFields({ "theme-color-value": value });
+    themeColorValue.classList.remove("invalid");
+    el("theme-color-error").textContent = "";
+    renderThemePicker(false);
+    markDirty();
+  }
+
+  function changeThemeColorValue(value) {
+    if (!draft || saveBusy || isInstallingUpdate()) return;
+    const raw = value.trim();
+    const color = toHexColor(raw);
+    draft.themeColor = color || raw;
+    presentSettingsFields({ "theme-color-value": value });
+    if (color) renderThemePicker(true);
+    themeColorValue.classList.remove("invalid");
+    el("theme-color-error").textContent = "";
+    markDirty();
+  }
+
   function chooseCustomColor() {
     if (!draft || saveBusy || isInstallingUpdate()) return;
     const value = hsvToHex(hsv.h, hsv.s, hsv.v);
@@ -535,7 +579,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1205,10 +1249,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function clearValidationErrors() {
-    [fontFamily, codeFontFamily, accentValue, advancedApiKey, advancedApiIp, advancedApiPort]
+    [fontFamily, codeFontFamily, accentValue, themeColorValue, advancedApiKey, advancedApiIp, advancedApiPort]
       .forEach((input) => input.classList.remove("invalid"));
     el("font-error").textContent = "";
     el("accent-error").textContent = "";
+    el("theme-color-error").textContent = "";
     el("advanced-api-error").textContent = "";
   }
 
@@ -1290,7 +1335,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     const saveVisible = Boolean(draft && dirty && window.appReady);
     const discardDisabled = settingsLocked || bannerReadPending || !saveVisible;
     const saveDisabled = discardDisabled || (!window.appReady && !prototypeDirty);
-    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady, backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady, kanbanStyleDisabled: settingsLocked || !draft });
+    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy,
+      customThemeDisabled: settingsLocked || !draft || !window.appReady,
+      startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
+      kanbanStyleDisabled: settingsLocked || !draft });
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
       if (control.id === "start-on-login") return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
@@ -1342,6 +1391,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      basedTheme: ["auto", "light", "dark", "inherit"].includes(settings.basedTheme) ? settings.basedTheme : "auto",
+      themePreset: String(settings.themePreset || ""),
+      themeColor: toHexColor(settings.themeColor) || "#191918",
       includeSelections: settings.includeSelections !== false,
       bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,
@@ -1363,6 +1415,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       "font-family": draft.fontFamily,
       "code-font-family": draft.codeFontFamily,
       "accent-value": draft.accentColor,
+      "based-theme": draft.basedTheme,
+      "custom-theme": draft.themePreset,
+      "theme-color-value": draft.themeColor,
       ...Object.fromEntries(Object.entries(toggleSettings).map(([id, key]) => [id, draft[key]])),
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
@@ -1370,6 +1425,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
+    renderThemePicker(true);
     applyFontFamilies();
     syncBannerPreview();
     initialDraft = { ...draft };
@@ -1419,6 +1475,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       state = await invoke("get_app_state");
       applyTheme(state.theme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
+      view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
       assignAdvancedConnection(state);
       void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
@@ -1498,6 +1555,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     window.appReady = !!state.ready;
     applyTheme(state.theme);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
+    view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
     assignAdvancedConnection(state);
     void refreshCalendarApiAvailability(true);
     assignDraftToForm(state.settings || {});
@@ -1806,6 +1864,19 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     el("accent-error").textContent = !safeAccentSyntax || !supportedAccent ? "Use a 3 or 6 digit hex color, a supported rgb()/rgba() value, or an Anytype color variable. Pure white is reserved." : "";
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
+    const themeColor = toHexColor(draft.themeColor);
+    const validBasedTheme = ["auto", "light", "dark", "inherit"].includes(draft.basedTheme);
+    const validThemePreset = !draft.themePreset || (draft.themePreset.length <= 128
+      && !draft.themePreset.startsWith(".") && draft.themePreset.endsWith(".css")
+      && /^[A-Za-z0-9_. -]+$/.test(draft.themePreset));
+    themeColorValue.classList.toggle("invalid", !themeColor);
+    el("theme-color-error").textContent = !themeColor
+      ? "Use a three or six digit hexadecimal color."
+      : !validBasedTheme ? "Choose a valid base theme."
+      : !validThemePreset ? "Choose a valid preset theme."
+      : "";
+    invalid = invalid || !themeColor || !validBasedTheme || !validThemePreset;
+
     const submittedCalendarRules = window.BlobUI.CalendarPage?.read();
     const calendarRulesChanged = JSON.stringify(submittedCalendarRules) !== JSON.stringify(editSession.getBaseline().calendarRules);
     const settingsChanged = !settingsEqual(draft, initialDraft);
@@ -1970,6 +2041,40 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     hsv.h = Number(hueInput.value);
     chooseCustomColor();
   });
+  listen(themeHueInput, "input", () => {
+    if (isInstallingUpdate()) return;
+    themeHsv.h = Number(themeHueInput.value);
+    chooseThemeColor();
+  });
+  listen(themeSaturationInput, "input", () => {
+    if (isInstallingUpdate()) return;
+    themeHsv.s = Number(themeSaturationInput.value);
+    chooseThemeColor();
+  });
+  listen(themeBrightnessInput, "input", () => {
+    if (isInstallingUpdate()) return;
+    themeHsv.v = Number(themeBrightnessInput.value);
+    chooseThemeColor();
+  });
+  function pickThemeAtPointer(event) {
+    const bounds = themePlane.getBoundingClientRect();
+    themeHsv.s = Math.max(0, Math.min(100, (event.clientX - bounds.left) / bounds.width * 100));
+    themeHsv.v = 100 - Math.max(0, Math.min(100, (event.clientY - bounds.top) / bounds.height * 100));
+    chooseThemeColor();
+  }
+  listen(themePlane, "pointerdown", (event) => {
+    if (!draft || saveBusy || isInstallingUpdate() || event.button !== 0) return;
+    event.preventDefault();
+    themePlane.setPointerCapture(event.pointerId);
+    themeSaturationInput.focus({ preventScroll: true });
+    pickThemeAtPointer(event);
+  });
+  listen(themePlane, "pointermove", (event) => {
+    if (themePlane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate()) pickThemeAtPointer(event);
+  });
+  listen(themePlane, "pointerup", (event) => {
+    if (themePlane.hasPointerCapture(event.pointerId)) themePlane.releasePointerCapture(event.pointerId);
+  });
   listen(chooseBannerImage, "click", () => {
     if (!chooseBannerImage.disabled && !isInstallingUpdate()) {
       invalidateBannerRead();
@@ -2043,7 +2148,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function changeSettingField(id, value) {
     if (id === "native-accent") return changeNativeAccent(value);
     if (id === "accent-value") return changeAccentValue(value);
+    if (id === "theme-color-value") return changeThemeColorValue(value);
     if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (id === "based-theme") {
+      draft.basedTheme = value;
+      presentSettingsFields({ [id]: value });
+      markDirty();
+      return;
+    }
+    if (id === "custom-theme") {
+      draft.themePreset = value;
+      presentSettingsFields({ [id]: value });
+      markDirty();
+      return;
+    }
     if (id === "font-family" || id === "code-font-family") {
       draft[id === "font-family" ? "fontFamily" : "codeFontFamily"] = value.trim();
       presentSettingsFields({ [id]: value });
@@ -2726,6 +2844,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); },
   });
   window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
+  window.BlobUI.AppReload.register(async () => {
+    const state = await invoke("get_app_state");
+    if (disposed) return;
+    view.update({
+      customThemes: Array.isArray(state.customThemes) ? state.customThemes : [],
+      themeDirectory: String(state.themeDirectory || ""),
+    });
+  });
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
     onChange: markDirty, onInfo: message => addLog(message, "info"), onAttempt: beginLogAttempt });

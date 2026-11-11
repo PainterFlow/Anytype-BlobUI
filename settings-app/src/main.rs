@@ -36,6 +36,7 @@ mod kanban_snapshot;
 mod hotkey;
 mod storage;
 mod settings_store;
+mod themes;
 mod updater;
 
 static SAVE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -117,6 +118,12 @@ struct SettingsDraft {
     accent_color: String,
     accent_mode: String,
     accent_preset: String,
+    #[serde(default = "default_based_theme")]
+    based_theme: String,
+    #[serde(default)]
+    theme_preset: String,
+    #[serde(default = "default_theme_color")]
+    theme_color: String,
     #[serde(default = "default_include_selections")]
     include_selections: bool,
     #[serde(default)]
@@ -176,12 +183,22 @@ fn default_kanban_style() -> String {
     "default".into()
 }
 
+fn default_based_theme() -> String {
+    "auto".into()
+}
+
+fn default_theme_color() -> String {
+    "#191918".into()
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AppState {
     ready: bool,
     install_directory: String,
     app_data_directory: String,
+    theme_directory: String,
+    custom_themes: Vec<themes::ThemeSummary>,
     theme: String,
     settings: SettingsDraft,
     default_banner_preview: String,
@@ -1151,6 +1168,9 @@ fn load_app_state() -> Result<AppState, String> {
     let install_directory = resolve_install_directory(&app_data)?;
     let data_path = settings_data_path(&install_directory)?;
     let theme = read_anytype_theme(&install_directory.join("devconfig.json"));
+    let settings_root = settings_root_for_install(&install_directory)?;
+    let settings_directory = settings_root.join("Settings");
+    let custom_themes = themes::list_themes(&settings_directory)?;
 
     let mut onboarding_complete = false;
     let mut api_port = 31009;
@@ -1193,6 +1213,8 @@ fn load_app_state() -> Result<AppState, String> {
         ready,
         install_directory: install_directory.to_string_lossy().into_owned(),
         app_data_directory: app_data.to_string_lossy().into_owned(),
+        theme_directory: themes::theme_directory(&settings_directory).to_string_lossy().into_owned(),
+        custom_themes,
         theme,
         settings,
         default_banner_preview: resolve_runtime_directory_for_install(&install_directory)
@@ -1562,6 +1584,9 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "accentColor": accent,
         "accentMode": settings.accent_mode,
         "accentPreset": settings.accent_preset,
+        "basedTheme": settings.based_theme,
+        "themePreset": settings.theme_preset,
+        "themeColor": settings.theme_color,
         "includeSelections": settings.include_selections,
         "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
@@ -1674,6 +1699,7 @@ fn runtime_css_data(data: &Value) -> Value {
         "fontFamily", "codeFontFamily", "accentColor", "bannerImage", "reducedMotion",
         "includeSelections", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect",
         "kanbanViewStyle", "collapsedCategories", "calendarColorsEnabled",
+        "basedTheme", "themePreset", "themeColor",
     ] {
         if let Some(value) = data["settings"].get(key) {
             appearance.insert(key.into(), value.clone());
@@ -1701,7 +1727,22 @@ fn validate_settings(mut settings: SettingsDraft) -> Result<SettingsDraft, Strin
     settings.code_font_family = validate_font_family(&settings.code_font_family, "Code font")?;
     settings.accent_color = settings.accent_color.trim().to_string();
     settings.accent_preset = settings.accent_preset.trim().to_string();
+    settings.based_theme = settings.based_theme.trim().to_ascii_lowercase();
+    settings.theme_preset = settings.theme_preset.trim().to_string();
+    settings.theme_color = themes::validate_theme_color(&settings.theme_color)?;
     settings.banner_image = css::validate_banner_image(&settings.banner_image)?;
+
+    if !matches!(settings.based_theme.as_str(), "auto" | "light" | "dark" | "inherit") {
+        return Err("Based Theme must be Auto, Light Mode, Dark Mode, or Don't Override.".into());
+    }
+    if !settings.theme_preset.is_empty()
+        && (settings.theme_preset.len() > 128
+            || settings.theme_preset.starts_with('.')
+            || !settings.theme_preset.to_ascii_lowercase().ends_with(".css")
+            || !settings.theme_preset.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b' ')))
+    {
+        return Err("The selected custom theme name is invalid.".into());
+    }
 
     if settings.accent_color.is_empty() || settings.accent_color.len() > 128 {
         return Err("Accent color must contain 1 to 128 characters.".into());
@@ -1773,6 +1814,17 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
     let accent_color = read_string(local, "accentColor")
         .or_else(|| read_string(Some(normalized), "accentColor"))
         .unwrap_or_else(|| DEFAULT_ACCENT.into());
+    let based_theme = read_string(local, "basedTheme")
+        .or_else(|| read_string(Some(normalized), "basedTheme"))
+        .filter(|value| matches!(value.as_str(), "auto" | "light" | "dark" | "inherit"))
+        .unwrap_or_else(default_based_theme);
+    let theme_preset = read_string(local, "themePreset")
+        .or_else(|| read_string(Some(normalized), "themePreset"))
+        .unwrap_or_default();
+    let theme_color = read_string(local, "themeColor")
+        .or_else(|| read_string(Some(normalized), "themeColor"))
+        .and_then(|value| themes::validate_theme_color(&value).ok())
+        .unwrap_or_else(default_theme_color);
     let reduced_motion = read_bool(local, "reducedMotion")
         .or_else(|| read_bool(Some(normalized), "reducedMotion"))
         .unwrap_or(false);
@@ -1819,6 +1871,9 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         accent_color,
         accent_mode,
         accent_preset,
+        based_theme,
+        theme_preset,
+        theme_color,
         include_selections: read_bool(local, "includeSelections")
             .or_else(|| read_bool(Some(normalized), "includeSelections"))
             .unwrap_or(true),
@@ -2431,6 +2486,9 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
+            based_theme: default_based_theme(),
+            theme_preset: String::new(),
+            theme_color: default_theme_color(),
             include_selections: true,
             banner_image: String::new(),
             reduced_motion: false,
@@ -3157,6 +3215,8 @@ mod tests {
             ready: true,
             install_directory: String::new(),
             app_data_directory: String::new(),
+            theme_directory: String::new(),
+            custom_themes: Vec::new(),
             theme: "dark".into(),
             settings: SettingsDraft::default(),
             default_banner_preview: String::new(),

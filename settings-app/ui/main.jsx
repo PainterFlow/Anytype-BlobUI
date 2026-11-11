@@ -40,7 +40,7 @@ const updateView = patch => flushSync(() => view.update(patch));
 let app;
 
 function SettingsScreens() {
-  const { page, preferenceTab, calendarTab, kanbanTab, advancedTab, settingsFields, saveVisible, saveDisabled, discardDisabled, saveBusy,
+  const { page, preferenceTab, calendarTab, kanbanTab, advancedTab, settingsFields, customThemes, themeDirectory, customThemeDisabled, saveVisible, saveDisabled, discardDisabled, saveBusy,
     documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, backgroundExperiment, backgroundExperimentDisabled } =
     useSyncExternalStore(view.subscribe, view.getSnapshot);
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
@@ -58,7 +58,8 @@ function SettingsScreens() {
           <div className="settings-content">
             <header className="page-heading"><h1 id="page-title" tabIndex="-1">{pageTitles[page]}</h1></header>
             <div id="preferences-page" className="settings-page" hidden={page !== "preferences"}>
-              <Preferences {...settingsProps} selectedTab={preferenceTab} onSelectTab={index => view.update({ preferenceTab: index })} />
+              <Preferences {...settingsProps} customThemes={customThemes} themeDirectory={themeDirectory} customThemeDisabled={customThemeDisabled}
+                selectedTab={preferenceTab} onSelectTab={index => view.update({ preferenceTab: index })} />
             </div>
             <div id="accessibility-page" className="settings-page" hidden={page !== "accessibility"}><Accessibility {...settingsProps} /></div>
             <div id="calendar-events-page" className="settings-page" hidden={page !== "calendar-events"}>

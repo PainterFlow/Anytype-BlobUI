@@ -541,6 +541,9 @@ fn prepare_staged(
     write_json(&staged.join(ANYBLOB_SETTINGS_FILE), &anyblob_settings)?;
     write_json(&staged.join(ANYBLOB_PROJECTS_FILE), &projects_file)?;
     write_json(&staged.join(ANYBLOB_PERMISSIONS_FILE), &permissions_file)?;
+    crate::themes::ensure_builtin_themes(staged)?;
+    let generated_theme_css = crate::themes::render_generated_css(staged, &Value::Object(original.clone()))?;
+    write_bytes(&staged.join("themes/generated.css"), generated_theme_css.as_bytes())?;
     Ok(())
 }
 
@@ -928,6 +931,9 @@ mod tests {
             "settings": {
                 "fontFamily": "Inter",
                 "backgroundExperiment": "normal",
+                "basedTheme": "dark",
+                "themePreset": "dark-mode-plus.css",
+                "themeColor": "#334455",
                 "futureSetting": {"nested": ["kept"]},
                 "codexIntegration": {
                     "objectMentions": {"types": ["task"], "futureMentionField": 7},
@@ -968,11 +974,18 @@ mod tests {
         let projects = read_json(&directory.join(ANYBLOB_PROJECTS_FILE), "projects").unwrap();
         let permissions = read_json(&directory.join(ANYBLOB_PERMISSIONS_FILE), "permissions").unwrap();
         assert_eq!(basic["settings"]["fontFamily"], "Inter");
+        assert_eq!(basic["settings"]["basedTheme"], "dark");
+        assert_eq!(basic["settings"]["themePreset"], "dark-mode-plus.css");
+        assert_eq!(basic["settings"]["themeColor"], "#334455");
         assert_eq!(advanced["settings"]["backgroundExperiment"], "autostart-background");
         assert_eq!(projects["projects"]["stable-id"]["future"], true);
         assert_eq!(permissions, json!({"formatVersion":2,"spaces":{"full-space-id":{"access":"createDelete","future":1}}}));
         assert!(directory.join(PRIVATE_CONNECTION_FILE).is_file());
         assert!(directory.join(PRIVATE_CREDENTIAL_FILE).parent().unwrap().is_dir());
+        let generated_theme_css = fs::read_to_string(directory.join("themes/generated.css")).unwrap();
+        assert!(generated_theme_css.contains("color-scheme: dark;"));
+        assert!(generated_theme_css.contains("--color-bg-primary: #334455;"));
+        assert!(generated_theme_css.contains("Dark Mode+ keeps the background near black"));
     }
 
     #[test]

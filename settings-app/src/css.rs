@@ -56,6 +56,16 @@ pub fn default_banner_preview(runtime_root: &Path) -> Result<String, String> {
 }
 
 pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> Result<String, String> {
+    let settings_root = crate::settings_root_for_install(install_directory)?;
+    compile_with_settings_directory(runtime_root, install_directory, &settings_root.join("Settings"), data)
+}
+
+pub(crate) fn compile_with_settings_directory(
+    runtime_root: &Path,
+    install_directory: &Path,
+    settings_directory: &Path,
+    data: &Value,
+) -> Result<String, String> {
     let dev_directory = runtime_root.join("Dev");
     let asset_directory = runtime_root.join("assets");
     if !dev_directory.is_dir() {
@@ -183,6 +193,10 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
                 css_text = format!("{}{newline}{newline}{calendar_css}{newline}", css_text.trim_end());
             }
         }
+    }
+    let theme_css = crate::themes::render_generated_css(settings_directory, data)?;
+    if !theme_css.trim().is_empty() {
+        css_text = format!("{}{newline}{newline}{}", css_text.trim_end(), theme_css.trim_end());
     }
     if Regex::new(r"\{\{[^}]+\}\}").unwrap().is_match(&css_text) {
         return Err("Compiled CSS still contains an unresolved placeholder.".into());

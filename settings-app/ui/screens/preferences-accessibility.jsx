@@ -5,6 +5,7 @@ import {
   Button,
   SettingsGroup,
   SettingsHeading,
+  SettingsRow,
   SettingsSection,
   Switch,
   TextField,
@@ -49,12 +50,67 @@ function settingSwitch(values, onChange, id, label, className, description, inpu
   return <Switch {...props} />;
 }
 
-function ColorPlane() {
-  return <div className="color-plane" id="color-plane" role="group" aria-label="Color saturation and brightness">
-    <span className="color-cursor" id="color-cursor" aria-hidden="true" />
-    <input className="sr-only" id="accent-saturation" type="range" min="0" max="100" defaultValue="64" aria-label="Color saturation" />
-    <input className="sr-only" id="accent-brightness" type="range" min="0" max="100" defaultValue="87" aria-label="Color brightness" />
+function ColorPlane({ id = "color-plane", cursorId = "color-cursor", saturationId = "accent-saturation", brightnessId = "accent-brightness", label = "Color saturation and brightness" }) {
+  return <div className="color-plane" id={id} role="group" aria-label={label}>
+    <span className="color-cursor" id={cursorId} aria-hidden="true" />
+    <input className="sr-only" id={saturationId} type="range" min="0" max="100" defaultValue="64" aria-label="Color saturation" />
+    <input className="sr-only" id={brightnessId} type="range" min="0" max="100" defaultValue="87" aria-label="Color brightness" />
   </div>;
+}
+
+const basedThemeOptions = [
+  { value: "auto", label: "Auto", description: "Choose a light or dark palette from the main color." },
+  { value: "light", label: "Light Mode" },
+  { value: "dark", label: "Dark Mode" },
+  { value: "inherit", label: "Don't Override", description: "Use the Light or Dark mode selected in Anytype." },
+];
+
+function CustomThemes({ values, onChange, themes = [], directory = "", disabled = false }) {
+  const selectedTheme = values["custom-theme"] || "";
+  const hasSelectedTheme = !selectedTheme || themes.some(theme => theme.id === selectedTheme);
+  const options = [
+    { value: "", label: "None", description: "Use the generated palette without a preset." },
+    ...themes.map(theme => ({ value: theme.id, label: theme.name, description: theme.author })),
+    ...(!hasSelectedTheme ? [{ value: selectedTheme, label: `Missing theme (${selectedTheme})`, description: "The selected CSS file is no longer available." }] : []),
+  ];
+  const inputValue = (id, fallback) => {
+    if (!Object.prototype.hasOwnProperty.call(values, id)) return fallback;
+    return { ...fallback, value: values[id], onChange: event => onChange?.(id, event.currentTarget.value, event) };
+  };
+
+  return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
+    <SettingsHeading id="custom-themes-heading" title="Custom Themes" description="Build an Anytype color palette from a main color and optional CSS preset." />
+    <SettingsGroup className="settings-list custom-theme-list">
+      <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
+        <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
+          label="Based Theme" value={values["based-theme"] || "auto"} options={basedThemeOptions} disabled={disabled}
+          onChange={value => onChange?.("based-theme", value)} />
+      </SettingsRow>
+      <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Preset Themes">
+        <SelectPicker id="custom-theme" rootId="custom-theme-select" menuId="custom-theme-options"
+          label="Preset Themes" value={selectedTheme} options={options} disabled={disabled}
+          emptyMessage="No theme files were found." onChange={value => onChange?.("custom-theme", value)} />
+      </SettingsRow>
+      <div className="custom-theme-color-row">
+        <div className="kanban-setting-copy"><span className="kanban-setting-title">Main color</span></div>
+        <div id="theme-color-editor" className="color-editor custom-theme-color-editor">
+          <ColorPlane id="theme-color-plane" cursorId="theme-color-cursor" saturationId="theme-color-saturation" brightnessId="theme-color-brightness" label="Theme color saturation and brightness" />
+          <div className="color-controls">
+            <label className="hue-field" htmlFor="theme-color-hue">Hue</label>
+            <input id="theme-color-hue" className="hue-slider" type="range" min="0" max="359" defaultValue="12" aria-label="Theme color hue" />
+            <label className="color-value-label" htmlFor="theme-color-value">Hex color</label>
+            <div className="color-value-row">
+              <span id="theme-color-swatch" className="accent-swatch" aria-hidden="true" />
+              <input id="theme-color-value" className="color-text-input" type="text" spellCheck="false" autoComplete="off"
+                aria-describedby="theme-color-error" {...inputValue("theme-color-value", {})} />
+            </div>
+          </div>
+        </div>
+        <p className="field-error" id="theme-color-error" aria-live="polite" />
+      </div>
+    </SettingsGroup>
+    <p className="custom-theme-help">Add a CSS file with a commented name and author header to <code>{directory || "Settings/themes/built-in-themes"}</code>. Press Ctrl+R in BlobUI Settings to reload the theme list.</p>
+  </SettingsSection>;
 }
 
 const boardLayouts = [
@@ -85,7 +141,7 @@ function SpaceBannerPreview() {
   </div>;
 }
 
-export function Preferences({ values = {}, onChange, selectedTab, onSelectTab }) {
+export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, customThemes = [], themeDirectory = "", customThemeDisabled = false }) {
   const inputValue = (id, fallbackProps) => {
     if (!hasValue(values, id)) return fallbackProps;
     if (onChange) return { ...fallbackProps, value: values[id], onChange: event => onChange(id, event.currentTarget.value, event) };
@@ -117,6 +173,8 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab })
       </SettingsGroup>
       <p className="field-error" id="accent-error" aria-live="polite" />
     </SettingsSection>
+
+    <CustomThemes values={values} onChange={onChange} themes={customThemes} directory={themeDirectory} disabled={customThemeDisabled} />
 
     <SettingsSection className="settings-group typography-group" aria-labelledby="typography-heading">
       <SettingsHeading id="typography-heading" title="Font" description="Use the same fonts as your Anytype workspace." />

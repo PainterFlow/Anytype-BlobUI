@@ -258,6 +258,9 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
+        based_theme: "auto".into(),
+        theme_preset: String::new(),
+        theme_color: "#191918".into(),
         include_selections: true,
         banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,
@@ -275,6 +278,8 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     let saved_data = read_json_file(&data_path).unwrap();
     assert!(saved_data.get("settingsV2").is_none());
     assert_eq!(saved_data["settings"]["accentColor"], "#27A879");
+    assert_eq!(saved_data["settings"]["basedTheme"], "auto");
+    assert_eq!(saved_data["settings"]["themeColor"], "#191918");
     assert_eq!(saved_data["settings"]["reducedMotion"], false);
     assert_eq!(saved_data["settings"]["kanbanViewStyle"], "compact");
     assert_eq!(saved_data["settings"]["collapsedCategories"], true);
@@ -287,6 +292,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     assert_eq!(saved_data["calendarObjectColors"]["fixture-event"], "Green");
     let saved_css = fs::read_to_string(&css_path).unwrap();
     assert!(saved_css.contains("#27A879"));
+    assert!(saved_css.contains("--color-bg-primary: #191918;"));
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));

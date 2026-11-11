@@ -1,0 +1,16 @@
+/*
+author: PainterFlow11
+name: OLED
+based-theme: Dark Mode
+accent-color: #DE50DE
+accent-color-selections: true
+*/
+/* OLED uses a pure black background. */
+html, html.themeDark {
+  --color-bg-primary: #000000;
+  --color-bg-primary-90: rgba(0, 0, 0, 0.9);
+  --color-bg-secondary: #000000;
+  --color-shape-primary: #171717;
+  --color-shape-secondary: #101010;
+  --color-shape-tertiary: #080808;
+}
