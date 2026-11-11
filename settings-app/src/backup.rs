@@ -109,7 +109,7 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
         crate::settings_store::save_with_formula(&stage_root, &data, &formula)?;
 
         let runtime = crate::resolve_runtime_directory_for_install(&anytype_data_root)?;
-        let css = crate::css::compile(&runtime, &anytype_data_root, &data)?;
+        let css = crate::css::compile_with_settings_directory(&runtime, &anytype_data_root, &stage_root.join("Settings"), &data)?;
         let serialized = crate::serialize_runtime_data(&data)?;
         let staged_settings = stage_root.join(SETTINGS_DIR);
         let banner_path = staged_settings.join("assets/banner.png");
