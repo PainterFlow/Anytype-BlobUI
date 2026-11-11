@@ -8,6 +8,7 @@ const contentTypes = new Map([
   ['.js', 'application/javascript'],
   ['.css', 'text/css'],
   ['.md', 'text/plain'],
+  ['.yaml', 'text/yaml'],
   ['.svg', 'image/svg+xml'],
   ['.png', 'image/png'],
   ['.mp4', 'video/mp4'],

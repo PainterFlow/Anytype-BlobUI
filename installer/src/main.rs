@@ -768,7 +768,7 @@ fn read_release_version(root: &Path) -> Result<String, String> {
         "assets",
         "settings-app/dist/blobui-settings.exe",
         "Changelogs.md",
-        "Changelogs.yaml",
+        "md-images.yaml",
     ] {
         if !root.join(required).exists() {
             return Err(format!(
@@ -959,7 +959,7 @@ mod tests {
         )
         .unwrap();
         fs::write(package.join("Changelogs.md"), "# Example release notes\n").unwrap();
-        fs::write(package.join("Changelogs.yaml"), "images: []\n").unwrap();
+        fs::write(package.join("md-images.yaml"), "images: []\n").unwrap();
         package
     }
 

@@ -59,7 +59,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     await page.keyboard.press('Home');
     assert.equal(await page.locator('#preference-tab-0').getAttribute('aria-selected'), 'true');
     await page.locator('#preference-tab-1').click(); await page.locator('#font-family').fill('Arial');
-    assert.deepEqual(await page.locator('#preferences-section-links .v21-section-link .documentation-item-label').allTextContents(), ['Colors', 'Font', 'Space banner']);
+    assert.deepEqual(await page.locator('#preferences-section-links .v21-section-link .documentation-item-label').allTextContents(), ['Colors', 'Font', 'Space Banner']);
     assert.equal(await page.locator('#preferences-section-links .settings-emoji-icon').textContent(), '🎨');
     await page.locator('#calendar-events-nav').click();
     assert.equal(await page.locator('#page-title').innerText(), 'Calendar Events');
@@ -67,10 +67,12 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     await page.locator('#calendar-events-section-links').getByRole('button', { name: 'Color by property', exact: true }).click();
     assert.equal(await page.locator('#calendar-events-tab-1').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
+    assert.equal(await page.locator('#calendar-events-section-links').getByRole('button', { name: 'Showcase', exact: true }).count(), 0);
     await page.locator('#kanban-views-nav').click();
     assert.equal(await page.locator('#page-title').innerText(), 'Kanban Views');
     await page.locator('#kanban-views-section-links').getByRole('button', { name: 'Kanban Calculations', exact: true }).click();
     assert.equal(await page.locator('#kanban-views-tab-1').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#kanban-views-section-links').getByRole('button', { name: 'Showcase', exact: true }).count(), 0);
     await page.locator('#accessibility-nav').click();
     assert.equal(await page.locator('#accessibility-nav').getAttribute('aria-expanded'), null);
     assert.equal(await page.locator('#accessibility-section-links').count(), 0);

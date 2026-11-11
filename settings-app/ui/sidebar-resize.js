@@ -102,19 +102,17 @@
     updateNativeTooltips();
   }
   function labelButtons() {
-    doc.querySelectorAll(".sidebar .nav-item,.sidebar .documentation-item,.documentation-navigation .documentation-item,.sidebar-action").forEach(button => {
+    doc.querySelectorAll(".sidebar .nav-item,.sidebar .documentation-item,.sidebar-action").forEach(button => {
       const label = button.querySelector(".documentation-item-label")?.textContent || button.getAttribute("aria-label") || button.textContent.trim();
       if (label) { button.setAttribute("aria-label", label); button.dataset.sidebarTooltip = label; button.removeAttribute("title"); }
     });
   }
   const observer = new MutationObserver(labelButtons);
-  for (const selector of ["#sidebar-nav", "#documentation-navigation"]) {
-    const target = doc.querySelector(selector);
-    if (target) observer.observe(target, { childList: true, subtree: true });
-  }
+  const navigation = doc.querySelector("#sidebar-nav");
+  if (navigation) observer.observe(navigation, { childList: true, subtree: true });
   labelButtons();
   const resizeObserver = new ResizeObserver(updateNativeTooltips);
-  doc.querySelectorAll(".sidebar,.documentation-navigation").forEach(sidebar => resizeObserver.observe(sidebar));
+  doc.querySelectorAll(".sidebar").forEach(sidebar => resizeObserver.observe(sidebar));
   doc.addEventListener("pointerover", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));
   doc.addEventListener("pointermove", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));
   doc.addEventListener("focusin", event => showTooltip(event.target.closest?.("[data-sidebar-tooltip]")));

@@ -38,21 +38,12 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
     assert.equal(await page.locator('#advanced-nav').getAttribute('title'), null);
     assert.equal(await page.locator('#save-button').isVisible(), false);
     await page.reload(); await page.waitForFunction(() => window.appReady); assert.equal(await width(), 320);
-    for (const layout of ["standard"]) {
-      const box = await handle.boundingBox();
-      await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(220, box.y + 50);
-      await page.keyboard.press('Escape'); await page.mouse.up(); assert.equal(await width(), 320);
-      await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 160);
-      await page.keyboard.press('ArrowLeft'); assert.equal(await width(), 160);
-      await page.keyboard.press('ArrowRight'); assert.equal(await width(), 168);
-      await page.evaluate(() => { document.querySelector('.documentation').hidden = false; });
-      const docsHandle = page.locator('.documentation-layout > .sidebar-resizer');
-      assert.equal(await docsHandle.getAttribute('aria-valuenow'), '168');
-      await docsHandle.focus(); await page.keyboard.press('End');
-      assert.equal(await handle.getAttribute('aria-valuenow'), '320');
-      await page.screenshot({ path: path.resolve(source, '../../.test-run/sidebar-standard-' + layout + '-dark.png') });
-      await page.evaluate(() => { document.querySelector('.documentation').hidden = true; });
-    }
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + 4, box.y + 50); await page.mouse.down(); await page.mouse.move(220, box.y + 50);
+    await page.keyboard.press('Escape'); await page.mouse.up(); assert.equal(await width(), 320);
+    await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 160);
+    await page.keyboard.press('ArrowLeft'); assert.equal(await width(), 160);
+    await page.keyboard.press('ArrowRight'); assert.equal(await width(), 168);
     await page.setViewportSize({ width: 600, height: 850 });
     await handle.focus(); await page.keyboard.press('End'); assert.equal(await width(), 240);
     for (const legacy of ['off', 'pro']) {

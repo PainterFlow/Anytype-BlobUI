@@ -545,9 +545,12 @@ fn read_packaged_release_notes(runtime_directory: &Path, version: &str) -> Resul
     if markdown.trim().is_empty() {
         return Ok(None);
     }
-    let manifest_path = runtime_directory.join("Changelogs.yaml");
+    let manifest_path = runtime_directory.join("md-images.yaml");
+    let legacy_manifest_path = runtime_directory.join("Changelogs.yaml");
     let image_manifest = if manifest_path.is_file() {
         read_release_text(&manifest_path, MAX_RELEASE_NOTES_BYTES)?
+    } else if legacy_manifest_path.is_file() {
+        read_release_text(&legacy_manifest_path, MAX_RELEASE_NOTES_BYTES)?
     } else {
         "images: []\n".into()
     };
@@ -665,7 +668,8 @@ fn fetch_release_notes_for_tag(tag: &str, release: Option<&Value>) -> Result<Rel
     if markdown.trim().is_empty() {
         return Err("The GitHub release notes are empty.".into());
     }
-    let image_manifest = fetch_raw_release_file(tag, "Changelogs.yaml", MAX_RELEASE_NOTES_BYTES as usize)
+    let image_manifest = fetch_raw_release_file(tag, "md-images.yaml", MAX_RELEASE_NOTES_BYTES as usize)
+        .or_else(|_| fetch_raw_release_file(tag, "Changelogs.yaml", MAX_RELEASE_NOTES_BYTES as usize))
         .unwrap_or_else(|_| "images: []\n".into());
     Ok(ReleaseNotes { version: parse_version(tag).unwrap().to_string(), tag: tag.to_string(), markdown, image_manifest })
 }
@@ -1566,6 +1570,7 @@ fn validate_managed_key(raw: &str) -> Result<Option<String>, String> {
         || key == "runtime/settings-app.exe"
         || key == "runtime/blobui-release.json"
         || key == "runtime/Changelogs.md"
+        || key == "runtime/md-images.yaml"
         || key == "runtime/Changelogs.yaml")
     {
         return Err("The BlobUI install manifest contains an unsupported file path.".into());
@@ -1981,7 +1986,7 @@ mod tests {
         let (install, _, _, _) = install_fixture(&root);
         let runtime = install.join("blob/runtime");
         fs::write(runtime.join("Changelogs.md"), "# BlobUI 1.0.0\n\nUpdated settings.\n").unwrap();
-        fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        fs::write(runtime.join("md-images.yaml"), "images: []\n").unwrap();
         let path = preferences_path(&app_data);
         let mut preferences = UpdaterPreferences {
             pending_changelog_version: Some("1.0.0".into()),
@@ -2015,7 +2020,7 @@ mod tests {
         let app_data = root.join("APPDATA/anytype");
         let runtime = install.join("blob/runtime");
         fs::write(runtime.join("Changelogs.md"), "# Latest notes\n").unwrap();
-        fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        fs::write(runtime.join("md-images.yaml"), "images: []\n").unwrap();
         assert!(!is_development_runtime(&runtime));
         let packaged = get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap();
         assert_eq!(packaged.version, "1.0.0");
@@ -2027,6 +2032,9 @@ mod tests {
         assert_eq!(notes.markdown, "# Latest notes\n");
         assert_eq!(notes.image_manifest, "images: []\n");
         assert_eq!(load_preferences(&preferences_path(&app_data)).unwrap().pending_changelog_version, None);
+        fs::remove_file(runtime.join("md-images.yaml")).unwrap();
+        fs::write(runtime.join("Changelogs.yaml"), "images: []\n").unwrap();
+        assert_eq!(get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap().image_manifest, "images: []\n");
         fs::remove_file(runtime.join("Changelogs.yaml")).unwrap();
         assert_eq!(get_latest_release_notes(Some(&install), Some(&runtime)).unwrap().unwrap().image_manifest, "images: []\n");
         fs::write(runtime.join("Changelogs.md"), "  \n").unwrap();
@@ -2051,7 +2059,7 @@ mod tests {
         fs::write(app_directory.join(".blobui-install.json"), "{}\n").unwrap();
         fs::write(app_directory.join("blobui-release.json"), r#"{"formatVersion":1,"version":"1.0.0"}"#).unwrap();
         fs::write(app_directory.join("Changelogs.md"), "# Packaged notes\n\nLoaded beside the app.\n").unwrap();
-        fs::write(app_directory.join("Changelogs.yaml"), "images: []\n").unwrap();
+        fs::write(app_directory.join("md-images.yaml"), "images: []\n").unwrap();
 
         let app_data = root.join("APPDATA/anytype");
         let mut preferences = UpdaterPreferences {

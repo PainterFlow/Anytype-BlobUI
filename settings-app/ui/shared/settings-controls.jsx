@@ -1,4 +1,5 @@
 import React from "react";
+import { HelpTooltip } from "./help-tooltip.jsx";
 
 export function Button({ type = "button", children, ...attributes }) {
   return <button type={type} {...attributes}>{children}</button>;
@@ -18,9 +19,12 @@ export function SettingsSection({ className = "settings-group", children, ...att
   return <section className={className} {...attributes}>{children}</section>;
 }
 
-export function SettingsHeading({ id, title, description }) {
+export function SettingsHeading({ id, title, description, help }) {
   return <div className="section-heading">
-    <h2 id={id}>{title}</h2>
+    <div className="section-heading-title">
+      <h2 id={id}>{title}</h2>
+      {help && <HelpTooltip label={`${title} help`} text={help} size="large" />}
+    </div>
     {description != null && <p>{description}</p>}
   </div>;
 }

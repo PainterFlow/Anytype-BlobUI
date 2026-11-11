@@ -159,20 +159,19 @@ test('disclosure controller supports reusable panels, rapid reversal, focus safe
   }
 });
 
-test('React documentation renders every bundled article offline in dark mode', {
+test('Dev Guide opens in a popup offline in dark mode', {
   skip: (!chromium || !chromePath) && 'Playwright and Google Chrome are required; set PLAYWRIGHT_MODULE and CHROME_PATH when they are not on the default paths',
   timeout: 60000,
 }, async () => {
-  const testRoot = path.join(workspace, '.test-run', 'docs-ui-integration');
-  const screenshot = path.join(workspace, '.test-run', 'docs-preview.png');
+  const testRoot = path.join(workspace, '.test-run', 'dev-guide-ui-integration');
+  const screenshot = path.join(testRoot, 'dev-guide-preview.png');
   fs.mkdirSync(testRoot, { recursive: true });
-  fs.mkdirSync(path.dirname(screenshot), { recursive: true });
   const browser = await chromium.launch({ executablePath: chromePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
-    const page = await browser.newPage({ viewport: { width: 960, height: 740 } });
+    const page = await browser.newPage({ viewport: { width: 960, height: 760 }, colorScheme: 'dark' });
     const errors = [];
     const externalRequests = [];
-    const blockedArticleRequests = [];
+    const oldDocumentationRequests = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => {
       if (!request.url().startsWith('http://blobui.test/') && !request.url().startsWith('blob:')) externalRequests.push(request.url());
@@ -187,59 +186,61 @@ test('React documentation renders every bundled article offline in dark mode', {
       } } };
     });
     await loadSettings(page);
+    const guideMarkdown = await fs.promises.readFile(path.join(workspace, 'dev-guide.md'), 'utf8');
+    await page.route('http://blobui.test/dev-guide.md', route => route.fulfill({
+      contentType: 'text/markdown; charset=utf-8',
+      body: guideMarkdown,
+    }));
     await page.route('http://blobui.test/docs/**', route => {
-      blockedArticleRequests.push(route.request().url());
+      oldDocumentationRequests.push(route.request().url());
       return route.abort();
     });
     await page.waitForTimeout(1000);
     const startup = await page.evaluate(() => ({ ready: window.appReady, bridge: typeof window.__TAURI__?.core?.invoke,
       status: document.getElementById('status-message')?.textContent, html: document.getElementById('settings-react-root')?.innerText.slice(0, 300) }));
-    if (!startup.ready) throw new Error(JSON.stringify({ startup, pageErrors }));
+    if (!startup.ready) throw new Error(JSON.stringify({ startup, pageErrors: errors }));
+
     await page.locator('#help-button').click();
-    await page.locator('#help-documentation').click();
-    await page.locator('#documentation-navigation [data-article-id="introduction"]').waitFor();
-    await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Introduction');
-
-    assert.equal(await page.locator('[data-article-id="introduction"]').getAttribute('aria-current'), 'page');
-    assert.equal(await page.locator('#documentation-navigation .documentation-child').count(), 6);
-    assert.deepEqual(await page.locator('.documentation-category-label').allTextContents(), ['User guide', 'Development']);
-    const ids = await page.locator('[data-article-id]').evaluateAll(nodes => nodes.map(node => node.dataset.articleId));
-    assert.deepEqual(ids, ['introduction', 'installation-and-removal', 'features', 'appearance', 'kanban-layouts-and-formulas', 'calendar-colors', 'text-effects-and-previews', 'anyblob-codex-integration', 'anyblob-setup', 'anyblob-configuration', 'api-guide', 'settings-ui-refresh', 'updating', 'setup-and-architecture', 'theme-and-documentation-development', 'testing-and-releases']);
-    assert.equal(await page.locator('#documentation-navigation .documentation-item-icon svg').count(), ids.length);
-    assert.equal(await page.locator('[data-article-id="theme-and-documentation-development"]').textContent(), 'Theme & docs dev');
-
-    for (const id of ids) {
-      await page.locator('[data-article-id="' + id + '"]').click();
-      const expected = await page.locator('[data-article-id="' + id + '"]').getAttribute('aria-label');
-      await page.waitForFunction(name => document.getElementById('documentation-article')?.getAttribute('aria-label') === name, expected);
-      assert.equal(await page.locator('#documentation-article h1').count(), 1);
-      assert.ok((await page.locator('#documentation-article').textContent()).length > 150);
-      assert.equal(await page.locator('#documentation-load-error').count(), 0);
-      assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true, id + ' should not overflow horizontally');
-      await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: node.scrollHeight, behavior: 'instant' }));
-      const geometry = await page.locator('#documentation-content').evaluate(node => ({ top: node.scrollTop, overflow: node.scrollHeight > node.clientHeight }));
-      if (geometry.overflow) assert.ok(geometry.top > 0, id + ' should scroll when it overflows');
-      if (id === 'features') assert.equal(await page.locator('#documentation-article table').count(), 0);
-      if (id === 'testing-and-releases') {
-        assert.ok(await page.locator('#documentation-article pre code').count() >= 3);
-        const code = page.locator('#documentation-article pre').first();
-        const scroll = await code.evaluate(node => {
-          node.scrollLeft = node.scrollWidth;
-          return { overflow: node.scrollWidth > node.clientWidth, left: node.scrollLeft,
-            width: getComputedStyle(node).scrollbarWidth, color: getComputedStyle(node).scrollbarColor };
-        });
-        assert.equal(scroll.overflow, true);
-        assert.ok(scroll.left > 0);
-        assert.equal(scroll.width, 'thin');
-        assert.notEqual(scroll.color, 'auto');
-        await code.evaluate(node => node.scrollLeft = 0);
-      }
-      await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
-      await page.screenshot({ path: path.join(testRoot, id + '-dark.png') });
+    await page.locator('#help-dev-guide').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Developer guide');
+    assert.equal(await page.locator('#documentation-dialog').getAttribute('role'), 'dialog');
+    assert.equal(await page.locator('#documentation').count(), 0, 'The Dev Guide opens in a dialog instead of a full-page view.');
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true, 'The settings stay inert while the guide dialog is open.');
+    const guideText = await page.locator('#documentation-article').textContent();
+    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'GitHub Guidelines']) {
+      assert.ok(guideText.includes(section), `The Dev Guide includes ${section}.`);
     }
-    assert.deepEqual(blockedArticleRequests, [], 'Documentation text should come from the bundled module, not runtime file requests.');
-    assert.deepEqual(externalRequests, [], 'Bundled articles should not request external resources.');
+    assert.match(guideText, /Markdown formatting|Release notes and Markdown/);
+    assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.setViewportSize({ width: 800, height: 650 });
+    const dialogBounds = await page.locator('#documentation-dialog').boundingBox();
+    assert.ok(dialogBounds.width <= 800 && dialogBounds.height <= 650, 'The Dev Guide dialog fits the smallest supported Settings window.');
+    assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.setViewportSize({ width: 960, height: 760 });
+    await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
+    await page.waitForTimeout(500);
     await page.screenshot({ path: screenshot });
+
+    await page.keyboard.press('Escape');
+    await page.locator('#documentation-backdrop').waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), false, 'Closing the guide restores the settings.');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'help-button', 'Closing the guide returns focus to Help.');
+
+    await page.locator('#help-button').click();
+    await page.locator('#help-dev-guide').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
+    await page.locator('#documentation-close').click();
+    await page.locator('#documentation-backdrop').waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'help-button', 'The close button also returns focus to Help.');
+
+    await page.goto('http://blobui.test/?window=component-catalog');
+    await page.getByRole('main', { name: 'Component catalog' }).waitFor();
+    await page.getByRole('button', { name: 'About color rules' }).focus();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(testRoot, 'component-catalog-help-dark.png') });
+    assert.deepEqual(oldDocumentationRequests, [], 'The app no longer requests the old documentation articles.');
+    assert.deepEqual(externalRequests, [], 'The Dev Guide should not request external resources.');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

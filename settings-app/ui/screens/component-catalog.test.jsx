@@ -44,6 +44,11 @@ describe("Component catalog", () => {
     expect(screen.getByRole("switch", { name: /Enable sample setting/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Board layout/ })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "Catalog preview navigation" })).toBeTruthy();
+    const help = screen.getByRole("button", { name: "About color rules" });
+    expect(document.getElementById(help.getAttribute("aria-describedby")).getAttribute("role")).toBe("tooltip");
+    expect(help.querySelector("svg").getAttribute("viewBox")).toBe("0 0 20 20");
+    expect(screen.queryByRole("heading", { name: "Showcase views" })).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Showcase examples" })).toBeNull();
   });
 
   it("requests a native window close when the X is clicked", () => {

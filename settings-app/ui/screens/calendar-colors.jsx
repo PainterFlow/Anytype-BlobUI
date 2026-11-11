@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import { ExpandableSearch } from "../shared/search.jsx";
 import { FilterIcon, ReloadIcon } from "../shared/catalog-icons.jsx";
-import { DeleteIcon } from "../shared/settings-controls.jsx";
+import { DeleteIcon, SettingsHeading } from "../shared/settings-controls.jsx";
 
 const UI = () => window.BlobUI;
 
@@ -86,6 +86,7 @@ export function CalendarColors({ controller }) {
   </div>, document.body);
 
   return <>
+    <SettingsHeading title="Color by property" help="Rules use the optional Anytype Local API v2 connection. Calendar popups without a matching view use the type default or legacy Calendar Color." />
     <Toolbar prefix="calendar" label="Search object types" records={types.map(type => ({ spaceId: type.spaceId, space: type.space }))} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading || snapshot.loadFailed} busy={snapshot.discovering} selectedSpace={space} setSelectedSpace={setSpace} query={query} setQuery={setQuery} />
     <p className="field-error" id="calendar-rules-message" role="status" aria-live="polite" data-status={snapshot.status.includes("saved") ? "success" : "error"}>{snapshot.status}</p>
     <div id="calendar-type-list">{visibleTypes.map(type => <section className="formula-view" key={`${type.spaceId}/${type.key}`}><button type="button" className="formula-view-row" disabled={snapshot.locked || snapshot.loading} onClick={event => { activeRow.current = event.currentTarget; controller.open(type); }}><span className="formula-view-name">{type.name}</span><span className="formula-source">{type.space}</span>{type.unavailable && <span className="formula-view-warning">Saved rules are retained until you remove them.</span>}</button>{type.unavailable && <button type="button" className="formula-button" onClick={() => controller.removeType(type)}>Remove saved rules</button>}</section>)}

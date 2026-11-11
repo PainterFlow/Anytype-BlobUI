@@ -519,7 +519,7 @@ fn packaged_app_files(package: &Path) -> Result<BTreeMap<String, PathBuf>, Strin
         package.join("blobui-release.json"),
     );
     files.insert("Changelogs.md".into(), package.join("Changelogs.md"));
-    files.insert("Changelogs.yaml".into(), package.join("Changelogs.yaml"));
+    files.insert("md-images.yaml".into(), package.join("md-images.yaml"));
     for key in files.keys() {
         validate_app_key(key)?;
     }
@@ -596,6 +596,7 @@ fn validate_app_key(key: &str) -> Result<(), String> {
             || key == "blobui-installer.exe"
             || key == "blobui-release.json"
             || key == "Changelogs.md"
+            || key == "md-images.yaml"
             || key == "Changelogs.yaml"
             || key.starts_with("Dev/")
             || key.starts_with("assets/")
@@ -746,7 +747,7 @@ fn validate_package(package: &Path, version: &str) -> Result<(), String> {
         "settings-app/dist/blobui-settings.exe",
         "blobui-release.json",
         "Changelogs.md",
-        "Changelogs.yaml",
+        "md-images.yaml",
     ] {
         let payload = package.join(path);
         reject_links(&payload)?;
@@ -813,7 +814,7 @@ fn validate_changelog_payload(package: &Path) -> Result<(), String> {
         return Err("The release notes Markdown is empty.".into());
     }
 
-    let yaml_path = package.join("Changelogs.yaml");
+    let yaml_path = package.join("md-images.yaml");
     reject_links(&yaml_path)?;
     let yaml_metadata = fs::metadata(&yaml_path)
         .map_err(|_| "The release notes image manifest is missing or unreadable.".to_string())?;
@@ -826,8 +827,10 @@ fn validate_changelog_payload(package: &Path) -> Result<(), String> {
     let ids = entries.iter().map(|entry| entry.id.as_str()).collect::<BTreeSet<_>>();
     validate_changelog_image_references(&markdown, &ids)?;
     for entry in entries {
-        let source = entry.src.ok_or("A release note image is missing its src field.")?;
-        validate_changelog_image_file(package, &source)?;
+        let source = entry.src.ok_or("A Markdown image is missing its src field.")?;
+        if !source.starts_with("./cdn/") {
+            validate_changelog_image_file(package, &source, entry.video)?;
+        }
     }
     Ok(())
 }
@@ -847,11 +850,11 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
         ids: &mut BTreeSet<String>,
     ) -> Result<(), String> {
         let Some(image) = current.take() else { return Ok(()); };
-        let source = image.src.as_deref().ok_or("Each Changelogs.yaml image needs an id and src.")?;
-        validate_changelog_source(source)?;
-        if source.to_ascii_lowercase().ends_with(".mp4") != image.video { return Err("Changelogs.yaml media format does not match its section.".into()); }
+        let source = image.src.as_deref().ok_or("Each md-images.yaml entry needs an id and src.")?;
+        validate_changelog_source(source, image.video)?;
+        if source.to_ascii_lowercase().ends_with(".mp4") != image.video { return Err("md-images.yaml media format does not match its section.".into()); }
         if !ids.insert(image.id.clone()) {
-            return Err("Changelogs.yaml contains a duplicate image id.".into());
+            return Err("md-images.yaml contains a duplicate image id.".into());
         }
         entries.push(image);
         Ok(())
@@ -860,61 +863,61 @@ fn parse_changelog_image_manifest(yaml: &str) -> Result<Vec<ChangelogImage>, Str
     for raw_line in yaml.trim_start_matches('\u{feff}').lines() {
         let line = raw_line.trim_end_matches('\r');
         if line.trim().is_empty() || line.trim_start().starts_with('#') { continue; }
-        if line.contains('\t') { return Err("Changelogs.yaml must use spaces for indentation.".into()); }
+        if line.contains('\t') { return Err("md-images.yaml must use spaces for indentation.".into()); }
         let section = line.split_once(" #").map_or(line, |(value, _)| value).trim();
         if let Some(captures) = Regex::new(r"^(images|videos):\s*(\[\s*\])?$").unwrap().captures(section) {
             save(&mut current, &mut entries, &mut ids)?;
             let name = captures.get(1).unwrap().as_str();
-            if !seen_sections.insert(name.to_string()) { return Err("Changelogs.yaml contains a duplicate media section.".into()); }
+            if !seen_sections.insert(name.to_string()) { return Err("md-images.yaml contains a duplicate media section.".into()); }
             section_seen = true;
             video_section = name == "videos";
             empty_list = captures.get(2).is_some();
             continue;
         }
-        if !section_seen { return Err("Changelogs.yaml must begin with an images section.".into()); }
-        if empty_list { return Err("Changelogs.yaml cannot add entries after images: [].".into()); }
+        if !section_seen { return Err("md-images.yaml must begin with an images section.".into()); }
+        if empty_list { return Err("md-images.yaml cannot add entries after images: [].".into()); }
         if let Some(item) = line.strip_prefix("  - ").and_then(|item| item.strip_prefix("id:")) {
             save(&mut current, &mut entries, &mut ids)?;
             let id = parse_changelog_scalar(item)?;
             if !valid_changelog_id(&id) {
-                return Err("Changelogs.yaml image ids may use letters, numbers, hyphens, and underscores.".into());
+                return Err("md-images.yaml image ids may use letters, numbers, hyphens, and underscores.".into());
             }
             current = Some(ChangelogImage { id, video: video_section, ..ChangelogImage::default() });
             continue;
         }
         if let Some(field) = line.strip_prefix("    ") {
-            let (name, value) = field.split_once(':').ok_or("Changelogs.yaml supports id, src, and optional alt fields.")?;
-            let image = current.as_mut().ok_or("Changelogs.yaml image fields must follow a list item.")?;
+            let (name, value) = field.split_once(':').ok_or("md-images.yaml supports id, src, and optional alt fields.")?;
+            let image = current.as_mut().ok_or("md-images.yaml image fields must follow a list item.")?;
             match name {
                 "src" => {
-                    if image.src.is_some() { return Err("Changelogs.yaml repeats src for an image.".into()); }
+                    if image.src.is_some() { return Err("md-images.yaml repeats src for an image.".into()); }
                     image.src = Some(parse_changelog_scalar(value)?);
                 }
                 "alt" => {
-                    if image.alt_seen { return Err("Changelogs.yaml repeats alt for an image.".into()); }
+                    if image.alt_seen { return Err("md-images.yaml repeats alt for an image.".into()); }
                     let _ = parse_changelog_scalar(value)?;
                     image.alt_seen = true;
                 }
-                _ => return Err("Changelogs.yaml supports id, src, and optional alt fields.".into()),
+                _ => return Err("md-images.yaml supports id, src, and optional alt fields.".into()),
             }
             continue;
         }
-        return Err("Changelogs.yaml supports an images list with id, src, and optional alt fields.".into());
+        return Err("md-images.yaml supports an images list with id, src, and optional alt fields.".into());
     }
-    if !section_seen { return Err("Changelogs.yaml must contain an images section.".into()); }
+    if !section_seen { return Err("md-images.yaml must contain an images section.".into()); }
     save(&mut current, &mut entries, &mut ids)?;
     Ok(entries)
 }
 
 fn parse_changelog_scalar(raw: &str) -> Result<String, String> {
     let value = raw.trim();
-    if value.is_empty() { return Err("Changelogs.yaml contains an empty value.".into()); }
+    if value.is_empty() { return Err("md-images.yaml contains an empty value.".into()); }
     if value.starts_with('"') {
-        return serde_json::from_str(value).map_err(|_| "Changelogs.yaml contains an invalid quoted value.".into());
+        return serde_json::from_str(value).map_err(|_| "md-images.yaml contains an invalid quoted value.".into());
     }
     if value.starts_with('\'') {
         if !value.ends_with('\'') || value.len() < 2 {
-            return Err("Changelogs.yaml contains an invalid quoted value.".into());
+            return Err("md-images.yaml contains an invalid quoted value.".into());
         }
         return Ok(value[1..value.len() - 1].replace("''", "'"));
     }
@@ -929,24 +932,34 @@ fn valid_changelog_id(id: &str) -> bool {
         && chars.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-fn validate_changelog_source(source: &str) -> Result<(), String> {
+fn validate_changelog_source(source: &str, video: bool) -> Result<(), String> {
+    if let Some(filename) = source.strip_prefix("./cdn/") {
+        if video || filename.is_empty() || filename.contains('/')
+            || !filename.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            || !matches!(Path::new(filename).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("svg" | "png" | "jpg" | "jpeg" | "gif" | "webp"))
+        {
+            return Err("md-images.yaml contains an unsafe or unsupported local Markdown image path.".into());
+        }
+        return Ok(());
+    }
     let relative = source.strip_prefix("assets/changelogs/")
-        .ok_or("Changelogs.yaml image paths must stay inside assets/changelogs/.")?;
+        .ok_or("md-images.yaml paths must stay inside assets/changelogs/ or use a local ./cdn image.")?;
     let segments = relative.split('/').collect::<Vec<_>>();
     if segments.is_empty() || segments.iter().any(|segment| {
         segment.is_empty() || *segment == "." || *segment == ".."
             || !segment.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     }) {
-        return Err("Changelogs.yaml contains an unsafe image path.".into());
+        return Err("md-images.yaml contains an unsafe image path.".into());
     }
-    if !matches!(Path::new(source).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "mp4")) {
-        return Err("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images, plus MP4 videos.".into());
+    let extension = Path::new(source).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase);
+    if !(if video { extension.as_deref() == Some("mp4") } else { matches!(extension.as_deref(), Some("png" | "jpg" | "jpeg" | "gif" | "webp")) }) {
+        return Err("md-images.yaml supports PNG, JPEG, GIF, and WebP images, plus MP4 videos.".into());
     }
     Ok(())
 }
 
-fn validate_changelog_image_file(package: &Path, source: &str) -> Result<(), String> {
-    validate_changelog_source(source)?;
+fn validate_changelog_image_file(package: &Path, source: &str, video: bool) -> Result<(), String> {
+    validate_changelog_source(source, video)?;
     let path = package.join(source);
     reject_links(&path)?;
     let metadata = fs::metadata(&path).map_err(|_| format!("The release note image is missing: {source}"))?;
@@ -993,7 +1006,7 @@ fn validate_changelog_image_references(markdown: &str, aliases: &BTreeSet<&str>)
     for captures in image_reference.captures_iter(&text).chain(html_image_reference.captures_iter(&text)) {
         let id = captures.name("id").unwrap().as_str();
         if !aliases.contains(id) {
-            return Err(format!("Release notes reference image id '{id}' which is not declared in Changelogs.yaml."));
+            return Err(format!("Release notes reference image id '{id}' which is not declared in md-images.yaml."));
         }
     }
     Ok(())
@@ -1046,8 +1059,8 @@ fn make_install_changes(
         package.join("Changelogs.md"),
     );
     files.insert(
-        "runtime/Changelogs.yaml".into(),
-        package.join("Changelogs.yaml"),
+        "runtime/md-images.yaml".into(),
+        package.join("md-images.yaml"),
     );
     let managed = files.keys().cloned().collect::<BTreeSet<_>>();
     let mut changes = Vec::new();
@@ -1721,7 +1734,7 @@ mod tests {
         )
         .unwrap();
         fs::write(package.join("Changelogs.md"), "# Example release notes\n").unwrap();
-        fs::write(package.join("Changelogs.yaml"), "images: []\n").unwrap();
+        fs::write(package.join("md-images.yaml"), "images: []\n").unwrap();
         package
     }
 
@@ -1735,8 +1748,8 @@ mod tests {
         fs::create_dir_all(image.parent().unwrap()).unwrap();
         fs::write(&image, b"\x89PNG\r\n\x1a\nfixture").unwrap();
         fs::write(
-            package.join("Changelogs.yaml"),
-            "images:\n  - id: setup\n    src: assets/changelogs/setup.png\n    alt: Setup screen\n",
+            package.join("md-images.yaml"),
+            "images:\n  - id: calendar-event-colors\n    src: ./cdn/calendar-event-colors.png\n    alt: Calendar event colors\n  - id: setup\n    src: assets/changelogs/setup.png\n    alt: Setup screen\n",
         )
         .unwrap();
         fs::write(
@@ -1751,21 +1764,21 @@ mod tests {
 
         fs::write(package.join("Changelogs.md"), "![Setup](@setup)\n").unwrap();
         fs::write(
-            package.join("Changelogs.yaml"),
+            package.join("md-images.yaml"),
             "images:\n  - id: setup\n    src: assets/changelogs/../setup.png\n",
         )
         .unwrap();
         assert!(validate_package(&package, "1.2.0").is_err());
 
         fs::write(
-            package.join("Changelogs.yaml"),
+            package.join("md-images.yaml"),
             "images:\n  - id: setup\n    src: assets/changelogs/missing.png\n",
         )
         .unwrap();
         assert!(validate_package(&package, "1.2.0").unwrap_err().contains("missing"));
 
         fs::write(
-            package.join("Changelogs.yaml"),
+            package.join("md-images.yaml"),
             "images:\n  - id: setup\n    src: assets/changelogs/setup.svg\n",
         )
         .unwrap();
@@ -1782,7 +1795,7 @@ mod tests {
         let video = package.join("assets/changelogs/demo.mp4");
         fs::write(&video, b"\x00\x00\x00\x18ftypmp42").unwrap();
         let manifest = "images: []\nvideos:\n  - id: demo\n    src: assets/changelogs/demo.mp4\n    alt: Board demo\n";
-        fs::write(package.join("Changelogs.yaml"), manifest).unwrap();
+        fs::write(package.join("md-images.yaml"), manifest).unwrap();
         fs::write(package.join("Changelogs.md"), "# Demo\n\n![Board demo](@demo)\n").unwrap();
         validate_package(&package, "1.3.0").unwrap();
         assert!(parse_changelog_image_manifest(&manifest.replace("videos:", "images:")).is_err());
@@ -1897,6 +1910,7 @@ mod tests {
         .unwrap();
         fs::write(blob.join("runtime/Dev/obsolete.css"), b"old managed css").unwrap();
         fs::write(blob.join("runtime/settings-app.exe"), b"old runtime app").unwrap();
+        fs::write(blob.join("runtime/Changelogs.yaml"), b"images: []\n").unwrap();
         fs::write(app.join("blobui-settings.exe"), b"old root app").unwrap();
         fs::write(
             app.join("settings-app/dist/blobui-settings.exe"),
@@ -1904,6 +1918,7 @@ mod tests {
         )
         .unwrap();
         fs::write(app.join("Dev/theme.css"), b"old theme").unwrap();
+        fs::write(app.join("Changelogs.yaml"), b"images: []\n").unwrap();
         fs::write(app.join("notes.txt"), b"user app file").unwrap();
         fs::write(
             app.join(".blobui-install.json"),
@@ -1911,11 +1926,21 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            app.join(".blobui-app-managed-files.json"),
+            serde_json::to_vec(&json!({
+                "manifestVersion": 1,
+                "releaseVersion": "1.1.0",
+                "managedFiles": ["Changelogs.yaml"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
             blob.join(".blobui-managed-files.json"),
             serde_json::to_vec(&json!({
                 "manifestVersion": 1,
                 "releaseVersion": "1.1.0",
-                "managedFiles": ["runtime/Dev/obsolete.css", "runtime/settings-app.exe"]
+                "managedFiles": ["runtime/Dev/obsolete.css", "runtime/settings-app.exe", "runtime/Changelogs.yaml"]
             }))
             .unwrap(),
         )
@@ -1944,6 +1969,8 @@ mod tests {
             b"new-settings-executable"
         );
         assert_eq!(fs::read(app.join("notes.txt")).unwrap(), b"user app file");
+        assert!(!app.join("Changelogs.yaml").exists());
+        assert!(app.join("md-images.yaml").is_file());
         assert_eq!(
             fs::read(app.join("blobui-installer.exe")).unwrap(),
             b"updated retained installer"
@@ -1968,6 +1995,8 @@ mod tests {
         let blob_metadata: Value = serde_json::from_slice(&fs::read(blob.join("blob.meta.json")).unwrap()).unwrap();
         assert_eq!(blob_metadata["blobuiVersion"], env!("BLOBUI_BUILD_VERSION"));
         assert!(!blob.join("runtime/Dev/obsolete.css").exists());
+        assert!(!blob.join("runtime/Changelogs.yaml").exists());
+        assert!(blob.join("runtime/md-images.yaml").is_file());
         let css = fs::read_to_string(anytype.join("custom.css")).unwrap();
         assert!(css.contains(".release-theme"));
         assert!(css.contains(".local-theme"));
