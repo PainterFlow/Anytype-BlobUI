@@ -36,8 +36,17 @@ test('mounted screens retain accessible controls, ordering and initial state', a
       first.setSelectionRange(1, 3);
       get('accessibility-nav').click();
       get('preferences-nav').click();
+      const preferencePanels = [0, 1, 2].map(index => get(`preference-panel-${index}`));
+      const customThemesHeading = get('custom-themes-heading');
+      const spacePreviewImage = get('space-preview-image');
       return {
         uniqueIds: ids.length === new Set(ids).size, problems,
+        preferencePanels: preferencePanels.length === 3
+          && preferencePanels[0].contains(customThemesHeading)
+          && !preferencePanels[1].contains(customThemesHeading)
+          && !preferencePanels[2].contains(customThemesHeading)
+          && preferencePanels[1].contains(first)
+          && preferencePanels[2].contains(spacePreviewImage),
         mounted: !document.querySelector('template[data-ui-mount]'),
         switches: switches.every(id => get(id)?.type === 'checkbox' && get(id).getAttribute('role') === 'switch' && get(id).labels.length > 0),
         visibility: fields.every(id => get(id).labels.length > 0 && get(id).parentElement.id === id + '-field' && get(id).nextElementSibling.id === id + '-visibility' && get(id + '-visibility').hasAttribute('aria-pressed')),
