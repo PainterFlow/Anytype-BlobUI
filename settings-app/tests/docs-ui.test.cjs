@@ -186,6 +186,11 @@ test('Dev Guide renders offline in dark mode', {
       } } };
     });
     await loadSettings(page);
+    const guideMarkdown = await fs.promises.readFile(path.join(workspace, 'dev-guide.md'), 'utf8');
+    await page.route('http://blobui.test/dev-guide.md', route => route.fulfill({
+      contentType: 'text/markdown; charset=utf-8',
+      body: `${guideMarkdown}\n\n![Calendar color example](@calendar-event-colors)\n`,
+    }));
     await page.route('http://blobui.test/docs/**', route => {
       oldDocumentationRequests.push(route.request().url());
       return route.abort();
@@ -200,9 +205,10 @@ test('Dev Guide renders offline in dark mode', {
     await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Developer guide');
     assert.equal(await page.locator('#documentation-navigation').count(), 0, 'The Dev Guide is a single page.');
     const guideText = await page.locator('#documentation-article').textContent();
-    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'Release notes and Markdown', 'GitHub workflow']) {
+    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'GitHub workflow']) {
       assert.ok(guideText.includes(section), `The Dev Guide includes ${section}.`);
     }
+    assert.match(guideText, /Markdown formatting|Release notes and Markdown/);
     const image = page.locator('#documentation-article img').first();
     await image.waitFor();
     assert.match(await image.getAttribute('src'), /^data:image\/png;base64,/);

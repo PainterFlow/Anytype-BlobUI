@@ -1,0 +1,28 @@
+images:
+  - id: blobui-mark
+    src: ./cdn/blobui-mark.svg
+    alt: BlobUI mark
+  - id: theme-swatches
+    src: ./cdn/theme-swatches.png
+    alt: Theme color swatches
+  - id: settings-ui-refresh
+    src: ./cdn/settings-ui-refresh.png
+    alt: Settings interface refresh
+  - id: api-connection-settings
+    src: ./cdn/api-connection-settings.png
+    alt: API connection settings
+  - id: anyblob-codex-integration
+    src: ./cdn/anyblob-codex-integration.png
+    alt: Anyblob Codex integration
+  - id: anyblob-project-permissions
+    src: ./cdn/anyblob-project-permissions.png
+    alt: Anyblob project permissions
+  - id: kanban-formula-calculator
+    src: ./cdn/kanban-formula-calculator.png
+    alt: Kanban formula calculator
+  - id: calendar-event-colors
+    src: ./cdn/calendar-event-colors.png
+    alt: Calendar event colors
+  - id: kanban-balanced-expanded
+    src: ./cdn/kanban-balanced-expanded.png
+    alt: Expanded Kanban categories

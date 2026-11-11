@@ -39,6 +39,15 @@ export default defineConfig({
             next(error);
           }
         });
+        server.middlewares.use('/md-images.yaml', async (_request, response, next) => {
+          try {
+            const manifest = await readFile(path.resolve(projectDirectory, '..', 'md-images.yaml'));
+            response.setHeader('Content-Type', 'text/yaml; charset=utf-8');
+            response.end(manifest);
+          } catch (error) {
+            next(error);
+          }
+        });
       },
       async closeBundle() {
         const outputDirectory = path.join(projectDirectory, 'frontend-dist');
@@ -50,6 +59,7 @@ export default defineConfig({
           });
         }
         await cp(path.resolve(projectDirectory, '..', 'dev-guide.md'), path.join(outputDirectory, 'dev-guide.md'));
+        await cp(path.resolve(projectDirectory, '..', 'md-images.yaml'), path.join(outputDirectory, 'md-images.yaml'));
         await cp(path.join(uiDirectory, 'vendor', 'MARKED-LICENSE.txt'), path.join(outputDirectory, 'MARKED-LICENSE.txt'));
       }
     }

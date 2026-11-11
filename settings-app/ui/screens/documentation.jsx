@@ -3,19 +3,29 @@ import { createPortal } from "react-dom";
 const aliasPattern = /@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/g;
 const imageCache = new Map();
 const videoCache = new Map();
+let imageManifestPromise;
+
+function loadImageManifest() {
+  if (!imageManifestPromise) {
+    imageManifestPromise = fetch("./md-images.yaml").then(response => {
+      if (!response.ok) throw new Error(`Markdown image manifest request failed (${response.status}).`);
+      return response.text();
+    }).then(yaml => window.BlobUI.Markdown.parseMediaManifest(yaml).images)
+      .catch(error => {
+        imageManifestPromise = null;
+        throw error;
+      });
+  }
+  return imageManifestPromise;
+}
 
 async function imageAsset(alias) {
   if (!imageCache.has(alias)) {
-    const source = window.BlobUI.MarkdownMedia.resolveImage(alias);
     const promise = (async () => {
-      if (typeof source !== "string" || !/^\.\/cdn\/[A-Za-z0-9_-]+\.(?:png|jpe?g|gif|webp)$/i.test(source)) return null;
-      const response = await fetch(source);
-      const mimeType = (response.headers.get("content-type") || "").split(";", 1)[0].toLowerCase();
-      if (!response.ok || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mimeType)) return null;
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-      return { src: `data:${mimeType};base64,${window.btoa(binary)}` };
+      const image = (await loadImageManifest())[alias];
+      if (!image) return null;
+      const loaded = await window.BlobUI.MarkdownMedia.loadImage(image.src);
+      return loaded ? { ...loaded, alt: image.alt } : null;
     })().catch(() => null);
     imageCache.set(alias, promise);
   }
@@ -30,7 +40,7 @@ async function mediaForMarkdown(markdown) {
   const videos = Object.create(null);
   await Promise.all([...aliases].map(async alias => {
     const image = await imageAsset(alias);
-    if (image) images[alias] = { ...image, alt: altByAlias.get(alias) || alias.replace(/[-_]+/g, " ") };
+    if (image) images[alias] = { ...image, alt: altByAlias.get(alias) || image.alt };
     const videoSource = window.BlobUI.MarkdownMedia.videoAliases?.[alias];
     if (!videoSource) return;
     if (!videoCache.has(alias)) {

@@ -142,7 +142,7 @@ if ($null -ne $existingDeveloperGuide -and
 }
 Copy-Item -LiteralPath $bundledDeveloperGuide -Destination $distributionDeveloperGuide -Force
 
-foreach ($releaseNotesFile in @('Changelogs.md', 'Changelogs.yaml')) {
+foreach ($releaseNotesFile in @('Changelogs.md', 'md-images.yaml')) {
     $sourceReleaseNotes = Join-Path $workspaceRoot $releaseNotesFile
     if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
         throw "The Settings app build is missing its release notes file: $sourceReleaseNotes"
@@ -156,6 +156,19 @@ foreach ($releaseNotesFile in @('Changelogs.md', 'Changelogs.yaml')) {
         throw "The Settings app release notes path is a reparse point: $distributionReleaseNotes"
     }
     Copy-Item -LiteralPath $sourceReleaseNotes -Destination $distributionReleaseNotes -Force
+}
+
+foreach ($directory in @($frontendOutputDirectory, $distributionDirectory)) {
+    $legacyImageManifest = Join-Path $directory 'Changelogs.yaml'
+    $legacyImageManifestItem = Get-Item -LiteralPath $legacyImageManifest -Force -ErrorAction SilentlyContinue
+    if ($null -eq $legacyImageManifestItem) { continue }
+    if (($legacyImageManifestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The obsolete Settings image manifest is a reparse point: $legacyImageManifest"
+    }
+    if ($legacyImageManifestItem.PSIsContainer) {
+        throw "The obsolete Settings image manifest path is a directory: $legacyImageManifest"
+    }
+    Remove-Item -LiteralPath $legacyImageManifest -Force
 }
 
 try {

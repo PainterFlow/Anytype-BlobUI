@@ -694,11 +694,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     el("release-notes-dialog").scrollTop = 0;
     updateReleaseNotesScrollbar();
 
-    const imageRequests = Object.entries(mediaManifest.images).map(async ([alias, image]) => {
-      const args = { source: image.src };
-      const src = historical
-        ? await invoke("get_release_note_history_image", { ...args, tag: notes.tag || notes.version })
-        : await invoke("get_release_note_image", args);
+    const markdownText = String(notes.markdown || "");
+    const imageRequests = Object.entries(mediaManifest.images).filter(([alias]) => markdownText.includes(`@${alias}`)).map(async ([alias, image]) => {
+      const src = image.src.startsWith("./cdn/")
+        ? (await window.BlobUI.MarkdownMedia.loadImage(image.src))?.src
+        : historical
+          ? await invoke("get_release_note_history_image", { source: image.src, tag: notes.tag || notes.version })
+          : await invoke("get_release_note_image", { source: image.src });
+      if (!src) throw new Error("The Markdown image could not be loaded.");
       return ["image", alias, { src, alt: image.alt }];
     });
     const videoRequests = Object.entries(mediaManifest.videos).map(async ([alias, video]) => {

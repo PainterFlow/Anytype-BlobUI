@@ -14,7 +14,8 @@
   ]);
   const imageDataUrl = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
   const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-  const sourcePattern = /^assets\/changelogs\/[A-Za-z0-9._/-]+$/;
+  const releaseSourcePattern = /^assets\/changelogs\/[A-Za-z0-9._/-]+$/;
+  const cdnImageSourcePattern = /^\.\/cdn\/[A-Za-z0-9_-]+\.(?:svg|png|jpe?g|gif|webp)$/i;
   const repositoryUrl = "https://github.com/PainterFlow/Anytype-BlobUI";
 
   function unquote(value) {
@@ -23,11 +24,11 @@
       try {
         return JSON.parse(text);
       } catch {
-        throw new TypeError("Changelogs.yaml contains an invalid quoted value.");
+        throw new TypeError("md-images.yaml contains an invalid quoted value.");
       }
     }
     if (text.startsWith("'")) {
-      if (!text.endsWith("'") || text.length < 2) throw new TypeError("Changelogs.yaml contains an invalid quoted value.");
+      if (!text.endsWith("'") || text.length < 2) throw new TypeError("md-images.yaml contains an invalid quoted value.");
       return text.slice(1, -1).replace(/''/g, "'");
     }
     if (/\s+#/.test(text)) return text.split(/\s+#/, 1)[0].trim();
@@ -35,12 +36,14 @@
   }
 
   function validateImageSource(source, video = false) {
-    if (!sourcePattern.test(source) || source.includes("\\")
-      || source.split("/").some((part) => !part || part === "." || part === "..")) {
-      throw new TypeError("Changelogs.yaml image paths must stay inside assets/changelogs/.");
+    const releaseSource = releaseSourcePattern.test(source);
+    const cdnImageSource = !video && cdnImageSourcePattern.test(source);
+    if (!(releaseSource || cdnImageSource) || source.includes("\\")
+      || (releaseSource && source.split("/").some((part) => !part || part === "." || part === ".."))) {
+      throw new TypeError("md-images.yaml paths must stay inside assets/changelogs/ or use a local ./cdn image.");
     }
-    if (!(video ? /\.mp4$/i : /\.(png|jpe?g|gif|webp)$/i).test(source)) {
-      throw new TypeError("Changelogs.yaml supports PNG, JPEG, GIF, and WebP images.");
+    if (!(video ? /\.mp4$/i : (cdnImageSource ? /\.(svg|png|jpe?g|gif|webp)$/i : /\.(png|jpe?g|gif|webp)$/i)).test(source)) {
+      throw new TypeError("md-images.yaml supports local PNG, JPEG, GIF, and WebP images, release note images, and MP4 videos.");
     }
     return source;
   }
@@ -54,8 +57,8 @@
 
     function saveCurrent() {
       if (!current) return;
-      if (!current.id || !current.src) throw new TypeError("Each Changelogs.yaml image needs an id and src.");
-      if (Object.prototype.hasOwnProperty.call(entries, current.id)) throw new TypeError("Changelogs.yaml contains a duplicate image id.");
+      if (!current.id || !current.src) throw new TypeError("Each md-images.yaml image needs an id and src.");
+      if (Object.prototype.hasOwnProperty.call(entries, current.id)) throw new TypeError("md-images.yaml contains a duplicate image id.");
       entries[current.id] = {
         src: validateImageSource(current.src, video),
         alt: current.alt || current.id.replace(/[-_]+/g, " "),
@@ -65,37 +68,37 @@
 
     for (const line of lines) {
       if (!line.trim() || /^\s*#/.test(line)) continue;
-      if (/\t/.test(line)) throw new TypeError("Changelogs.yaml must use spaces for indentation.");
+      if (/\t/.test(line)) throw new TypeError("md-images.yaml must use spaces for indentation.");
       if (/^images:\s*(?:#.*)?$/.test(line)) {
-        if (sectionSeen) throw new TypeError("Changelogs.yaml contains more than one images section.");
+        if (sectionSeen) throw new TypeError("md-images.yaml contains more than one images section.");
         sectionSeen = true;
         continue;
       }
       if (/^images:\s*\[\s*\]\s*(?:#.*)?$/.test(line)) {
-        if (sectionSeen) throw new TypeError("Changelogs.yaml contains more than one images section.");
+        if (sectionSeen) throw new TypeError("md-images.yaml contains more than one images section.");
         sectionSeen = true;
         emptyList = true;
         continue;
       }
-      if (!sectionSeen) throw new TypeError("Changelogs.yaml must begin with an images section.");
-      if (emptyList) throw new TypeError("Changelogs.yaml cannot add entries after images: [].");
+      if (!sectionSeen) throw new TypeError("md-images.yaml must begin with an images section.");
+      if (emptyList) throw new TypeError("md-images.yaml cannot add entries after images: [].");
       const item = /^  - id:\s*(.+?)\s*$/.exec(line);
       if (item) {
         saveCurrent();
         current = { id: unquote(item[1]) };
-        if (!aliasPattern.test(current.id)) throw new TypeError("Changelogs.yaml image ids may use letters, numbers, hyphens, and underscores.");
+        if (!aliasPattern.test(current.id)) throw new TypeError("md-images.yaml image ids may use letters, numbers, hyphens, and underscores.");
         continue;
       }
       const field = /^    (src|alt):\s*(.*?)\s*$/.exec(line);
       if (field && current) {
-        if (Object.prototype.hasOwnProperty.call(current, field[1])) throw new TypeError(`Changelogs.yaml repeats ${field[1]} for an image.`);
+        if (Object.prototype.hasOwnProperty.call(current, field[1])) throw new TypeError(`md-images.yaml repeats ${field[1]} for an image.`);
         current[field[1]] = unquote(field[2]);
         continue;
       }
-      throw new TypeError("Changelogs.yaml supports an images list with id, src, and optional alt fields.");
+      throw new TypeError("md-images.yaml supports an images list with id, src, and optional alt fields.");
     }
     saveCurrent();
-    if (!sectionSeen) throw new TypeError("Changelogs.yaml must contain an images section.");
+    if (!sectionSeen) throw new TypeError("md-images.yaml must contain an images section.");
     return entries;
   }
 
@@ -106,15 +109,15 @@
       const match = /^(images|videos):\s*(?:\[\s*\])?\s*(?:#.*)?$/.exec(line);
       if (match) {
         kind = match[1];
-        if (sections[kind]) throw new TypeError("Changelogs.yaml contains more than one " + kind + " section.");
+        if (sections[kind]) throw new TypeError("md-images.yaml contains more than one " + kind + " section.");
         sections[kind] = [line.replace(/^(images|videos):/, "images:")];
       } else if (kind) sections[kind].push(line);
-      else if (line.trim() && !/^\s*#/.test(line)) throw new TypeError("Changelogs.yaml must begin with an images or videos section.");
+      else if (line.trim() && !/^\s*#/.test(line)) throw new TypeError("md-images.yaml must begin with an images or videos section.");
     }
-    if (!sections.images && !sections.videos) throw new TypeError("Changelogs.yaml must contain an images section.");
+    if (!sections.images && !sections.videos) throw new TypeError("md-images.yaml must contain an images section.");
     const images = parseManifestSection((sections.images || ["images: []"]).join("\n"));
     const videos = parseManifestSection((sections.videos || ["images: []"]).join("\n"), true);
-    if (Object.keys(videos).some(id => Object.hasOwn(images, id))) throw new TypeError("Changelogs.yaml contains a duplicate media id.");
+    if (Object.keys(videos).some(id => Object.hasOwn(images, id))) throw new TypeError("md-images.yaml contains a duplicate media id.");
     return { images, videos };
   }
 

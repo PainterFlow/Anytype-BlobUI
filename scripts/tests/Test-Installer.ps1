@@ -32,7 +32,7 @@ try {
     $archive = [IO.Compression.ZipFile]::OpenRead($package)
     try {
         Assert (@($archive.Entries | Where-Object { $_.FullName -match '\.(ps1|psm1|cmd)$' }).Count -eq 0) 'The release package contains legacy scripts or launchers.'
-        foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+        foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
             Assert (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -eq 1) "The release package must contain $name at its root."
         }
     } finally { $archive.Dispose() }
@@ -49,7 +49,7 @@ try {
     $dataPath = Join-Path $testRoot 'Anytype/blob/data.json'
     Assert (Test-Path -LiteralPath $dataPath) 'Development EXE did not create isolated settings.'
     Assert (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/settings-app.exe')) 'Native installation omitted the Settings runtime.'
-    foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+    foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
         $source = Join-Path $repo $name
         $installed = Join-Path $testRoot ("Anytype/blob/runtime/" + $name)
         Assert (Test-Path -LiteralPath $installed -PathType Leaf) "Native installation omitted runtime/$name."
@@ -66,12 +66,14 @@ try {
     $managedPath = Join-Path $testRoot 'Anytype/blob/.blobui-managed-files.json'
     $managed = Get-Content -LiteralPath $managedPath -Raw | ConvertFrom-Json
     Assert ($managed.managedFiles -contains 'runtime/Changelogs.md') 'The changelog Markdown is not tracked by the runtime ownership manifest.'
-    Assert ($managed.managedFiles -contains 'runtime/Changelogs.yaml') 'The changelog image manifest is not tracked by the runtime ownership manifest.'
+    Assert ($managed.managedFiles -contains 'runtime/md-images.yaml') 'The changelog image manifest is not tracked by the runtime ownership manifest.'
     $managed.managedFiles += 'runtime/scripts/obsolete.ps1'
+    $managed.managedFiles += 'runtime/Changelogs.yaml'
     $managed | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $managedPath -Encoding UTF8
     $oldScripts = Join-Path $testRoot 'Anytype/blob/runtime/scripts'
     [IO.Directory]::CreateDirectory($oldScripts) | Out-Null
     [IO.File]::WriteAllText((Join-Path $oldScripts 'obsolete.ps1'), 'old managed script')
+    [IO.File]::WriteAllText((Join-Path $testRoot 'Anytype/blob/runtime/Changelogs.yaml'), 'images: []')
     [IO.File]::WriteAllText((Join-Path $oldScripts 'user-local.ps1'), 'keep local file')
     $data = Get-Content -LiteralPath $dataPath -Raw | ConvertFrom-Json
     $data.settings.accentColor = '#123456'
@@ -89,6 +91,7 @@ try {
     & $devExe --no-pause --package $package
     Assert ($LASTEXITCODE -eq 0) 'Repeated native development installation failed.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $oldScripts 'obsolete.ps1'))) 'Repeated installation left an obsolete managed script.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/Changelogs.yaml'))) 'Repeated installation left the obsolete image manifest.'
     Assert ([IO.File]::ReadAllText((Join-Path $oldScripts 'user-local.ps1')) -eq 'keep local file') 'Repeated installation removed an unmanaged local script.'
     Assert ((Get-FileHash -LiteralPath $dataPath).Hash -eq $savedDataHash) 'Repeated installation rewrote or reset saved settings.'
     Assert ([IO.File]::ReadAllText($credentialPath) -eq 'keep-encrypted-credential') 'Repeated installation changed credentials.'

@@ -1,6 +1,6 @@
 # Release notes authoring
 
-The Windows release package carries `Changelogs.md`, `Changelogs.yaml`, and any referenced image files. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
+The Windows release package carries `Changelogs.md`, `md-images.yaml`, and release note image files. `md-images.yaml` also lists the image aliases used by the Dev Guide. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
 
 The dialog shows the changelog's version and marks entries that match the running app's current version or the latest available changelog. These markers follow the selected entry when browsing release history.
 
@@ -12,7 +12,7 @@ Raw HTML can be used for semantic formatting such as `<details>`, `<summary>`, `
 
 ## Local images
 
-Put image files in `assets/changelogs/`. Declare them in `Changelogs.yaml` using this list shape:
+Put release note image files in `assets/changelogs/`. Declare them in `md-images.yaml` using this list shape:
 
 ```yaml
 images:
@@ -23,6 +23,8 @@ images:
     src: assets/changelogs/finished.jpg
     alt: Completed settings
 ```
+
+The same `images` list contains Dev Guide aliases. Those entries use paths under `./cdn/`, such as `./cdn/calendar-event-colors.png`. The app bundles those files from `settings-app/ui/cdn/`.
 
 Use the id as an at-mention in Markdown or as a Markdown image target:
 
@@ -38,11 +40,11 @@ An alias can also be used in a raw HTML image tag:
 <img src="@setup" alt="The setup screen">
 ```
 
-Mentions are resolved only in normal Markdown text and raw HTML image sources. A mention inside inline or fenced code remains literal text. Supported files are PNG, JPEG, GIF, and WebP; SVG is deliberately rejected. At runtime the image bytes are checked against their declared file type and embedded locally, so no network image requests are made. Sources must stay within `assets/changelogs/`; absolute paths, parent-directory segments, and other folders are rejected.
+Mentions are resolved only in normal Markdown text and raw HTML image sources. A mention inside inline or fenced code remains literal text. Release note images support PNG, JPEG, GIF, and WebP; SVG release note images are rejected. Dev Guide paths may point to one image directly under `./cdn/`. At runtime the app checks image types and embeds local image bytes, so it makes no network image requests. Release note image paths must stay inside `assets/changelogs/`; absolute paths, parent-directory segments, and other folders are rejected.
 
-Keep each of `Changelogs.md` and `Changelogs.yaml` at or below 512 KiB. Each image can be at most 8 MiB. The package validator enforces these limits before it creates the release ZIP.
+Keep each of `Changelogs.md` and `md-images.yaml` at or below 512 KiB. Each image can be at most 8 MiB. The package validator enforces these limits before it creates the release ZIP.
 
-The manifest accepts only one `images:` section with list entries containing `id`, `src`, and optional `alt` fields. Use two spaces before each list item and four spaces before its fields. IDs contain letters and numbers and may include hyphens or underscores. When no alt text is given, the id becomes the accessible image description.
+The manifest accepts one `images:` section with list entries containing `id`, `src`, and optional `alt` fields. A `videos:` section can follow it. Use two spaces before each list item and four spaces before its fields. IDs contain letters and numbers and may include hyphens or underscores. When no alt text is given, the id becomes the accessible image description.
 
 ## Reusable renderer API
 
@@ -63,11 +65,11 @@ container.innerHTML = safeHtml;
 
 `parseImageManifest(yamlText)` validates the supported manifest subset and returns an object keyed by image id. Each value has `src` and `alt`. The caller supplies `render` an `images` object keyed by id, where each `src` is a base64 `data:image/png`, `image/jpeg`, `image/gif`, or `image/webp` URL. `render(markdownText, { images, document })` returns sanitized HTML; `document` is optional and defaults to the current window document. The renderer is intended for inert, local Markdown content and does not grant arbitrary HTML execution.
 
-For production packaging, build Settings with `scripts/Build-App.ps1 -s -c`, then run `scripts/Build-Installer.ps1 -PackageRelease`. Packaging fails if either changelog source file is missing. The native installer places them in BlobUI's managed runtime, and update installation replaces them with the rest of the managed release files.
+For production packaging, build Settings with `scripts/Build-App.ps1 -s -c`, then run `scripts/Build-Installer.ps1 -PackageRelease`. Packaging fails if either changelog source file is missing. The native installer places `md-images.yaml` in BlobUI's managed runtime, and update installation replaces it with the rest of the managed release files.
 
 ## MP4 videos
 
-Add a videos section beside images in Changelogs.yaml. IDs must be unique across both sections. Existing image-only manifests remain supported.
+Add a videos section beside images in md-images.yaml. IDs must be unique across both sections. Existing image-only manifests remain supported.
 
 ```yaml
 images: []
