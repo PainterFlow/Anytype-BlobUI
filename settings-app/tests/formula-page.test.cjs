@@ -21,6 +21,9 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     window.__TAURI__ = { core: { invoke: async (command, args) => {
       window.__calls.push(command);
       if (command === 'get_app_state') return { ready: true, theme: document.documentElement.dataset.theme || 'dark', onboardingComplete: true, settings: {}, hasSavedApiKey: true };
+      if (command === 'reload_custom_themes') return { cssRebuilt: true, state: {
+        theme: 'dark', themeCss: '', previewTheme: 'dark', themeDiagnostics: [], customThemes: [], themeDirectory: 'Settings/themes/built-in-themes',
+      } };
       if (command === 'load_kanban_formulas') return { configuration: configuration(), calculatedAt: sessionStorage.getItem('calculated-at') };
       if (command === 'discover_kanban_views') {
         return { views: ['view-a', 'view-b'].filter(id => !window.__hideView || id !== 'view-a').map(viewId => ({

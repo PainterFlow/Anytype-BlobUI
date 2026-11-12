@@ -185,6 +185,9 @@ const context = {
         return;
       }
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
+      if (name === 'reload_custom_themes') return { cssRebuilt: true, state: {
+        theme: 'dark', themeCss: '', previewTheme: 'dark', themeDiagnostics: [], customThemes: [], themeDirectory: 'Settings/themes/built-in-themes',
+      } };
       // External refresh behavior is covered by saved-state-refresh.test.cjs.
       if (name === 'get_saved_state_snapshot') return new Promise(() => {});
       if (name === 'get_app_state') {

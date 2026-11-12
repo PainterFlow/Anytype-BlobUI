@@ -379,6 +379,66 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
 }
 
 #[test]
+fn theme_reload_rebuilds_both_css_outputs_from_the_current_preset_without_changing_settings() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixture = source.join(".test-run").join(format!(
+        "theme-reload-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    let install = fixture.join("Anytype data");
+    let runtime = fixture.join("runtime");
+    let settings = install.join("Settings");
+    let theme_directory = themes::theme_directory(&settings);
+    fs::create_dir_all(install.join("blob")).unwrap();
+    fs::create_dir_all(&theme_directory).unwrap();
+    copy_tree(&source.join("Dev"), &runtime.join("Dev"));
+    copy_tree(&source.join("assets"), &runtime.join("assets"));
+    let preset = "/*\nname: Reload Fixture\nauthor: Test\n*/\nhtml.themeDark { --color-bg-primary: #101010; }";
+    fs::write(theme_directory.join("reload-fixture.css"), preset).unwrap();
+    let mut draft = SettingsDraft::default();
+    draft.enable_custom_themes = true;
+    draft.based_theme = "dark".into();
+    draft.theme_preset = "reload-fixture.css".into();
+    let data = json!({"installDirectory": install.to_string_lossy(), "settings": draft});
+    let data_path = install.join("blob/data.json");
+    let original_data = serde_json::to_vec_pretty(&data).unwrap();
+    fs::write(&data_path, &original_data).unwrap();
+    let css_path = install.join("custom.css");
+    fs::write(&css_path, b"stale custom css").unwrap();
+    fs::write(settings.join("themes/generated.css"), b"stale generated theme css").unwrap();
+
+    let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _environment = EnvironmentGuard::set(&[
+        ("BLOBUI_INSTALL_DIRECTORY", &install),
+        ("BLOBUI_SOURCE_DIRECTORY", &runtime),
+    ]);
+    let result = reload_custom_themes_blocking().expect("theme reload should rebuild saved CSS");
+    assert!(result.css_rebuilt, "{:?}", result.state.theme_diagnostics);
+    assert_eq!(fs::read(&data_path).unwrap(), original_data, "Reload must not rewrite settings");
+    assert!(fs::read_to_string(&css_path).unwrap().contains("--color-bg-primary: #101010"));
+    assert!(fs::read_to_string(settings.join("themes/generated.css")).unwrap().contains("--color-bg-primary: #101010"));
+    assert!(result.state.custom_themes.iter().any(|theme| theme.id == "reload-fixture.css"));
+
+    let previous_css = fs::read(&css_path).unwrap();
+    let generated_path = settings.join("themes/generated.css");
+    fs::remove_file(&generated_path).unwrap();
+    fs::create_dir(&generated_path).unwrap();
+    fs::write(generated_path.join("keep.txt"), b"transaction sentinel").unwrap();
+    let failed = reload_custom_themes_blocking().expect("reload errors should be returned with diagnostics");
+    assert!(!failed.css_rebuilt);
+    assert_eq!(fs::read(&css_path).unwrap(), previous_css, "A failed two-file replacement must preserve custom.css");
+    assert_eq!(fs::read(generated_path.join("keep.txt")).unwrap(), b"transaction sentinel");
+    assert!(failed.state.theme_diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic.level, themes::ThemeDiagnosticLevel::Error)
+            && diagnostic.message.contains("Custom theme CSS could not be rebuilt.")
+    }));
+
+    drop(_environment);
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
 #[ignore = "Retired credential-reset flow. Use profile-isolation regressions; never run against a user profile."]
 fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

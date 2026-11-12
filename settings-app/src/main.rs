@@ -201,7 +201,7 @@ struct AppState {
     app_data_directory: String,
     theme_directory: String,
     custom_themes: Vec<themes::ThemeSummary>,
-    theme_diagnostics: Vec<String>,
+    theme_diagnostics: Vec<themes::ThemeDiagnostic>,
     theme: String,
     theme_css: String,
     preview_theme: String,
@@ -225,6 +225,13 @@ struct SaveResult {
     preview_theme: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThemeReloadResult {
+    state: AppState,
+    css_rebuilt: bool,
+}
+
 #[tauri::command]
 async fn reveal_api_key() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(read_saved_api_key)
@@ -246,6 +253,47 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
     let state = load_app_state()?;
     apply_native_theme(&app, &state.theme);
     Ok(state)
+}
+
+#[tauri::command]
+async fn reload_custom_themes() -> Result<ThemeReloadResult, String> {
+    let guard = acquire_save_guard("Wait for the current settings save to finish.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        reload_custom_themes_blocking()
+    })
+    .await
+    .map_err(|_| "Custom themes could not be reloaded.".to_string())?
+}
+
+fn reload_custom_themes_blocking() -> Result<ThemeReloadResult, String> {
+    let install = resolve_install_directory(&app_data_directory())?;
+    let (_, _, css_path, _) = save_paths(&install)?;
+    let runtime = resolve_runtime_directory_for_install(&install)?;
+    let data = load_settings_data(&install)?;
+    let settings_directory = settings_root_for_install(&install)?.join("Settings");
+    let generated_path = settings_directory.join("themes/generated.css");
+    let rebuilt = themes::effective_include_selections(&settings_directory, &data).and_then(|include_selections| {
+        let theme_css = themes::render_generated_css_with_include(&settings_directory, &data, include_selections)?;
+        let css = css::compile_with_theme_css(&runtime, &install, &data, &theme_css, include_selections)?;
+        storage::transaction::commit_update(vec![
+            storage::transaction::FileChange { path: css_path, contents: Some(css.into_bytes()) },
+            storage::transaction::FileChange { path: generated_path, contents: Some(theme_css.into_bytes()) },
+        ])
+    });
+    let mut state = load_app_state()?;
+    if let Err(error) = &rebuilt {
+        let message = error.to_string();
+        if !state.theme_diagnostics.iter().any(|diagnostic| diagnostic.message == message) {
+            state.theme_diagnostics.push(themes::ThemeDiagnostic::error(format!(
+                "Custom theme CSS could not be rebuilt. {message}"
+            )));
+        }
+    }
+    Ok(ThemeReloadResult {
+        state,
+        css_rebuilt: rebuilt.is_ok(),
+    })
 }
 
 #[tauri::command]
@@ -1230,7 +1278,14 @@ fn load_app_state() -> Result<AppState, String> {
     };
 
     let theme_data = json!({"settings": &settings});
-    let theme_css = themes::render_generated_css(&settings_directory, &theme_data).unwrap_or_default();
+    let mut theme_diagnostics = theme_catalog.diagnostics;
+    let theme_css = match themes::render_generated_css(&settings_directory, &theme_data) {
+        Ok(css) => css,
+        Err(error) => {
+            theme_diagnostics.push(themes::ThemeDiagnostic::error(error));
+            String::new()
+        }
+    };
     let preview_theme = themes::preview_mode(&theme_data).unwrap_or_else(|_| "system".into());
 
     Ok(AppState {
@@ -1239,7 +1294,7 @@ fn load_app_state() -> Result<AppState, String> {
         app_data_directory: app_data.to_string_lossy().into_owned(),
         theme_directory: themes::theme_directory(&settings_directory).to_string_lossy().into_owned(),
         custom_themes: theme_catalog.themes,
-        theme_diagnostics: theme_catalog.diagnostics,
+        theme_diagnostics,
         theme,
         theme_css,
         preview_theme,
@@ -2407,6 +2462,7 @@ fn main() {
             get_calendar_api_availability,
             configure_connection,
             get_app_state,
+            reload_custom_themes,
             get_anytype_theme,
             get_saved_state_snapshot,
             save_settings,

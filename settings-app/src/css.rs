@@ -66,6 +66,18 @@ pub(crate) fn compile_with_settings_directory(
     settings_directory: &Path,
     data: &Value,
 ) -> Result<String, String> {
+    let include_selections = crate::themes::effective_include_selections(settings_directory, data)?;
+    let theme_css = crate::themes::render_generated_css_with_include(settings_directory, data, include_selections)?;
+    compile_with_theme_css(runtime_root, install_directory, data, &theme_css, include_selections)
+}
+
+pub(crate) fn compile_with_theme_css(
+    runtime_root: &Path,
+    install_directory: &Path,
+    data: &Value,
+    theme_css: &str,
+    include_selections: bool,
+) -> Result<String, String> {
     let dev_directory = runtime_root.join("Dev");
     let asset_directory = runtime_root.join("assets");
     if !dev_directory.is_dir() {
@@ -101,7 +113,7 @@ pub(crate) fn compile_with_settings_directory(
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
-    bool_settings.insert("includeSelections", crate::themes::effective_include_selections(settings_directory, data)?);
+    bool_settings.insert("includeSelections", include_selections);
     let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
     bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
     bool_settings.insert("kanbanCompact", kanban_style == "compact");
@@ -194,7 +206,6 @@ pub(crate) fn compile_with_settings_directory(
             }
         }
     }
-    let theme_css = crate::themes::render_generated_css(settings_directory, data)?;
     if !theme_css.trim().is_empty() {
         css_text = format!("{}{newline}{newline}{}", css_text.trim_end(), theme_css.trim_end());
     }

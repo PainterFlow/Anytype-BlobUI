@@ -1068,6 +1068,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (logStore.add(message, kind)) updateLogView();
   }
 
+  function reportThemeDiagnostics(diagnostics) {
+    for (const diagnostic of Array.isArray(diagnostics) ? diagnostics : []) {
+      const message = typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || "");
+      if (!message || loggedThemeDiagnostics.has(message)) continue;
+      loggedThemeDiagnostics.add(message);
+      const level = diagnostic && typeof diagnostic === "object"
+        && ["warning", "error"].includes(String(diagnostic.level).toLowerCase())
+        ? String(diagnostic.level).toLowerCase() : "error";
+      addLog(message, level);
+    }
+  }
+
   function formatLog(entry) {
     return "[" + entry.time + "] " + entry.level.toUpperCase() + " " + entry.message;
   }
@@ -1498,12 +1510,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       applyTheme(state.theme, state.themeCss, state.previewTheme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
-      for (const diagnostic of Array.isArray(state.themeDiagnostics) ? state.themeDiagnostics : []) {
-        const message = String(diagnostic);
-        if (loggedThemeDiagnostics.has(message)) continue;
-        loggedThemeDiagnostics.add(message);
-        addLog(message, "error");
-      }
+      reportThemeDiagnostics(state.themeDiagnostics);
       assignAdvancedConnection(state);
       void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
@@ -1582,6 +1589,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     window.appReady = !!state.ready;
     applyTheme(state.theme, state.themeCss, state.previewTheme);
+    reportThemeDiagnostics(state.themeDiagnostics);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
     view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
     assignAdvancedConnection(state);
@@ -2900,12 +2908,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
   window.BlobUI.AppReload.register(async () => {
-    const state = await invoke("get_app_state");
+    const result = await invoke("reload_custom_themes");
+    const state = result?.state;
+    if (!state) throw new Error("Custom themes could not be reloaded.");
     if (disposed) return;
+    applyTheme(state.theme, state.themeCss, state.previewTheme);
+    reportThemeDiagnostics(state.themeDiagnostics);
     view.update({
       customThemes: Array.isArray(state.customThemes) ? state.customThemes : [],
       themeDirectory: String(state.themeDirectory || ""),
     });
+    if (result.cssRebuilt === false) setStatus("Custom theme CSS could not be rebuilt. Check Logs.", "error", false);
   });
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
