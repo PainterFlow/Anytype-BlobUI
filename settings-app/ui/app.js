@@ -146,7 +146,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         }
       }).catch((error) => {
         releaseNotesFailed = true;
-        setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error");
+        setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error", true, error);
       });
     },
   });
@@ -178,7 +178,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
   const logStore = window.BlobUI.LogStore.create();
-  const loggedThemeDiagnostics = new Set();
   let copyConfirmationTimer = null;
   let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
@@ -282,10 +281,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const savedRefresh = window.BlobUI.SavedState.createRefreshController({
     isBlocked: refreshBlocked,
     refresh: refreshSavedSnapshot,
-    onError: error => addLog("Saved settings reload failed. " + String(error.message || error), "error"),
+    onError: error => addLog("Saved settings reload failed. " + String(error.message || error), "error", error),
   });
   function requestSavedRefresh() {
-    void savedRefresh.request().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error"));
+    void savedRefresh.request().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error", error));
   }
   function refreshSavedState() { return savedRefresh.run(); }
   async function refreshSavedSnapshot({ generation, isCurrent }) {
@@ -366,7 +365,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   const nativeService = createNativeService({
     tauri,
-    onMetadataError: message => addLog(message, "error"),
+    onMetadataError: (message, error) => addLog(message, "error", error),
   });
   const invoke = nativeService.invoke;
   const metadataPending = nativeService.metadataPending;
@@ -850,7 +849,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } catch (error) {
       newerReleaseNotes.pop();
       displayedReleaseNotes = newer;
-      setStatus("Could not display the previous changelog. " + (error.message || String(error)), "error");
+      setStatus("Could not display the previous changelog. " + (error.message || String(error)), "error", true, error);
     } finally {
       releaseNotesNavigationBusy = false;
       updateReleaseNotesNavigation();
@@ -868,7 +867,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } catch (error) {
       newerReleaseNotes.push(newer);
       displayedReleaseNotes = current;
-      setStatus("Could not display the newer changelog. " + (error.message || String(error)), "error");
+      setStatus("Could not display the newer changelog. " + (error.message || String(error)), "error", true, error);
     } finally {
       releaseNotesNavigationBusy = false;
       updateReleaseNotesNavigation();
@@ -917,7 +916,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       releaseNotesLatestVersion = null;
       releaseNotesLoaded = false;
       releaseNotesFailed = true;
-      setStatus("Could not display the release notes. " + (error.message || String(error)), "error");
+      setStatus("Could not display the release notes. " + (error.message || String(error)), "error", true, error);
       return false;
     } finally {
       releaseNotesLoading = false;
@@ -960,7 +959,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       el("release-notes-status").textContent = "Could not load the latest changelog. " + message;
       el("release-notes-status").hidden = false;
       el("release-notes-retry").hidden = false;
-      setStatus("Could not display the latest changelog. " + message, "error");
+      setStatus("Could not display the latest changelog. " + message, "error", true, error);
     }
   }
 
@@ -969,7 +968,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   async function checkForUpdates(automatic = false) {
     if (automatic && (simulationActive || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed)) return;
     if (!updaterSettingsLoaded || !window.appReady || updaterBusyOperation) return;
-    if (!automatic) beginLogAttempt();
     updaterBusyOperation = "checking";
     mergeUpdaterState({ status: "checking", message: "Checking for updates…" });
     renderUpdaterState();
@@ -989,7 +987,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
     } catch (error) {
       mergeUpdaterState({ status: "error", message: error.message || String(error) });
-      if (!automatic) setStatus("Could not check for updates. " + (error.message || String(error)), "error");
+      if (!automatic) setStatus("Could not check for updates. " + (error.message || String(error)), "error", true, error);
     } finally {
       updaterBusyOperation = "";
       renderUpdaterState();
@@ -1016,7 +1014,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
       return;
     }
-    if (!fromAutomaticCheck) beginLogAttempt();
     updaterBusyOperation = "updating";
     mergeUpdaterState({ status: "updating", message: "Downloading the update. Settings will close and reopen automatically." });
     renderUpdaterState();
@@ -1025,7 +1022,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       mergeUpdaterState(await invoke("apply_update", { automatic: fromAutomaticCheck }) || {});
     } catch (error) {
       mergeUpdaterState({ status: "error", message: error.message || String(error), updateAvailable: true });
-      setStatus("Could not install the update. " + (error.message || String(error)), "error");
+      setStatus("Could not install the update. " + (error.message || String(error)), "error", true, error);
     } finally {
       updaterBusyOperation = "";
       renderUpdaterState();
@@ -1041,18 +1038,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       mergeUpdaterState({ ...(state || {}), status: "simulated", updateAvailable: true });
     } catch (error) {
       simulationActive = false;
-      setStatus("Could not preview an update. " + (error.message || String(error)), "error");
+      setStatus("Could not preview an update. " + (error.message || String(error)), "error", true, error);
     }
   }
 
-  function setStatus(message, kind, record = true) {
+  function setStatus(message, kind, record = true, occurrence) {
     statusMessage.textContent = message;
     if (!record) return;
-    addLog(message, kind);
-  }
-
-  function beginLogAttempt() {
-    logStore.beginAttempt();
+    addLog(message, kind, occurrence);
   }
 
   function updateLogView() {
@@ -1062,17 +1055,16 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     logEntries.scrollTop = logEntries.scrollHeight;
   }
 
-  function addLog(message, kind) {
+  function addLog(message, kind, occurrence) {
     if (disposed) return;
     if (!hasSavedApiKey && window.BlobUI.LogStore.isConnectionFailure(message)) return;
-    if (logStore.add(message, kind)) updateLogView();
+    if (logStore.add(message, kind, occurrence)) updateLogView();
   }
 
   function reportThemeDiagnostics(diagnostics) {
     for (const diagnostic of Array.isArray(diagnostics) ? diagnostics : []) {
       const message = typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || "");
-      if (!message || loggedThemeDiagnostics.has(message)) continue;
-      loggedThemeDiagnostics.add(message);
+      if (!message) continue;
       const level = diagnostic && typeof diagnostic === "object"
         && ["warning", "error"].includes(String(diagnostic.level).toLowerCase())
         ? String(diagnostic.level).toLowerCase() : "error";
@@ -1501,7 +1493,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   async function loadState({ refreshMetadata = false, waitForUpdater = false } = {}) {
-    beginLogAttempt();
     const loadGeneration = ++appStateLoadGeneration;
     let state = null;
     let stateError = null;
@@ -1544,7 +1535,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       window.appReady = !!state.ready;
     }
     if (stateError) {
-      setStatus(stateError.message || String(stateError), "error");
+      setStatus(stateError.message || String(stateError), "error", true, stateError);
       updateSaveButton();
       return;
     }
@@ -1576,7 +1567,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
-    beginLogAttempt();
     savedRefreshEpoch++;
     savedRefresh.invalidate();
     let state;
@@ -1866,7 +1856,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   async function save(options = {}) {
     if (!draft || saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
-    beginLogAttempt();
     // Let the formula page report missing connection/setup requirements inline.
     if (!window.appReady) {
       const formulas = window.BlobUI.FormulaPage.read();
@@ -2074,11 +2063,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
     } catch (error) {
       const message = error.message || String(error);
-      setStatus(connectionSaved && settingsChanged
+      const status = connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
         : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved || calendarRulesSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
-          : message, "error");
+          : message;
+      setStatus(status, "error", true, error);
     } finally {
       saveBusy = false;
       if (connectionSaved || updaterPathChanged) void refreshCalendarApiAvailability(true);
@@ -2346,7 +2336,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
     open: url => invoke("open_external_link", { url }),
     onError(error) {
-      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error");
+      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error", true, error);
     },
   });
   const blobImportModal = window.BlobUI.createModalController({
@@ -2521,7 +2511,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!el("log-control").contains(event.target)) closeLogs();
   });
   listen(el("copy-logs"), "click", async () => {
-    beginLogAttempt();
     try {
       await navigator.clipboard.writeText(logStore.entries().map(formatLog).join("\n"));
       el("copy-status").textContent = "All logs copied.";
@@ -2534,13 +2523,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }, 1400);
     } catch (error) {
       view.update({ copyLogsCopied: false });
-      setStatus("Could not copy logs. " + (error.message || String(error)), "error");
+      setStatus("Could not copy logs. " + (error.message || String(error)), "error", true, error);
       el("copy-status").textContent = "Could not copy logs.";
     }
   });
   listen(el("clear-logs"), "click", () => {
     logStore.clear();
-    loggedThemeDiagnostics.clear();
     if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
     copyConfirmationTimer = null;
     view.update({ copyLogsCopied: false });
@@ -2551,11 +2539,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
 
   async function windowAction(command) {
-    beginLogAttempt();
     try {
       await invoke(command);
     } catch (error) {
-      setStatus(error.message || String(error), "error");
+      setStatus(error.message || String(error), "error", true, error);
     }
   }
   listen(el("window-background"), "click", () => windowAction("run_in_background"));
@@ -2727,7 +2714,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (enabled) {
         el("connection-error").textContent = error.message || String(error);
       } else {
-        setStatus(error.message || String(error), "error");
+        setStatus(error.message || String(error), "error", true, error);
         el("onboarding-choice-error").textContent = "Could not apply this choice. Check your BlobUI installation and try again.";
       }
     } finally {
@@ -2782,7 +2769,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       event.preventDefault();
       if (!event.repeat) {
         invoke("open_component_catalog").catch((error) => {
-          setStatus("Could not open the component catalog. " + (error.message || String(error)), "error");
+          setStatus("Could not open the component catalog. " + (error.message || String(error)), "error", true, error);
         });
       }
       return;
@@ -2846,20 +2833,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     return subscription.catch(error => { onError(error); return false; });
   }
   savedStateSubscription = subscribeNativeEvent("blobui-saved-state-changed", () => requestSavedRefresh(), error => {
-    addLog("Could not listen for saved settings changes. " + String(error.message || error), "error");
+    addLog("Could not listen for saved settings changes. " + String(error.message || error), "error", error);
   });
   subscribeNativeEvent("blobui-rebuild-custom-css", () => save({ forceRebuild: true }), error => {
-    setStatus(error.message || String(error), "error");
+    setStatus(error.message || String(error), "error", true, error);
   });
   const onboardingSubscription = subscribeNativeEvent("blobui-show-onboarding", () => showOnboarding(), error => {
-    setStatus(error.message || String(error), "error");
+    setStatus(error.message || String(error), "error", true, error);
   });
   const backgroundErrorSubscription = subscribeNativeEvent("blobui-background-error", event => {
-    beginLogAttempt();
     const message = String(event.payload || "Could not run BlobUI in background.");
     setStatus(message, "error");
-    addLog(message, "error");
-  }, error => addLog(String(error.message || error), "error"));
+  }, error => addLog(String(error.message || error), "error", error));
   function dispose() {
     if (disposed) return;
     disposed = true;
@@ -2895,16 +2880,15 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         window.clearTimeout(startupRefreshTimer);
         startupRefreshTimer = null;
       }
-      if (!startup) beginLogAttempt();
       addLog("Reloading app metadata and refreshing Anytype lists and pickers.", "info");
     },
     isCapturing: () => !!shortcutCaptureAction,
     beforeRun: async () => {
       try { await refreshSavedState(); }
-      catch (error) { addLog("Saved settings reload failed. " + String(error.message || error), "error"); }
+      catch (error) { addLog("Saved settings reload failed. " + String(error.message || error), "error", error); }
       await Promise.allSettled([...metadataPending]);
     },
-    onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); },
+    onError: error => setStatus(String(error.message || error), "error", true, error),
   });
   window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
   window.BlobUI.AppReload.register(async () => {
@@ -2922,12 +2906,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
-    onChange: markDirty, onInfo: message => addLog(message, "info"), onAttempt: beginLogAttempt });
-  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: message => addLog(message, "info"), onAttempt: beginLogAttempt, onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+    onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error) });
+  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
   const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
-    addLog("Settings could not be loaded. " + String(error.message || error), "error");
+    addLog("Settings could not be loaded. " + String(error.message || error), "error", error);
   }).finally(() => {
     if (disposed) return;
     void savedRefresh.setReady();
@@ -2935,7 +2919,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   Promise.all([onboardingSubscription, initialStateLoaded, backgroundErrorSubscription]).then(([subscription]) => {
     if (!disposed && subscription !== false) return invoke("onboarding_ready");
-  }).catch(error => setStatus(String(error.message || error), "error"));
+  }).catch(error => setStatus(String(error.message || error), "error", true, error));
   const themeInterval = window.setInterval(refreshTheme, 2000);
   const updateInterval = window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);

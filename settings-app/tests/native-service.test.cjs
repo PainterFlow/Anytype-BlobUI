@@ -56,11 +56,30 @@ test('native events are injectable and metadata errors reach the caller', async 
   assert.equal(listener, null);
 });
 
-test('rejected metadata requests report one bridge error for the log store to deduplicate', async () => {
+test('rejected metadata requests report the same error occurrence to callbacks and callers', async () => {
   const errors = [];
-  const service = serviceFor({ core: { invoke: async () => { throw new Error('metadata unavailable'); } } }, message => errors.push(message));
-  await assert.rejects(service.invoke('discover_calendar_colors'), /metadata unavailable/);
-  assert.deepEqual(errors, ['metadata unavailable']);
+  const service = serviceFor({ core: { invoke: async () => { throw 'metadata unavailable'; } } }, (message, error) => errors.push({ message, error }));
+  let caught;
+  try { await service.invoke('discover_calendar_colors'); }
+  catch (error) { caught = error; }
+  assert.match(caught.message, /metadata unavailable/);
+  assert.deepEqual(errors.map(item => item.message), ['metadata unavailable']);
+  assert.equal(errors[0].error, caught);
+});
+
+test('separate native throws with the same string get separate error identities', async () => {
+  const errors = [];
+  const service = serviceFor({ core: { invoke: async () => { throw 'metadata unavailable'; } } }, (message, error) => errors.push({ message, error }));
+  const caught = [];
+  for (let i = 0; i < 2; i++) {
+    try { await service.invoke('discover_calendar_colors'); }
+    catch (error) { caught.push(error); }
+  }
+  assert.equal(caught.length, 2);
+  assert.notEqual(caught[0], caught[1]);
+  assert.equal(errors.length, 2);
+  assert.equal(errors[0].error, caught[0]);
+  assert.equal(errors[1].error, caught[1]);
 });
 
 test('missing Tauri bridge rejects invocations and event subscriptions become no-ops', async () => {

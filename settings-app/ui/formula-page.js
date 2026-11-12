@@ -548,7 +548,7 @@
       discovered = true;
       setMessage([loadError, result.warning].filter(Boolean).join(" "));
     } catch (error) {
-      if (generation === discoveryGeneration) { setMessage(String(error.message || error)); api?.onInfo?.(String(error.message || error)); }
+      if (generation === discoveryGeneration) { setMessage(String(error.message || error)); api?.onInfo?.(String(error.message || error), error); }
     } finally {
       if (generation === discoveryGeneration) {
         discovering = false;
@@ -603,7 +603,7 @@
       record.row = row || null;
       openCalculator(record);
     },
-    reloadViews() { api?.onAttempt?.(); return discover(true); },
+    reloadViews() { return discover(true); },
     setCalculatorSourceInput(input) { if (activeRecord) activeRecord.sourceInput = input || null; },
     setCalculatorDisplay(display) { if (activeRecord) activeRecord.display = display || null; },
     calculatorSourceChanged(input) { handleSourceInput(activeRecord, input); },

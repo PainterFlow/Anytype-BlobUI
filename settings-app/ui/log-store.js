@@ -14,22 +14,18 @@
     return kind === "error" || kind === "warning" ? kind : "info";
   }
 
-  function messageKey(message) {
-    if (isConnectionFailure(message)) return "anytype-local-api-unavailable";
-    return String(message).trim().replace(/\s+/g, " ").toLocaleLowerCase();
-  }
-
   UI.LogStore = Object.freeze({
     isConnectionFailure,
     create() {
       const entries = [];
-      let currentAttempt = new Map();
+      let reportedErrors = new WeakMap();
 
-      function add(message, kind, time = new Date().toLocaleTimeString()) {
+      function add(message, kind, occurrence, time = new Date().toLocaleTimeString()) {
         const text = String(message);
-        const key = messageKey(text);
         const level = normalizeLevel(text, kind);
-        const previous = currentAttempt.get(key);
+        const hasOccurrence = occurrence !== null
+          && (typeof occurrence === "object" || typeof occurrence === "function");
+        const previous = hasOccurrence ? reportedErrors.get(occurrence) : null;
         if (previous) {
           if (severity[level] > severity[previous.level]) {
             previous.level = level;
@@ -39,7 +35,7 @@
         }
         const entry = { message: text, level, time };
         entries.push(entry);
-        currentAttempt.set(key, entry);
+        if (hasOccurrence) reportedErrors.set(occurrence, entry);
         return true;
       }
 
@@ -51,8 +47,7 @@
 
       return Object.freeze({
         add,
-        beginAttempt() { currentAttempt = new Map(); },
-        clear() { entries.length = 0; currentAttempt.clear(); },
+        clear() { entries.length = 0; reportedErrors = new WeakMap(); },
         entries() { return entries.slice(); },
         severity: getSeverity,
       });

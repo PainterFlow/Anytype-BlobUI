@@ -30,10 +30,10 @@
         pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
           .catch(error => [{ status: "rejected", reason: error }])
           .then(results => {
-            const error = results.find(result => result.status === "rejected")?.reason;
-            if (!error) return;
             if (typeof onError === "function") {
-              try { onError(error); } catch (_) { /* Keep keyboard reload errors handled. */ }
+              results.filter(result => result.status === "rejected").forEach(result => {
+                try { onError(result.reason); } catch (_) { /* Keep keyboard reload errors handled. */ }
+              });
             }
           })
           .finally(() => {
