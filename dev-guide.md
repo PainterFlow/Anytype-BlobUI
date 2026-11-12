@@ -1,5 +1,3 @@
-# Developer guide
-
 ## Set up
 
 Install Git for Windows, Node.js LTS, Rust stable for `x86_64-pc-windows-msvc`, Visual Studio Build Tools with the Desktop development with C++ workload, and a Windows SDK.
