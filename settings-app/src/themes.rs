@@ -63,6 +63,26 @@ pub(crate) struct ThemeSummary {
     pub accent_color_selection: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThemeDiagnostic {
+    pub message: String,
+    pub level: ThemeDiagnosticLevel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ThemeDiagnosticLevel {
+    Warning,
+    Error,
+}
+
+impl ThemeDiagnostic {
+    pub(crate) fn error(message: impl Into<String>) -> Self {
+        Self { message: message.into(), level: ThemeDiagnosticLevel::Error }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ThemeFile {
     summary: ThemeSummary,
@@ -72,7 +92,7 @@ struct ThemeFile {
 #[derive(Debug)]
 pub(crate) struct ThemeCatalog {
     pub(crate) themes: Vec<ThemeSummary>,
-    pub(crate) diagnostics: Vec<String>,
+    pub(crate) diagnostics: Vec<ThemeDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,7 +105,7 @@ struct ThemeSourceError {
 #[derive(Debug)]
 struct ThemeFileLoad {
     theme: Option<ThemeFile>,
-    diagnostics: Vec<String>,
+    diagnostics: Vec<ThemeDiagnostic>,
 }
 
 #[derive(Debug)]
@@ -140,7 +160,7 @@ pub(crate) fn list_themes(settings_directory: &Path) -> Result<ThemeCatalog, Str
                     themes.push(theme.summary);
                 }
             }
-            Err(error) => diagnostics.push(format!("{}: {error}", theme_file_name(&path))),
+            Err(error) => diagnostics.push(ThemeDiagnostic::error(theme_file_error(&path, &error))),
         }
     }
     themes.sort_by(|left, right| {
@@ -156,6 +176,15 @@ pub(crate) fn render_generated_css(
     settings_directory: &Path,
     data: &Value,
 ) -> Result<String, String> {
+    let include_selections = effective_include_selections(settings_directory, data)?;
+    render_generated_css_with_include(settings_directory, data, include_selections)
+}
+
+pub(crate) fn render_generated_css_with_include(
+    settings_directory: &Path,
+    data: &Value,
+    include_selections: bool,
+) -> Result<String, String> {
     ensure_builtin_themes(settings_directory)?;
     let empty_settings = Map::new();
     let settings = data
@@ -166,7 +195,6 @@ pub(crate) fn render_generated_css(
         .get("enableCustomThemes")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let include_selections = effective_include_selections(settings_directory, data)?;
     let accent = crate::css::normalize_accent(
         settings
             .get("accentColor")
@@ -481,43 +509,47 @@ fn selected_theme_path(settings_directory: &Path, id: &str) -> Result<PathBuf, S
 }
 
 fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
-    let loaded = inspect_theme_file(path)?;
+    let loaded = inspect_theme_file(path).map_err(|error| theme_file_error(path, &error))?;
     loaded.theme.ok_or_else(|| {
         loaded
             .diagnostics
             .into_iter()
             .next()
+            .map(|diagnostic| theme_file_error(path, &diagnostic.message))
             .unwrap_or_else(|| format!("{} has an invalid custom theme header.", theme_file_name(path)))
     })
 }
 
 fn inspect_theme_file(path: &Path) -> Result<ThemeFileLoad, String> {
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("Could not read theme file {}: {error}", path.display()))?;
+        .map_err(|error| format!("Could not inspect theme file '{}': {error}", theme_file_name(path)))?;
     reject_reparse_point(&metadata, path)?;
     if !metadata.is_file() || metadata.len() > MAX_THEME_BYTES {
         return Err(format!(
-            "Theme file {} must be a CSS file no larger than 1 MB.",
-            path.display()
+            "Theme file '{}' must be CSS and no larger than 1 MB.",
+            theme_file_name(path)
         ));
     }
     let contents = fs::read_to_string(path)
-        .map_err(|error| format!("Could not read theme file {}: {error}", path.display()))?;
+        .map_err(|error| format!("Could not read theme '{}': {error}", theme_file_name(path)))?;
     let mut diagnostics = Vec::new();
     let header_result = parse_header(&contents);
     if let Err(error) = &header_result {
-        diagnostics.push(format_source_error(theme_file_name(path), error));
+        diagnostics.push(ThemeDiagnostic::error(format_source_error(theme_file_name(path), error)));
     }
     let css_errors = validate_theme_css(&contents, theme_file_name(path));
-    for error in css_errors.iter().take(MAX_CSS_DIAGNOSTICS_PER_THEME) {
-        diagnostics.push(format_source_error(theme_file_name(path), error));
+    for (error, level) in css_errors.iter().take(MAX_CSS_DIAGNOSTICS_PER_THEME) {
+        diagnostics.push(ThemeDiagnostic {
+            message: format_source_error(theme_file_name(path), error),
+            level: *level,
+        });
     }
     let omitted_css_errors = css_errors.len().saturating_sub(MAX_CSS_DIAGNOSTICS_PER_THEME);
     if omitted_css_errors > 0 {
-        diagnostics.push(format!(
-            "{}: {omitted_css_errors} additional CSS errors omitted.",
+        diagnostics.push(ThemeDiagnostic::error(format!(
+            "{}: {omitted_css_errors} additional CSS diagnostics omitted.",
             theme_file_name(path)
-        ));
+        )));
     }
     let id = path
         .file_name()
@@ -530,7 +562,7 @@ fn inspect_theme_file(path: &Path) -> Result<ThemeFileLoad, String> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b' '))
     {
-        diagnostics.push(format!("{}: A custom theme filename is invalid.", theme_file_name(path)));
+        diagnostics.push(ThemeDiagnostic::error(format!("{}: A custom theme filename is invalid.", theme_file_name(path))));
         return Ok(ThemeFileLoad { theme: None, diagnostics });
     }
     let theme = header_result.ok().map(|(header, css)| ThemeFile {
@@ -551,7 +583,16 @@ fn theme_file_name(path: &Path) -> &str {
     path.file_name().and_then(|name| name.to_str()).unwrap_or("custom theme")
 }
 
-fn validate_theme_css(contents: &str, file_name: &str) -> Vec<ThemeSourceError> {
+fn theme_file_error(path: &Path, message: &str) -> String {
+    let name = theme_file_name(path);
+    if message.starts_with(&format!("{name}:")) {
+        message.to_string()
+    } else {
+        format!("{name}: {message}")
+    }
+}
+
+fn validate_theme_css(contents: &str, file_name: &str) -> Vec<(ThemeSourceError, ThemeDiagnosticLevel)> {
     let warnings = Arc::new(RwLock::new(Vec::new()));
     let options = ParserOptions {
         filename: file_name.to_string(),
@@ -564,11 +605,11 @@ fn validate_theme_css(contents: &str, file_name: &str) -> Vec<ThemeSourceError> 
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .iter()
-        .map(css_source_error)
+        .map(|warning| (css_source_error(warning), ThemeDiagnosticLevel::Warning))
         .collect::<Vec<_>>();
     if let Err(error) = parsed {
-        let diagnostic = css_source_error(&error);
-        if !diagnostics.contains(&diagnostic) {
+        let diagnostic = (css_source_error(&error), ThemeDiagnosticLevel::Error);
+        if !diagnostics.iter().any(|(existing, _)| existing == &diagnostic.0) {
             diagnostics.push(diagnostic);
         }
     }
@@ -914,18 +955,33 @@ mod tests {
         let catalog = list_themes(&settings).unwrap();
         assert!(!catalog.themes.iter().any(|theme| theme.id == "missing-name.css"));
         assert!(catalog.themes.iter().any(|theme| theme.id == "bad-value.css"));
-        assert!(catalog.diagnostics.iter().any(|message| {
-            message == "missing-name.css:3:1: Theme header is missing required field `name`."
+        assert!(catalog.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message == "missing-name.css:3:1: Theme header is missing required field `name`."
+                && matches!(diagnostic.level, ThemeDiagnosticLevel::Error)
         }));
         let css_diagnostics = catalog.diagnostics.iter()
-            .filter(|message| message.starts_with("bad-value.css:"))
+            .filter(|diagnostic| diagnostic.message.starts_with("bad-value.css:"))
             .collect::<Vec<_>>();
         assert_eq!(css_diagnostics.len(), 2, "{:?}", catalog.diagnostics);
-        assert!(css_diagnostics[0].starts_with("bad-value.css:6:")
-            && css_diagnostics[0].contains("Unexpected CSS token"));
-        assert!(css_diagnostics[1].starts_with("bad-value.css:9:")
-            && css_diagnostics[1].contains("Unexpected CSS token"));
+        assert!(css_diagnostics[0].message.starts_with("bad-value.css:6:")
+            && css_diagnostics[0].message.contains("Unexpected CSS token")
+            && matches!(css_diagnostics[0].level, ThemeDiagnosticLevel::Warning));
+        assert!(css_diagnostics[1].message.starts_with("bad-value.css:9:")
+            && css_diagnostics[1].message.contains("Unexpected CSS token")
+            && matches!(css_diagnostics[1].level, ThemeDiagnosticLevel::Warning));
 
+        let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn selected_theme_read_errors_use_the_catalog_filename_prefix() {
+        let settings = test_directory("selected-read-error").join("Settings");
+        ensure_builtin_themes(&settings).unwrap();
+        let path = theme_directory(&settings).join("missing-theme.css");
+        let inspected = inspect_theme_file(&path).unwrap_err();
+        let catalog_message = theme_file_error(&path, &inspected);
+        let selected_message = read_theme_file(&path).unwrap_err();
+        assert_eq!(selected_message, catalog_message);
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
 

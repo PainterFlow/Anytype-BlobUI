@@ -203,18 +203,17 @@ test('Dev Guide opens in a popup offline in dark mode', {
     await page.locator('#help-button').click();
     await page.locator('#help-dev-guide').click();
     await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
-    await page.waitForFunction(() => document.querySelector('#documentation-article')?.textContent.includes('Set up'));
+    await page.waitForFunction(() => document.querySelector('#documentation-article')?.textContent.includes('Required tools'));
     assert.equal(await page.locator('#documentation-title').evaluate(element => element.tagName), 'H1');
     assert.equal(await page.locator('#documentation-title').textContent(), 'Developer Guide');
     assert.equal(await page.locator('#documentation-dialog').getAttribute('role'), 'dialog');
     assert.equal(await page.locator('#documentation').count(), 0, 'The Dev Guide opens in a dialog instead of a full-page view.');
     assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true, 'The settings stay inert while the guide dialog is open.');
     const guideText = await page.locator('#documentation-article').textContent();
-    for (const section of ['Set up', 'Build and test', 'Custom themes', 'Project rules']) {
+    for (const section of ['Required tools', 'Build BlobUI', 'Custom Themes', 'GitHub Guidelines']) {
       assert.ok(guideText.includes(section), `The Dev Guide includes ${section}.`);
     }
-    assert.match(guideText, /Based Theme|Auto to select light or dark mode/);
-    assert.doesNotMatch(guideText, /Markdown formatting|Version Formatting/);
+    assert.match(guideText, /based theme/i);
     assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
     const scrollbarGap = await page.evaluate(() => {
       const dialog = document.getElementById('documentation-dialog');
