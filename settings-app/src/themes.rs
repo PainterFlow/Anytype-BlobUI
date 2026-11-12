@@ -729,8 +729,10 @@ fn parse_header(contents: &str) -> Result<(ThemeMetadata, &str), ThemeSourceErro
         let value_offset = value_start + line[value_start..].len() - line[value_start..].trim_start().len();
         let error_offset = line_offset + value_offset;
         let optional_color_key = normalized_key == "accent-color";
+        let based_theme_key = normalized_key == "based-theme";
         let selection_key = matches!(normalized_key.as_str(), "accent-color-selection" | "accent-color-selections");
-        let recognized_key = matches!(normalized_key.as_str(), "name" | "author") || optional_color_key || selection_key;
+        let recognized_key = matches!(normalized_key.as_str(), "name" | "author")
+            || optional_color_key || based_theme_key || selection_key;
         if !recognized_key {
             line_offset += raw_line.len();
             continue;
@@ -764,6 +766,15 @@ fn parse_header(contents: &str) -> Result<(ThemeMetadata, &str), ThemeSourceErro
                     source_error(contents, error_offset, "Unsupported `accent-color` value.")
                 })?);
             }
+            "based-theme" => {
+                if !value.eq_ignore_ascii_case("dark mode") && !value.eq_ignore_ascii_case("light mode") {
+                    return Err(source_error(
+                        contents,
+                        error_offset,
+                        "Expected `Dark Mode` or `Light Mode` for `based-theme`.",
+                    ));
+                }
+            }
             "accent-color-selection" | "accent-color-selections" => {
                 accent_color_selection = Some(match value.to_ascii_lowercase().as_str() {
                     "true" => true,
@@ -772,7 +783,7 @@ fn parse_header(contents: &str) -> Result<(ThemeMetadata, &str), ThemeSourceErro
                         return Err(source_error(
                             contents,
                             error_offset,
-                            "Expected `true` or `false` for `accent-color-selection`.",
+                            format!("Expected `true` or `false` for `{key}`."),
                         ));
                     }
                 });
@@ -969,6 +980,38 @@ mod tests {
         assert!(css_diagnostics[1].message.starts_with("bad-value.css:9:")
             && css_diagnostics[1].message.contains("Unexpected CSS token")
             && matches!(css_diagnostics[1].level, ThemeDiagnosticLevel::Warning));
+
+        let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn theme_catalog_rejects_invalid_based_theme_and_boolean_metadata_values() {
+        let settings = test_directory("invalid-theme-metadata").join("Settings");
+        ensure_builtin_themes(&settings).unwrap();
+        let directory = theme_directory(&settings);
+        fs::write(
+            directory.join("bad-based-theme.css"),
+            "/*\nname: Bad Based Theme\nauthor: Example\nbased-theme: Dwe\n*/\n:root {}",
+        )
+        .unwrap();
+        fs::write(
+            directory.join("bad-boolean.css"),
+            "/*\nname: Bad Boolean\nauthor: Example\naccent-color: #27A879\naccent-color-selections: tru\n*/\n:root {}",
+        )
+        .unwrap();
+
+        let catalog = list_themes(&settings).unwrap();
+        for (file, expected) in [
+            ("bad-based-theme.css", "Expected `Dark Mode` or `Light Mode` for `based-theme`."),
+            ("bad-boolean.css", "Expected `true` or `false` for `accent-color-selections`."),
+        ] {
+            assert!(!catalog.themes.iter().any(|theme| theme.id == file));
+            assert!(catalog.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.starts_with(&format!("{file}:"))
+                    && diagnostic.message.contains(expected)
+                    && matches!(diagnostic.level, ThemeDiagnosticLevel::Error)
+            }), "Missing {expected} diagnostic: {:?}", catalog.diagnostics);
+        }
 
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
