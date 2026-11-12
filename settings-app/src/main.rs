@@ -200,6 +200,8 @@ struct AppState {
     theme_directory: String,
     custom_themes: Vec<themes::ThemeSummary>,
     theme: String,
+    theme_css: String,
+    preview_theme: String,
     settings: SettingsDraft,
     default_banner_preview: String,
     message: Option<String>,
@@ -216,6 +218,8 @@ struct AppState {
 struct SaveResult {
     calendar_status: String,
     info: Vec<String>,
+    theme_css: Option<String>,
+    preview_theme: Option<String>,
 }
 
 #[tauri::command]
@@ -239,6 +243,14 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
     let state = load_app_state()?;
     apply_native_theme(&app, &state.theme);
     Ok(state)
+}
+
+#[tauri::command]
+fn get_anytype_theme(app: tauri::AppHandle) -> Result<String, String> {
+    let install = resolve_install_directory(&app_data_directory())?;
+    let theme = read_anytype_theme(&install.join("devconfig.json"));
+    apply_native_theme(&app, &theme);
+    Ok(theme)
 }
 
 #[tauri::command]
@@ -952,7 +964,12 @@ fn configure_connection_blocking(connection: ConnectionDraft) -> Result<SaveResu
         &data,
         credential,
     )?;
-    Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
+    Ok(SaveResult {
+        calendar_status: calendar_status.into(),
+        info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
+        theme_css: None,
+        preview_theme: None,
+    })
 }
 
 fn normalize_connection(mut connection: ConnectionDraft) -> Result<ConnectionDraft, String> {
@@ -1209,6 +1226,10 @@ fn load_app_state() -> Result<AppState, String> {
         )
     };
 
+    let theme_data = json!({"settings": &settings});
+    let theme_css = themes::render_generated_css(&settings_directory, &theme_data).unwrap_or_default();
+    let preview_theme = themes::preview_mode(&theme_data).unwrap_or_else(|_| "system".into());
+
     Ok(AppState {
         ready,
         install_directory: install_directory.to_string_lossy().into_owned(),
@@ -1216,6 +1237,8 @@ fn load_app_state() -> Result<AppState, String> {
         theme_directory: themes::theme_directory(&settings_directory).to_string_lossy().into_owned(),
         custom_themes,
         theme,
+        theme_css,
+        preview_theme,
         settings,
         default_banner_preview: resolve_runtime_directory_for_install(&install_directory)
             .ok()
@@ -1284,6 +1307,9 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
     }
 
     if rules.is_some() && calendar_status == "cached" { return Err("Calendar colors could not be refreshed. Your rules and previous snapshot are unchanged.".into()); }
+    let settings_directory = settings_root_for_install(&install)?.join("Settings");
+    let theme_css = themes::render_generated_css(&settings_directory, &data)?;
+    let preview_theme = themes::preview_mode(&data)?;
     let css = css::compile(&runtime, &install, &data)?;
     anyblob::invalidate();
     commit_settings_with_store(
@@ -1295,7 +1321,12 @@ fn save_settings_with_calendar_rules(settings: SettingsDraft, rules: Option<cale
         &data,
         storage::CredentialChange::Keep,
     )?;
-    Ok(SaveResult { calendar_status: calendar_status.into(), info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() })
+    Ok(SaveResult {
+        calendar_status: calendar_status.into(),
+        info: data["calendarColorInfo"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect(),
+        theme_css: Some(theme_css),
+        preview_theme: Some(preview_theme),
+    })
 }
 
 #[cfg(test)]
@@ -2366,6 +2397,7 @@ fn main() {
             get_calendar_api_availability,
             configure_connection,
             get_app_state,
+            get_anytype_theme,
             get_saved_state_snapshot,
             save_settings,
             get_updater_state,
@@ -3218,6 +3250,8 @@ mod tests {
             theme_directory: String::new(),
             custom_themes: Vec::new(),
             theme: "dark".into(),
+            theme_css: String::new(),
+            preview_theme: "dark".into(),
             settings: SettingsDraft::default(),
             default_banner_preview: String::new(),
             message: None,

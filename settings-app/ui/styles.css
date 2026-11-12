@@ -1,21 +1,20 @@
 :root {
   --sidebar-width: 256px;
   color-scheme: dark;
-  --bg: #171717;
-  --sidebar: #171717;
-  --active: rgba(255, 255, 255, .05);
-  --input-bg: #1e1e1e;
-  --scroll-thumb: #737373;
-  --hover: rgba(255, 255, 255, .11);
-  --line: #292929;
-  --text: #e1e1e1;
-  --text-secondary: #a3a3a3;
-  --text-muted: #5c5c5c;
-  --accent: #de50de;
+  --bg: var(--color-bg-primary, #171717);
+  --sidebar: var(--color-bg-primary, #171717);
+  --active: var(--color-shape-highlight-medium, rgba(255, 255, 255, .05));
+  --input-bg: var(--color-bg-secondary, #1e1e1e);
+  --scroll-thumb: var(--color-light-grey, #737373);
+  --hover: var(--color-shape-highlight-dark, rgba(255, 255, 255, .11));
+  --line: var(--color-shape-secondary, #292929);
+  --text: var(--color-text-primary, #e1e1e1);
+  --text-secondary: var(--color-text-secondary, #a3a3a3);
+  --text-muted: var(--color-text-tertiary, #5c5c5c);
+  --accent: var(--color-blob-accent, #de50de);
   --color-system-selection: color-mix(in srgb, #377aff 25%, transparent);
   --font-interface: "Inter", "Segoe UI", sans-serif;
   --font-code: "Consolas", "Cascadia Code", monospace;
-  --color-grey: #a8a8a8;
   --color-yellow: #ecd91a;
   --color-orange: #f0a820;
   --color-amber: #f0a820;
@@ -37,17 +36,16 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #ffffff;
-  --sidebar: #ffffff;
-  --active: rgba(0, 0, 0, .05);
-  --input-bg: #f7f7f7;
-  --scroll-thumb: #b6b6b6;
-  --hover: rgba(0, 0, 0, .11);
-  --line: #ebebeb;
-  --text: #252525;
-  --text-secondary: #828282;
-  --text-muted: #bfbfbf;
-  --color-grey: #888888;
+  --bg: var(--color-bg-primary, #ffffff);
+  --sidebar: var(--color-bg-primary, #ffffff);
+  --active: var(--color-shape-highlight-medium, rgba(0, 0, 0, .05));
+  --input-bg: var(--color-bg-secondary, #f7f7f7);
+  --scroll-thumb: var(--color-light-grey, #b6b6b6);
+  --hover: var(--color-shape-highlight-dark, rgba(0, 0, 0, .11));
+  --line: var(--color-shape-secondary, #ebebeb);
+  --text: var(--color-text-primary, #252525);
+  --text-secondary: var(--color-text-secondary, #828282);
+  --text-muted: var(--color-text-tertiary, #bfbfbf);
   --color-yellow: #c49a0e;
   --color-orange: #c07830;
   --color-amber: #c07830;
@@ -295,7 +293,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .save-button { grid-row: 1; color: var(--accent); }
 .discard-button { grid-row: 2; color: var(--text-secondary); }
 .discard-button:hover:not(:disabled) { color: var(--color-red); }
-.update-now-button { grid-row: 3; color: #de50de; }
+.update-now-button { grid-row: 3; color: var(--accent); }
 .log-button[data-severity="error"] { color: var(--color-red); }
 .log-button[data-severity="warning"] { color: var(--color-yellow); }
 .log-control { position: relative; grid-row: 3; }

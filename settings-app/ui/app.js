@@ -182,6 +182,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
   const root = document.documentElement;
+  const customThemeStyle = document.createElement("style");
+  customThemeStyle.id = "custom-theme-preview";
+  document.head?.append?.(customThemeStyle);
   const toggleSettings = {
     "include-selections": "includeSelections",
     "reduced-motion": "reducedMotion",
@@ -260,6 +263,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let themeHsv = { h: 12, s: 7, v: 10 };
   let lastCustomAccent = null;
   let lastTheme = "";
+  let lastHostTheme = "system";
+  let lastPreviewTheme = "system";
+  let lastThemeCss = "";
   let defaultBannerPreview = "";
   let bannerReadGeneration = 0;
   let bannerReadPending = false;
@@ -1473,7 +1479,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     let stateError = null;
     try {
       state = await invoke("get_app_state");
-      applyTheme(state.theme);
+      applyTheme(state.theme, state.themeCss, state.previewTheme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
       assignAdvancedConnection(state);
@@ -1553,7 +1559,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       throw error;
     }
     window.appReady = !!state.ready;
-    applyTheme(state.theme);
+    applyTheme(state.theme, state.themeCss, state.previewTheme);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
     view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
     assignAdvancedConnection(state);
@@ -1581,9 +1587,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updateSaveButton();
   }
 
-  function applyTheme(theme) {
-    const next = theme === "light" || theme === "dark" ? theme : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  function applyTheme(theme, themeCss = lastThemeCss, previewTheme = lastPreviewTheme) {
+    lastHostTheme = theme === "light" || theme === "dark" ? theme : "system";
+    if (["light", "dark", "system"].includes(previewTheme)) lastPreviewTheme = previewTheme;
+    const preferred = lastPreviewTheme === "light" || lastPreviewTheme === "dark" ? lastPreviewTheme : lastHostTheme;
+    const next = preferred === "light" || preferred === "dark"
+      ? preferred
+      : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     root.dataset.theme = next;
+    root.classList.toggle("themeDark", next === "dark");
+    root.style.colorScheme = next;
+    if (typeof themeCss === "string" && themeCss !== lastThemeCss) {
+      lastThemeCss = themeCss;
+      customThemeStyle.textContent = themeCss;
+    }
     if (next !== lastTheme) {
       lastTheme = next;
       if (draft) renderPicker(true);
@@ -1746,8 +1763,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   async function refreshTheme() {
     try {
-      const state = await invoke("get_app_state");
-      applyTheme(state.theme);
+      const theme = await invoke("get_anytype_theme");
+      applyTheme(theme);
     } catch (_) { /* Keep the last known mode while Anytype is not readable. */ }
   }
 
@@ -2008,6 +2025,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         else mergeUpdaterState(savedUpdaterState || {});
       }
       if (settingsChanged || options.forceRebuild) {
+        if (result && typeof result.themeCss === "string") {
+          applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
+        }
         saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
       } else if (updaterSettingsChanged && connectionChanged) {
         setStatus("App Settings and Anytype connection saved.", "info");

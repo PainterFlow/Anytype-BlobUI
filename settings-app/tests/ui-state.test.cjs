@@ -286,7 +286,7 @@ assert.match(settingsCss, /\.visibility-toggle:focus-visible/);
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
-assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
+assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*var\(--accent\)/);
 assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
 assert.match(settingsCss, /\.danger-button\s*\{[^}]*background:\s*#b8323c/);
 assert.match(settingsCss, /\.danger-button:hover:not\(:disabled\)\s*\{[^}]*background:\s*#942630/);
