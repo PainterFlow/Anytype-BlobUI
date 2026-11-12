@@ -214,10 +214,24 @@ test('Dev Guide opens in a popup offline in dark mode', {
     assert.match(guideText, /Based Theme|Auto to select light or dark mode/);
     assert.doesNotMatch(guideText, /Markdown formatting|Version Formatting/);
     assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    const scrollbarGap = await page.evaluate(() => {
+      const dialog = document.getElementById('documentation-dialog');
+      const content = document.getElementById('documentation-content');
+      const border = parseFloat(getComputedStyle(dialog).borderRightWidth) || 0;
+      return dialog.getBoundingClientRect().right - border - content.getBoundingClientRect().right;
+    });
+    assert.ok(Math.abs(scrollbarGap) <= 1, `The Dev Guide scroll area reaches the dialog's right inner edge, got a ${scrollbarGap}px gap.`);
     await page.setViewportSize({ width: 800, height: 650 });
     const dialogBounds = await page.locator('#documentation-dialog').boundingBox();
     assert.ok(dialogBounds.width <= 800 && dialogBounds.height <= 650, 'The Dev Guide dialog fits the smallest supported Settings window.');
     assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    const narrowScrollbarGap = await page.evaluate(() => {
+      const dialog = document.getElementById('documentation-dialog');
+      const content = document.getElementById('documentation-content');
+      const border = parseFloat(getComputedStyle(dialog).borderRightWidth) || 0;
+      return dialog.getBoundingClientRect().right - border - content.getBoundingClientRect().right;
+    });
+    assert.ok(Math.abs(narrowScrollbarGap) <= 1, `The Dev Guide scroll area keeps the right edge at narrow heights, got a ${narrowScrollbarGap}px gap.`);
     await page.setViewportSize({ width: 960, height: 760 });
     await page.locator('#documentation-content').evaluate(node => node.scrollTo({ top: 0, behavior: 'instant' }));
     await page.waitForTimeout(500);
