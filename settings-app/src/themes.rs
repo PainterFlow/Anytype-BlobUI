@@ -162,6 +162,17 @@ pub(crate) fn render_generated_css(
     css.push_str(".sidebarPage > .bottom .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }\n");
     css.push_str(".sidebarPage.pageVault > .bottom .grad { background-image: linear-gradient(180deg, transparent 3.62%, var(--color-shape-highlight-light-solid) 100%); }\n");
 
+    // The discussion footer fade follows the active theme background and can be disabled.
+    if settings
+        .get("discussionFade")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        css.push_str(".formWrapper .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }\n");
+    } else {
+        css.push_str(".formWrapper .grad { background: none; }\n");
+    }
+
     // The user's Appearance settings take precedence over accent values in a preset.
     css.push_str("\n:root, html, html.themeDark {\n");
     css.push_str(&format!("  --color-blob-accent: {accent};\n"));
@@ -556,6 +567,7 @@ mod tests {
         assert!(css.contains("--color-text-primary-inversion: #EBEBEB;"));
         assert!(css.contains("--color-grey: #A8A8A8;"));
         assert!(css.contains(".sidebarPage > .bottom .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }"));
+        assert!(css.contains(".formWrapper .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }"));
         assert!(css.contains("--color-blob-accent: #DE50DE;"));
         assert!(css.contains("--color-control-accent: var(--color-blob-accent);"));
         let selection_off = json!({"settings": {
@@ -581,6 +593,21 @@ mod tests {
         assert!(css.contains("html.themeDark {"));
         assert!(css.contains("--color-bg-primary: #AABBCC;"));
         assert!(!css.contains("color-scheme:"));
+        let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn discussion_footer_fade_can_be_disabled_without_losing_theme_color() {
+        let settings = test_directory("discussion-fade").join("Settings");
+        let enabled = json!({"settings": {"basedTheme":"dark", "themeColor":"#123456", "discussionFade":true}});
+        let enabled_css = render_generated_css(&settings, &enabled).unwrap();
+        assert!(enabled_css.contains("--color-bg-primary: #123456;"));
+        assert!(enabled_css.contains(".formWrapper .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }"));
+
+        let disabled = json!({"settings": {"basedTheme":"dark", "themeColor":"#123456", "discussionFade":false}});
+        let disabled_css = render_generated_css(&settings, &disabled).unwrap();
+        assert!(disabled_css.contains(".formWrapper .grad { background: none; }"));
+        assert!(!disabled_css.contains(".formWrapper .grad { background: linear-gradient"));
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
 

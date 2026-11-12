@@ -108,6 +108,13 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
         </div>
         <p className="field-error" id="theme-color-error" aria-live="polite" />
       </div>
+      <SettingsRow className="kanban-setting-row custom-theme-fade-row" label="Discussion footer fade"
+        description="Fade into the active theme background. Turn it off to remove the gradient."
+        descriptionAttributes={{ className: "kanban-setting-description" }}>
+        <Switch id="discussion-fade" label="Enabled" className="native-accent-control custom-theme-fade-control"
+          checked={values["discussion-fade"] !== false} disabled={disabled}
+          onChange={value => onChange?.("discussion-fade", value)} />
+      </SettingsRow>
     </SettingsGroup>
   </SettingsSection>;
 }
