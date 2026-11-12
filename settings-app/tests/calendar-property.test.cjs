@@ -185,12 +185,13 @@ test('opening Calendar Colors while rules load starts discovery after the rules 
 test('calendar CSS scopes overrides and suppression to their exact view while overflow keeps defaults', async () => {
   const css = fs.readFileSync(path.join(root, 'scoped.css'), 'utf8');
   const browser = await chromium.launch({ executablePath, headless: true });
-  const page = await browser.newPage({ colorScheme: 'dark' });
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 }, colorScheme: 'dark' });
   const calendar = (object, block, view) => `<section id="block-${block}"><div data-root-id="${object}"><div id="view-item-${block}-${view}" class="viewItem active"></div></div><div class="viewContent viewCalendar"><div class="record" id="record-event"><span class="name">Event</span></div></div></section>`;
   try {
-    await page.setContent(`<style>:root{--color-purple:purple;--color-green:green;--color-lime:green}body{background:#171717}.record{background:rgb(40,40,40);color:rgb(200,200,200)}${css}</style>
+    await page.setContent(`<style>:root{--color-purple:purple;--color-green:green;--color-lime:green}body{background:#171717;font:16px sans-serif}main{padding:12px;margin:8px}#light-mode{--color-bg-primary:#ffffff;--color-text-primary:#252525;background:var(--color-bg-primary);color:var(--color-text-primary)}#dark-mode{--color-bg-primary:#171717;--color-text-primary:#e1e1e1;background:var(--color-bg-primary);color:var(--color-text-primary)}.record{background:rgb(40,40,40);color:rgb(200,200,200)}${css}</style>
       <main id="green">${calendar('host','calendar','green')}</main><main id="none">${calendar('host','calendar','none')}</main>
       <main id="other-view">${calendar('host','calendar','other')}</main><main id="other-object">${calendar('other','calendar','green')}</main><main id="other-block">${calendar('host','other','green')}</main>
+      <main id="light-mode">${calendar('host','calendar','other')}</main><main id="dark-mode">${calendar('host','calendar','other')}</main>
       <div class="content"><div class="wrap"><div class="items"><div class="item" id="item-event"><i class="iconObject" id="menuCalendarDay-event-icon"></i><span class="name">Event</span></div></div></div></div>`);
     const border = id => page.locator(`#${id} .record`).evaluate(el => getComputedStyle(el).borderLeftColor);
     assert.equal(await border('green'), 'rgb(0, 128, 0)');
@@ -198,6 +199,20 @@ test('calendar CSS scopes overrides and suppression to their exact view while ov
     assert.equal(await page.locator('#none .record').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(40, 40, 40)');
     assert.equal(await page.locator('#none .name').evaluate(el => getComputedStyle(el).color), 'rgb(200, 200, 200)');
     assert.equal(await page.locator('#item-event').evaluate(el => getComputedStyle(el).borderLeftColor), 'rgb(128, 0, 128)');
+    const eventColors = async mode => page.locator(`#${mode}-mode .record`).evaluate(el => ({
+      background: getComputedStyle(el).backgroundColor,
+      text: getComputedStyle(el).color,
+      title: getComputedStyle(el.querySelector('.name')).color,
+    }));
+    const lightColors = await eventColors('light');
+    const darkColors = await eventColors('dark');
+    assert.notEqual(lightColors.background, darkColors.background);
+    assert.equal(lightColors.text, 'rgb(37, 37, 37)');
+    assert.equal(lightColors.title, 'rgb(37, 37, 37)');
+    assert.equal(darkColors.text, 'rgb(225, 225, 225)');
+    assert.equal(darkColors.title, 'rgb(225, 225, 225)');
+    await page.locator('#light-mode').screenshot({ path: path.join(root, 'theme-aware-light-calendar.png') });
+    await page.locator('#dark-mode').screenshot({ path: path.join(root, 'theme-aware-dark-calendar.png') });
   } finally { await browser.close(); }
 });
 

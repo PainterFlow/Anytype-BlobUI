@@ -2178,7 +2178,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     if (id === "custom-theme") {
       draft.themePreset = value;
-      presentSettingsFields({ [id]: value });
+      const selectedTheme = view.getSnapshot().customThemes.find(theme => theme.id === value);
+      const mainColor = toHexColor(selectedTheme?.mainColor);
+      const fields = { [id]: value };
+      if (mainColor) {
+        draft.themeColor = mainColor;
+        fields["theme-color-value"] = mainColor;
+        themeColorValue.classList.remove("invalid");
+        el("theme-color-error").textContent = "";
+        renderThemePicker(true);
+      }
+      presentSettingsFields(fields);
       markDirty();
       return;
     }

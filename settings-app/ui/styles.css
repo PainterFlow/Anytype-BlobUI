@@ -114,6 +114,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .page-heading h1 { margin: 0; font-size: 28px; line-height: 32px; font-weight: 700; letter-spacing: -.56px; }
 .settings-group { margin: 0 0 32px; }
 .settings-group:last-child { margin-bottom: 0; }
+.custom-themes-group { margin-top: 24px; }
 .section-heading { margin-bottom: 16px; }
 .section-heading-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .section-heading h2 { margin: 0; font-size: 16px; line-height: 24px; letter-spacing: -.2px; font-weight: 600; }
@@ -180,8 +181,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .custom-theme-color-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; padding: 14px 14px 16px; border-top: 1px solid var(--line); }
 .custom-theme-color-editor { grid-column: 1 / -1; padding: 0; }
 .custom-theme-color-row .field-error { grid-column: 1 / -1; margin: -8px 0 0; }
-.custom-theme-help { margin: 10px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
-.custom-theme-help code { color: var(--text); font-family: var(--font-code); overflow-wrap: anywhere; }
 .field-error { margin: 8px 0 0; color: #f07878; font-size: 12px; line-height: 18px; }
 .field-error:empty { display: none; }
 
@@ -209,6 +208,7 @@ button:focus-visible, input:focus-visible { outline: none; }
 .kanban-select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 7px; min-width: 100px; height: 32px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 22px; cursor: pointer; transition: background .15s ease; }
 .kanban-select-trigger:hover:not(:disabled), .kanban-select-trigger[aria-expanded="true"] { background: var(--active); }
 .kanban-select-trigger:focus-visible, .kanban-select-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
+#based-theme-select .kanban-select-trigger:focus-visible, #based-theme-options .kanban-select-option:focus-visible { outline: none; }
 .kanban-select-trigger:disabled { color: var(--text-muted); cursor: default; }
 .kanban-trigger-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kanban-select-trigger svg { flex-shrink: 0; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
