@@ -12,7 +12,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
   const page=await browser.newPage({colorScheme:'dark',viewport:{width:1050,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
-    window.calls=[];window.network=0;window.revision=0;window.hold=false;
+    window.calls=[];window.network=0;window.revision=0;window.themeRevision=0;window.hold=false;
     const cache=new Map([[JSON.stringify(["discover_kanban_views",undefined]),{views:[],info:[]}]]);
     window.__TAURI__={core:{invoke:async(name,args={})=>{
       window.calls.push({name,args});
@@ -20,7 +20,10 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
         const invoke=window.__TAURI__.core.invoke;
         return {app:await invoke('get_app_state'),updater:await invoke('get_updater_state'),formulas:await invoke('load_kanban_formulas'),calendar:await invoke('load_calendar_rules')};
       }
-      if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,settings:{codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
+      if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,
+        customThemes:window.themeRevision?[{id:'original.css',name:'Original Theme',author:'Fixture'},{id:'added.css',name:'Added Theme',author:'Fixture'}]:[{id:'original.css',name:'Original Theme',author:'Fixture'}],
+        themeDirectory:'Settings/themes/built-in-themes',
+        settings:{enableCustomThemes:true,themePreset:'original.css',codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
       if(name==='load_kanban_formulas')return {configuration:{version:2,display:'balanced',definitions:[]}};
       if(name==='load_calendar_rules')return {version:1,types:[]};
       if(name==='get_calendar_api_availability')return 'available';
@@ -55,6 +58,10 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
   try{
     await loadSettings(page);
     await page.waitForFunction(()=>window.appReady && window.calls.some(c=>c.name==='discover_anyblob_types') && !document.getElementById('object-mentions-status').textContent.includes('Loading'));
+    const presetTrigger=page.locator('#custom-theme-select .kanban-select-trigger');
+    await presetTrigger.click();
+    await page.getByRole('option',{name:'Original Theme',exact:true}).waitFor();
+    await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(()=>window.calls.some(c=>c.name==='check_for_updates')),false,'Startup respects disabled automatic checks');
     const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
@@ -64,13 +71,19 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     assert(!startup.some(c=>c.name==='discover_codex_projects'));
     assert.equal(await page.evaluate(()=>window.calls.some(c=>/^(save_|evaluate_|configure_)/.test(c.name))),false);
     assert.equal(await page.getByRole('button',{name:'Reload options',exact:true}).count(),0);
+    await page.evaluate(()=>{window.themeRevision=1;});
+    await refresh();
+    await presetTrigger.click();
+    await page.getByRole('option',{name:'Added Theme',exact:true}).waitFor();
+    assert.equal(await page.getByRole('option',{name:'Original Theme',exact:true}).count(),1);
+    await page.keyboard.press('Escape');
     await page.evaluate(()=>{window.hold=true;window.calls=[];});
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
     await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_codex_sources'));
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
-    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),2);
+    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),3);
     const calls=await page.evaluate(()=>window.calls);
     for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');
