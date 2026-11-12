@@ -431,35 +431,35 @@ fn calendar_color_css_scoped(colors: Option<&Value>, overrides: Option<&Value>) 
         rules.push(selector);
         rules.push(format!("{calendar} {{"));
         rules.push(format!("    background-color: {color} !important;"));
-        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important;"));
+        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important;"));
         rules.push(format!("    border-left: 3px solid {color} !important;"));
         rules.push("    border-radius: 3px !important;".into());
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name,"));
         rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name span,"));
         rules.push(format!("{calendar} .name,"));
         rules.push(format!("{calendar} .name span {{"));
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         let menu = format!(".content > .wrap > .items > .item[id=\"item-{object_id}\"]:has(> .iconObject[id=\"menuCalendarDay-{object_id}-icon\"])");
         rules.push(format!("{menu} {{"));
         rules.push(format!("    background-color: {color} !important;"));
-        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important;"));
+        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important;"));
         rules.push(format!("    border-left: 3px solid {color} !important;"));
         rules.push("    border-radius: 3px !important;".into());
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         rules.push(format!("{menu} .name,"));
         rules.push(format!("{menu} .name span {{"));
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
     }
     for (scope, id, color) in scopes {
         let Some(color) = color.filter(|color| !color.is_empty()) else { continue; };
         let selector = format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"], {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"]:not(.record *)");
-        rules.push(format!("{selector} {{ background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important; border-left: 3px solid {color} !important; border-radius: 3px !important; color: #FFFFFF !important; }}"));
-        rules.push(format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name, {scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name span, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name span {{ color: #FFFFFF !important; }}"));
+        rules.push(format!("{selector} {{ background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important; border-left: 3px solid {color} !important; border-radius: 3px !important; color: var(--color-text-primary) !important; }}"));
+        rules.push(format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name, {scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name span, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name span {{ color: var(--color-text-primary) !important; }}"));
     }
     if rules.is_empty() { Ok(None) } else { Ok(Some(format!("/* BlobUI Calendar Color overrides */{newline}{}", rules.join(newline)))) }
 }
@@ -486,6 +486,10 @@ mod tests {
         let css = calendar_color_css_scoped(Some(&colors), Some(&overrides)).unwrap().unwrap();
         assert!(css.contains(":not([id="));
         assert!(css.contains("color-mix"));
+        assert!(css.contains("var(--color-bg-primary)"));
+        assert!(css.contains("var(--color-text-primary)"));
+        assert!(!css.contains("#1b1b1b"));
+        assert!(!css.contains("#FFFFFF"));
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run/calendar-property");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("scoped.css"), &css).unwrap();

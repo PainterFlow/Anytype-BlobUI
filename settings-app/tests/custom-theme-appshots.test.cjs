@@ -54,7 +54,10 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
           theme: 'dark',
           previewTheme: window.__activePreviewTheme,
           themeCss: window.__activeThemeCss,
-          customThemes: [{ id: 'dark-mode-plus.css', name: 'Dark Mode+', author: 'PainterFlow11' }],
+          customThemes: [
+            { id: 'dark-mode-plus.css', name: 'Dark Mode+', author: 'PainterFlow11', mainColor: '#191918' },
+            { id: 'oled.css', name: 'OLED', author: 'PainterFlow11', mainColor: '#000000' },
+          ],
           themeDirectory: 'Settings/themes/built-in-themes',
           settings: {
             fontFamily: 'Inter', codeFontFamily: 'Consolas', accentColor: '#DE50DE',
@@ -104,6 +107,31 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     await fs.mkdir(screenshotDirectory, { recursive: true });
     await page.screenshot({ path: path.join(screenshotDirectory, 'dark-mode-plus-settings.png'), fullPage: true });
     await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'dark-mode-plus-custom-themes.png') });
+
+    const basedThemeTrigger = page.locator('#based-theme-select .kanban-select-trigger');
+    await basedThemeTrigger.press('ArrowDown');
+    await page.locator('#based-theme-options').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#based-theme-options .kanban-select-option-description').count(), 0);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'none');
+    await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'based-theme-options.png') });
+    await page.keyboard.press('Escape');
+
+    const presetTrigger = page.locator('#custom-theme-select .kanban-select-trigger');
+    await presetTrigger.press('ArrowDown');
+    await page.locator('#custom-theme-options').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#custom-theme-options .kanban-select-option-description').count(), 0);
+    await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'preset-theme-options.png') });
+    await page.locator('#custom-theme-options [data-value="oled.css"]').click();
+    await page.locator('#custom-theme-options').waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => document.getElementById('theme-color-value').value === '#000000');
+    assert.equal(await page.locator('#theme-color-swatch').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(0, 0, 0)');
+    await page.locator('.custom-theme-color-row').screenshot({ path: path.join(screenshotDirectory, 'oled-main-color.png') });
+    assert.equal(await page.locator('#discard-button').isVisible(), true);
+    await page.locator('#discard-button').click();
+    await page.locator('#discard-confirmation-undo').click();
+    await page.locator('#discard-confirmation-backdrop').waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => document.getElementById('theme-color-value').value === '#191918');
+    assert.equal(await page.locator('#custom-theme-select .kanban-trigger-value').textContent(), 'Dark Mode+');
 
     await page.locator('#theme-color-value').fill('#FFFFFF');
     await page.locator('#save-button').click();

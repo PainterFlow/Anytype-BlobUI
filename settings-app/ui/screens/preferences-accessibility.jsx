@@ -59,19 +59,19 @@ function ColorPlane({ id = "color-plane", cursorId = "color-cursor", saturationI
 }
 
 const basedThemeOptions = [
-  { value: "auto", label: "Auto", description: "Choose a light or dark palette from the main color." },
+  { value: "auto", label: "Auto" },
   { value: "light", label: "Light Mode" },
   { value: "dark", label: "Dark Mode" },
-  { value: "inherit", label: "Don't Override", description: "Use the Light or Dark mode selected in Anytype." },
+  { value: "inherit", label: "Don't Override" },
 ];
 
-function CustomThemes({ values, onChange, themes = [], directory = "", disabled = false }) {
+function CustomThemes({ values, onChange, themes = [], disabled = false }) {
   const selectedTheme = values["custom-theme"] || "";
   const hasSelectedTheme = !selectedTheme || themes.some(theme => theme.id === selectedTheme);
   const options = [
-    { value: "", label: "None", description: "Use the generated palette without a preset." },
-    ...themes.map(theme => ({ value: theme.id, label: theme.name, description: theme.author })),
-    ...(!hasSelectedTheme ? [{ value: selectedTheme, label: `Missing theme (${selectedTheme})`, description: "The selected CSS file is no longer available." }] : []),
+    { value: "", label: "None" },
+    ...themes.map(theme => ({ value: theme.id, label: theme.name })),
+    ...(!hasSelectedTheme ? [{ value: selectedTheme, label: `Missing theme (${selectedTheme})` }] : []),
   ];
   const inputValue = (id, fallback) => {
     if (!Object.prototype.hasOwnProperty.call(values, id)) return fallback;
@@ -109,7 +109,6 @@ function CustomThemes({ values, onChange, themes = [], directory = "", disabled 
         <p className="field-error" id="theme-color-error" aria-live="polite" />
       </div>
     </SettingsGroup>
-    <p className="custom-theme-help">Put CSS presets in <code>{directory || "Settings/themes/built-in-themes"}</code> with a commented name and author header. Save to preview here, then press Ctrl+R in Anytype to apply. CSS cannot change Anytype's native titlebar or separate app tab bar.</p>
   </SettingsSection>;
 }
 
@@ -141,7 +140,7 @@ function SpaceBannerPreview() {
   </div>;
 }
 
-export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, customThemes = [], themeDirectory = "", customThemeDisabled = false }) {
+export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, customThemes = [], customThemeDisabled = false }) {
   const inputValue = (id, fallbackProps) => {
     if (!hasValue(values, id)) return fallbackProps;
     if (onChange) return { ...fallbackProps, value: values[id], onChange: event => onChange(id, event.currentTarget.value, event) };
@@ -172,7 +171,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, c
         </div>
       </SettingsGroup>
       <p className="field-error" id="accent-error" aria-live="polite" />
-      <CustomThemes values={values} onChange={onChange} themes={customThemes} directory={themeDirectory} disabled={customThemeDisabled} />
+      <CustomThemes values={values} onChange={onChange} themes={customThemes} disabled={customThemeDisabled} />
     </SettingsSection>
 
     <SettingsSection className="settings-group typography-group" aria-labelledby="typography-heading">

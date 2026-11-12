@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::fs;
@@ -16,6 +17,8 @@ pub(crate) struct ThemeSummary {
     pub id: String,
     pub name: String,
     pub author: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_color: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -382,9 +385,24 @@ fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
             id: id.to_string(),
             name,
             author,
+            main_color: theme_main_color(css),
         },
         css: css.to_string(),
     })
+}
+
+fn theme_main_color(css: &str) -> Option<String> {
+    let without_comments = Regex::new(r"(?s)/\*.*?\*/")
+        .unwrap()
+        .replace_all(css, "");
+    let declaration = Regex::new(
+        r"(?i)(?:^|[;{])\s*--color-bg-primary\s*:\s*(?<color>#[0-9a-f]{3}(?:[0-9a-f]{3})?)\s*(?:!important\s*)?(?:;|})",
+    )
+    .unwrap();
+    declaration
+        .captures(&without_comments)
+        .and_then(|capture| capture.name("color"))
+        .and_then(|color| normalize_theme_color(color.as_str()).ok())
 }
 
 fn parse_header(contents: &str) -> Result<(String, String, &str), String> {
@@ -506,11 +524,20 @@ mod tests {
         let themes = list_themes(&settings).unwrap();
         assert!(themes.iter().any(|theme| theme.id == "dark-mode-plus.css"
             && theme.name == "Dark Mode+"
-            && theme.author == "PainterFlow11"));
+            && theme.author == "PainterFlow11"
+            && theme.main_color.as_deref() == Some("#191918")));
         assert!(themes.iter().any(|theme| theme.id == "oled.css"
             && theme.name == "OLED"
-            && theme.author == "PainterFlow11"));
+            && theme.author == "PainterFlow11"
+            && theme.main_color.as_deref() == Some("#000000")));
         let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn extracts_literal_main_colors_and_ignores_comments_or_dynamic_values() {
+        assert_eq!(theme_main_color("html { --color-bg-primary: #abc; }"), Some("#AABBCC".into()));
+        assert_eq!(theme_main_color("html { --color-bg-primary: #123456 !important; }"), Some("#123456".into()));
+        assert_eq!(theme_main_color("/* html { --color-bg-primary: #abc; } */ html { --color-bg-primary: var(--surface); }"), None);
     }
 
     #[test]
