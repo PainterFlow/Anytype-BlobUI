@@ -8,6 +8,7 @@ const { loadSettings } = require('./frontend-fixture.cjs');
 const workspace = path.resolve(__dirname, '../..');
 const screenshotDirectory = path.join(workspace, '.test-run/custom-theme-appshots');
 const chromePath = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const userAccentCss = `:root, html, html.themeDark { --color-blob-accent: #DE50DE; }`;
 const darkThemeCss = `
 html, html.themeDark {
   --color-bg-primary: #191918;
@@ -21,20 +22,6 @@ html, html.themeDark {
   --color-light-grey: #414141;
   --color-blob-accent: #de50de;
 }`;
-const lightThemeCss = `
-html, html.themeDark {
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f7f7f7;
-  --color-text-primary: #252525;
-  --color-text-secondary: #828282;
-  --color-text-tertiary: #bfbfbf;
-  --color-shape-highlight-dark: rgba(0, 0, 0, .11);
-  --color-shape-highlight-medium: rgba(0, 0, 0, .05);
-  --color-shape-secondary: #ebebeb;
-  --color-light-grey: #e3e3e3;
-  --color-blob-accent: #de50de;
-}`;
-
 test('custom theme previews update BlobUI Settings and save with dark appshots', {
   skip: !require('node:fs').existsSync(chromePath) && 'Google Chrome is required for the isolated appshot check.',
   timeout: 60000,
@@ -42,9 +29,9 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
   const browser = await chromium.launch({ executablePath: chromePath, headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
-    await page.addInitScript(({ darkThemeCss, lightThemeCss }) => {
-      window.__activePreviewTheme = 'dark';
-      window.__activeThemeCss = darkThemeCss;
+    await page.addInitScript(({ userAccentCss, darkThemeCss }) => {
+      window.__activePreviewTheme = 'system';
+      window.__activeThemeCss = userAccentCss;
       window.__calls = [];
       window.__TAURI__ = { core: { invoke: async (command, args) => {
         window.__calls.push({ command, args });
@@ -60,7 +47,7 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
           ],
           themeDirectory: 'Settings/themes/built-in-themes',
           settings: {
-            fontFamily: 'Inter', codeFontFamily: 'Consolas', accentColor: '#DE50DE',
+            fontFamily: 'Inter', codeFontFamily: 'Consolas', accentColor: '#DE50DE', enableCustomThemes: false,
             accentMode: 'native', accentPreset: '', basedTheme: 'auto',
             themePreset: 'dark-mode-plus.css', themeColor: '#191918',
             includeSelections: true, reducedMotion: false, tabHoverEffect: false,
@@ -70,10 +57,10 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
           },
         };
         if (command === 'save_settings') {
-          window.__activePreviewTheme = 'light';
-          window.__activeThemeCss = lightThemeCss;
+          window.__activePreviewTheme = 'dark';
+          window.__activeThemeCss = darkThemeCss;
           window.__savedSettings = args.settings;
-          return { calendarStatus: 'cached', info: [], themeCss: lightThemeCss, previewTheme: 'light' };
+          return { calendarStatus: 'cached', info: [], themeCss: darkThemeCss, previewTheme: 'dark' };
         }
         if (command === 'get_updater_state') return {};
         if (command === 'get_anytype_theme') return 'dark';
@@ -83,7 +70,7 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
         if (command === 'get_calendar_api_availability') return 'missing';
         return null;
       } } };
-    }, { darkThemeCss, lightThemeCss });
+    }, { userAccentCss, darkThemeCss });
 
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady && document.documentElement.dataset.theme === 'dark');
@@ -98,13 +85,28 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
       secondNavGap: getComputedStyle(document.querySelector('#sidebar-nav > .nav-group-label:not(:first-child)')).marginTop,
       isDark: document.documentElement.classList.contains('themeDark'),
     }));
-    assert.equal(darkPreview.background, 'rgb(25, 25, 24)');
-    assert.equal(darkPreview.titlebar, 'rgb(25, 25, 24)');
+    assert.equal(darkPreview.background, 'rgb(23, 23, 23)');
+    assert.equal(darkPreview.titlebar, 'rgb(23, 23, 23)');
     assert.equal(darkPreview.updateText, 'rgb(225, 225, 225)');
     assert.equal(darkPreview.secondNavGap, '24px');
     assert.equal(darkPreview.isDark, true);
 
     await fs.mkdir(screenshotDirectory, { recursive: true });
+    assert.equal(await page.locator('#enable-custom-themes').isChecked(), false);
+    assert.equal(await page.locator('#based-theme-select .kanban-select-trigger').isDisabled(), true);
+    assert.equal(await page.locator('#custom-theme-select .kanban-select-trigger').isDisabled(), true);
+    assert.equal(await page.locator('#theme-color-value').isDisabled(), true);
+    assert.equal(await page.locator('#theme-color-plane').getAttribute('aria-disabled'), 'true');
+    await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'custom-themes-disabled.png') });
+    await page.locator('#enable-custom-themes').click();
+    assert.equal(await page.locator('#enable-custom-themes').isChecked(), true);
+    assert.equal(await page.locator('#based-theme-select .kanban-select-trigger').isDisabled(), false);
+    assert.equal(await page.locator('#custom-theme-select .kanban-select-trigger').isDisabled(), false);
+    assert.equal(await page.locator('#theme-color-value').isDisabled(), false);
+    assert.equal(await page.locator('#theme-color-plane').getAttribute('aria-disabled'), 'false');
+    await page.locator('#save-button').click();
+    await page.waitForFunction(() => window.__savedSettings?.enableCustomThemes === true);
+    assert.equal(await page.locator('body').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(25, 25, 24)');
     await page.screenshot({ path: path.join(screenshotDirectory, 'dark-mode-plus-settings.png'), fullPage: true });
     await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'dark-mode-plus-custom-themes.png') });
 
@@ -133,18 +135,20 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     await page.waitForFunction(() => document.getElementById('theme-color-value').value === '#191918');
     assert.equal(await page.locator('#custom-theme-select .kanban-trigger-value').textContent(), 'Dark Mode+');
 
-    await page.locator('#theme-color-value').fill('#FFFFFF');
+    await page.locator('#theme-color-value').fill('#202020');
     assert.equal(await page.locator('#discussion-fade').count(), 0, 'The footer fade is configured in theme CSS instead of Settings.');
     await page.locator('#save-button').click();
-    await page.waitForFunction(() => window.__savedSettings && document.documentElement.dataset.theme === 'light');
+    await page.waitForFunction(() => window.__savedSettings?.themeColor === '#202020' && document.documentElement.dataset.theme === 'dark');
     const savedPreview = await page.evaluate(() => ({
       background: getComputedStyle(document.body).backgroundColor,
       isDark: document.documentElement.classList.contains('themeDark'),
       color: window.__savedSettings.themeColor,
+      enabled: window.__savedSettings.enableCustomThemes,
     }));
-    assert.equal(savedPreview.background, 'rgb(255, 255, 255)');
-    assert.equal(savedPreview.isDark, false);
-    assert.equal(savedPreview.color, '#ffffff');
+    assert.equal(savedPreview.background, 'rgb(25, 25, 24)');
+    assert.equal(savedPreview.isDark, true);
+    assert.equal(savedPreview.color, '#202020');
+    assert.equal(savedPreview.enabled, true);
   } finally {
     await browser.close();
   }

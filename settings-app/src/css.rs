@@ -101,7 +101,7 @@ pub(crate) fn compile_with_settings_directory(
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
-    bool_settings.insert("includeSelections", settings.get("includeSelections").and_then(Value::as_bool).unwrap_or(true));
+    bool_settings.insert("includeSelections", crate::themes::effective_include_selections(settings_directory, data)?);
     let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
     bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
     bool_settings.insert("kanbanCompact", kanban_style == "compact");
@@ -641,6 +641,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn preset_accent_metadata_overrides_user_accent_and_selection_settings() {
+        let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = runtime.join(".test-run/preset-accent-compiled");
+        let install = fixture.join("Anytype");
+        let settings_directory = fixture.join("Settings");
+        let themes = crate::themes::theme_directory(&settings_directory);
+        fs::create_dir_all(&themes).unwrap();
+        let preset = themes.join("custom-accent.css");
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\naccent-color: #27A879\naccent-color-selection: true\n*/\n").unwrap();
+        let mut data = json!({"installDirectory": install, "settings": {
+            "fontFamily":"Inter", "codeFontFamily":"Consolas", "accentColor":"#3656D4",
+            "enableCustomThemes":true, "basedTheme":"dark", "themePreset":"custom-accent.css",
+            "themeColor":"#191918", "includeSelections":false
+        }});
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(compiled.rfind("--color-blob-accent: #27A879;").unwrap() > compiled.rfind("--color-blob-accent: #3656D4;").unwrap());
+        assert!(compiled.contains("--blobui-selection-fill:"));
+
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\naccent-color-selection: false\n*/\n").unwrap();
+        data["settings"]["includeSelections"] = json!(true);
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(!compiled.contains("--blobui-selection-fill:"));
+        assert!(compiled.contains("--color-blob-accent: #3656D4;"));
+
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\n*/\n").unwrap();
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(compiled.contains("--blobui-selection-fill:"));
+        assert!(compiled.contains("--color-blob-accent: #3656D4;"));
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]

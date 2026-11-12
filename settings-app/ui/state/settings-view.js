@@ -20,7 +20,7 @@ export function createSettingsView() {
     saveVisible: false, saveDisabled: true, discardDisabled: true, saveBusy: false,
     settingsFields: {
       "font-family": "", "code-font-family": "", "accent-value": "",
-      "based-theme": "auto", "custom-theme": "", "theme-color-value": "#191918",
+      "enable-custom-themes": false, "based-theme": "auto", "custom-theme": "", "theme-color-value": "#191918",
       "include-selections": false, "native-accent": false, "reduced-motion": false,
       "tab-hover-effect": false, "link-hover-effect": false, "object-mention-hover-effect": false,
       "collapsed-categories": false, "calendar-colors-enabled": true,
