@@ -46,6 +46,7 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
             { id: 'oled.css', name: 'OLED', author: 'PainterFlow11', mainColor: '#000000' },
           ],
           themeDirectory: 'Settings/themes/built-in-themes',
+          themeDiagnostics: ['bad-theme.css:6:8: Unexpected CSS token `Ident("red")`.'],
           settings: {
             fontFamily: 'Inter', codeFontFamily: 'Consolas', accentColor: '#DE50DE', enableCustomThemes: false,
             accentMode: 'native', accentPreset: '', basedTheme: 'auto',
@@ -74,6 +75,10 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
 
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady && document.documentElement.dataset.theme === 'dark');
+    await page.locator('#log-button').click();
+    await page.locator('#log-popup').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#log-entries').innerText(), /ERROR bad-theme\.css:6:8: Unexpected CSS token/);
+    await page.locator('#log-button').click();
     await page.locator('#preferences-nav').click();
     await page.locator('#preference-tab-0').click();
     await page.locator('#custom-themes-heading').waitFor({ state: 'visible' });

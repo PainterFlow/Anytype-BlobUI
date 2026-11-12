@@ -1,11 +1,15 @@
+use lightningcss::error::ParserError;
+use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 const MAX_THEME_BYTES: u64 = 1024 * 1024;
+const MAX_CSS_DIAGNOSTICS_PER_THEME: usize = 8;
 const DEFAULT_BASE_COLOR: &str = "#191918";
 
 const DARK_MODE_PLUS: &str = include_str!("../themes/built-in-themes/dark-mode-plus.css");
@@ -66,6 +70,25 @@ struct ThemeFile {
 }
 
 #[derive(Debug)]
+pub(crate) struct ThemeCatalog {
+    pub(crate) themes: Vec<ThemeSummary>,
+    pub(crate) diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ThemeSourceError {
+    line: usize,
+    column: usize,
+    message: String,
+}
+
+#[derive(Debug)]
+struct ThemeFileLoad {
+    theme: Option<ThemeFile>,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug)]
 struct ThemeMetadata {
     name: String,
     author: String,
@@ -88,7 +111,7 @@ pub(crate) fn ensure_builtin_themes(settings_directory: &Path) -> Result<(), Str
     Ok(())
 }
 
-pub(crate) fn list_themes(settings_directory: &Path) -> Result<Vec<ThemeSummary>, String> {
+pub(crate) fn list_themes(settings_directory: &Path) -> Result<ThemeCatalog, String> {
     ensure_builtin_themes(settings_directory)?;
     let directory = theme_directory(settings_directory);
     let entries = fs::read_dir(&directory).map_err(|error| {
@@ -98,6 +121,7 @@ pub(crate) fn list_themes(settings_directory: &Path) -> Result<Vec<ThemeSummary>
         )
     })?;
     let mut themes = Vec::new();
+    let mut diagnostics = Vec::new();
     for entry in entries {
         let entry =
             entry.map_err(|error| format!("Could not inspect custom theme files: {error}"))?;
@@ -109,10 +133,15 @@ pub(crate) fn list_themes(settings_directory: &Path) -> Result<Vec<ThemeSummary>
         {
             continue;
         }
-        let Ok(theme) = read_theme_file(&path) else {
-            continue;
-        };
-        themes.push(theme.summary);
+        match inspect_theme_file(&path) {
+            Ok(loaded) => {
+                diagnostics.extend(loaded.diagnostics);
+                if let Some(theme) = loaded.theme {
+                    themes.push(theme.summary);
+                }
+            }
+            Err(error) => diagnostics.push(format!("{}: {error}", theme_file_name(&path))),
+        }
     }
     themes.sort_by(|left, right| {
         left.name
@@ -120,7 +149,7 @@ pub(crate) fn list_themes(settings_directory: &Path) -> Result<Vec<ThemeSummary>
             .cmp(&right.name.to_lowercase())
             .then(left.id.cmp(&right.id))
     });
-    Ok(themes)
+    Ok(ThemeCatalog { themes, diagnostics })
 }
 
 pub(crate) fn render_generated_css(
@@ -452,6 +481,17 @@ fn selected_theme_path(settings_directory: &Path, id: &str) -> Result<PathBuf, S
 }
 
 fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
+    let loaded = inspect_theme_file(path)?;
+    loaded.theme.ok_or_else(|| {
+        loaded
+            .diagnostics
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| format!("{} has an invalid custom theme header.", theme_file_name(path)))
+    })
+}
+
+fn inspect_theme_file(path: &Path) -> Result<ThemeFileLoad, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not read theme file {}: {error}", path.display()))?;
     reject_reparse_point(&metadata, path)?;
@@ -463,11 +503,26 @@ fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
     }
     let contents = fs::read_to_string(path)
         .map_err(|error| format!("Could not read theme file {}: {error}", path.display()))?;
-    let (header, css) = parse_header(&contents)?;
+    let mut diagnostics = Vec::new();
+    let header_result = parse_header(&contents);
+    if let Err(error) = &header_result {
+        diagnostics.push(format_source_error(theme_file_name(path), error));
+    }
+    let css_errors = validate_theme_css(&contents, theme_file_name(path));
+    for error in css_errors.iter().take(MAX_CSS_DIAGNOSTICS_PER_THEME) {
+        diagnostics.push(format_source_error(theme_file_name(path), error));
+    }
+    let omitted_css_errors = css_errors.len().saturating_sub(MAX_CSS_DIAGNOSTICS_PER_THEME);
+    if omitted_css_errors > 0 {
+        diagnostics.push(format!(
+            "{}: {omitted_css_errors} additional CSS errors omitted.",
+            theme_file_name(path)
+        ));
+    }
     let id = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or("A custom theme filename is not valid UTF-8.")?;
+        .ok_or_else(|| "A custom theme filename is not valid UTF-8.".to_string())?;
     if id.starts_with('.')
         || id.len() > 128
         || !id.to_ascii_lowercase().ends_with(".css")
@@ -475,9 +530,10 @@ fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b' '))
     {
-        return Err("A custom theme filename is invalid.".into());
+        diagnostics.push(format!("{}: A custom theme filename is invalid.", theme_file_name(path)));
+        return Ok(ThemeFileLoad { theme: None, diagnostics });
     }
-    Ok(ThemeFile {
+    let theme = header_result.ok().map(|(header, css)| ThemeFile {
         summary: ThemeSummary {
             id: id.to_string(),
             name: header.name,
@@ -487,7 +543,89 @@ fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
             accent_color_selection: header.accent_color_selection,
         },
         css: css.to_string(),
-    })
+    });
+    Ok(ThemeFileLoad { theme, diagnostics })
+}
+
+fn theme_file_name(path: &Path) -> &str {
+    path.file_name().and_then(|name| name.to_str()).unwrap_or("custom theme")
+}
+
+fn validate_theme_css(contents: &str, file_name: &str) -> Vec<ThemeSourceError> {
+    let warnings = Arc::new(RwLock::new(Vec::new()));
+    let options = ParserOptions {
+        filename: file_name.to_string(),
+        error_recovery: true,
+        warnings: Some(Arc::clone(&warnings)),
+        ..ParserOptions::default()
+    };
+    let parsed = StyleSheet::parse(contents, options);
+    let mut diagnostics = warnings
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .map(css_source_error)
+        .collect::<Vec<_>>();
+    if let Err(error) = parsed {
+        let diagnostic = css_source_error(&error);
+        if !diagnostics.contains(&diagnostic) {
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
+}
+
+fn css_source_error(error: &lightningcss::error::Error<ParserError<'_>>) -> ThemeSourceError {
+    let (line, column) = error
+        .loc
+        .as_ref()
+        .map(|location| (location.line as usize + 1, location.column as usize))
+        .unwrap_or((1, 1));
+    ThemeSourceError {
+        line,
+        column,
+        message: css_error_message(&error.kind),
+    }
+}
+
+fn css_error_message(error: &ParserError<'_>) -> String {
+    match error {
+        ParserError::AtRuleBodyInvalid => "Invalid at-rule body.".into(),
+        ParserError::AtRulePreludeInvalid => "Invalid at-rule prelude.".into(),
+        ParserError::AtRuleInvalid(name) => format!("Unsupported at-rule `@{name}`."),
+        ParserError::EndOfInput => "Unexpected end of file.".into(),
+        ParserError::InvalidDeclaration => "Invalid CSS declaration.".into(),
+        ParserError::InvalidMediaQuery => "Invalid media query.".into(),
+        ParserError::EmptyBracketInCondition => "Empty brackets in CSS condition.".into(),
+        ParserError::InvalidNesting => "Invalid CSS nesting.".into(),
+        ParserError::DeprecatedNestRule => "The `@nest` rule is deprecated.".into(),
+        ParserError::DeprecatedCssModulesValueRule => "The `@value` rule is deprecated.".into(),
+        ParserError::InvalidPageSelector => "Invalid page selector.".into(),
+        ParserError::InvalidValue => "Invalid CSS value.".into(),
+        ParserError::QualifiedRuleInvalid => "Invalid CSS rule.".into(),
+        ParserError::SelectorError(_) => "Invalid CSS selector.".into(),
+        ParserError::UnexpectedImportRule => "`@import` must appear before other rules.".into(),
+        ParserError::UnexpectedNamespaceRule => "`@namespace` must appear before qualified rules.".into(),
+        ParserError::UnexpectedToken(token) => {
+            let token = shorten_message(&format!("{token:?}"), 48);
+            format!("Unexpected CSS token `{token}`.")
+        }
+        ParserError::MaximumNestingDepth => "CSS nesting is too deep.".into(),
+    }
+}
+
+fn shorten_message(message: &str, max_chars: usize) -> String {
+    let mut chars = message.chars();
+    let shortened = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{shortened}...")
+    } else {
+        shortened
+    }
+}
+
+fn format_source_error(file_name: &str, error: &ThemeSourceError) -> String {
+    format!("{file_name}:{}:{}: {}", error.line, error.column, error.message)
 }
 
 fn theme_main_color(css: &str) -> Option<String> {
@@ -504,47 +642,132 @@ fn theme_main_color(css: &str) -> Option<String> {
         .and_then(|color| normalize_theme_color(color.as_str()).ok())
 }
 
-fn parse_header(contents: &str) -> Result<(ThemeMetadata, &str), String> {
-    let contents = contents.strip_prefix('\u{feff}').unwrap_or(contents);
-    let trimmed = contents.trim_start();
+fn parse_header(contents: &str) -> Result<(ThemeMetadata, &str), ThemeSourceError> {
+    let normalized = contents.strip_prefix('\u{feff}').unwrap_or(contents);
+    let bom_bytes = contents.len() - normalized.len();
+    let trimmed = normalized.trim_start();
+    let header_start = bom_bytes + normalized.len() - trimmed.len();
     let Some(header) = trimmed.strip_prefix("/*") else {
-        return Err("A custom theme needs a commented metadata header.".into());
+        return Err(source_error(
+            contents,
+            header_start,
+            "Expected a `/* ... */` metadata header at the start of the file.",
+        ));
     };
     let Some((header, css)) = header.split_once("*/") else {
-        return Err("A custom theme metadata header is not closed.".into());
+        return Err(source_error(
+            contents,
+            header_start,
+            "Metadata header is missing its closing `*/`.",
+        ));
     };
+    let header_offset = header_start + 2;
+    let header_end = header_offset + header.len();
     let mut name = None;
     let mut author = None;
     let mut accent_color = None;
     let mut accent_color_selection = None;
-    for line in header.lines() {
-        let line = line.trim().trim_start_matches('*').trim();
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim();
-        if value.len() > 128 || value.chars().any(char::is_control) {
+    let mut line_offset = header_offset;
+    for raw_line in header.split_inclusive('\n') {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let after_indent = line.trim_start();
+        let after_marker = after_indent.strip_prefix('*').unwrap_or(after_indent);
+        let normalized_line = after_marker.trim();
+        if normalized_line.is_empty() {
+            line_offset += raw_line.len();
             continue;
         }
-        match key.trim().to_ascii_lowercase().as_str() {
-            "name" if !value.is_empty() => name = Some(value.to_string()),
-            "author" if !value.is_empty() => author = Some(value.to_string()),
-            "accent-color" if !value.is_empty() => {
-                accent_color = Some(crate::css::normalize_accent(value)?);
+        let Some((key, value)) = normalized_line.split_once(':') else {
+            line_offset += raw_line.len();
+            continue;
+        };
+        let key = key.trim();
+        let normalized_key = key.to_ascii_lowercase();
+        let value = value.trim();
+        let value_start = line.find(':').map_or(0, |colon| colon + 1);
+        let value_offset = value_start + line[value_start..].len() - line[value_start..].trim_start().len();
+        let error_offset = line_offset + value_offset;
+        let optional_color_key = normalized_key == "accent-color";
+        let selection_key = matches!(normalized_key.as_str(), "accent-color-selection" | "accent-color-selections");
+        let recognized_key = matches!(normalized_key.as_str(), "name" | "author") || optional_color_key || selection_key;
+        if !recognized_key {
+            line_offset += raw_line.len();
+            continue;
+        }
+        if value.is_empty() {
+            return Err(source_error(
+                contents,
+                error_offset,
+                format!("The `{key}` field is empty."),
+            ));
+        }
+        if value.len() > 128 {
+            return Err(source_error(
+                contents,
+                error_offset,
+                format!("The `{key}` value exceeds 128 bytes."),
+            ));
+        }
+        if value.chars().any(char::is_control) {
+            return Err(source_error(
+                contents,
+                error_offset,
+                format!("The `{key}` value contains a control character."),
+            ));
+        }
+        match normalized_key.as_str() {
+            "name" => name = Some(value.to_string()),
+            "author" => author = Some(value.to_string()),
+            "accent-color" => {
+                accent_color = Some(crate::css::normalize_accent(value).map_err(|_| {
+                    source_error(contents, error_offset, "Unsupported `accent-color` value.")
+                })?);
             }
             "accent-color-selection" | "accent-color-selections" => {
                 accent_color_selection = Some(match value.to_ascii_lowercase().as_str() {
                     "true" => true,
                     "false" => false,
-                    _ => return Err("The accent-color-selection theme option must be true or false.".into()),
+                    _ => {
+                        return Err(source_error(
+                            contents,
+                            error_offset,
+                            "Expected `true` or `false` for `accent-color-selection`.",
+                        ));
+                    }
                 });
             }
             _ => {}
         }
+        line_offset += raw_line.len();
     }
-    let name = name.ok_or("A custom theme header must include a name.")?;
-    let author = author.ok_or("A custom theme header must include an author.")?;
+
+    let mut missing = Vec::new();
+    if name.is_none() {
+        missing.push("`name`");
+    }
+    if author.is_none() {
+        missing.push("`author`");
+    }
+    if !missing.is_empty() {
+        let message = match missing.as_slice() {
+            [field] => format!("Theme header is missing required field {field}."),
+            _ => "Theme header is missing required fields `name` and `author`.".into(),
+        };
+        return Err(source_error(contents, header_end, message));
+    }
+    let name = name.unwrap();
+    let author = author.unwrap();
     Ok((ThemeMetadata { name, author, accent_color, accent_color_selection }, css))
+}
+
+fn source_error(contents: &str, byte_offset: usize, message: impl Into<String>) -> ThemeSourceError {
+    let safe_offset = byte_offset.min(contents.len());
+    let prefix = &contents[..safe_offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix.rsplit_once('\n')
+        .map(|(_, after_newline)| after_newline.chars().count() + 1)
+        .unwrap_or_else(|| prefix.chars().count() + 1);
+    ThemeSourceError { line, column, message: message.into() }
 }
 
 fn ensure_directory(path: &Path) -> Result<(), String> {
@@ -654,7 +877,9 @@ mod tests {
     #[test]
     fn seeds_and_lists_the_builtin_themes_with_author_metadata() {
         let settings = test_directory("catalog").join("Settings");
-        let themes = list_themes(&settings).unwrap();
+        let catalog = list_themes(&settings).unwrap();
+        let themes = catalog.themes;
+        assert!(catalog.diagnostics.is_empty());
         assert!(themes.iter().any(|theme| theme.id == "dark-mode-plus.css"
             && theme.name == "Dark Mode+"
             && theme.author == "PainterFlow11"
@@ -667,6 +892,40 @@ mod tests {
             && theme.main_color.as_deref() == Some("#000000")
             && theme.accent_color.is_none()
             && theme.accent_color_selection.is_none()));
+        let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn theme_catalog_reports_header_and_css_errors_with_source_locations() {
+        let settings = test_directory("diagnostics").join("Settings");
+        ensure_builtin_themes(&settings).unwrap();
+        let directory = theme_directory(&settings);
+        fs::write(
+            directory.join("missing-name.css"),
+            "/*\nauthor: Example\n*/\n:root { color: red; }",
+        )
+        .unwrap();
+        fs::write(
+            directory.join("bad-value.css"),
+            "/*\nname: Bad CSS\nauthor: Example\n*/\nbody {\n  color red;\n}\nmain {\n  background blue;\n}",
+        )
+        .unwrap();
+
+        let catalog = list_themes(&settings).unwrap();
+        assert!(!catalog.themes.iter().any(|theme| theme.id == "missing-name.css"));
+        assert!(catalog.themes.iter().any(|theme| theme.id == "bad-value.css"));
+        assert!(catalog.diagnostics.iter().any(|message| {
+            message == "missing-name.css:3:1: Theme header is missing required field `name`."
+        }));
+        let css_diagnostics = catalog.diagnostics.iter()
+            .filter(|message| message.starts_with("bad-value.css:"))
+            .collect::<Vec<_>>();
+        assert_eq!(css_diagnostics.len(), 2, "{:?}", catalog.diagnostics);
+        assert!(css_diagnostics[0].starts_with("bad-value.css:6:")
+            && css_diagnostics[0].contains("Unexpected CSS token"));
+        assert!(css_diagnostics[1].starts_with("bad-value.css:9:")
+            && css_diagnostics[1].contains("Unexpected CSS token"));
+
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
 
@@ -708,23 +967,23 @@ mod tests {
     fn source_theme_headers_require_name_and_author_but_generated_css_does_not() {
         assert_eq!(
             parse_header("/*\nauthor: Example\n*/\n:root {}")
-                .unwrap_err(),
-            "A custom theme header must include a name."
+                .unwrap_err().message,
+            "Theme header is missing required field `name`."
         );
         assert_eq!(
             parse_header("/*\nname: \nauthor: Example\n*/\n:root {}")
-                .unwrap_err(),
-            "A custom theme header must include a name."
+                .unwrap_err().message,
+            "The `name` field is empty."
         );
         assert_eq!(
             parse_header("/*\nname: Example\n*/\n:root {}")
-                .unwrap_err(),
-            "A custom theme header must include an author."
+                .unwrap_err().message,
+            "Theme header is missing required field `author`."
         );
         assert_eq!(
             parse_header("/*\nname: Example\nauthor: \n*/\n:root {}")
-                .unwrap_err(),
-            "A custom theme header must include an author."
+                .unwrap_err().message,
+            "The `author` field is empty."
         );
 
         let settings = test_directory("generated-css-metadata").join("Settings");
@@ -740,8 +999,8 @@ mod tests {
         assert!(!generated_header.contains("name:"));
         assert!(!generated_header.contains("author:"));
         assert_eq!(
-            parse_header(&generated).unwrap_err(),
-            "A custom theme header must include a name."
+            parse_header(&generated).unwrap_err().message,
+            "Theme header is missing required fields `name` and `author`."
         );
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
