@@ -76,6 +76,18 @@ test('reload reports synchronous and asynchronous handler errors without leaving
   }
 });
 
+test('reload reports every handler failure, including identical messages', async () => {
+  const errors = [];
+  const { controller } = harness({ onError: error => errors.push(error) });
+  controller.register(() => { throw new Error('same failure'); });
+  controller.register(() => Promise.reject(new Error('same failure')));
+  await controller.run();
+  assert.equal(errors.length, 2);
+  assert.notEqual(errors[0], errors[1]);
+  assert.equal(errors[0].message, errors[1].message);
+  controller.destroy();
+});
+
 test('Ctrl+R reloads the app, while other modifiers pass through', async () => {
   const { controller, document, button } = harness();
   let calls = 0;

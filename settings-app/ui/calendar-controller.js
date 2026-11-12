@@ -73,7 +73,7 @@ export function createCalendarController() {
       if (request === generation) {
         discoveryError = true;
         const detail = String(error.message || error);
-        api.onInfo?.(detail); status = detail + " Your saved rules are kept.";
+        api.onInfo?.(detail, error); status = detail + " Your saved rules are kept.";
       }
     } finally { if (request === generation) { discovering = false; publish(); } }
   }
@@ -141,7 +141,7 @@ export function createCalendarController() {
     show(value) { shown = value; if (shown && !discovered) return discover(); },
     reload() { generation++; discovering = false; discovered = false; publish(); if (shown) return discover(); },
     discover,
-    refresh() { api.onAttempt?.(); return discover(true); },
+    refresh() { return discover(true); },
     getTypes() {
       const types = catalog.types.slice();
       if (hasCatalog) for (const saved of state.types) if (!types.some(type => key(type) === key(saved))) types.push({ spaceId: saved.spaceId,
