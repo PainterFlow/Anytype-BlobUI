@@ -79,7 +79,7 @@ function CustomThemes({ values, onChange, themes = [], directory = "", disabled 
   };
 
   return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
-    <SettingsHeading id="custom-themes-heading" title="Custom Themes" description="Build an Anytype color palette from a main color and optional CSS preset." />
+    <SettingsHeading id="custom-themes-heading" title="Custom Themes" description="Set the Anytype palette and preview it in BlobUI Settings." />
     <SettingsGroup className="settings-list custom-theme-list">
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
         <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
@@ -109,7 +109,7 @@ function CustomThemes({ values, onChange, themes = [], directory = "", disabled 
         <p className="field-error" id="theme-color-error" aria-live="polite" />
       </div>
     </SettingsGroup>
-    <p className="custom-theme-help">Add a CSS file with a commented name and author header to <code>{directory || "Settings/themes/built-in-themes"}</code>. Press Ctrl+R in BlobUI Settings to reload the theme list.</p>
+    <p className="custom-theme-help">Put CSS presets in <code>{directory || "Settings/themes/built-in-themes"}</code> with a commented name and author header. Save to preview here, then press Ctrl+R in Anytype to apply. CSS cannot change Anytype's native titlebar or separate app tab bar.</p>
   </SettingsSection>;
 }
 

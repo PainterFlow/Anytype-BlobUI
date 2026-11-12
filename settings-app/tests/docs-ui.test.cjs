@@ -208,10 +208,11 @@ test('Dev Guide opens in a popup offline in dark mode', {
     assert.equal(await page.locator('#documentation').count(), 0, 'The Dev Guide opens in a dialog instead of a full-page view.');
     assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true, 'The settings stay inert while the guide dialog is open.');
     const guideText = await page.locator('#documentation-article').textContent();
-    for (const section of ['Required tools', 'Install the tools', 'Build BlobUI', 'GitHub Guidelines']) {
+    for (const section of ['Set up', 'Build and test', 'Custom themes', 'Project rules']) {
       assert.ok(guideText.includes(section), `The Dev Guide includes ${section}.`);
     }
-    assert.match(guideText, /Markdown formatting|Release notes and Markdown/);
+    assert.match(guideText, /Based Theme|Auto to select light or dark mode/);
+    assert.doesNotMatch(guideText, /Markdown formatting|Version Formatting/);
     assert.equal(await page.locator('#documentation-content').evaluate(node => node.scrollWidth <= node.clientWidth), true);
     await page.setViewportSize({ width: 800, height: 650 });
     const dialogBounds = await page.locator('#documentation-dialog').boundingBox();

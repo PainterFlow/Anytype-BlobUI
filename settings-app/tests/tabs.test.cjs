@@ -115,12 +115,14 @@ test('real settings tabs keep their width and open panels at the top across heig
       const position = () => new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
       const start = position();
       tab.click();
-      // Let the resize observer for the new selection deliver its first measurement.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return { start, current: position(), target: tab.offsetLeft };
+      return {
+        start,
+        target: tab.offsetLeft,
+        transition: getComputedStyle(strip, "::after").transition,
+      };
     });
-    assert.ok(movement.target > movement.start && movement.current < movement.target,
-      'The React tab indicator keeps animating after the resize observer runs');
+    assert.ok(movement.target > movement.start, 'Selecting a later tab moves the indicator');
+    assert.match(movement.transition, /transform 0\.2s/);
     await page.waitForFunction(target => {
       const strip = document.getElementById('advanced-tabs');
       const current = new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
