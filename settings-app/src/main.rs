@@ -124,8 +124,6 @@ struct SettingsDraft {
     theme_preset: String,
     #[serde(default = "default_theme_color")]
     theme_color: String,
-    #[serde(default = "default_discussion_fade_enabled")]
-    discussion_fade: bool,
     #[serde(default = "default_include_selections")]
     include_selections: bool,
     #[serde(default)]
@@ -191,10 +189,6 @@ fn default_based_theme() -> String {
 
 fn default_theme_color() -> String {
     "#191918".into()
-}
-
-fn default_discussion_fade_enabled() -> bool {
-    true
 }
 
 #[derive(Debug, Serialize)]
@@ -1624,7 +1618,6 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "basedTheme": settings.based_theme,
         "themePreset": settings.theme_preset,
         "themeColor": settings.theme_color,
-        "discussionFade": settings.discussion_fade,
         "includeSelections": settings.include_selections,
         "bannerImage": settings.banner_image,
         "reducedMotion": settings.reduced_motion,
@@ -1659,6 +1652,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         for (name, value) in values {
             target.insert(name.clone(), value.clone());
         }
+        target.remove("discussionFade");
     }
 }
 
@@ -1737,7 +1731,7 @@ fn runtime_css_data(data: &Value) -> Value {
     for key in [
         "fontFamily", "codeFontFamily", "accentColor", "bannerImage", "reducedMotion",
         "includeSelections", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect",
-        "kanbanViewStyle", "collapsedCategories", "calendarColorsEnabled", "discussionFade",
+        "kanbanViewStyle", "collapsedCategories", "calendarColorsEnabled",
         "basedTheme", "themePreset", "themeColor",
     ] {
         if let Some(value) = data["settings"].get(key) {
@@ -1913,9 +1907,6 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         based_theme,
         theme_preset,
         theme_color,
-        discussion_fade: read_bool(local, "discussionFade")
-            .or_else(|| read_bool(Some(normalized), "discussionFade"))
-            .unwrap_or_else(default_discussion_fade_enabled),
         include_selections: read_bool(local, "includeSelections")
             .or_else(|| read_bool(Some(normalized), "includeSelections"))
             .unwrap_or(true),
@@ -2532,7 +2523,6 @@ impl Default for SettingsDraft {
             based_theme: default_based_theme(),
             theme_preset: String::new(),
             theme_color: default_theme_color(),
-            discussion_fade: default_discussion_fade_enabled(),
             include_selections: true,
             banner_image: String::new(),
             reduced_motion: false,
@@ -2706,25 +2696,6 @@ mod tests {
     }
 
     #[test]
-    fn discussion_fade_defaults_on_and_round_trips() {
-        assert!(SettingsDraft::default().discussion_fade);
-        assert!(settings_from_data(&json!({"settings": {}})).discussion_fade);
-
-        let mut older_settings = serde_json::to_value(SettingsDraft::default()).unwrap();
-        older_settings.as_object_mut().unwrap().remove("discussionFade");
-        assert!(serde_json::from_value::<SettingsDraft>(older_settings).unwrap().discussion_fade);
-
-        for enabled in [false, true] {
-            let settings = SettingsDraft { discussion_fade: enabled, ..SettingsDraft::default() };
-            let mut data = json!({"unrelated": "keep"});
-            apply_settings(&mut data, Path::new("fixture"), &settings);
-            assert_eq!(data["settings"]["discussionFade"], enabled);
-            assert_eq!(settings_from_data(&data).discussion_fade, enabled);
-            assert_eq!(data["unrelated"], "keep");
-        }
-    }
-
-    #[test]
     fn selection_settings_migrate_and_preserve_explicit_values() {
         assert!(SettingsDraft::default().include_selections);
         assert!(settings_from_data(&json!({"settings": {}})).include_selections);
@@ -2740,6 +2711,14 @@ mod tests {
         }
         assert!(!settings_from_data(&json!({"settings": {"includeSelections": false}})).include_selections);
         assert!(!settings_from_data(&json!({"settings": {"includeSelections": true}, "settingsV2": {"settings": {"includeSelections": false}}})).include_selections);
+    }
+
+    #[test]
+    fn legacy_discussion_fade_setting_is_removed_when_settings_are_saved() {
+        let mut data = json!({"settings": {"discussionFade": false}});
+        let settings = settings_from_data(&data);
+        apply_settings(&mut data, Path::new("fixture"), &settings);
+        assert!(data["settings"].get("discussionFade").is_none());
     }
 
     #[test]

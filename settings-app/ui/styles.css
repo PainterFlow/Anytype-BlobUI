@@ -181,8 +181,6 @@ button:focus-visible, input:focus-visible { outline: none; }
 .custom-theme-color-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; padding: 14px 14px 16px; border-top: 1px solid var(--line); }
 .custom-theme-color-editor { grid-column: 1 / -1; padding: 0; }
 .custom-theme-color-row .field-error { grid-column: 1 / -1; margin: -8px 0 0; }
-.custom-theme-fade-row { border-top: 1px solid var(--line); }
-.custom-theme-fade-control { flex: 0 0 auto; min-height: 32px; gap: 8px; border: 0; }
 .field-error { margin: 8px 0 0; color: #f07878; font-size: 12px; line-height: 18px; }
 .field-error:empty { display: none; }
 
@@ -378,7 +376,7 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .release-notes-dialog { width: min(100%, 720px); max-height: min(82vh, 760px); overflow-y: auto; padding: 28px; border-radius: 16px; --page-scrollbar-color: transparent; transition: --page-scrollbar-color .15s ease; }
 .documentation-dialog { --documentation-dialog-inset: 28px; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(100%, 720px); height: min(82vh, 760px); padding: var(--documentation-dialog-inset); overflow: hidden; border-radius: 16px; }
 .documentation-dialog-heading { min-width: 0; padding: 0 36px 0 0; }
-.documentation-dialog-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
+.documentation-dialog-heading h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
 .release-notes-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-right: 36px; }
 .release-notes-heading h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 28px; }
 .release-notes-status { margin: 16px 0 0; color: var(--text-secondary); }

@@ -193,7 +193,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     "object-mention-hover-effect": "objectMentionHoverEffect",
     "collapsed-categories": "collapsedCategories",
     "calendar-colors-enabled": "calendarColorsEnabled",
-    "discussion-fade": "discussionFade",
   };
 
   const presentSettingsFields = view.updateSettingsFields;
@@ -586,7 +585,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.discussionFade === right.discussionFade && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1401,7 +1400,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       basedTheme: ["auto", "light", "dark", "inherit"].includes(settings.basedTheme) ? settings.basedTheme : "auto",
       themePreset: String(settings.themePreset || ""),
       themeColor: toHexColor(settings.themeColor) || "#191918",
-      discussionFade: settings.discussionFade !== false,
       includeSelections: settings.includeSelections !== false,
       bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,

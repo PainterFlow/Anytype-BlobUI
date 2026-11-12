@@ -63,7 +63,6 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
             fontFamily: 'Inter', codeFontFamily: 'Consolas', accentColor: '#DE50DE',
             accentMode: 'native', accentPreset: '', basedTheme: 'auto',
             themePreset: 'dark-mode-plus.css', themeColor: '#191918',
-            discussionFade: true,
             includeSelections: true, reducedMotion: false, tabHoverEffect: false,
             linkHoverEffect: false, objectMentionHoverEffect: false,
             kanbanViewStyle: 'default', collapsedCategories: false,
@@ -135,10 +134,7 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     assert.equal(await page.locator('#custom-theme-select .kanban-trigger-value').textContent(), 'Dark Mode+');
 
     await page.locator('#theme-color-value').fill('#FFFFFF');
-    const discussionFade = page.locator('#discussion-fade');
-    assert.equal(await discussionFade.isChecked(), true);
-    await discussionFade.uncheck();
-    await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'discussion-fade-disabled.png') });
+    assert.equal(await page.locator('#discussion-fade').count(), 0, 'The footer fade is configured in theme CSS instead of Settings.');
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__savedSettings && document.documentElement.dataset.theme === 'light');
     const savedPreview = await page.evaluate(() => ({
@@ -149,7 +145,6 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     assert.equal(savedPreview.background, 'rgb(255, 255, 255)');
     assert.equal(savedPreview.isDark, false);
     assert.equal(savedPreview.color, '#ffffff');
-    assert.equal(await page.evaluate(() => window.__savedSettings.discussionFade), false);
   } finally {
     await browser.close();
   }

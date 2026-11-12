@@ -261,7 +261,6 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         based_theme: "auto".into(),
         theme_preset: String::new(),
         theme_color: "#191918".into(),
-        discussion_fade: true,
         include_selections: true,
         banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,

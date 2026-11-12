@@ -203,7 +203,9 @@ test('Dev Guide opens in a popup offline in dark mode', {
     await page.locator('#help-button').click();
     await page.locator('#help-dev-guide').click();
     await page.locator('#documentation-backdrop').waitFor({ state: 'visible' });
-    await page.waitForFunction(() => document.querySelector('#documentation-article h1')?.textContent === 'Developer guide');
+    await page.waitForFunction(() => document.querySelector('#documentation-article')?.textContent.includes('Set up'));
+    assert.equal(await page.locator('#documentation-title').evaluate(element => element.tagName), 'H1');
+    assert.equal(await page.locator('#documentation-title').textContent(), 'Developer Guide');
     assert.equal(await page.locator('#documentation-dialog').getAttribute('role'), 'dialog');
     assert.equal(await page.locator('#documentation').count(), 0, 'The Dev Guide opens in a dialog instead of a full-page view.');
     assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true, 'The settings stay inert while the guide dialog is open.');
