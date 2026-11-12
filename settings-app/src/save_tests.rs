@@ -258,6 +258,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
+        enable_custom_themes: true,
         based_theme: "auto".into(),
         theme_preset: String::new(),
         theme_color: "#191918".into(),
@@ -278,6 +279,7 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     let saved_data = read_json_file(&data_path).unwrap();
     assert!(saved_data.get("settingsV2").is_none());
     assert_eq!(saved_data["settings"]["accentColor"], "#27A879");
+    assert_eq!(saved_data["settings"]["enableCustomThemes"], true);
     assert_eq!(saved_data["settings"]["basedTheme"], "auto");
     assert_eq!(saved_data["settings"]["themeColor"], "#191918");
     assert_eq!(saved_data["settings"]["reducedMotion"], false);

@@ -931,6 +931,7 @@ mod tests {
             "settings": {
                 "fontFamily": "Inter",
                 "backgroundExperiment": "normal",
+                "enableCustomThemes": true,
                 "basedTheme": "dark",
                 "themePreset": "dark-mode-plus.css",
                 "themeColor": "#334455",

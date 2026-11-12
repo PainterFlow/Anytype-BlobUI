@@ -186,6 +186,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   customThemeStyle.id = "custom-theme-preview";
   document.head?.append?.(customThemeStyle);
   const toggleSettings = {
+    "enable-custom-themes": "enableCustomThemes",
     "include-selections": "includeSelections",
     "reduced-motion": "reducedMotion",
     "tab-hover-effect": "tabHoverEffect",
@@ -466,7 +467,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function chooseThemeColor() {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!draft || !draft.enableCustomThemes || saveBusy || isInstallingUpdate()) return;
     const value = hsvToHex(themeHsv.h, themeHsv.s, themeHsv.v);
     draft.themeColor = value;
     presentSettingsFields({ "theme-color-value": value });
@@ -477,7 +478,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function changeThemeColorValue(value) {
-    if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (!draft || !draft.enableCustomThemes || saveBusy || isInstallingUpdate()) return;
     const raw = value.trim();
     const color = toHexColor(raw);
     draft.themeColor = color || raw;
@@ -585,7 +586,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+  }
+
+  function effectiveIncludeSelections(settings = draft) {
+    if (!settings) return false;
+    if (!settings.enableCustomThemes || !settings.themePreset) return settings.includeSelections;
+    const theme = view.getSnapshot().customThemes.find(item => item.id === settings.themePreset);
+    return typeof theme?.accentColorSelection === "boolean" ? theme.accentColorSelection : settings.includeSelections;
+  }
+
+  function syncIncludeSelectionsPreview() {
+    if (draft) root.dataset.includeSelections = String(effectiveIncludeSelections());
   }
 
   function updaterSettingsEqual(left, right) {
@@ -1346,9 +1358,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
       kanbanStyleDisabled: settingsLocked || !draft });
+    const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
       if (control.id === "start-on-login") return;
-      control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
+      control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control))
+        || (themeColorControls.includes(control) && !draft.enableCustomThemes);
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
     window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
@@ -1397,6 +1411,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      enableCustomThemes: settings.enableCustomThemes === true,
       basedTheme: ["auto", "light", "dark", "inherit"].includes(settings.basedTheme) ? settings.basedTheme : "auto",
       themePreset: String(settings.themePreset || ""),
       themeColor: toHexColor(settings.themeColor) || "#191918",
@@ -1427,7 +1442,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       ...Object.fromEntries(Object.entries(toggleSettings).map(([id, key]) => [id, draft[key]])),
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
-    root.dataset.includeSelections = String(draft.includeSelections);
+    syncIncludeSelectionsPreview();
     view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
@@ -2062,17 +2077,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     chooseCustomColor();
   });
   listen(themeHueInput, "input", () => {
-    if (isInstallingUpdate()) return;
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
     themeHsv.h = Number(themeHueInput.value);
     chooseThemeColor();
   });
   listen(themeSaturationInput, "input", () => {
-    if (isInstallingUpdate()) return;
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
     themeHsv.s = Number(themeSaturationInput.value);
     chooseThemeColor();
   });
   listen(themeBrightnessInput, "input", () => {
-    if (isInstallingUpdate()) return;
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
     themeHsv.v = Number(themeBrightnessInput.value);
     chooseThemeColor();
   });
@@ -2083,14 +2098,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     chooseThemeColor();
   }
   listen(themePlane, "pointerdown", (event) => {
-    if (!draft || saveBusy || isInstallingUpdate() || event.button !== 0) return;
+    if (!draft?.enableCustomThemes || saveBusy || isInstallingUpdate() || event.button !== 0) return;
     event.preventDefault();
     themePlane.setPointerCapture(event.pointerId);
     themeSaturationInput.focus({ preventScroll: true });
     pickThemeAtPointer(event);
   });
   listen(themePlane, "pointermove", (event) => {
-    if (themePlane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate()) pickThemeAtPointer(event);
+    if (draft?.enableCustomThemes && themePlane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate()) pickThemeAtPointer(event);
   });
   listen(themePlane, "pointerup", (event) => {
     if (themePlane.hasPointerCapture(event.pointerId)) themePlane.releasePointerCapture(event.pointerId);
@@ -2189,6 +2204,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         renderThemePicker(true);
       }
       presentSettingsFields(fields);
+      syncIncludeSelectionsPreview();
       markDirty();
       return;
     }
@@ -2206,7 +2222,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
       draft[property] = value;
       presentSettingsFields({ [id]: value });
-      if (property === "reducedMotion" || property === "includeSelections") root.dataset[property] = String(value);
+      if (property === "reducedMotion") root.dataset.reducedMotion = String(value);
+      if (property === "includeSelections" || property === "enableCustomThemes") syncIncludeSelectionsPreview();
     }
     markDirty();
   }

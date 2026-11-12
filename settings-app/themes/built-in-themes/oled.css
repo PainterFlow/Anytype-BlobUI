@@ -2,8 +2,6 @@
 author: PainterFlow11
 name: OLED
 based-theme: Dark Mode
-accent-color: #DE50DE
-accent-color-selections: true
 */
 /* OLED uses a pure black background and disables the object discussion footer fade. */
 html, html.themeDark {

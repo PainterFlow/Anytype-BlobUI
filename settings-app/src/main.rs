@@ -118,6 +118,8 @@ struct SettingsDraft {
     accent_color: String,
     accent_mode: String,
     accent_preset: String,
+    #[serde(default)]
+    enable_custom_themes: bool,
     #[serde(default = "default_based_theme")]
     based_theme: String,
     #[serde(default)]
@@ -1615,6 +1617,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "accentColor": accent,
         "accentMode": settings.accent_mode,
         "accentPreset": settings.accent_preset,
+        "enableCustomThemes": settings.enable_custom_themes,
         "basedTheme": settings.based_theme,
         "themePreset": settings.theme_preset,
         "themeColor": settings.theme_color,
@@ -1670,7 +1673,7 @@ fn consolidate_legacy_settings(data: &mut serde_json::Map<String, Value>) {
                 | "kanbanViewStyle" | "sidebarResizeMode" | "backgroundExperiment" => value.is_string(),
                 "reducedMotion" | "includeSelections" | "tabHoverEffect" | "linkHoverEffect"
                 | "objectMentionHoverEffect" | "collapsedCategories" | "calendarColorsEnabled"
-                | "discussionFade" => value.is_boolean(),
+                | "discussionFade" | "enableCustomThemes" => value.is_boolean(),
                 _ => true,
             };
             if valid || !settings.contains_key(&key) {
@@ -1732,7 +1735,7 @@ fn runtime_css_data(data: &Value) -> Value {
         "fontFamily", "codeFontFamily", "accentColor", "bannerImage", "reducedMotion",
         "includeSelections", "tabHoverEffect", "linkHoverEffect", "objectMentionHoverEffect",
         "kanbanViewStyle", "collapsedCategories", "calendarColorsEnabled",
-        "basedTheme", "themePreset", "themeColor",
+        "enableCustomThemes", "basedTheme", "themePreset", "themeColor",
     ] {
         if let Some(value) = data["settings"].get(key) {
             appearance.insert(key.into(), value.clone());
@@ -1904,6 +1907,9 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
         accent_color,
         accent_mode,
         accent_preset,
+        enable_custom_themes: read_bool(local, "enableCustomThemes")
+            .or_else(|| read_bool(Some(normalized), "enableCustomThemes"))
+            .unwrap_or(false),
         based_theme,
         theme_preset,
         theme_color,
@@ -2520,6 +2526,7 @@ impl Default for SettingsDraft {
             accent_color: DEFAULT_ACCENT.into(),
             accent_mode: "preset".into(),
             accent_preset: "blob-pink".into(),
+            enable_custom_themes: false,
             based_theme: default_based_theme(),
             theme_preset: String::new(),
             theme_color: default_theme_color(),
@@ -2693,6 +2700,24 @@ mod tests {
             assert_eq!(data["settings"]["calendarColorsEnabled"], enabled);
             assert_eq!(data["unrelated"], "keep");
         }
+    }
+
+    #[test]
+    fn custom_theme_settings_default_off_and_round_trip() {
+        assert!(!SettingsDraft::default().enable_custom_themes);
+        assert!(!settings_from_data(&json!({"settings": {}})).enable_custom_themes);
+        let mut old = serde_json::to_value(SettingsDraft::default()).unwrap();
+        old.as_object_mut().unwrap().remove("enableCustomThemes");
+        assert!(!serde_json::from_value::<SettingsDraft>(old).unwrap().enable_custom_themes);
+        for enabled in [false, true] {
+            let draft = SettingsDraft { enable_custom_themes: enabled, ..SettingsDraft::default() };
+            let mut data = json!({});
+            apply_settings(&mut data, Path::new("fixture"), &draft);
+            assert_eq!(data["settings"]["enableCustomThemes"], enabled);
+            assert_eq!(settings_from_data(&data).enable_custom_themes, enabled);
+            assert_eq!(runtime_css_data(&data)["settings"]["enableCustomThemes"], enabled);
+        }
+        assert!(!settings_from_data(&json!({"settings": {"enableCustomThemes": true}, "settingsV2": {"settings": {"enableCustomThemes": false}}})).enable_custom_themes);
     }
 
     #[test]

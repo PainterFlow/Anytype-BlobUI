@@ -50,8 +50,8 @@ function settingSwitch(values, onChange, id, label, className, description, inpu
   return <Switch {...props} />;
 }
 
-function ColorPlane({ id = "color-plane", cursorId = "color-cursor", saturationId = "accent-saturation", brightnessId = "accent-brightness", label = "Color saturation and brightness" }) {
-  return <div className="color-plane" id={id} role="group" aria-label={label}>
+function ColorPlane({ id = "color-plane", cursorId = "color-cursor", saturationId = "accent-saturation", brightnessId = "accent-brightness", label = "Color saturation and brightness", disabled = false }) {
+  return <div className="color-plane" id={id} role="group" aria-label={label} aria-disabled={disabled}>
     <span className="color-cursor" id={cursorId} aria-hidden="true" />
     <input className="sr-only" id={saturationId} type="range" min="0" max="100" defaultValue="64" aria-label="Color saturation" />
     <input className="sr-only" id={brightnessId} type="range" min="0" max="100" defaultValue="87" aria-label="Color brightness" />
@@ -66,6 +66,8 @@ const basedThemeOptions = [
 ];
 
 function CustomThemes({ values, onChange, themes = [], disabled = false }) {
+  const customThemesEnabled = values["enable-custom-themes"] === true;
+  const themeControlsDisabled = disabled || !customThemesEnabled;
   const selectedTheme = values["custom-theme"] || "";
   const hasSelectedTheme = !selectedTheme || themes.some(theme => theme.id === selectedTheme);
   const options = [
@@ -81,20 +83,22 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
   return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
     <SettingsHeading id="custom-themes-heading" title="Custom Themes" description="Set the Anytype palette and preview it in BlobUI Settings." />
     <SettingsGroup className="settings-list custom-theme-list">
+      <Switch id="enable-custom-themes" label="Enable Custom Themes" className="kanban-setting-row native-accent-control"
+        checked={customThemesEnabled} disabled={disabled} onChange={checked => onChange?.("enable-custom-themes", checked)} />
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
         <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
-          label="Based Theme" value={values["based-theme"] || "auto"} options={basedThemeOptions} disabled={disabled}
+          label="Based Theme" value={values["based-theme"] || "auto"} options={basedThemeOptions} disabled={themeControlsDisabled}
           onChange={value => onChange?.("based-theme", value)} />
       </SettingsRow>
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Preset Themes">
         <SelectPicker id="custom-theme" rootId="custom-theme-select" menuId="custom-theme-options"
-          label="Preset Themes" value={selectedTheme} options={options} disabled={disabled}
+          label="Preset Themes" value={selectedTheme} options={options} disabled={themeControlsDisabled}
           emptyMessage="No theme files were found." onChange={value => onChange?.("custom-theme", value)} />
       </SettingsRow>
-      <div className="custom-theme-color-row">
+      <div className="custom-theme-color-row" aria-disabled={themeControlsDisabled}>
         <div className="kanban-setting-copy"><span className="kanban-setting-title">Main color</span></div>
         <div id="theme-color-editor" className="color-editor custom-theme-color-editor">
-          <ColorPlane id="theme-color-plane" cursorId="theme-color-cursor" saturationId="theme-color-saturation" brightnessId="theme-color-brightness" label="Theme color saturation and brightness" />
+          <ColorPlane id="theme-color-plane" cursorId="theme-color-cursor" saturationId="theme-color-saturation" brightnessId="theme-color-brightness" label="Theme color saturation and brightness" disabled={themeControlsDisabled} />
           <div className="color-controls">
             <label className="hue-field" htmlFor="theme-color-hue">Hue</label>
             <input id="theme-color-hue" className="hue-slider" type="range" min="0" max="359" defaultValue="12" aria-label="Theme color hue" />
