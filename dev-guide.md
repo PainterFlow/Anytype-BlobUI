@@ -52,6 +52,38 @@ But there are a few additional features, you can use `[ ]` and `[x]` to make che
 You can also mention images that are included in `md-images.yaml` by `@`-mentioning them.
 Another feature the BlobUI markdown reader supports is `Issue#ID`, `PR#ID` and `User#username` to quickly mention issues, prs and users.
 
+## Custom Themes
+
+You can create custom built in themes using css.
+To create a theme, create a new css file in `app-installation-folder/Settings/themes/built-in-themes/`.
+
+Once you created a file paste this at the top of the file:
+*Developers Note: The header always has to be at the top of the css file, the order of fields does not matter.*
+
+```
+/*
+author: {username}
+name: {name that is displayed in the app}
+*/
+```
+
+And from there you can go ahead customizing Anytype to your liking.
+See existing built-in themes and `app-installation-folder/Settings/generated.css` for reference.
+*Developers Note: Yes I will admit, I'm too lazy to document the css variables.*
+
+One thing I'm not too lazy to admit are the available fields you can put in the commented header in your custom theme.
+The available fields are:
+
+- **(required)** `author: {text}` - currently unused but might get used in the future, also useful to know who created the theme.
+- **(required)** `name: {text}` - the name that is displayed in the app.
+- `based-theme: Dark Mode / Light Mode` - the based theme, controls things like text color, icon color and so on. 
+- `accent-color: {color code}` - Override the users accent color.
+- `accent-color-selections: {bool}` - Override whether selections are effected by the accent color. (*requires `accent-color` field*)
+
+*Developers Note: Errors & warnings are logged in logs.*
+
+You can use `ctrl+r` to reload available custom preset themes.
+
 ## GitHub Guidelines
 
 - When making changes, always target your PRs to `dev` unless it's for a hotfix.
