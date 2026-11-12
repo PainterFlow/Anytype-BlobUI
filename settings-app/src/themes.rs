@@ -91,6 +91,11 @@ pub(crate) fn render_generated_css(
         .get("themePreset")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let footer_fade_fallback = if selected_id.eq_ignore_ascii_case("oled.css") {
+        "none"
+    } else {
+        "linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%)"
+    };
     let base_theme = settings
         .get("basedTheme")
         .and_then(Value::as_str)
@@ -162,16 +167,8 @@ pub(crate) fn render_generated_css(
     css.push_str(".sidebarPage > .bottom .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }\n");
     css.push_str(".sidebarPage.pageVault > .bottom .grad { background-image: linear-gradient(180deg, transparent 3.62%, var(--color-shape-highlight-light-solid) 100%); }\n");
 
-    // The discussion footer fade follows the active theme background and can be disabled.
-    if settings
-        .get("discussionFade")
-        .and_then(Value::as_bool)
-        .unwrap_or(true)
-    {
-        css.push_str(".formWrapper .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }\n");
-    } else {
-        css.push_str(".formWrapper .grad { background: none; }\n");
-    }
+    // Theme files can override the fallback to disable or customize the discussion footer fade.
+    css.push_str(&format!(".formWrapper .grad {{ background: var(--blobui-discussion-footer-fade-background, {footer_fade_fallback}); }}\n"));
 
     // The user's Appearance settings take precedence over accent values in a preset.
     css.push_str("\n:root, html, html.themeDark {\n");
@@ -597,18 +594,37 @@ mod tests {
     }
 
     #[test]
-    fn discussion_footer_fade_can_be_disabled_without_losing_theme_color() {
-        let settings = test_directory("discussion-fade").join("Settings");
-        let enabled = json!({"settings": {"basedTheme":"dark", "themeColor":"#123456", "discussionFade":true}});
-        let enabled_css = render_generated_css(&settings, &enabled).unwrap();
-        assert!(enabled_css.contains("--color-bg-primary: #123456;"));
-        assert!(enabled_css.contains(".formWrapper .grad { background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%); }"));
+    fn discussion_footer_fade_is_controlled_by_the_selected_theme_css() {
+        let settings = test_directory("discussion-fade-theme").join("Settings");
+        let oled = json!({"settings": {"basedTheme":"dark", "themePreset":"oled.css", "themeColor":"#000000"}});
+        let oled_css = render_generated_css(&settings, &oled).unwrap();
+        assert!(oled_css.contains("--blobui-discussion-footer-fade-background: none;"));
+        assert!(oled_css.contains(".formWrapper .grad { background: var(--blobui-discussion-footer-fade-background, none); }"));
 
-        let disabled = json!({"settings": {"basedTheme":"dark", "themeColor":"#123456", "discussionFade":false}});
-        let disabled_css = render_generated_css(&settings, &disabled).unwrap();
-        assert!(disabled_css.contains(".formWrapper .grad { background: none; }"));
-        assert!(!disabled_css.contains(".formWrapper .grad { background: linear-gradient"));
+        let dark_mode_plus = json!({"settings": {"basedTheme":"dark", "themePreset":"dark-mode-plus.css", "themeColor":"#191918"}});
+        let dark_mode_plus_css = render_generated_css(&settings, &dark_mode_plus).unwrap();
+        assert!(dark_mode_plus_css.contains("--blobui-discussion-footer-fade-background: linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%);"));
+        assert!(dark_mode_plus_css.contains("--color-bg-primary: #191918;"));
+
+        let legacy_settings = test_directory("discussion-fade-legacy").join("Settings");
+        let legacy_themes = theme_directory(&legacy_settings);
+        fs::create_dir_all(&legacy_themes).unwrap();
+        fs::write(
+            legacy_themes.join("oled.css"),
+            "/*\nauthor: PainterFlow11\nname: OLED\nbased-theme: Dark Mode\n*/\nhtml { --color-bg-primary: #000000; }",
+        )
+        .unwrap();
+        fs::write(
+            legacy_themes.join("dark-mode-plus.css"),
+            "/*\nauthor: PainterFlow11\nname: Dark Mode+\nbased-theme: Dark Mode\n*/\nhtml { --color-bg-primary: #191918; }",
+        )
+        .unwrap();
+        let legacy_oled_css = render_generated_css(&legacy_settings, &oled).unwrap();
+        assert!(legacy_oled_css.contains(".formWrapper .grad { background: var(--blobui-discussion-footer-fade-background, none); }"));
+        let legacy_dark_mode_plus_css = render_generated_css(&legacy_settings, &dark_mode_plus).unwrap();
+        assert!(legacy_dark_mode_plus_css.contains(".formWrapper .grad { background: var(--blobui-discussion-footer-fade-background, linear-gradient(180deg, transparent 3.62%, var(--color-bg-primary) 68.18%)); }"));
         let _ = fs::remove_dir_all(settings.parent().unwrap());
+        let _ = fs::remove_dir_all(legacy_settings.parent().unwrap());
     }
 
     #[test]
