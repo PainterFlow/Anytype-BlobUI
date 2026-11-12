@@ -93,6 +93,13 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
 
     await fs.mkdir(screenshotDirectory, { recursive: true });
     assert.equal(await page.locator('#enable-custom-themes').isChecked(), false);
+    const customThemeLabelStyle = await page.evaluate(() => ({
+      toggle: getComputedStyle(document.querySelector('#enable-custom-themes').previousElementSibling).fontSize,
+      basedTheme: getComputedStyle(document.querySelector('#based-theme-select').closest('.kanban-setting-row').querySelector('.kanban-setting-title')).fontSize,
+      subtitle: document.querySelector('.custom-themes-group .section-heading p'),
+    }));
+    assert.equal(customThemeLabelStyle.toggle, customThemeLabelStyle.basedTheme);
+    assert.equal(customThemeLabelStyle.subtitle, null);
     assert.equal(await page.locator('#based-theme-select .kanban-select-trigger').isDisabled(), true);
     assert.equal(await page.locator('#custom-theme-select .kanban-select-trigger').isDisabled(), true);
     assert.equal(await page.locator('#theme-color-value').isDisabled(), true);
