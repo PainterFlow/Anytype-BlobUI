@@ -178,6 +178,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
   const logStore = window.BlobUI.LogStore.create();
+  const loggedThemeDiagnostics = new Set();
   let copyConfirmationTimer = null;
   let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
@@ -1497,6 +1498,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       applyTheme(state.theme, state.themeCss, state.previewTheme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
+      for (const diagnostic of Array.isArray(state.themeDiagnostics) ? state.themeDiagnostics : []) {
+        const message = String(diagnostic);
+        if (loggedThemeDiagnostics.has(message)) continue;
+        loggedThemeDiagnostics.add(message);
+        addLog(message, "error");
+      }
       assignAdvancedConnection(state);
       void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
@@ -2525,6 +2532,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   listen(el("clear-logs"), "click", () => {
     logStore.clear();
+    loggedThemeDiagnostics.clear();
     if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
     copyConfirmationTimer = null;
     view.update({ copyLogsCopied: false });

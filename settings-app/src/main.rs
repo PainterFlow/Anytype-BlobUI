@@ -201,6 +201,7 @@ struct AppState {
     app_data_directory: String,
     theme_directory: String,
     custom_themes: Vec<themes::ThemeSummary>,
+    theme_diagnostics: Vec<String>,
     theme: String,
     theme_css: String,
     preview_theme: String,
@@ -1189,7 +1190,7 @@ fn load_app_state() -> Result<AppState, String> {
     let theme = read_anytype_theme(&install_directory.join("devconfig.json"));
     let settings_root = settings_root_for_install(&install_directory)?;
     let settings_directory = settings_root.join("Settings");
-    let custom_themes = themes::list_themes(&settings_directory)?;
+    let theme_catalog = themes::list_themes(&settings_directory)?;
 
     let mut onboarding_complete = false;
     let mut api_port = 31009;
@@ -1237,7 +1238,8 @@ fn load_app_state() -> Result<AppState, String> {
         install_directory: install_directory.to_string_lossy().into_owned(),
         app_data_directory: app_data.to_string_lossy().into_owned(),
         theme_directory: themes::theme_directory(&settings_directory).to_string_lossy().into_owned(),
-        custom_themes,
+        custom_themes: theme_catalog.themes,
+        theme_diagnostics: theme_catalog.diagnostics,
         theme,
         theme_css,
         preview_theme,
@@ -3284,6 +3286,7 @@ mod tests {
             app_data_directory: String::new(),
             theme_directory: String::new(),
             custom_themes: Vec::new(),
+            theme_diagnostics: Vec::new(),
             theme: "dark".into(),
             theme_css: String::new(),
             preview_theme: "dark".into(),
