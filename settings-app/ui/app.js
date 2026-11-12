@@ -178,6 +178,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
   const logStore = window.BlobUI.LogStore.create();
+  let startupThemeDiagnosticMessages = null;
   let copyConfirmationTimer = null;
   let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
@@ -1061,15 +1062,21 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (logStore.add(message, kind, occurrence)) updateLogView();
   }
 
-  function reportThemeDiagnostics(diagnostics) {
+  function reportThemeDiagnostics(diagnostics, suppressedMessages = null) {
     for (const diagnostic of Array.isArray(diagnostics) ? diagnostics : []) {
       const message = typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || "");
-      if (!message) continue;
+      if (!message || suppressedMessages?.has(message)) continue;
       const level = diagnostic && typeof diagnostic === "object"
         && ["warning", "error"].includes(String(diagnostic.level).toLowerCase())
         ? String(diagnostic.level).toLowerCase() : "error";
       addLog(message, level);
     }
+  }
+
+  function reportReloadedThemeDiagnostics(diagnostics) {
+    const startupMessages = startupThemeDiagnosticMessages;
+    startupThemeDiagnosticMessages = null;
+    reportThemeDiagnostics(diagnostics, startupMessages);
   }
 
   function formatLog(entry) {
@@ -1501,7 +1508,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       applyTheme(state.theme, state.themeCss, state.previewTheme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
       view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
-      reportThemeDiagnostics(state.themeDiagnostics);
       assignAdvancedConnection(state);
       void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
@@ -1516,6 +1522,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (waitForUpdater) await updaterLoad;
     else void updaterLoad;
     const refreshOnStart = refreshMetadata && state?.ready && state?.hasSavedApiKey;
+    if (!stateError && state) {
+      reportThemeDiagnostics(state.themeDiagnostics);
+      startupThemeDiagnosticMessages = refreshOnStart
+        ? new Set((Array.isArray(state.themeDiagnostics) ? state.themeDiagnostics : [])
+          .map(diagnostic => typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || ""))
+          .filter(Boolean))
+        : null;
+    }
     const formulaLoad = window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
     void Promise.resolve(formulaLoad).then((loaded) => {
       if (loaded && !stateError && loadGeneration === appStateLoadGeneration) {
@@ -1579,7 +1593,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     window.appReady = !!state.ready;
     applyTheme(state.theme, state.themeCss, state.previewTheme);
-    reportThemeDiagnostics(state.themeDiagnostics);
+    reportReloadedThemeDiagnostics(state.themeDiagnostics);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
     view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
     assignAdvancedConnection(state);
@@ -2897,7 +2911,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!state) throw new Error("Custom themes could not be reloaded.");
     if (disposed) return;
     applyTheme(state.theme, state.themeCss, state.previewTheme);
-    reportThemeDiagnostics(state.themeDiagnostics);
+    reportReloadedThemeDiagnostics(state.themeDiagnostics);
     view.update({
       customThemes: Array.isArray(state.customThemes) ? state.customThemes : [],
       themeDirectory: String(state.themeDirectory || ""),
