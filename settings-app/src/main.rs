@@ -1282,7 +1282,9 @@ fn load_app_state() -> Result<AppState, String> {
     let theme_css = match themes::render_generated_css(&settings_directory, &theme_data) {
         Ok(css) => css,
         Err(error) => {
-            theme_diagnostics.push(themes::ThemeDiagnostic::error(error));
+            if !theme_diagnostics.iter().any(|diagnostic| diagnostic.message == error) {
+                theme_diagnostics.push(themes::ThemeDiagnostic::error(error));
+            }
             String::new()
         }
     };

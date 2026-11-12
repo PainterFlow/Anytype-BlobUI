@@ -439,6 +439,45 @@ fn theme_reload_rebuilds_both_css_outputs_from_the_current_preset_without_changi
 }
 
 #[test]
+fn app_state_reports_an_invalid_selected_theme_diagnostic_once() {
+    let _lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixture = source.join(".test-run").join(format!(
+        "theme-diagnostic-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    let install = fixture.join("Anytype");
+    let blob = install.join("blob");
+    let theme_directory = install.join("Settings/themes/built-in-themes");
+    fs::create_dir_all(&blob).unwrap();
+    fs::create_dir_all(&theme_directory).unwrap();
+    fs::write(blob.join("data.json"), serde_json::to_vec(&json!({
+        "settings": {
+            "enableCustomThemes": true,
+            "basedTheme": "dark",
+            "themePreset": "weqlkjew.css",
+            "themeColor": "#191918"
+        }
+    })).unwrap()).unwrap();
+    fs::write(
+        theme_directory.join("weqlkjew.css"),
+        "/*\nname: Broken\nauthor: Test\nbased-theme: Dwe\n*/\n:root {}",
+    ).unwrap();
+
+    let _environment = EnvironmentGuard::set(&[("BLOBUI_INSTALL_DIRECTORY", &install)]);
+    let state = load_app_state().unwrap();
+    let based_theme_errors = state.theme_diagnostics.iter().filter(|diagnostic| {
+        diagnostic.message == "weqlkjew.css:4:14: Expected `Dark Mode` or `Light Mode` for `based-theme`."
+            && matches!(diagnostic.level, themes::ThemeDiagnosticLevel::Error)
+    }).count();
+    assert_eq!(based_theme_errors, 1, "{:?}", state.theme_diagnostics);
+
+    drop(_environment);
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
 #[ignore = "Retired credential-reset flow. Use profile-isolation regressions; never run against a user profile."]
 fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
