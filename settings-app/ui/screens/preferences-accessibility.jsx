@@ -81,9 +81,9 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
   };
 
   return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
-    <SettingsHeading id="custom-themes-heading" title="Custom Themes" description="Set the Anytype palette and preview it in BlobUI Settings." />
+    <SettingsHeading id="custom-themes-heading" title="Custom Themes" />
     <SettingsGroup className="settings-list custom-theme-list">
-      <Switch id="enable-custom-themes" label="Enable Custom Themes" className="kanban-setting-row native-accent-control"
+      <Switch id="enable-custom-themes" label="Enable Custom Themes" className="kanban-setting-row native-accent-control settings-row"
         checked={customThemesEnabled} disabled={disabled} onChange={checked => onChange?.("enable-custom-themes", checked)} />
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
         <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
