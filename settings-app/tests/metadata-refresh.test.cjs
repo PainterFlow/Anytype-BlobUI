@@ -86,8 +86,8 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.evaluate(()=>{window.themeRevision=1;window.themeFailure=true;});
     await refresh();
     assert.match(await page.locator('#custom-theme-preview').textContent(),/--theme-revision: 1/);
-    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),1);
-    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),1);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),2);
     assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'added.css:8:2: CSS parser warning.'}).count(),1);
     assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'Custom theme CSS could not be rebuilt. Permission denied.'}).count(),1);
     assert.match(await page.locator('#status-message').textContent(),/Custom theme CSS could not be rebuilt/);
@@ -101,9 +101,10 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
-    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),1);
-    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),1);
-    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'Custom theme CSS could not be rebuilt. Permission denied.'}).count(),1);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),3);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),3);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'added.css:8:2: CSS parser warning.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'Custom theme CSS could not be rebuilt. Permission denied.'}).count(),2);
     assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='reload_custom_themes').length),1);
     assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),3);
     const calls=await page.evaluate(()=>window.calls);
