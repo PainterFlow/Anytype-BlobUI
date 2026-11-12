@@ -5,7 +5,7 @@ based-theme: Dark Mode
 accent-color: #DE50DE
 accent-color-selections: true
 */
-/* OLED uses a pure black background. */
+/* OLED uses a pure black background and disables the discussion footer fade. */
 html, html.themeDark {
   --color-bg-primary: #000000;
   --color-bg-primary-90: rgba(0, 0, 0, 0.9);
@@ -13,4 +13,5 @@ html, html.themeDark {
   --color-shape-primary: #171717;
   --color-shape-secondary: #101010;
   --color-shape-tertiary: #080808;
+  --blobui-discussion-footer-fade-background: none;
 }
