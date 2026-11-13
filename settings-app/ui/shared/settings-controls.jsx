@@ -75,9 +75,9 @@ export function TextField({ label, inputAttributes }) {
   </label>;
 }
 
-export function VisibilityTextField({ label, inputAttributes, buttonAttributes }) {
+export function VisibilityTextField({ label, inputAttributes, buttonAttributes, className = "input-field advanced-row" }) {
   const fieldId = `${inputAttributes.id}-field`;
-  return <div className="input-field advanced-row">
+  return <div className={className}>
     <label htmlFor={inputAttributes.id}>{label}</label>
     <div id={fieldId} className="visibility-field" data-filled="false">
       <input {...inputAttributes} />

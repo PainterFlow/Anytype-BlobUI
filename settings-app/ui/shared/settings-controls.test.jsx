@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ExpandableSearch } from "./search.jsx";
+import { DialogSwitch } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
 
 describe("Settings controls", () => {
@@ -45,5 +46,17 @@ describe("Settings controls", () => {
     expect(input.tabIndex).toBe(-1);
     expect(document.activeElement).toBe(button);
     expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("portals help popovers out of clipped settings groups", () => {
+    render(<div className="settings-list" style={{ overflow: "hidden" }}>
+      <DialogSwitch id="remote-toggle" dialogId="remote-dialog" label="Remote access" help="This text stays above the row." checked={false} onChange={() => {}} onOpen={() => {}} />
+    </div>);
+    const trigger = screen.getByRole("button", { name: "Remote access information" });
+    fireEvent.focus(trigger);
+    const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
+    expect(popover.parentElement).toBe(document.body);
+    expect(popover.dataset.open).toBe("true");
+    expect(popover.textContent).toBe("This text stays above the row.");
   });
 });
