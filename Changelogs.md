@@ -32,7 +32,7 @@
 
 *Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
 
-## Anyblob (0.2.25 -> 0.2.27)
+## Anyblob (0.2.25 -> 0.2.28)
 
 - Added Linux support. (User#pxlarified)
 - Added support for cloud agents. (User#pxlarified)
