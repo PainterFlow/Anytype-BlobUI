@@ -55,6 +55,19 @@ export function Switch({ id, label, description, className = "native-accent-cont
   </label>;
 }
 
+export function DialogSwitch({ id, label, help, dialogId, expanded = false, className = "native-accent-control settings-row", checked, disabled, labelDisabled = disabled, onChange, onOpen }) {
+  return <div className={`${className} dialog-switch`}>
+    <div className="dialog-switch-label-group">
+      <button type="button" className="dialog-switch-label" aria-haspopup="dialog" aria-controls={dialogId}
+        aria-expanded={expanded} disabled={labelDisabled} onClick={onOpen}>{label}</button>
+      {help && <HelpTooltip label={`${label} information`} text={help} />}
+    </div>
+    <input id={id} type="checkbox" role="switch" aria-label={label} checked={checked} disabled={disabled}
+      onChange={onChange && (event => onChange(event.currentTarget.checked, event))} />
+    <span className="switch-track" aria-hidden="true" />
+  </div>;
+}
+
 export function TextField({ label, inputAttributes }) {
   return <label className="input-field" htmlFor={inputAttributes.id}>
     <span>{label}</span>

@@ -153,6 +153,10 @@ button:focus-visible, input:focus-visible { outline: none; }
 .native-accent-control input:checked + .switch-track { background: var(--accent); }
 .native-accent-control input:checked + .switch-track::after { transform: translateX(16px); }
 .native-accent-control input:focus-visible + .switch-track { outline: none; }
+.dialog-switch-label-group { display: flex; align-items: center; flex: 1; min-width: 0; gap: 4px; }
+.dialog-switch-label { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
+.dialog-switch-label:disabled { cursor: default; }
+.dialog-switch-label:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
 #include-selections:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 #enable-custom-themes:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 :root ::selection {
