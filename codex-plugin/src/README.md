@@ -1,6 +1,6 @@
 # Anyblob
 
-Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. The bundled plugin runs locally on Windows. Codex on another Windows or Linux host can connect through the SSH-tunneled MCP setup described in [remote access](../../docs/anyblob-remote-access.md).
+Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. The bundled plugin runs locally on Windows. Codex on another Windows or Linux host can connect through the Cloudflare Tunnel MCP setup described in [remote access](../../docs/anyblob-remote-access.md).
 
 ## Setup
 
@@ -21,7 +21,7 @@ For Codex running on another PC or server, enable remote access in BlobUI's Code
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.2.27. The version in codex-plugin/src/plugin.json covers the plugin and its bundled MCP executable. Keep the compatibility manifest version in sync. Bump both for plugin or MCP releases, then build Settings to ship that package. BlobUI-only changes do not require an Anyblob version bump. File comparisons also detect rebuilt or incomplete packages with unchanged versions.
+The current Anyblob release version is 0.2.28. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge, and can use Cloudflare Quick Tunnels or a named tunnel. See [remote access setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 

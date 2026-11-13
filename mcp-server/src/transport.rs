@@ -1,7 +1,7 @@
 //! Windows transport is separate from stdio MCP and the typed operations.
 use std::{
     io::{self, Read, Write},
-    net::{SocketAddr, TcpStream},
+    net::TcpStream,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -17,20 +17,30 @@ pub trait Bridge {
     fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>>;
 }
 
-fn loopback_address(value: &str) -> io::Result<SocketAddr> {
-    let address: SocketAddr = value.parse().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid remote Anyblob address.",
-        )
-    })?;
-    if !address.ip().is_loopback() {
+fn tunnel_endpoint(value: &str) -> io::Result<String> {
+    let mut url = reqwest::Url::parse(value)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid remote Anyblob URL."))?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "Remote Anyblob must use a loopback address through an SSH tunnel.",
+            io::ErrorKind::InvalidInput,
+            "Remote Anyblob requires an HTTPS tunnel URL without credentials, query, or fragment.",
         ));
     }
-    Ok(address)
+    if !url.path().ends_with("/anyblob") {
+        let path = format!("{}/anyblob", url.path().trim_end_matches('/'));
+        url.set_path(&path);
+    }
+    Ok(url.to_string())
+}
+
+fn valid_remote_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub struct TcpBridge {
@@ -50,34 +60,6 @@ impl TcpBridge {
             writer: Mutex::new(stream),
             connected: AtomicBool::new(true),
         })
-    }
-
-    pub fn connect_remote(cancel: &AtomicBool, deadline: Instant) -> io::Result<Self> {
-        let value = std::env::var("ANYBLOB_REMOTE_ADDRESS").map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "Remote Anyblob address is not configured.",
-            )
-        })?;
-        let address = loopback_address(&value)?;
-        loop {
-            stopped(cancel, deadline)?;
-            let timeout = deadline
-                .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(500));
-            match TcpStream::connect_timeout(&address, timeout) {
-                Ok(stream) => return Self::from_stream(stream),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::ConnectionRefused | io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    std::thread::sleep(Duration::from_millis(50))
-                }
-                Err(error) => return Err(error),
-            }
-        }
     }
 }
 
@@ -338,11 +320,13 @@ mod windows {
                     ERROR_NO_DATA | ERROR_BROKEN_PIPE => {
                         // A canceled typeahead can close its handle before our polling accept.
                         // Reset this instance instead of terminating the entire bridge listener.
-                        if DisconnectNamedPipe(self.0)==0 && GetLastError()!=ERROR_PIPE_NOT_CONNECTED {
+                        if DisconnectNamedPipe(self.0) == 0
+                            && GetLastError() != ERROR_PIPE_NOT_CONNECTED
+                        {
                             return Err(io::Error::last_os_error());
                         }
                         Ok(false)
-                    },
+                    }
                     _ => Err(io::Error::last_os_error()),
                 }
             }
@@ -370,10 +354,10 @@ mod windows {
                 Ok(Self(handle))
             }
         }
-        pub fn connect_wait(cancel:&AtomicBool, deadline:Instant)->io::Result<Self> {
+        pub fn connect_wait(cancel: &AtomicBool, deadline: Instant) -> io::Result<Self> {
             let startup_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
             loop {
-                stopped(cancel,deadline)?;
+                stopped(cancel, deadline)?;
                 match Self::connect() {
                     Ok(pipe)=>return Ok(pipe),
                     Err(error) if error.raw_os_error()==Some(ERROR_PIPE_BUSY as i32)=>{
@@ -562,6 +546,104 @@ mod tests {
         drop((client, recovered));
     }
 }
+struct HttpBridge {
+    client: reqwest::blocking::Client,
+    endpoint: String,
+    token: String,
+    response: Mutex<Option<Vec<u8>>>,
+    connected: AtomicBool,
+}
+
+impl HttpBridge {
+    fn connect() -> io::Result<Self> {
+        let address = std::env::var("ANYBLOB_REMOTE_ADDRESS").map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "Remote Anyblob URL is not configured.",
+            )
+        })?;
+        let endpoint = tunnel_endpoint(&address)?;
+        let token = std::env::var("ANYBLOB_REMOTE_TOKEN").map_err(|_| {
+            io::Error::new(io::ErrorKind::NotFound, "ANYBLOB_REMOTE_TOKEN is not set.")
+        })?;
+        if !valid_remote_token(&token) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "ANYBLOB_REMOTE_TOKEN must be a 64-character hexadecimal key.",
+            ));
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(CALL_TIMEOUT)
+            .build()
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+        Ok(Self {
+            client,
+            endpoint,
+            token,
+            response: Mutex::new(None),
+            connected: AtomicBool::new(true),
+        })
+    }
+}
+
+impl Bridge for HttpBridge {
+    fn connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
+        stopped(cancel, deadline)?;
+        if bytes.len() > MAX_FRAME {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Bridge frame too large.",
+            ));
+        }
+        let timeout = deadline.saturating_duration_since(Instant::now());
+        let result = self
+            .client
+            .post(&self.endpoint)
+            .bearer_auth(&self.token)
+            .timeout(timeout)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(bytes.to_vec())
+            .send()
+            .and_then(|response| {
+                if !response.status().is_success() {
+                    return Err(response.error_for_status().unwrap_err());
+                }
+                response.bytes()
+            })
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+        if result.len() > MAX_FRAME + 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Bridge response too large.",
+            ));
+        }
+        *self
+            .response
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Bridge response unavailable."))? =
+            Some(result.to_vec());
+        Ok(())
+    }
+
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>> {
+        stopped(cancel, deadline)?;
+        self.response
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Bridge response unavailable."))?
+            .take()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Remote bridge returned no response.",
+                )
+            })
+    }
+}
+
 pub fn call(request: &crate::Request, cancel: &AtomicBool) -> Result<crate::Response, String> {
     call_with_approval(request, cancel, &|_, _| {
         Err("Update Codex or use a client supporting form elicitation.".into())
@@ -574,7 +656,7 @@ pub fn call_with_approval(
 ) -> Result<crate::Response, String> {
     let deadline = Instant::now() + CALL_TIMEOUT;
     if std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some() {
-        let bridge = TcpBridge::connect_remote(cancel, deadline).map_err(|e| e.to_string())?;
+        let bridge = HttpBridge::connect().map_err(|e| e.to_string())?;
         return call_on_bridge(&bridge, request, cancel, deadline, approve);
     }
     #[cfg(windows)]
@@ -586,7 +668,7 @@ pub fn call_with_approval(
     {
         let _ = (request, cancel, approve);
         Err(
-            "Set ANYBLOB_REMOTE_ADDRESS to a loopback SSH tunnel before using remote Anyblob."
+            "Set ANYBLOB_REMOTE_ADDRESS to the HTTPS Cloudflare Tunnel URL before using remote Anyblob."
                 .into(),
         )
     }
@@ -623,7 +705,7 @@ fn call_on_bridge(
                 if response.result.is_none() && response.error.is_none() {
                     return Err(crate::approval::UPDATE.into());
                 }
-                    return Ok(response)
+                return Ok(response);
             }
             crate::approval::Frame::ApprovalRequest {
                 version,
@@ -654,7 +736,7 @@ fn call_on_bridge(
 
 #[cfg(test)]
 mod tcp_tests {
-    use super::{loopback_address, Bridge, TcpBridge, MAX_FRAME};
+    use super::{tunnel_endpoint, valid_remote_token, Bridge, TcpBridge, MAX_FRAME};
     use std::io::{self, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::AtomicBool;
@@ -674,20 +756,33 @@ mod tcp_tests {
     }
 
     #[test]
-    fn remote_address_must_be_loopback() {
-        assert!(loopback_address("127.0.0.1:31420")
-            .unwrap()
-            .ip()
-            .is_loopback());
-        assert!(loopback_address("[::1]:31420").unwrap().ip().is_loopback());
+    fn remote_url_requires_https_and_targets_only_the_bridge() {
         assert_eq!(
-            loopback_address("192.0.2.1:31420").unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
+            tunnel_endpoint("https://example.trycloudflare.com").unwrap(),
+            "https://example.trycloudflare.com/anyblob"
         );
         assert_eq!(
-            loopback_address("localhost:31420").unwrap_err().kind(),
-            io::ErrorKind::InvalidInput
+            tunnel_endpoint("https://anyblob.example.com/base").unwrap(),
+            "https://anyblob.example.com/base/anyblob"
         );
+        for invalid in [
+            "http://example.trycloudflare.com",
+            "https://user:pass@example.com",
+            "https://example.com/?token=secret",
+            "https://example.com/#secret",
+        ] {
+            assert_eq!(
+                tunnel_endpoint(invalid).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
+
+    #[test]
+    fn remote_token_requires_a_64_character_hex_key() {
+        assert!(valid_remote_token(&"a".repeat(64)));
+        assert!(!valid_remote_token("short"));
+        assert!(!valid_remote_token(&"g".repeat(64)));
     }
 
     #[test]
