@@ -53,8 +53,8 @@
 
 ## Developer Changelogs
 
-- Added linux support.
-- Added linux versions of all scripts.
+- Added Linux support. (User#pxlarified)
+- Added Linux versions of all scripts. (User#pxlarified)
 - Added a new F10 hotkey that opens a component catalog.
 - Added public GitHub project so you can see the development process easier.
 - Improved the GitHub repo overall.
