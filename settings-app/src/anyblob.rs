@@ -1,5 +1,8 @@
 //! Anyblob's trust boundary. Only saved settings authorize reads.
-use blobui_mcp::{Operation, Request, Response};
+use blobui_mcp::{
+    transport::{Bridge, TcpBridge},
+    Operation, Request, Response,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -64,6 +67,7 @@ fn configure_at(
     path: &std::path::Path,
     credential: &std::path::Path,
     enabled: bool,
+    remote_access: bool,
 ) -> Result<(), String> {
     use crate::storage as store;
     blobui_mcp::credential::reject_links(credential)?;
@@ -87,9 +91,19 @@ fn configure_at(
     } else {
         json!({})
     };
-    let fields = state.as_object_mut().ok_or("Anyblob settings must contain an object.")?;
+    let fields = state
+        .as_object_mut()
+        .ok_or("Anyblob settings must contain an object.")?;
     fields.insert("enabled".into(), json!(enabled));
-    fields.insert("verifier".into(), json!(if enabled { digest(&token) } else { String::new() }));
+    fields.insert("remoteAccess".into(), json!(enabled && remote_access));
+    fields.insert(
+        "verifier".into(),
+        json!(if enabled {
+            digest(&token)
+        } else {
+            String::new()
+        }),
+    );
     let state = serde_json::to_vec(&state).map_err(|_| "Could not encode Anyblob settings.")?;
     let state_temp = store::prepare_temp(path, &state, None, false)?;
     let secret_temp = match encrypted
@@ -148,21 +162,48 @@ fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bo
             .ok()
             .is_none_or(|token| authenticate(&value, &token).is_err())
     {
-        configure_at(path, credential, true)?;
+        configure_at(path, credential, true, false)?;
     } else if !enabled && credential.exists() {
-        configure_at(path, credential, false)?;
+        configure_at(path, credential, false, false)?;
     }
     Ok(enabled)
 }
+pub const REMOTE_BRIDGE_PORT: u16 = 31420;
+
 #[tauri::command]
 pub fn anyblob_status() -> Result<Value, String> {
-    Ok(json!({"enabled":migrate()?}))
+    let enabled = migrate()?;
+    let current = state()?;
+    Ok(
+        json!({"enabled":enabled,"remoteAccess":current["remoteAccess"] == true,"remotePort":REMOTE_BRIDGE_PORT}),
+    )
 }
 #[tauri::command]
 pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
-    configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
-    Ok(json!({"enabled":enabled}))
+    configure_at(
+        &bridge_path()?,
+        &blobui_mcp::credential::path()?,
+        enabled,
+        false,
+    )?;
+    Ok(json!({"enabled":enabled,"remoteAccess":false}))
+}
+#[tauri::command]
+pub fn configure_anyblob_remote(enabled: bool) -> Result<Value, String> {
+    let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
+    let path = bridge_path()?;
+    let credential = blobui_mcp::credential::path()?;
+    if !migrate_at(&path, &credential)? {
+        return Err("Enable Anyblob before allowing remote connections.".into());
+    }
+    configure_at(&path, &credential, true, enabled)?;
+    let token = if enabled {
+        blobui_mcp::credential::read_at(&credential)?
+    } else {
+        String::new()
+    };
+    Ok(json!({"enabled":enabled,"remotePort":REMOTE_BRIDGE_PORT,"token":token}))
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
     let data = crate::load_settings_data(&install()?)?;
@@ -352,7 +393,7 @@ fn guarded_read(
 }
 #[cfg(windows)]
 fn pipe_prompt(
-    pipe: &blobui_mcp::transport::Pipe,
+    pipe: &impl Bridge,
     operation_id: &str,
     op: &Operation,
     check: &dyn Fn() -> Result<(), String>,
@@ -607,7 +648,7 @@ fn dispatch_resolved_with(
 }
 #[cfg(windows)]
 fn dispatch(
-    pipe: &blobui_mcp::transport::Pipe,
+    pipe: &impl Bridge,
     request: Request,
     connected: impl Fn() -> bool,
 ) -> Result<Value, String> {
@@ -636,10 +677,128 @@ fn publication_event(operation: &Operation, result: &Result<Value, String>) -> O
         "revision":value["revision"], "publishedAt":value["published_at"]}))
 }
 
+#[cfg(windows)]
+fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
+    use blobui_mcp::approval::{Frame, VERSION};
+    if !matches!(stream.peer_addr(), Ok(peer) if peer.ip().is_loopback()) {
+        return;
+    }
+    let bridge = match TcpBridge::from_stream(stream) {
+        Ok(bridge) => bridge,
+        Err(_) => return,
+    };
+    let cancel = AtomicBool::new(false);
+    let deadline = Instant::now() + blobui_mcp::transport::CALL_TIMEOUT;
+    let started = Instant::now();
+    let result = (|| {
+        let bytes = bridge
+            .receive(&cancel, Instant::now() + Duration::from_secs(5))
+            .map_err(|_| "Invalid remote Anyblob request.")?;
+        let envelope: Value =
+            serde_json::from_slice(&bytes).map_err(|_| "Invalid remote Anyblob request.")?;
+        if envelope["version"] != VERSION {
+            return Err(blobui_mcp::approval::UPDATE.into());
+        }
+        let mut request: Request = serde_json::from_value(envelope["request"].clone())
+            .map_err(|_| "Invalid remote Anyblob request.")?;
+        if state()
+            .map(|value| value["remoteAccess"] == true)
+            .unwrap_or(false)
+            == false
+        {
+            return Err("SSH remote access is disabled in BlobUI.".into());
+        }
+        // A remote thread ID cannot prove membership in the host's local Codex project.
+        request.thread_id = None;
+        let operation = request.request.name().to_owned();
+        let requested_operation = request.request.clone();
+        let result = dispatch(&bridge, request, || {
+            Instant::now() < deadline && bridge.connected()
+        });
+        if let Some(payload) = publication_event(&requested_operation, &result) {
+            use tauri::Emitter;
+            let _ = app.emit("blobui-saved-state-changed", payload);
+        }
+        eprintln!(
+            "anyblob remote operation={operation} elapsed_ms={} outcome={}",
+            started.elapsed().as_millis(),
+            if result.is_ok() { "allowed" } else { "denied" }
+        );
+        result
+    })();
+    let response = match result {
+        Ok(value) => Response {
+            result: Some(value),
+            error: None,
+        },
+        Err(error) => Response {
+            result: None,
+            error: Some(error),
+        },
+    };
+    let frame = Frame::Response {
+        version: VERSION,
+        response,
+    };
+    if let Ok(bytes) = serde_json::to_vec(&frame) {
+        let _ = bridge.send(&bytes, &cancel, deadline);
+    }
+}
+
+#[cfg(windows)]
+fn start_remote_bridge(app: tauri::AppHandle) {
+    use std::{
+        net::TcpListener,
+        sync::{atomic::AtomicUsize, Arc},
+    };
+    std::thread::spawn(move || {
+        let active = Arc::new(AtomicUsize::new(0));
+        loop {
+            let listener = match TcpListener::bind(("127.0.0.1", REMOTE_BRIDGE_PORT)) {
+                Ok(listener) => listener,
+                Err(error) => {
+                    eprintln!("Anyblob SSH bridge could not bind its loopback port: {error}");
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+            };
+            if listener.set_nonblocking(true).is_err() {
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        if active.load(Ordering::Acquire) >= 15 {
+                            continue;
+                        }
+                        active.fetch_add(1, Ordering::AcqRel);
+                        let active = active.clone();
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            serve_remote_connection(stream, app);
+                            active.fetch_sub(1, Ordering::AcqRel);
+                        });
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(30));
+                    }
+                    Err(error) => {
+                        eprintln!("Anyblob SSH bridge accept failed: {error}");
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
 pub fn start(_app: tauri::AppHandle) {
     if migrate().is_err() {
         eprintln!("Anyblob credential setup needs attention in Settings.");
     }
+    #[cfg(windows)]
+    start_remote_bridge(_app.clone());
     #[cfg(windows)]
     std::thread::spawn(move || {
         use blobui_mcp::transport::{Pipe, CALL_TIMEOUT};
@@ -1692,14 +1851,14 @@ mod credential_tests {
         assert_eq!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
         for failed in [&secret, &state_path] {
             crate::storage::FAIL_AFTER_REPLACE.with(|v| *v.borrow_mut() = Some(failed.clone()));
-            assert!(configure_at(&state_path, &secret, true).is_err());
+            assert!(configure_at(&state_path, &secret, true, false).is_err());
             assert_eq!(std::fs::read(&secret).unwrap(), saved_secret);
             assert_eq!(std::fs::read(&state_path).unwrap(), saved_state);
         }
-        configure_at(&state_path, &secret, false).unwrap();
+        configure_at(&state_path, &secret, false, false).unwrap();
         assert!(!secret.exists());
         assert!(authenticate(&crate::read_json_file(&state_path).unwrap(), &token).is_err());
-        configure_at(&state_path, &secret, true).unwrap();
+        configure_at(&state_path, &secret, true, false).unwrap();
         assert_ne!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
         std::fs::write(&secret, b"corrupted credential").unwrap();
         assert!(migrate_at(&state_path, &secret).unwrap());
