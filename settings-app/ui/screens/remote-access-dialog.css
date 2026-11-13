@@ -1,3 +1,5 @@
+.anyblob-integration-settings + .anyblob-integration-settings { margin-top: 16px; }
+
 .confirm-dialog.anyblob-remote-dialog {
   display: flex;
   flex-direction: column;
@@ -36,12 +38,18 @@
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 
+.anyblob-remote-dialog .anyblob-remote-dialog-group {
+  display: grid;
+  gap: 8px;
+}
+
 .anyblob-remote-dialog .anyblob-remote-dialog-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 12px;
+  padding: 8px 0;
 }
 
 .anyblob-remote-dialog .anyblob-remote-dialog-row .kanban-setting-copy {
@@ -57,6 +65,26 @@
   border-radius: 18px;
   background: var(--input-bg);
   color: var(--text);
+}
+
+.anyblob-remote-dialog .anyblob-remote-key-field {
+  gap: 12px;
+  padding: 8px 0;
+  border: 0;
+}
+
+.anyblob-remote-dialog .anyblob-remote-key-field > label {
+  flex: 0 0 80px;
+}
+
+.anyblob-remote-dialog .anyblob-remote-key-field .visibility-field {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.anyblob-remote-dialog .anyblob-remote-key-field .visibility-toggle {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .anyblob-remote-dialog .anyblob-remote-dialog-row .banner-image-button {

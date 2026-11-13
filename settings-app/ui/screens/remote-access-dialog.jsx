@@ -1,19 +1,39 @@
-import React from "react";
-import { Button, SettingsGroup, SettingsRow } from "../shared/settings-controls.jsx";
+import React, { useEffect, useRef } from "react";
+import { Button, SettingsRow, VisibilityTextField } from "../shared/settings-controls.jsx";
 import "./remote-access-dialog.css";
+
+function RemoteAccessKeyField({ value }) {
+  const input = useRef(null);
+  const button = useRef(null);
+
+  useEffect(() => {
+    if (!input.current || !button.current || !window.VisibilityField) return;
+    const controller = window.VisibilityField.bind({
+      input: input.current,
+      button: button.current,
+      field: input.current.closest(".visibility-field"),
+      showLabel: "Show remote access key",
+      hideLabel: "Hide remote access key",
+      defaultVisible: false,
+    });
+    return () => controller.destroy();
+  }, []);
+
+  return <VisibilityTextField label="Key" className="input-field advanced-row anyblob-remote-dialog-key-field"
+    inputAttributes={{ id: "anyblob-remote-access-key", ref: input, type: "password", defaultValue: value, readOnly: true, autoComplete: "off", spellCheck: false }}
+    buttonAttributes={{ ref: button, className: "visibility-toggle", "aria-controls": "anyblob-remote-access-key", "aria-pressed": "false", "aria-label": "Show remote access key", title: "Show remote access key" }} />;
+}
 
 export function RemoteAccessDialog({
   dialogRef,
   closeRef,
   remoteToken,
-  remoteTokenVisible,
   remoteCopied,
   tunnelUrl,
   tunnelChanging,
   tunnelCopied,
   status,
   onClose,
-  onToggleRemoteToken,
   onCopyRemoteToken,
   onStartTunnel,
   onStopTunnel,
@@ -36,7 +56,7 @@ export function RemoteAccessDialog({
       <button ref={closeRef} type="button" className="neutral-icon-button" aria-label="Close remote access" onClick={onClose}>×</button>
     </header>
     <div className="anyblob-remote-dialog-content">
-      <SettingsGroup>
+      <div className="anyblob-remote-dialog-group">
         <SettingsRow
           className="settings-row anyblob-remote-dialog-row"
           label="Remote access key"
@@ -46,21 +66,9 @@ export function RemoteAccessDialog({
             {remoteCopied ? "Copied" : "Copy key"}
           </Button>
         </SettingsRow>
-        {remoteToken && <div className="settings-row anyblob-remote-dialog-row">
-          <input
-            id="anyblob-remote-access-key"
-            aria-label="Remote Anyblob key"
-            type={remoteTokenVisible ? "text" : "password"}
-            value={remoteToken}
-            readOnly
-            autoComplete="off"
-          />
-          <Button className="banner-image-button" aria-controls="anyblob-remote-access-key" onClick={onToggleRemoteToken}>
-            {remoteTokenVisible ? "Hide" : "Show"}
-          </Button>
-        </div>}
-      </SettingsGroup>
-      <SettingsGroup>
+        {remoteToken && <RemoteAccessKeyField value={remoteToken} />}
+      </div>
+      <div className="anyblob-remote-dialog-group">
         <SettingsRow
           className="settings-row anyblob-remote-dialog-row"
           label="Cloudflare Quick Tunnel"
@@ -80,7 +88,7 @@ export function RemoteAccessDialog({
             {tunnelCopied ? "Copied" : "Copy URL"}
           </Button>
         </div>}
-      </SettingsGroup>
+      </div>
       <p className="anyblob-remote-dialog-status" role="status">{status}</p>
       <div className="anyblob-remote-dialog-instructions">
         <h3>Setup instructions</h3>
