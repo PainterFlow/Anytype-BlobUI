@@ -1,11 +1,202 @@
 //! Windows transport is separate from stdio MCP and the typed operations.
 use std::{
-    io,
-    sync::atomic::{AtomicBool, Ordering},
+    io::{self, Read, Write},
+    net::{SocketAddr, TcpStream},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(180);
+
+pub trait Bridge {
+    fn connected(&self) -> bool;
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()>;
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>>;
+}
+
+fn loopback_address(value: &str) -> io::Result<SocketAddr> {
+    let address: SocketAddr = value.parse().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid remote Anyblob address.",
+        )
+    })?;
+    if !address.ip().is_loopback() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "Remote Anyblob must use a loopback address through an SSH tunnel.",
+        ));
+    }
+    Ok(address)
+}
+
+pub struct TcpBridge {
+    reader: Mutex<TcpStream>,
+    writer: Mutex<TcpStream>,
+    connected: AtomicBool,
+}
+
+impl TcpBridge {
+    pub fn from_stream(stream: TcpStream) -> io::Result<Self> {
+        stream.set_nodelay(true)?;
+        stream.set_read_timeout(Some(Duration::from_millis(50)))?;
+        stream.set_write_timeout(Some(Duration::from_millis(50)))?;
+        let reader = stream.try_clone()?;
+        Ok(Self {
+            reader: Mutex::new(reader),
+            writer: Mutex::new(stream),
+            connected: AtomicBool::new(true),
+        })
+    }
+
+    pub fn connect_remote(cancel: &AtomicBool, deadline: Instant) -> io::Result<Self> {
+        let value = std::env::var("ANYBLOB_REMOTE_ADDRESS").map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "Remote Anyblob address is not configured.",
+            )
+        })?;
+        let address = loopback_address(&value)?;
+        loop {
+            stopped(cancel, deadline)?;
+            let timeout = deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(500));
+            match TcpStream::connect_timeout(&address, timeout) {
+                Ok(stream) => return Self::from_stream(stream),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::ConnectionRefused | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    std::thread::sleep(Duration::from_millis(50))
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+fn read_exact_until(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    cancel: &AtomicBool,
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut read = 0;
+    while read < buffer.len() {
+        stopped(cancel, deadline)?;
+        match stream.read(&mut buffer[read..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Bridge disconnected.",
+                ))
+            }
+            Ok(count) => read += count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::Interrupted
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn write_all_until(
+    stream: &mut TcpStream,
+    buffer: &[u8],
+    cancel: &AtomicBool,
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < buffer.len() {
+        stopped(cancel, deadline)?;
+        match stream.write(&buffer[written..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "Bridge disconnected.",
+                ))
+            }
+            Ok(count) => written += count,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::Interrupted
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+impl Bridge for TcpBridge {
+    fn connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
+        if bytes.len() > MAX_FRAME {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Bridge frame too large.",
+            ));
+        }
+        let result = (|| {
+            let mut stream = self
+                .writer
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Bridge stream unavailable."))?;
+            write_all_until(
+                &mut stream,
+                &(bytes.len() as u32).to_le_bytes(),
+                cancel,
+                deadline,
+            )?;
+            write_all_until(&mut stream, bytes, cancel, deadline)
+        })();
+        if result.is_err() {
+            self.connected.store(false, Ordering::Release);
+        }
+        result
+    }
+
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>> {
+        let result = (|| {
+            let mut stream = self
+                .reader
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Bridge stream unavailable."))?;
+            let mut header = [0; 4];
+            read_exact_until(&mut stream, &mut header, cancel, deadline)?;
+            let size = u32::from_le_bytes(header) as usize;
+            if size > MAX_FRAME {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Bridge frame too large.",
+                ));
+            }
+            let mut bytes = vec![0; size];
+            read_exact_until(&mut stream, &mut bytes, cancel, deadline)?;
+            Ok(bytes)
+        })();
+        if result.is_err() {
+            self.connected.store(false, Ordering::Release);
+        }
+        result
+    }
+}
 fn stopped(cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
     if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
         Err(io::Error::new(
@@ -291,37 +482,82 @@ mod windows {
 }
 #[cfg(windows)]
 pub use windows::Pipe;
-#[cfg(all(test,windows))]
+#[cfg(windows)]
+impl Bridge for Pipe {
+    fn connected(&self) -> bool {
+        Pipe::connected(self)
+    }
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
+        Pipe::send(self, bytes, cancel, deadline)
+    }
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>> {
+        Pipe::receive(self, cancel, deadline)
+    }
+}
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     #[test]
     fn aborted_typeahead_connections_do_not_poison_the_listener() {
-        std::env::set_var("ANYBLOB_BRIDGE_INSTANCE",format!("fixture-aborted-{}",std::process::id()));
-        let listener=Pipe::listen(true).unwrap();
+        std::env::set_var(
+            "ANYBLOB_BRIDGE_INSTANCE",
+            format!("fixture-aborted-{}", std::process::id()),
+        );
+        let listener = Pipe::listen(true).unwrap();
         for _ in 0..3 {
             let client = Pipe::connect().expect(
                 "Connect to the same-user fixture pipe. On access denied, run the test in a normal Windows session outside the restricted sandbox.",
             );
             drop(client);
-            assert!(!listener.accept().expect("A client that leaves before accept must reset the listener"));
+            assert!(!listener
+                .accept()
+                .expect("A client that leaves before accept must reset the listener"));
             assert!(!listener.accept().unwrap()); // Re-arm the disconnected instance on the next poll.
         }
-        let client=Pipe::connect().unwrap();assert!(listener.accept().unwrap());
-        let cancel=AtomicBool::new(false);
-        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_millis(20)).err().unwrap().kind(),io::ErrorKind::TimedOut);
-        let waiting=std::thread::spawn(||Pipe::connect_wait(&AtomicBool::new(false),Instant::now()+Duration::from_secs(5)));
-        let next=Pipe::listen(false).unwrap();
-        let second=waiting.join().unwrap().expect("Concurrent searches wait for the next pipe instance");
+        let client = Pipe::connect().unwrap();
+        assert!(listener.accept().unwrap());
+        let cancel = AtomicBool::new(false);
+        assert_eq!(
+            Pipe::connect_wait(&cancel, Instant::now() + Duration::from_millis(20))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        let waiting = std::thread::spawn(|| {
+            Pipe::connect_wait(
+                &AtomicBool::new(false),
+                Instant::now() + Duration::from_secs(5),
+            )
+        });
+        let next = Pipe::listen(false).unwrap();
+        let second = waiting
+            .join()
+            .unwrap()
+            .expect("Concurrent searches wait for the next pipe instance");
         assert!(next.accept().unwrap());
-        cancel.store(true,Ordering::Release);
-        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_secs(5)).err().unwrap().kind(),io::ErrorKind::TimedOut);
-        drop((second,next,client,listener));
+        cancel.store(true, Ordering::Release);
+        assert_eq!(
+            Pipe::connect_wait(&cancel, Instant::now() + Duration::from_secs(5))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        drop((second, next, client, listener));
         // A temporarily absent listener may recover without replaying a request.
-        let waiting = std::thread::spawn(|| Pipe::connect_wait(
-            &AtomicBool::new(false), Instant::now() + Duration::from_secs(3)));
+        let waiting = std::thread::spawn(|| {
+            Pipe::connect_wait(
+                &AtomicBool::new(false),
+                Instant::now() + Duration::from_secs(3),
+            )
+        });
         std::thread::sleep(Duration::from_millis(50));
         let recovered = Pipe::listen(true).unwrap();
-        let client = waiting.join().unwrap().expect("Wait for a restarting bridge");
+        let client = waiting
+            .join()
+            .unwrap()
+            .expect("Wait for a restarting bridge");
         assert!(recovered.accept().unwrap());
         drop((client, recovered));
     }
@@ -336,11 +572,35 @@ pub fn call_with_approval(
     cancel: &AtomicBool,
     approve: &impl Fn(&str, Duration) -> Result<bool, String>,
 ) -> Result<crate::Response, String> {
+    let deadline = Instant::now() + CALL_TIMEOUT;
+    if std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some() {
+        let bridge = TcpBridge::connect_remote(cancel, deadline).map_err(|e| e.to_string())?;
+        return call_on_bridge(&bridge, request, cancel, deadline, approve);
+    }
     #[cfg(windows)]
     {
-        let deadline = Instant::now() + CALL_TIMEOUT;
         let pipe = Pipe::connect_wait(cancel, deadline).map_err(|e| e.to_string())?;
-        pipe.send(
+        call_on_bridge(&pipe, request, cancel, deadline, approve)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (request, cancel, approve);
+        Err(
+            "Set ANYBLOB_REMOTE_ADDRESS to a loopback SSH tunnel before using remote Anyblob."
+                .into(),
+        )
+    }
+}
+
+fn call_on_bridge(
+    bridge: &impl Bridge,
+    request: &crate::Request,
+    cancel: &AtomicBool,
+    deadline: Instant,
+    approve: &impl Fn(&str, Duration) -> Result<bool, String>,
+) -> Result<crate::Response, String> {
+    bridge
+        .send(
             &serde_json::to_vec(
                 &serde_json::json!({"version":crate::approval::VERSION,"request":request}),
             )
@@ -349,47 +609,128 @@ pub fn call_with_approval(
             deadline,
         )
         .map_err(|e| e.to_string())?;
-        loop {
-            let frame: crate::approval::Frame =
-                serde_json::from_slice(&pipe.receive(cancel, deadline).map_err(|e| e.to_string())?)
-                    .map_err(|_| crate::approval::UPDATE)?;
-            match frame {
-                crate::approval::Frame::Response { version, response }
-                    if version == crate::approval::VERSION =>
-                {
-                    if response.result.is_none() && response.error.is_none() {
-                        return Err(crate::approval::UPDATE.into());
-                    }
-                    return Ok(response)
+    loop {
+        let frame: crate::approval::Frame = serde_json::from_slice(
+            &bridge
+                .receive(cancel, deadline)
+                .map_err(|e| e.to_string())?,
+        )
+        .map_err(|_| crate::approval::UPDATE)?;
+        match frame {
+            crate::approval::Frame::Response { version, response }
+                if version == crate::approval::VERSION =>
+            {
+                if response.result.is_none() && response.error.is_none() {
+                    return Err(crate::approval::UPDATE.into());
                 }
-                crate::approval::Frame::ApprovalRequest {
+                    return Ok(response)
+            }
+            crate::approval::Frame::ApprovalRequest {
+                version,
+                operation_id,
+                approval_id,
+                message,
+            } if version == crate::approval::VERSION && operation_id == request.id => {
+                let accepted =
+                    approve(&message, deadline.saturating_duration_since(Instant::now()))?;
+                let decision = crate::approval::Frame::ApprovalDecision {
                     version,
                     operation_id,
                     approval_id,
-                    message,
-                } if version == crate::approval::VERSION && operation_id == request.id => {
-                    let accepted =
-                        approve(&message, deadline.saturating_duration_since(Instant::now()))?;
-                    let decision = crate::approval::Frame::ApprovalDecision {
-                        version,
-                        operation_id,
-                        approval_id,
-                        accepted,
-                    };
-                    pipe.send(
+                    accepted,
+                };
+                bridge
+                    .send(
                         &serde_json::to_vec(&decision).map_err(|_| "Invalid decision")?,
                         cancel,
                         deadline,
                     )
                     .map_err(|e| e.to_string())?;
-                }
-                _ => return Err(crate::approval::UPDATE.into()),
             }
+            _ => return Err(crate::approval::UPDATE.into()),
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = (request, cancel, approve);
-        Err("Anyblob requires local Windows execution alongside BlobUI.".into())
+}
+
+#[cfg(test)]
+mod tcp_tests {
+    use super::{loopback_address, Bridge, TcpBridge, MAX_FRAME};
+    use std::io::{self, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::AtomicBool;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    fn streams() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let server = listener.accept().unwrap().0;
+        (client, server)
+    }
+
+    fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(3)
+    }
+
+    #[test]
+    fn remote_address_must_be_loopback() {
+        assert!(loopback_address("127.0.0.1:31420")
+            .unwrap()
+            .ip()
+            .is_loopback());
+        assert!(loopback_address("[::1]:31420").unwrap().ip().is_loopback());
+        assert_eq!(
+            loopback_address("192.0.2.1:31420").unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            loopback_address("localhost:31420").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[test]
+    fn tcp_bridge_round_trips_a_length_prefixed_frame() {
+        let (client_stream, server_stream) = streams();
+        let client = TcpBridge::from_stream(client_stream).unwrap();
+        let server = TcpBridge::from_stream(server_stream).unwrap();
+        let server_task = thread::spawn(move || {
+            let cancel = AtomicBool::new(false);
+            let request = server.receive(&cancel, deadline()).unwrap();
+            server.send(&request, &cancel, deadline()).unwrap();
+            request
+        });
+        let cancel = AtomicBool::new(false);
+        client.send(b"remote request", &cancel, deadline()).unwrap();
+        assert_eq!(
+            client.receive(&cancel, deadline()).unwrap(),
+            b"remote request"
+        );
+        assert_eq!(server_task.join().unwrap(), b"remote request");
+    }
+
+    #[test]
+    fn tcp_bridge_rejects_oversized_frames() {
+        let (client_stream, _server_stream) = streams();
+        let client = TcpBridge::from_stream(client_stream).unwrap();
+        let cancel = AtomicBool::new(false);
+        let oversized = vec![0; MAX_FRAME + 1];
+        assert_eq!(
+            client
+                .send(&oversized, &cancel, deadline())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let (bridge_stream, mut peer) = streams();
+        let bridge = TcpBridge::from_stream(bridge_stream).unwrap();
+        peer.write_all(&((MAX_FRAME as u32 + 1).to_le_bytes()))
+            .unwrap();
+        assert_eq!(
+            bridge.receive(&cancel, deadline()).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }
