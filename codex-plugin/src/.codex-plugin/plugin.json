@@ -1,6 +1,6 @@
 {
   "name": "anyblob",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "description": "Read and manage permitted Anytype content through BlobUI on Windows.",
   "requires_local_executor": true,
   "skills": "./skills/",
