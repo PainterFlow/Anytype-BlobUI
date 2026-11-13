@@ -109,6 +109,26 @@ struct ThemeFileLoad {
 }
 
 #[derive(Debug)]
+enum ThemeFileInspectionError {
+    NotFound(String),
+    Other(String),
+}
+
+impl ThemeFileInspectionError {
+    fn message(&self) -> &str {
+        match self {
+            Self::NotFound(message) | Self::Other(message) => message,
+        }
+    }
+}
+
+impl From<String> for ThemeFileInspectionError {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+
+#[derive(Debug)]
 struct ThemeMetadata {
     name: String,
     author: String,
@@ -153,13 +173,14 @@ pub(crate) fn list_themes(settings_directory: &Path) -> Result<ThemeCatalog, Str
         {
             continue;
         }
-        match inspect_theme_file(&path) {
-            Ok(loaded) => {
+        match inspect_theme_file_for_catalog(&path) {
+            Ok(Some(loaded)) => {
                 diagnostics.extend(loaded.diagnostics);
                 if let Some(theme) = loaded.theme {
                     themes.push(theme.summary);
                 }
             }
+            Ok(None) => {}
             Err(error) => diagnostics.push(ThemeDiagnostic::error(theme_file_error(&path, &error))),
         }
     }
@@ -509,7 +530,7 @@ fn selected_theme_path(settings_directory: &Path, id: &str) -> Result<PathBuf, S
 }
 
 fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
-    let loaded = inspect_theme_file(path).map_err(|error| theme_file_error(path, &error))?;
+    let loaded = inspect_theme_file(path).map_err(|error| theme_file_error(path, error.message()))?;
     loaded.theme.ok_or_else(|| {
         loaded
             .diagnostics
@@ -520,18 +541,38 @@ fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
     })
 }
 
-fn inspect_theme_file(path: &Path) -> Result<ThemeFileLoad, String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("Could not inspect theme file '{}': {error}", theme_file_name(path)))?;
+fn inspect_theme_file_for_catalog(path: &Path) -> Result<Option<ThemeFileLoad>, String> {
+    match inspect_theme_file(path) {
+        Ok(loaded) => Ok(Some(loaded)),
+        Err(ThemeFileInspectionError::NotFound(_)) => Ok(None),
+        Err(error) => Err(error.message().to_string()),
+    }
+}
+
+fn inspect_theme_file(path: &Path) -> Result<ThemeFileLoad, ThemeFileInspectionError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        let message = format!("Could not inspect theme file '{}': {error}", theme_file_name(path));
+        if error.kind() == ErrorKind::NotFound {
+            ThemeFileInspectionError::NotFound(message)
+        } else {
+            ThemeFileInspectionError::Other(message)
+        }
+    })?;
     reject_reparse_point(&metadata, path)?;
     if !metadata.is_file() || metadata.len() > MAX_THEME_BYTES {
         return Err(format!(
             "Theme file '{}' must be CSS and no larger than 1 MB.",
             theme_file_name(path)
-        ));
+        ).into());
     }
-    let contents = fs::read_to_string(path)
-        .map_err(|error| format!("Could not read theme '{}': {error}", theme_file_name(path)))?;
+    let contents = fs::read_to_string(path).map_err(|error| {
+        let message = format!("Could not read theme '{}': {error}", theme_file_name(path));
+        if error.kind() == ErrorKind::NotFound {
+            ThemeFileInspectionError::NotFound(message)
+        } else {
+            ThemeFileInspectionError::Other(message)
+        }
+    })?;
     let mut diagnostics = Vec::new();
     let header_result = parse_header(&contents);
     if let Err(error) = &header_result {
@@ -1022,9 +1063,24 @@ mod tests {
         ensure_builtin_themes(&settings).unwrap();
         let path = theme_directory(&settings).join("missing-theme.css");
         let inspected = inspect_theme_file(&path).unwrap_err();
-        let catalog_message = theme_file_error(&path, &inspected);
+        let catalog_message = theme_file_error(&path, inspected.message());
         let selected_message = read_theme_file(&path).unwrap_err();
         assert_eq!(selected_message, catalog_message);
+        let _ = fs::remove_dir_all(settings.parent().unwrap());
+    }
+
+    #[test]
+    fn theme_catalog_skips_files_that_disappear_before_inspection() {
+        let settings = test_directory("catalog-missing-file").join("Settings");
+        ensure_builtin_themes(&settings).unwrap();
+        let path = theme_directory(&settings).join("deleted.css");
+        fs::write(&path, "/*\nname: Deleted\nauthor: Example\n*/\n").unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(inspect_theme_file_for_catalog(&path).unwrap().is_none());
+        let catalog = list_themes(&settings).unwrap();
+        assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
+        assert!(!catalog.themes.iter().any(|theme| theme.id == "deleted.css"));
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
 
