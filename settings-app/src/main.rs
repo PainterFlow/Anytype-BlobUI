@@ -2453,6 +2453,7 @@ fn main() {
             marketplace::anyblob_installation_status,
             marketplace::install_anyblob_marketplace,
             anyblob::configure_anyblob,
+            anyblob::configure_anyblob_remote,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
