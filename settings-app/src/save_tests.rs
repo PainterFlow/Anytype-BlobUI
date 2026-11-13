@@ -400,6 +400,7 @@ fn theme_reload_rebuilds_both_css_outputs_from_the_current_preset_without_changi
     draft.enable_custom_themes = true;
     draft.based_theme = "dark".into();
     draft.theme_preset = "reload-fixture.css".into();
+    draft.include_selections = false;
     let data = json!({"installDirectory": install.to_string_lossy(), "settings": draft});
     let data_path = install.join("blob/data.json");
     let original_data = serde_json::to_vec_pretty(&data).unwrap();
@@ -419,6 +420,17 @@ fn theme_reload_rebuilds_both_css_outputs_from_the_current_preset_without_changi
     assert!(fs::read_to_string(&css_path).unwrap().contains("--color-bg-primary: #101010"));
     assert!(fs::read_to_string(settings.join("themes/generated.css")).unwrap().contains("--color-bg-primary: #101010"));
     assert!(result.state.custom_themes.iter().any(|theme| theme.id == "reload-fixture.css"));
+
+    fs::remove_file(theme_directory.join("reload-fixture.css")).unwrap();
+    let deleted = reload_custom_themes_blocking().expect("deleting the selected theme should fall back to the base theme");
+    assert!(deleted.css_rebuilt, "{:?}", deleted.state.theme_diagnostics);
+    assert_eq!(deleted.state.settings.theme_preset, "");
+    assert!(deleted.state.theme_diagnostics.is_empty(), "{:?}", deleted.state.theme_diagnostics);
+    assert_eq!(fs::read(&data_path).unwrap(), original_data, "Reload must not rewrite settings");
+    let fallback_css = fs::read_to_string(&css_path).unwrap();
+    assert!(fallback_css.contains("--color-bg-primary: #191918;"));
+    assert!(!fallback_css.contains("--color-bg-primary: #101010;"));
+    assert!(fallback_css.contains("--color-control-accent: #D4D4D4;"));
 
     let previous_css = fs::read(&css_path).unwrap();
     let generated_path = settings.join("themes/generated.css");

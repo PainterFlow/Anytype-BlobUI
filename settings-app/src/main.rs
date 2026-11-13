@@ -1264,7 +1264,8 @@ fn load_app_state() -> Result<AppState, String> {
             .filter(|ip| ip != DEFAULT_API_IP)
             .unwrap_or_default();
         has_saved_api_key = credential_exists && configured_api_state.unwrap_or(true);
-        let settings = settings_from_data(&data);
+        let mut settings = settings_from_data(&data);
+        themes::clear_missing_selected_theme(&settings_directory, &mut settings.theme_preset);
         (true, settings, None)
     } else {
         (

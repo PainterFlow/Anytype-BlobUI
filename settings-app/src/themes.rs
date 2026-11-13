@@ -140,6 +140,18 @@ pub(crate) fn theme_directory(settings_directory: &Path) -> PathBuf {
     settings_directory.join("themes").join("built-in-themes")
 }
 
+pub(crate) fn clear_missing_selected_theme(settings_directory: &Path, theme_id: &mut String) {
+    if theme_id.is_empty() {
+        return;
+    }
+    let Ok(path) = selected_theme_path(settings_directory, theme_id) else {
+        return;
+    };
+    if matches!(fs::symlink_metadata(path), Err(error) if error.kind() == ErrorKind::NotFound) {
+        theme_id.clear();
+    }
+}
+
 pub(crate) fn ensure_builtin_themes(settings_directory: &Path) -> Result<(), String> {
     ensure_directory(settings_directory)?;
     let themes = settings_directory.join("themes");
@@ -249,7 +261,7 @@ pub(crate) fn render_generated_css_with_include(
         None
     } else {
         let path = selected_theme_path(settings_directory, selected_id)?;
-        Some(read_theme_file(&path)?)
+        read_theme_file_if_present(&path)?
     };
     let resolved_theme = resolved_palette_mode(base_theme, &base_color)?;
 
@@ -336,8 +348,10 @@ pub(crate) fn effective_include_selections(settings_directory: &Path, data: &Val
         return Ok(user_setting);
     };
     ensure_builtin_themes(settings_directory)?;
-    let theme = read_theme_file(&selected_theme_path(settings_directory, theme_id)?)?;
-    Ok(theme.summary.accent_color_selection.unwrap_or(user_setting))
+    let theme = read_theme_file_if_present(&selected_theme_path(settings_directory, theme_id)?)?;
+    Ok(theme
+        .and_then(|theme| theme.summary.accent_color_selection)
+        .unwrap_or(user_setting))
 }
 
 pub(crate) fn preview_mode(data: &Value) -> Result<String, String> {
@@ -529,8 +543,16 @@ fn selected_theme_path(settings_directory: &Path, id: &str) -> Result<PathBuf, S
     Ok(theme_directory(settings_directory).join(id))
 }
 
-fn read_theme_file(path: &Path) -> Result<ThemeFile, String> {
-    let loaded = inspect_theme_file(path).map_err(|error| theme_file_error(path, error.message()))?;
+fn read_theme_file_if_present(path: &Path) -> Result<Option<ThemeFile>, String> {
+    let loaded = match inspect_theme_file(path) {
+        Ok(loaded) => loaded,
+        Err(ThemeFileInspectionError::NotFound(_)) => return Ok(None),
+        Err(error) => return Err(theme_file_error(path, error.message())),
+    };
+    theme_from_load(path, loaded).map(Some)
+}
+
+fn theme_from_load(path: &Path, loaded: ThemeFileLoad) -> Result<ThemeFile, String> {
     loaded.theme.ok_or_else(|| {
         loaded
             .diagnostics
@@ -1058,14 +1080,21 @@ mod tests {
     }
 
     #[test]
-    fn selected_theme_read_errors_use_the_catalog_filename_prefix() {
+    fn missing_selected_themes_are_ignored_but_invalid_files_still_error() {
         let settings = test_directory("selected-read-error").join("Settings");
         ensure_builtin_themes(&settings).unwrap();
-        let path = theme_directory(&settings).join("missing-theme.css");
-        let inspected = inspect_theme_file(&path).unwrap_err();
-        let catalog_message = theme_file_error(&path, inspected.message());
-        let selected_message = read_theme_file(&path).unwrap_err();
-        assert_eq!(selected_message, catalog_message);
+        let directory = theme_directory(&settings);
+        let missing = directory.join("missing-theme.css");
+        assert!(read_theme_file_if_present(&missing).unwrap().is_none());
+
+        let invalid = directory.join("invalid-theme.css");
+        fs::write(
+            &invalid,
+            "/*\nname: Invalid\nauthor: Example\nbased-theme: Dwe\n*/\n:root {}",
+        )
+        .unwrap();
+        let error = read_theme_file_if_present(&invalid).unwrap_err();
+        assert!(error.starts_with("invalid-theme.css:") && error.contains("Expected `Dark Mode` or `Light Mode`"), "{error}");
         let _ = fs::remove_dir_all(settings.parent().unwrap());
     }
 
@@ -1106,13 +1135,13 @@ mod tests {
         let themes = theme_directory(&settings);
         let bare = themes.join("bare.css");
         fs::write(&bare, "/*\nname: Bare\nauthor: Example\n*/\n").unwrap();
-        let summary = read_theme_file(&bare).unwrap().summary;
+        let summary = read_theme_file_if_present(&bare).unwrap().unwrap().summary;
         assert!(summary.accent_color.is_none());
         assert!(summary.accent_color_selection.is_none());
 
         let legacy = themes.join("legacy-accent.css");
         fs::write(&legacy, "/*\nname: Legacy\nauthor: Example\naccent-color: #27A879\naccent-color-selections: true\n*/\n").unwrap();
-        let summary = read_theme_file(&legacy).unwrap().summary;
+        let summary = read_theme_file_if_present(&legacy).unwrap().unwrap().summary;
         assert_eq!(summary.accent_color.as_deref(), Some("#27A879"));
         assert_eq!(summary.accent_color_selection, Some(true));
         let _ = fs::remove_dir_all(settings.parent().unwrap());
