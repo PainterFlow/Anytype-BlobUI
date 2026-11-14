@@ -258,8 +258,21 @@ pub const REMOTE_BRIDGE_PORT: u16 = 31420;
 
 #[tauri::command]
 pub fn anyblob_status() -> Result<Value, String> {
-    let enabled = migrate()?;
-    let current = state()?;
+    let current = match crate::acquire_save_guard(
+        "Wait for the current save before changing Anyblob.",
+    ) {
+        Ok(_guard) => {
+            let enabled = migrate_at(&bridge_path()?, &blobui_mcp::credential::path()?)?;
+            let mut current = state()?;
+            if let Some(fields) = current.as_object_mut() {
+                fields.insert("enabled".into(), json!(enabled));
+            }
+            current
+        }
+        Err(error) if error == "Wait for the current save before changing Anyblob." => state()?,
+        Err(error) => return Err(error),
+    };
+    let enabled = current["enabled"] == true;
     Ok(
         json!({"enabled":enabled,"remoteAccess":current["remoteAccess"] == true,"remotePort":REMOTE_BRIDGE_PORT}),
     )

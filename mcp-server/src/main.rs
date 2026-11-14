@@ -212,8 +212,8 @@ fn main() {
                         thread_id.as_deref().and_then(|thread| {
                             match blobui_mcp::codex_identity::resolve_remote(thread) {
                                 Ok(membership) => Some(membership),
-                                Err(_) => {
-                                    eprintln!("Anyblob could not resolve the remote Codex chat project.");
+                                Err(error) => {
+                                    eprintln!("Anyblob could not resolve the remote Codex chat project: {error}");
                                     None
                                 }
                             }

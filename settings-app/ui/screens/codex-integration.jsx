@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import { clearStaleSaveStatus } from "../anyblob-status.js";
 import { DialogSwitch, Switch } from "../shared/settings-controls.jsx";
 import { RemoteAccessDialog } from "./remote-access-dialog.jsx";
 
@@ -27,7 +28,7 @@ export function CodexIntegration() {
   const [remote,setRemote]=useState(false),[remoteToken,setRemoteToken]=useState(""),[remoteChanging,setRemoteChanging]=useState(false),[remoteCopied,setRemoteCopied]=useState(false),[tunnelUrl,setTunnelUrl]=useState(""),[tunnelChanging,setTunnelChanging]=useState(false),[tunnelCopied,setTunnelCopied]=useState(false),[remoteDialogRequested,setRemoteDialogRequested]=useState(false);
   const integrationEpoch=useRef(0),installationEpoch=useRef(0),backdrop=useRef(null),dialog=useRef(null),done=useRef(null),modal=useRef(null),remoteBackdrop=useRef(null),remoteDialog=useRef(null),remoteClose=useRef(null),remoteModal=useRef(null);
   const remoteCopyTimer=useRef(null),tunnelCopyTimer=useRef(null);
-  const refresh=async()=>{if(!api)return;const epoch=++integrationEpoch.current;try{const value=await api.invoke("anyblob_status");if(epoch===integrationEpoch.current){setEnabled(value.enabled);setRemote(value.enabled&&value.remoteAccess===true);}}catch(error){if(epoch===integrationEpoch.current)setStatus(String(error.message||error));}};
+  const refresh=async()=>{if(!api)return;const epoch=++integrationEpoch.current;try{const value=await api.invoke("anyblob_status");if(epoch===integrationEpoch.current){setEnabled(value.enabled);setRemote(value.enabled&&value.remoteAccess===true);setStatus(clearStaleSaveStatus);}}catch(error){if(epoch===integrationEpoch.current)setStatus(String(error.message||error));}};
   const refreshInstallation=async()=>{if(!api||installing)return;const epoch=++installationEpoch.current;try{const value=await api.invoke("anyblob_installation_status");if(epoch===installationEpoch.current)setInstallation(value);}catch(error){if(epoch===installationEpoch.current){setInstallation(null);setStatus(String(error.message||error));}}};
   useEffect(()=>{if(!api)return;void refresh();void refreshInstallation();return()=>{integrationEpoch.current++;installationEpoch.current++;};},[api]);
   useEffect(()=>UI().AppReload?.register(()=>Promise.allSettled([refresh(),refreshInstallation()])),[api,installing]);
