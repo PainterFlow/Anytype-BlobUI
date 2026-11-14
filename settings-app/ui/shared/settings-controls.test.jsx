@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CopyTextField } from "./copy-text-field.jsx";
+import { HelpTooltip } from "./help-tooltip.jsx";
+import { GlobeIcon } from "./catalog-icons.jsx";
 import { ExpandableSearch } from "./search.jsx";
 import { DialogSwitch } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
@@ -90,5 +92,23 @@ describe("Settings controls", () => {
     expect(popover.parentElement).toBe(document.body);
     expect(popover.dataset.open).toBe("true");
     expect(popover.textContent).toBe("This text stays above the row.");
+  });
+
+  it("keeps globe help on the shared focus and hover tooltip behavior", () => {
+    render(<HelpTooltip label="Cloud project information" text="Cloud access is scoped to its host." icon={<GlobeIcon />} />);
+    const trigger = screen.getByRole("button", { name: "Cloud project information" });
+    expect(trigger.querySelector("svg circle")).not.toBeNull();
+    expect(trigger.querySelector("svg path")).not.toBeNull();
+    const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
+    expect(popover.getAttribute("role")).toBe("tooltip");
+
+    fireEvent.focus(trigger);
+    expect(popover.dataset.open).toBe("true");
+    fireEvent.blur(trigger);
+    expect(popover.dataset.open).toBe("false");
+    fireEvent.pointerEnter(trigger.parentElement);
+    expect(popover.dataset.open).toBe("true");
+    fireEvent.pointerLeave(trigger.parentElement);
+    expect(popover.dataset.open).toBe("false");
   });
 });

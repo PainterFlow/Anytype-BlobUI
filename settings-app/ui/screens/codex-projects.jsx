@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom";
 import { ExpandableSearch } from "../shared/search.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
-import { FilterIcon } from "../shared/catalog-icons.jsx";
+import { FilterIcon, GlobeIcon } from "../shared/catalog-icons.jsx";
+import { HelpTooltip } from "../shared/help-tooltip.jsx";
 
 const UI = () => window.BlobUI;
 const accessOptions = [{value:"none",label:"No Access"},{value:"read",label:"Read Only"},{value:"readWrite",label:"Read-Write"},{value:"createDelete",label:"Create-Delete"}];
@@ -51,7 +52,7 @@ export function CodexProjects() {
   const [query,setQuery]=useState(""),[sourceQuery,setSourceQuery]=useState(""),[categories,setCategories]=useState(controller.kinds.map(item=>item.value));
   const backdrop=useRef(null),dialog=useRef(null),close=useRef(null),content=useRef(null),modal=useRef(null);
   const projects=controller.projectCatalog();
-  const projectMatches=project=>`${project.name} ${project.rootPaths.join(" ")}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  const projectMatches=project=>`${project.name} ${project.rootPaths.join(" ")} ${project.kind||""} ${project.computerName||""} ${project.hostId||""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   const selected=new Map(controller.selectedSources().map(source=>[controller.identity(source),source]));
   const sources=controller.sourceCatalog().filter(source=>categories.includes(source.kind)&&`${source.name} ${source.space} ${source.kind}`.toLocaleLowerCase().includes(sourceQuery.trim().toLocaleLowerCase()));
   useEffect(()=>{if(!backdrop.current||!dialog.current)return;modal.current=UI().createModalController({backdrop:backdrop.current,dialog:dialog.current,initialFocus:()=>close.current,fallbackFocus:()=>document.getElementById("codex-tab-2"),inertTargets:[document.getElementById("settings-shell"),document.getElementById("title-drag-region")].filter(Boolean),onClose:()=>controller.close()});return()=>{modal.current?.destroy();modal.current=null;};},[controller]);
@@ -60,7 +61,17 @@ export function CodexProjects() {
   return <>
     <CatalogToolbar prefix="projects" label="Search projects and folders" locked={state.locked} busy={state.busy} query={query} setQuery={setQuery} onReload={()=>controller.reloadProjects()} />
     <p className="input-hint" role="status">{state.projectStatus}</p>
-    <div id="codex-project-list">{projects.map(project=><section className="formula-view" key={project.id} hidden={!projectMatches(project)}><button type="button" className="formula-view-row" disabled={state.locked} title={project.name} onClick={()=>controller.selectProject(project)}><span className="formula-view-name">{project.name}</span>{project.unavailable&&<span className="formula-view-warning">Unavailable project. Saved selections are retained.</span>}</button></section>)}{state.scanned&&!projects.some(projectMatches)&&<p className="input-hint">{query?"No matching results.":"No local Codex projects found."}</p>}</div>
+    <div id="codex-project-list">{projects.map(project=>{
+      const key=controller.projectKey(project);
+      const host=project.computerName||project.hostId||"this Codex host";
+      return <div className="formula-view project-catalog-entry" data-project-kind={project.kind} key={key} hidden={!projectMatches(project)}>
+        <button type="button" className="formula-view-row" data-project-key={key} disabled={state.locked} title={project.name} onClick={()=>controller.selectProject(project)}>
+          <span className="formula-view-name">{project.name}</span>
+          {project.unavailable&&<span className="formula-view-warning">Unavailable project. Saved selections are retained.</span>}
+        </button>
+        {project.kind==="cloud"&&<HelpTooltip label={`Cloud project information for ${project.name}`} text={`Cloud project permissions are saved separately for ${host} and project ${project.id}.`} icon={<GlobeIcon />} />}
+      </div>;
+    })}{state.scanned&&!projects.some(projectMatches)&&<p className="input-hint">{query?"No matching results.":"No local or cloud projects found."}</p>}</div>
     {createPortal(<div id="project-source-backdrop" className="confirm-backdrop" hidden ref={backdrop}>
       <section id="project-source-dialog" className="confirm-dialog calendar-rule-dialog project-source-dialog" role="dialog" aria-modal="true" aria-labelledby="project-source-title" tabIndex={-1} ref={dialog}>
         <header className="calendar-modal-header"><h2 id="project-source-title">{state.active?.name||"Project sources"}</h2><button ref={close} type="button" className="neutral-icon-button calendar-modal-close" aria-label="Close project sources" onClick={()=>modal.current?.close()}>×</button></header>

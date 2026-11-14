@@ -4,7 +4,19 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Project { pub id: String, pub name: String, pub root_paths: Vec<String> }
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub root_paths: Vec<String>,
+    #[serde(default = "local_kind")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_name: Option<String>,
+}
+
+fn local_kind() -> String { "local".into() }
 
 pub fn parse(text: &str) -> Result<Vec<Project>, String> {
     let state: Value = serde_json::from_str(text).map_err(|_| "Codex project metadata is not valid JSON.")?;
@@ -12,12 +24,15 @@ pub fn parse(text: &str) -> Result<Vec<Project>, String> {
         .ok_or("Unsupported Codex project metadata. Expected a local-projects object.")?;
     let mut projects = Vec::new();
     for (key, value) in entries {
-        let project: Project = serde_json::from_value(value.clone())
+        let mut project: Project = serde_json::from_value(value.clone())
             .map_err(|_| "Unsupported Codex project metadata. Each project needs an ID, name and rootPaths list.")?;
         if project.id.is_empty() || project.id != *key || project.name.trim().is_empty()
             || project.root_paths.is_empty() || project.root_paths.iter().any(|path| path.trim().is_empty()) {
             return Err("Unsupported Codex project metadata. Project IDs, names and folders must be present and consistent.".into());
         }
+        project.kind = local_kind();
+        project.host_id = None;
+        project.computer_name = None;
         projects.push(project);
     }
     projects.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
@@ -30,7 +45,24 @@ pub async fn discover_codex_projects() -> Result<Vec<Project>, String> {
         let profile = std::env::var_os("USERPROFILE").ok_or("Windows user profile is unavailable.")?;
         let path = std::path::PathBuf::from(profile).join(".codex/.codex-global-state.json");
         let text = std::fs::read_to_string(path).map_err(|_| "Could not read Codex project metadata. The previous project list has been kept.")?;
-        parse(&text)
+        let mut projects = parse(&text)?;
+        for project in crate::anyblob::synced_cloud_projects()? {
+            projects.push(Project {
+                id: project.id,
+                name: project.name,
+                root_paths: Vec::new(),
+                kind: "cloud".into(),
+                host_id: Some(project.host_id),
+                computer_name: Some(project.computer_name),
+            });
+        }
+        projects.sort_by(|a, b| {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                .then(a.kind.cmp(&b.kind))
+                .then(a.host_id.cmp(&b.host_id))
+                .then(a.id.cmp(&b.id))
+        });
+        Ok(projects)
     }).await.map_err(|_| "Project discovery stopped. Reload to retry.".to_string())?
 }
 

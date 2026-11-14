@@ -2918,7 +2918,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     if (result.cssRebuilt === false) setStatus("Custom theme CSS could not be rebuilt. Check Logs.", "error", false);
   });
-  window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
+  window.BlobUI.CodexPage.init({ invoke, listen: nativeService.listen, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
     onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error) });
   window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });

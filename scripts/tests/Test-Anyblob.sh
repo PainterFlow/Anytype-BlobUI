@@ -42,5 +42,5 @@ mkdir -p "$HOME" "$APPDATA" "$LOCALAPPDATA" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" 
 if ((!skip_build)); then "$script_dir/../Build-Codex.sh" --skip-mcp-build; fi
 (
     cd "$workspaceRoot"
-    CARGO_TARGET_DIR="$workspaceRoot/settings-app/target" cargo test --locked --release --manifest-path "$workspaceRoot/settings-app/Cargo.toml" -- --test-threads=1 anyblob:: anyblob_content:: anyblob_creation:: anyblob_scope:: marketplace:: codex:: codex_identity:: codex_projects::
+    CARGO_TARGET_DIR="$workspaceRoot/settings-app/target" cargo test --locked --release --manifest-path "$workspaceRoot/settings-app/Cargo.toml" -- --test-threads=1 anyblob:: anyblob_cloud_projects:: anyblob_content:: anyblob_creation:: anyblob_scope:: marketplace:: codex:: codex_identity:: codex_projects::
 )

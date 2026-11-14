@@ -74,6 +74,7 @@ impl Runner {
                 id: format!("live-{name}"),
                 token: token.clone(),
                 thread_id: None,
+                remote_membership: None,
                 request: op,
             },
             || true,

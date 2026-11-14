@@ -98,7 +98,9 @@ export function RemoteAccessDialog({
       <div className="anyblob-remote-dialog-instructions">
         <h3>Setup instructions</h3>
         <p>Install cloudflared on this PC from <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noreferrer">Cloudflare's download instructions</a>, then start the Quick Tunnel above. Quick Tunnels need no Cloudflare account and stop working when BlobUI closes or you stop the tunnel.</p>
-        <p>On the remote Codex machine, build the MCP server and set <code>ANYBLOB_REMOTE_ADDRESS</code> to the tunnel URL and <code>ANYBLOB_REMOTE_TOKEN</code> to this key. Protect your Codex config because the token grants Anyblob access under saved global permissions.</p>
+        <p>On the remote Codex machine, build the MCP server and set <code>ANYBLOB_REMOTE_ADDRESS</code> to the tunnel URL and <code>ANYBLOB_REMOTE_TOKEN</code> to this key. Protect your Codex config because the token grants access under saved BlobUI permissions.</p>
+        <p>Launch or reconnect the remote Anyblob MCP server after configuring its URL and key. It syncs its host and project catalog at startup and refreshes the catalog when the remote Codex project list changes. Sync sends project IDs and names, not project folder paths. BlobUI checks request membership against the synced catalog separately from tool arguments.</p>
+        <p>In BlobUI Settings &gt; Anyblob &gt; Projects, cloud rows appear under the remote PC name. The globe tooltip shows the computer name. Select a project row to save source permissions for that host and project. These project scopes override global space permissions for chats with verified membership in configured projects. Projectless chats and projects without saved sources use global permissions. Missing or invalid identity is denied when project scopes are saved.</p>
         <p>Quick Tunnel URLs are temporary. For a stable URL, create a named Cloudflare Tunnel and configure it to route to this PC's local Anyblob HTTP bridge at <code>http://127.0.0.1:31421</code>. Keep its origin limited to loopback.</p>
       </div>
     </div>

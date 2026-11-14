@@ -14,3 +14,10 @@ export function FilterIcon() {
 export function ReloadIcon() {
   return <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" /></svg>;
 }
+
+export function GlobeIcon() {
+  return <svg aria-hidden="true" focusable="false" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="10" cy="10" r="8.25" />
+    <path d="M2.1 10h15.8M10 1.75c2.15 2.25 3.2 4.98 3.2 8.25S12.15 16 10 18.25C7.85 16 6.8 13.27 6.8 10S7.85 4 10 1.75Z" />
+  </svg>;
+}

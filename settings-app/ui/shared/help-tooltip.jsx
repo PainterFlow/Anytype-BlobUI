@@ -4,7 +4,7 @@ import "../help-tooltip.css";
 
 const popoverGap = 7;
 
-export function HelpTooltip({ label, text, size = "normal" }) {
+export function HelpTooltip({ label, text, size = "normal", icon = null }) {
   const tooltipId = `help-tooltip-${useId()}`;
   const rootRef = useRef(null);
   const popoverRef = useRef(null);
@@ -81,11 +81,11 @@ export function HelpTooltip({ label, text, size = "normal" }) {
       onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
       <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={tooltipId}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
-        <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+        {icon || <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="10" cy="10" r="8.25" />
           <path d="M7.65 7.45a2.37 2.37 0 0 1 4.7.4c0 1.65-2.35 1.8-2.35 3.45" />
           <path d="M10 14.2h.01" strokeWidth="1.65" />
-        </svg>
+        </svg>}
       </button>
     </span>
     {createPortal(<span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip" data-open={open}>{text}</span>, document.body)}

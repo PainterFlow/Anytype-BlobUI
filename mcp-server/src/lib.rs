@@ -7,6 +7,8 @@ pub mod credential;
 pub mod content;
 pub mod sources;
 pub mod blobui;
+pub mod codex_identity;
+pub mod codex_projects;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -80,7 +82,29 @@ pub struct Request {
     pub token: String,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default, rename = "remoteMembership", skip_serializing_if = "Option::is_none")]
+    pub remote_membership: Option<RemoteMembership>,
     pub request: Operation,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteMembership {
+    pub host_id: String,
+    pub project_id: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectInfo {
+    pub id: String,
+    pub name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectSync {
+    pub token: String,
+    pub host_id: String,
+    pub computer_name: String,
+    pub projects: Vec<ProjectInfo>,
 }
 /// Host metadata is deliberately separate from model-controlled tool arguments.
 pub fn thread_id(params: &Value) -> Result<Option<String>, String> {
@@ -187,13 +211,38 @@ mod tests {
             assert!(thread_id(&json!({"_meta":{"threadId":bad}})).is_err());
         }
         assert!(operation("list_spaces",json!({"threadId":"spoof"})).is_err());
+        for key in ["host_id", "project_id", "remoteMembership", "remote_membership"] {
+            let mut arguments = json!({"query":"task"});
+            arguments[key] = json!("spoof");
+            assert!(operation("search_mentions", arguments).is_err(), "{key}");
+        }
+        let request: Request = serde_json::from_value(json!({
+            "id":"request",
+            "token":"a".repeat(64),
+            "request":{"operation":"list_spaces"},
+            "remoteMembership":{"hostId":"host_1","projectId":"project_1"}
+        })).unwrap();
+        assert_eq!(request.remote_membership, Some(RemoteMembership {
+            host_id:"host_1".into(), project_id:Some("project_1".into())
+        }));
+        let envelope = serde_json::to_value(&request).unwrap();
+        assert_eq!(envelope["remoteMembership"]["hostId"], "host_1");
+        assert_eq!(envelope["remoteMembership"]["projectId"], "project_1");
+        assert!(envelope.get("remote_membership").is_none());
+        let projectless: Request = serde_json::from_value(json!({
+            "id":"request",
+            "token":"a".repeat(64),
+            "request":{"operation":"list_spaces"},
+            "remoteMembership":{"hostId":"host_1","projectId":null}
+        })).unwrap();
+        assert_eq!(projectless.remote_membership.unwrap().project_id, None);
     }
     #[test]
     fn strict_arguments() {
         assert!(operation("search_mentions",json!({"query":"猫"})).is_ok());
         assert!(operation("search_mentions",json!({"query":""})).is_ok());
         assert!(operation("search_mentions",json!({"query":"x".repeat(4097)})).is_err());
-        for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {
+        for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","host_id":"forged"}),json!({"query":"","project_id":"forged"}),json!({"query":"","remoteMembership":{"hostId":"forged","projectId":"forged"}}),json!({"query":"","remote_membership":{"host_id":"forged","project_id":"forged"}}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {
             assert!(operation("search_mentions",extra).is_err());
         }
         for name in ["delete_object", "GET", ""] {
