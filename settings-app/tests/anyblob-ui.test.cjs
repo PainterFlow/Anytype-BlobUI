@@ -16,7 +16,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
         if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
-        if(name==='anyblob_status')return{enabled:window.enabled,remoteAccess:window.remoteAccess};
+        if(name==='anyblob_status'){if(window.statusError)throw Error(window.statusError);return{enabled:window.enabled,remoteAccess:window.remoteAccess};}
         if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;if(!args.enabled)window.remoteAccess=false;return{enabled:args.enabled};}
         if(name==='configure_anyblob_remote'){if(window.remoteToggleError)throw Error('Could not save remote access.');window.remoteAccess=args.enabled;return{enabled:args.enabled,token:args.enabled?'fixture-remote-key':''};}
         if(name==='start_cloudflare_tunnel'){window.tunnelStarts=(window.tunnelStarts||0)+1;return{url:'https://sample.trycloudflare.com'};}
@@ -61,6 +61,11 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
       warningWithoutHelper:'16px',warningWithHelper:'14px',
     });
     assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
+    const saveBusyMessage='Wait for the current save before changing Anyblob.';
+    await page.evaluate(message=>{window.statusError=message;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));},saveBusyMessage);
+    await page.waitForFunction(message=>document.querySelector('#codex-panel-0 [role=status]')?.textContent===message,saveBusyMessage);
+    await page.evaluate(()=>{window.statusError=null;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
+    await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]')?.textContent==='');
     const remoteToggle=panel.locator('#enable-anyblob-remote'),remoteLabel=panel.getByRole('button',{name:'Allow Cloudflare Tunnel remote access',exact:true});
     assert.equal(await toggle.isChecked(),false);assert.equal(await remoteToggle.isDisabled(),true);assert.equal(await remoteLabel.isDisabled(),true);
     await remoteLabel.evaluate(el=>el.click());assert.equal(await page.locator('#anyblob-remote-access-dialog').isVisible(),false);

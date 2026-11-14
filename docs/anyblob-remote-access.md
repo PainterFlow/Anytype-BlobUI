@@ -15,13 +15,21 @@ Quick Tunnels provide a temporary `trycloudflare.com` URL and do not require a C
 1. Install `cloudflared` on the Windows PC from [Cloudflare's install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
 2. Open BlobUI Settings on the PC, enable Anyblob, then enable **Allow Cloudflare Tunnel remote access**.
 3. Select **Start tunnel**. BlobUI runs `cloudflared tunnel --url http://127.0.0.1:31421 --no-autoupdate` and shows the generated HTTPS URL. Keep BlobUI running while remote Codex needs access. Select **Stop tunnel** when finished.
-4. On the remote server, build the MCP server:
+4. On the remote server, build the MCP server with this command.
 
    ```sh
    cargo build --locked --release --manifest-path mcp-server/Cargo.toml
    ```
 
-5. Configure Codex's local stdio MCP server with the URL and key from BlobUI. For example, in `~/.codex/config.toml`:
+   Install the Anyblob skills from this checkout with this command.
+
+   ```sh
+   ./scripts/Install-Remote-Skills.sh
+   ```
+
+   The installer copies the skills to `~/.agents/skills` and their shared workflow reference to `~/.agents/references`. It refuses to replace an unrelated skill or a different reference file with the same name. Start a new Codex session after installation.
+
+5. Configure Codex's local stdio MCP server with the URL and key from BlobUI. This example belongs in `~/.codex/config.toml`.
 
    ```toml
    [mcp_servers.anyblob]
