@@ -26,6 +26,26 @@ fn captured_type_rows() -> Value {
 }
 
 #[test]
+fn list_type_candidates_intersect_property_sources_with_view_type_filters() {
+    let definition = json!({
+        "document":{"query_source":{"properties":["project"]}},
+        "views":[{"id":"tasks","filters":[{"property":"type","condition":"in","value":["task"]}]}]
+    });
+    let (client, capture, server) = fixture(vec![
+        page(json!([{"key":"project","format":"text"},{"key":"type","format":"objects"}])),
+        json!({"id":"task-id","type_settings":{"property_definitions":[{"property":"project","internal_key":"project-key"}]}}),
+        json!({"id":"page-id","type_settings":{"property_definitions":[]}}),
+    ]);
+    let mut types = vec![json!({"id":"task-id","key":"task"}),json!({"id":"page-id","key":"page"})];
+    assert_eq!(
+        query::type_candidates(&client, &source("query", "read"), &definition, &mut types, &|| Ok(())).unwrap(),
+        std::collections::BTreeSet::from(["task-id".into()])
+    );
+    server.join().unwrap();
+    assert_eq!(capture.lock().unwrap().len(), 3);
+}
+
+#[test]
 fn normalized_file_type_ids_still_require_file_permission() {
     let mut request = req("query");
     request.arguments["body"]["type"] = json!("file-object-id");

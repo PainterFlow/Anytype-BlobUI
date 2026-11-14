@@ -484,8 +484,19 @@ fn dispatch_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
+    dispatch_with_mode(request, connected, load_state, load_config, connect, approve, false)
+}
+fn dispatch_with_mode(
+    request: Request,
+    connected: impl Fn() -> bool,
+    load_state: impl Fn() -> Result<Value, String>,
+    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
+    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
+    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+    remote_global_only: bool,
+) -> Result<Value, String> {
     let thread = request.thread_id.clone();
-    dispatch_resolved_with(
+    dispatch_resolved_with_mode(
         request,
         connected,
         load_state,
@@ -498,6 +509,7 @@ fn dispatch_with(
                 .map(crate::codex_identity::resolve)
                 .transpose()
         },
+        remote_global_only,
     )
 }
 fn dispatch_resolved_with(
@@ -508,6 +520,18 @@ fn dispatch_resolved_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
     resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
+) -> Result<Value, String> {
+    dispatch_resolved_with_mode(request, connected, load_state, load_config, connect, approve, resolve, false)
+}
+fn dispatch_resolved_with_mode(
+    request: Request,
+    connected: impl Fn() -> bool,
+    load_state: impl Fn() -> Result<Value, String>,
+    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
+    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
+    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
+    remote_global_only: bool,
 ) -> Result<Value, String> {
     request.request.validate()?;
     blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
@@ -542,7 +566,7 @@ fn dispatch_resolved_with(
         .projects
         .values()
         .any(|project| !project.sources.is_empty());
-    let membership = if restricted {
+    let membership = if restricted && !remote_global_only {
         Some(resolve()?.ok_or(
             "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
         )?)
@@ -572,7 +596,7 @@ fn dispatch_resolved_with(
         {
             return Err("BlobUI permissions or integration changed. Retry the request.".into());
         }
-        if restricted && resolve()? != membership {
+        if restricted && !remote_global_only && resolve()? != membership {
             return Err("Codex chat project changed during the request. Retry the request.".into());
         }
         Ok(())
@@ -582,20 +606,31 @@ fn dispatch_resolved_with(
         if content.tool == "list_creation_targets"
             || (content.tool == "create_object" && content.arguments.get("destination").is_some())
         {
-            let project = project
-                .ok_or("Creation destinations require a saved source in the verified project.")?;
-            let project_id = match &membership {
-                Some(crate::codex_identity::Membership::Project(id)) => id,
-                _ => return Err("Creation destinations require a verified project.".into()),
-            };
-            return crate::anyblob_creation::dispatch(
-                &connect()?,
-                project_id,
-                project,
-                content,
-                &check,
-                &approve,
-            );
+            let client = connect()?;
+            if let Some(project) = project {
+                let project_id = match &membership {
+                    Some(crate::codex_identity::Membership::Project(id)) => id,
+                    _ => return Err("Creation destinations require a verified project.".into()),
+                };
+                return crate::anyblob_creation::dispatch(
+                    &client,
+                    project_id,
+                    project,
+                    content,
+                    &check,
+                    &approve,
+                );
+            }
+            if remote_global_only || !restricted || membership.is_some() {
+                return crate::anyblob_creation::dispatch_global(
+                    &client,
+                    &effective,
+                    content,
+                    &check,
+                    &approve,
+                );
+            }
+            return Err("Creation destinations require a saved source in the verified project or global Create-Delete access.".into());
         }
     }
     let client = if project.is_some() {
@@ -760,14 +795,17 @@ fn dispatch_resolved_with(
         }
         // Every preflight and commit rechecks live authorization. Mutation receipts survive
         // membership changes caused by this edit, and are never followed by implicit reads.
-        let mut result = if content.tool == "list_properties"
-            && scope.as_ref().is_some_and(|s| {
-                !s.has_whole_space(content.arguments["space_id"].as_str().unwrap())
-            }) {
-            let scope = scope.as_ref().unwrap();
-            let result =
-                scope.list_properties(&client, project.unwrap(), content, &before_dispatch)?;
-            if crate::anyblob_scope::Scope::load(&client, project.unwrap(), &check)? != *scope {
+        let scoped_metadata = if let Some(scope) = scope.as_ref().filter(|scope| {
+            !scope.has_whole_space(content.arguments["space_id"].as_str().unwrap())
+        }) {
+            match content.tool.as_str() {
+                "list_types" => Some(scope.list_types(&client, project.unwrap(), content, &before_dispatch)?),
+                "list_properties" => Some(scope.list_properties(&client, project.unwrap(), content, &before_dispatch)?),
+                _ => None,
+            }
+        } else { None };
+        let mut result = if let Some(result) = scoped_metadata {
+            if crate::anyblob_scope::Scope::load(&client, project.unwrap(), &check)? != *scope.as_ref().unwrap() {
                 return Err("Project source membership changed. Reread before retrying.".into());
             }
             result
@@ -1124,9 +1162,20 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
         request.thread_id = None;
         let operation = request.request.name().to_owned();
         let requested_operation = request.request.clone();
-        let result = dispatch(&bridge, request, || {
-            Instant::now() < deadline && bridge.connected()
-        });
+        let operation_id = request.id.clone();
+        let result = dispatch_with_mode(
+            request,
+            || Instant::now() < deadline && bridge.connected(),
+            state,
+            saved,
+            || {
+                crate::kanban_api::Client::connect().map_err(|_| {
+                    "Configure the saved Anytype API v2 connection in BlobUI Advanced Settings.".into()
+                })
+            },
+            |op, check| pipe_prompt(&bridge, &operation_id, op, check),
+            true,
+        );
         if let Some(payload) = publication_event(&requested_operation, &result) {
             use tauri::Emitter;
             let _ = app.emit("blobui-saved-state-changed", payload);
@@ -1666,6 +1715,55 @@ mod tests {
         );
         assert!(allowed(&empty, &search()).is_ok());
         assert!(allowed(&config("read", "fullAccess"), &Operation::ListSpaces {}).is_ok());
+    }
+    #[test]
+    fn remote_creation_uses_global_space_permission_when_project_sources_exist() {
+        let mut config = config("createDelete", "fullAccess");
+        config.projects.insert("saved-project".into(), crate::codex::ProjectConfiguration {
+            sources: vec![crate::codex::SourcePermission {
+                space_id:"space".into(), kind:"collection".into(), id:"project-collection".into(),
+                name:"Project collection".into(), space:"Work".into(),
+                permission:crate::codex::Permission {access:"createDelete".into(), approval:"fullAccess".into(), files_enabled:false},
+            }],
+            ..Default::default()
+        });
+        let operation = blobui_mcp::operation("list_creation_targets", json!({"space_id":"space"})).unwrap();
+        let (client, server) = mock(vec![(
+            "POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),
+            json!({"_fixture_request_body":{},"data":[],"has_more":false}),
+        )], None);
+        let result = dispatch_resolved_with_mode(
+            request(operation),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("global full access does not prompt"),
+            || panic!("remote calls must not resolve local project identity"),
+            true,
+        ).unwrap();
+        assert_eq!(result["targets"], json!([]));
+        server.join().unwrap();
+
+        let mut project_only = config.clone();
+        project_only.spaces.get_mut("space").unwrap().access = "readWrite".into();
+        let create = blobui_mcp::operation("create_object", json!({
+            "space_id":"space",
+            "destination":{"kind":"collection","id":"project-collection"},
+            "idempotency_key":"remote-global-denial",
+            "body":{"type":"page","name":"fixture"}
+        })).unwrap();
+        let error = dispatch_resolved_with_mode(
+            request(create),
+            || true,
+            || Ok(enabled()),
+            || Ok(project_only.clone()),
+            || Ok(crate::kanban_api::Client::with_connection("fixture", "127.0.0.1", 1)),
+            |_, _| panic!("denied global access must not prompt"),
+            || panic!("remote calls must not resolve local project identity"),
+            true,
+        ).unwrap_err();
+        assert!(error.contains("global space permissions") || error.contains("Create-Delete"), "{error}");
     }
     fn request(op: Operation) -> Request {
         Request {

@@ -21,7 +21,7 @@ For Codex running on another PC or server, enable remote access in BlobUI's Code
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.2.30. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge, and can use Cloudflare Quick Tunnels or a named tunnel. See [remote access setup](../../docs/anyblob-remote-access.md).
+The current Anyblob release version is 0.3.0. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge, and can use Cloudflare Quick Tunnels or a named tunnel. Remote creation destinations require global Create-Delete access. See [remote access setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 

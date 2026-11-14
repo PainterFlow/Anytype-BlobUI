@@ -243,9 +243,18 @@ fn load_types(
         &format!("{}/types?ids=full", base(&source.space_id)),
         None,
     )?;
+    normalize_types(client, source, &mut types, check)?;
+    Ok(types)
+}
+fn normalize_types(
+    client: &Client,
+    source: &SourcePermission,
+    types: &mut Vec<Value>,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
     let mut keys = std::collections::BTreeSet::new();
     let mut ids = std::collections::BTreeSet::new();
-    for row in &mut types {
+    for row in types.iter_mut() {
         let key = row["key"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -266,7 +275,7 @@ fn load_types(
             return Err("Ambiguous type object IDs in metadata.".into());
         }
     }
-    Ok(types)
+    Ok(())
 }
 fn contains_type_filter(value: &Value, properties: &[Value]) -> bool {
     match value {
@@ -432,6 +441,84 @@ fn requirements(
         json!({"template":"none","query_source":def["document"]["query_source"],"source":{"operator":"or","types":source_entries(def,"types")?,"properties":source_properties},"views":views,
         "membership_rule":"Match at least one source entry AND all conditions in at least one supported view. Property sources require explicit presence, including empty, false, zero or null values. No values are filled automatically."}),
     )
+}
+
+fn possible_type_ids(node: &Value, all_ids: &std::collections::BTreeSet<String>) -> Option<std::collections::BTreeSet<String>> {
+    if node["supported"] != true { return None; }
+    if node["property"] == "type" {
+        return Some(node["allowed_values"].as_array()?.iter().filter_map(Value::as_str).map(String::from).collect());
+    }
+    let children = node["filters"].as_array();
+    match node["operator"].as_str() {
+        Some("and") => {
+            let mut result = all_ids.clone();
+            for child in children? {
+                let possible = possible_type_ids(child, all_ids)?;
+                result.retain(|id| possible.contains(id));
+            }
+            Some(result)
+        }
+        Some("or") => {
+            let mut result = std::collections::BTreeSet::new();
+            let mut supported = false;
+            for child in children? {
+                if let Some(possible) = possible_type_ids(child, all_ids) {
+                    supported = true;
+                    result.extend(possible);
+                }
+            }
+            supported.then_some(result)
+        }
+        _ => Some(all_ids.clone()),
+    }
+}
+
+pub(super) fn type_candidates(
+    client: &Client,
+    source: &SourcePermission,
+    def: &Value,
+    types: &mut Vec<Value>,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    if valid_definition(def).is_err() { return Ok(Default::default()); }
+    normalize_types(client, source, types, check)?;
+    let all_ids = types.iter().filter_map(|row| row["id"].as_str().map(String::from)).collect::<std::collections::BTreeSet<_>>();
+    let (properties, options) = query_metadata(client, source, def, types, check)?;
+    let mut source_ids = std::collections::BTreeSet::new();
+    for key in source_entries(def, "types")? {
+        if let Ok(ty) = resolve_type(key, types) {
+            if let Some(id) = ty["id"].as_str() { source_ids.insert(id.into()); }
+        }
+    }
+    for key in source_entries(def, "properties")? {
+        let Ok(prop) = property(key, &properties) else { continue; };
+        let Some(canonical) = prop["key"].as_str() else { continue; };
+        if matches!(canonical, "name" | "type") {
+            source_ids.extend(all_ids.iter().cloned());
+            continue;
+        }
+        for row in types.iter_mut() {
+            let doc = type_document(client, source, row, check)?;
+            let id = row["id"].as_str().ok_or("Type omitted its object ID.")?;
+            let internal = prop["internal_key"].as_str();
+            if doc.pointer("/type_settings/property_definitions").and_then(Value::as_array).is_some_and(|definitions| definitions.iter().any(|definition| {
+                definition["uninstalled"] != true
+                    && (definition["property"] == canonical
+                        || prop["id"].as_str().is_some_and(|property_id| definition["property"] == property_id)
+                        || internal.is_some_and(|key| definition["internal_key"] == key))
+            })) {
+                source_ids.insert(id.into());
+            }
+        }
+    }
+    let empty = json!([]);
+    let mut view_ids = std::collections::BTreeSet::new();
+    for view in def["views"].as_array().ok_or("Query views unavailable.")? {
+        let filters = view.get("filters").unwrap_or(&empty);
+        let tree = filter_requirement(filters, &json!({}), &properties, &options, 0, types);
+        if let Some(ids) = possible_type_ids(&tree, &all_ids) { view_ids.extend(ids); }
+    }
+    Ok(source_ids.intersection(&view_ids).cloned().collect())
 }
 
 pub(super) fn discovery(
