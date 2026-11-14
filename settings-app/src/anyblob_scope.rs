@@ -68,6 +68,11 @@ fn property_page(rows: Vec<Value>, keys: &std::collections::BTreeSet<String>, of
     let total = rows.len();
     json!({"data":rows.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),"total":total,"has_more":offset.saturating_add(limit)<total})
 }
+fn type_page(rows: Vec<Value>, keys: &std::collections::BTreeSet<String>, all: bool, offset: usize, limit: usize) -> Value {
+    let rows = rows.into_iter().filter(|row| all || ["id", "key"].iter().any(|field| row[*field].as_str().is_some_and(|key| keys.contains(key)))).collect::<Vec<_>>();
+    let total = rows.len();
+    json!({"data":rows.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),"total":total,"has_more":offset.saturating_add(limit)<total})
+}
 impl Scope {
     pub(crate) fn list_properties(
         &self, client: &Client, project: &ProjectConfiguration,
@@ -117,6 +122,50 @@ impl Scope {
         let rows = client.pages("GET", &format!("{base}/properties?ids=full"), None)?;
         check()?;
         Ok(property_page(rows, &keys, req.arguments["offset"].as_u64().unwrap_or(0) as usize, req.arguments["limit"].as_u64().unwrap_or(25) as usize))
+    }
+    pub(crate) fn list_types(
+        &self, client: &Client, project: &ProjectConfiguration,
+        req: &blobui_mcp::content::ContentRequest, check: &impl Fn() -> Result<(), String>,
+    ) -> Result<Value, String> {
+        let space = req.arguments["space_id"].as_str().ok_or("Missing space ID.")?;
+        let base = format!("/v2/spaces/{}", encoded(space));
+        let get = |path: String| -> Result<Value, String> {
+            check()?;
+            let doc = client.content_request("GET", &path, None, None, None, None)?;
+            if doc.get("_http_error").is_some() { return Err("Could not read scoped object type metadata.".into()); }
+            Ok(doc)
+        };
+        let mut keys = std::collections::BTreeSet::new();
+        let mut all = false;
+        let mut rows = crate::codex::source_types(client, &base)?;
+        for source in project.sources.iter().filter(|s| s.space_id == space && reads(&s.permission)) {
+            match source.kind.as_str() {
+                "type" => { keys.insert(source.id.clone()); }
+                "query" => {
+                    let doc = get(format!("{base}/objects/{}?ids=full", encoded(&source.id)))?;
+                    if doc["id"] != source.id { return Err("Source identity changed during type discovery.".into()); }
+                    check()?;
+                    let views = client.pages("GET", &format!("{base}/queries/{}/views?ids=full", encoded(&source.id)), None)?;
+                    let definition = json!({"document":doc,"views":views});
+                    keys.extend(crate::anyblob_creation::query_type_candidates(client, source, &definition, &mut rows, check)?);
+                }
+                "collection" => {
+                    if source.permission.permits("createDelete") { all = true; }
+                }
+                _ => {}
+            }
+        }
+        for id in self.object_ids(space) {
+            let doc = get(format!("{base}/objects/{}?ids=full", encoded(&id)))?;
+            if doc["id"] != id { return Err("Member identity changed during type discovery.".into()); }
+            if let Some(key) = doc["type"].as_str().or_else(|| doc["type"]["key"].as_str()) { keys.insert(key.into()); }
+        }
+        check()?;
+        for row in &mut rows {
+            if let Some(fields) = row.as_object_mut() { fields.remove("_document"); }
+        }
+        check()?;
+        Ok(type_page(rows, &keys, all, req.arguments["offset"].as_u64().unwrap_or(0) as usize, req.arguments["limit"].as_u64().unwrap_or(25) as usize))
     }
     pub fn load(
         client: &Client,
@@ -223,7 +272,7 @@ impl Scope {
     }
     pub fn content_permission(&self, request: &blobui_mcp::content::ContentRequest, files: bool) -> Option<Permission> {
         let space=self.spaces.get(request.arguments["space_id"].as_str()?)?;
-        let grants=if matches!(request.tool.as_str(), "list_schemas" | "get_schema" | "get_op_schema" | "list_properties" | "list_objects") {
+        let grants=if matches!(request.tool.as_str(), "list_schemas" | "get_schema" | "get_op_schema" | "list_properties" | "list_objects" | "list_types") {
             &space.schema_grants
         } else if request.space_wide() { &space.all_grants } else {
             request.target().and_then(|id|space.object_grants.get(id)).unwrap_or(&space.all_grants)
@@ -359,6 +408,61 @@ mod tests {
                 ("delete_property",json!({"space_id":"s","key":"status"})),
             ] { assert!(scope.content_permission(&req(name,args),false).is_none()); }
         }
+    }
+    #[test]
+    fn scoped_type_catalog_filters_source_types_before_pagination() {
+        let read = p("read", "fullAccess");
+        let scope = Scope {
+            spaces: BTreeMap::from([("s".into(), Space {
+                schema_grants: vec![read.clone(), read.clone(), read.clone()],
+                objects: BTreeMap::from([("member".into(), read.clone())]),
+                ..Space::default()
+            })]),
+        };
+        let project = ProjectConfiguration { sources: vec![
+            crate::codex::SourcePermission { space_id:"s".into(), id:"query".into(), kind:"query".into(), name:String::new(), space:String::new(), permission:read.clone() },
+            crate::codex::SourcePermission { space_id:"s".into(), id:"collection".into(), kind:"collection".into(), name:String::new(), space:String::new(), permission:read.clone() },
+            crate::codex::SourcePermission { space_id:"s".into(), id:"type-id".into(), kind:"type".into(), name:String::new(), space:String::new(), permission:read },
+        ], ..Default::default() };
+        let page = |rows: Value| json!({"data":rows,"has_more":false});
+        let (client, requests, server) = crate::anyblob_content::tests::fixture(vec![
+            page(json!([
+                {"id":"task-id","key":"task"},
+                {"id":"private-id","key":"private"},
+                {"id":"project-id","key":"project"},
+                {"id":"type-id","key":"custom"}
+            ])),
+            json!({"id":"query","query_source":{"types":["task"]}}),
+            page(json!([{"id":"all"}])),
+            page(json!([])),
+            json!({"id":"member","type":"project"}),
+        ]);
+        let request = req("list_types", json!({"space_id":"s","offset":1,"limit":1}));
+        assert!(scope.content_permission(&request, false).is_some());
+        assert_eq!(
+            scope.list_types(&client, &project, &request, &|| Ok(())).unwrap(),
+            json!({"data":[{"id":"project-id","key":"project"}],"total":3,"has_more":true})
+        );
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        assert!(requests[0].starts_with(b"GET /v2/spaces/s/types?ids=full&limit=100&offset=0 "));
+        assert!(requests[1].starts_with(b"GET /v2/spaces/s/objects/query?ids=full "));
+        assert!(requests[2].starts_with(b"GET /v2/spaces/s/queries/query/views?ids=full&limit=100&offset=0 "));
+        assert!(requests[3].starts_with(b"GET /v2/spaces/s/properties?ids=full&limit=100&offset=0 "));
+        assert!(requests[4].starts_with(b"GET /v2/spaces/s/objects/member?ids=full "));
+    }
+    #[test]
+    fn create_delete_collection_makes_all_existing_types_available() {
+        let permission = p("createDelete", "fullAccess");
+        let scope = Scope { spaces: BTreeMap::from([("s".into(), Space { schema_grants: vec![permission.clone()], ..Space::default() })]) };
+        let project = ProjectConfiguration { sources: vec![crate::codex::SourcePermission {
+            space_id:"s".into(), id:"collection".into(), kind:"collection".into(), name:String::new(), space:String::new(), permission,
+        }], ..Default::default() };
+        let request = req("list_types", json!({"space_id":"s"}));
+        let rows = json!([{"id":"one","key":"one"},{"id":"two","key":"two"}]);
+        let (client, _, server) = crate::anyblob_content::tests::fixture(vec![json!({"data":rows.clone(),"has_more":false})]);
+        assert_eq!(scope.list_types(&client, &project, &request, &|| Ok(())).unwrap(), json!({"data":rows,"total":2,"has_more":false}));
+        server.join().unwrap();
     }
     #[test]
     fn property_references_exclude_values_and_paginate_empty_results() {
@@ -533,9 +637,11 @@ mod mutation_permission_tests {
                 let mut other = request.clone(); other.arguments["space_id"] = json!("other");
                 assert!(scope.content_permission(&other,false).is_none());
             }
+            let types = req("list_types",json!({"space_id":"s"}));
+            let type_permission = scope.content_permission(&types,false);
+            assert_eq!(type_permission.is_some(),access != "none");
             for (name,args) in [
                 ("read_document",json!({"space_id":"s","object_id":"outside"})),
-                ("list_types",json!({"space_id":"s"})),
                 ("create_object",json!({"space_id":"s","body":{"type":"page"}})),
                 ("update_property",json!({"space_id":"s","key":"p","body":{"name":"new"}})),
             ] {
