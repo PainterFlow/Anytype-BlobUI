@@ -1501,6 +1501,71 @@ mod tests {
         }
     }
     #[test]
+    fn dry_run_create_validates_without_confirmation_or_write() {
+        let operation = || {
+            blobui_mcp::operation(
+                "create_object",
+                json!({"space_id":"space","body":{"type":"page","name":"fixture"},"dry_run":true}),
+            )
+            .unwrap()
+        };
+
+        for access in ["none", "read", "readWrite"] {
+            let config = config(access, "alwaysAsk");
+            let result = dispatch_resolved_with(
+                request(operation()),
+                || true,
+                || Ok(enabled()),
+                || Ok(config.clone()),
+                || {
+                    Ok(crate::kanban_api::Client::with_connection(
+                        "fixture-key",
+                        "127.0.0.1",
+                        1,
+                    ))
+                },
+                |_, _| panic!("Denied dry_run requests must not prompt"),
+                || Ok(None),
+            );
+            assert!(result.unwrap_err().contains("Access denied"));
+        }
+
+        for approval in ["alwaysAsk", "approveForMe"] {
+            let config = config("createDelete", approval);
+            let captured_body = json!({"type":"page","name":"fixture"});
+            let (client, captured, server) = mock_recording(
+                vec![(
+                    "POST /v2/spaces/space/objects?dry_run=true ".into(),
+                    json!({"_fixture_request_body":captured_body,"valid":true}),
+                )],
+                None,
+            );
+            let prompted = std::cell::Cell::new(false);
+            let result = dispatch_resolved_with(
+                request(operation()),
+                || true,
+                || Ok(enabled()),
+                || Ok(config.clone()),
+                || Ok(client.clone_for_fixture()),
+                |_, _| {
+                    prompted.set(true);
+                    Err("Dry-run requests must not prompt".into())
+                },
+                || Ok(None),
+            )
+            .unwrap();
+
+            assert!(!prompted.get(), "dry_run requested approval");
+            assert_eq!(result["outcome"], "validated");
+            assert_eq!(result["receipt"]["valid"], true);
+            server.join().unwrap();
+            let requests = captured.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].starts_with("POST /v2/spaces/space/objects?dry_run=true "));
+            assert!(!requests[0].starts_with("POST /v2/spaces/space/objects "));
+        }
+    }
+    #[test]
     fn invalid_create_option_returns_guidance_without_approval_or_creation() {
         let body = json!({"type":"page","name":"fixture","properties":{"status":{"select":{"name":"Todo"}}}});
         let (client, captured, server) = mock_recording(

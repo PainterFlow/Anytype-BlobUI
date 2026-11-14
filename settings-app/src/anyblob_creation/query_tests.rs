@@ -454,6 +454,38 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
 }
 
 #[test]
+fn dry_run_missing_query_inputs_skips_confirmation_and_does_not_write() {
+    let mut request = req("query");
+    request.arguments["dry_run"] = json!(true);
+    let mut p = project(source("query", "createDelete"));
+    p.sources[0].permission.approval = "alwaysAsk".into();
+    let mut responses = vec![property_doc(json!([])), views()];
+    responses.extend(assessment_reads());
+    let (client, capture, server) = fixture(responses);
+    let answer = dispatch(
+        &client,
+        "dry-run-needs-input",
+        &p,
+        &request,
+        &|| Ok(()),
+        &|_, _| panic!("Dry-run validation must not request confirmation"),
+    )
+    .unwrap();
+
+    assert_eq!(answer["outcome"], "needs_input");
+    assert_eq!(answer["creation"]["outcome"], "not_attempted");
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+    assert!(!record_path("dry-run-needs-input", &request)
+        .unwrap()
+        .exists());
+}
+
+#[test]
 fn conflicting_values_return_choices_without_silent_replacement() {
     let mut request = property_request();
     request.arguments["body"]["properties"]["Status"] = json!("Blocked");
