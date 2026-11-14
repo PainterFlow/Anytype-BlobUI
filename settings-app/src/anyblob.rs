@@ -496,21 +496,19 @@ fn dispatch_with_mode(
     remote_global_only: bool,
 ) -> Result<Value, String> {
     let thread = request.thread_id.clone();
-    dispatch_resolved_with_mode(
-        request,
-        connected,
-        load_state,
-        load_config,
-        connect,
-        approve,
-        || {
-            thread
-                .as_deref()
-                .map(crate::codex_identity::resolve)
-                .transpose()
-        },
-        remote_global_only,
-    )
+    let resolve = || {
+        thread
+            .as_deref()
+            .map(crate::codex_identity::resolve)
+            .transpose()
+    };
+    if remote_global_only {
+        dispatch_resolved_with_mode(
+            request, connected, load_state, load_config, connect, approve, resolve, true,
+        )
+    } else {
+        dispatch_resolved_with(request, connected, load_state, load_config, connect, approve, resolve)
+    }
 }
 fn dispatch_resolved_with(
     request: Request,
