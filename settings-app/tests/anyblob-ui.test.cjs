@@ -11,7 +11,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.addInitScript(()=>{
       window.events={};window.decisions=[];window.enabled=false;window.remoteAccess=false;window.installed=false;window.installCalls=0;window.clipboardWrites=[];
-      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>window.clipboardWrites.push(value)}});
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{if(window.clipboardFails)throw Error('Clipboard unavailable.');window.clipboardWrites.push(value);}}});
       window.__TAURI__={event:{listen:async(name,callback)=>{window.events[name]=callback;return()=>{};}},core:{invoke:async(name,args)=>{
         if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
@@ -78,13 +78,23 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.match(await remoteDialog.innerText(),/Quick Tunnel URLs are temporary/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
     assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
     await remoteDialog.getByRole('button',{name:'Copy key'}).click();await remoteDialog.getByRole('button',{name:'Copied'}).waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key']);
+    assert.equal(await remoteDialog.getByRole('status').innerText(),'Remote access key copied.');assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key']);
     await remoteDialog.getByRole('button',{name:'Show remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'text');
     await remoteDialog.getByRole('button',{name:'Hide remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
     await remoteDialog.getByRole('button',{name:'Start tunnel'}).click();await remoteDialog.getByRole('button',{name:'Stop tunnel'}).waitFor();
-    assert.equal(await remoteDialog.getByLabel('Cloudflare Tunnel URL').inputValue(),'https://sample.trycloudflare.com');
-    await remoteDialog.getByRole('button',{name:'Copy URL'}).click();await remoteDialog.getByRole('button',{name:'Copied',exact:true}).last().waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key','https://sample.trycloudflare.com']);
+    const tunnelInput=remoteDialog.getByRole('textbox',{name:'Cloudflare Tunnel URL'}),tunnelField=remoteDialog.locator('.copy-text-field');
+    assert.equal(await tunnelInput.inputValue(),'https://sample.trycloudflare.com');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
+    assert.equal(await tunnelField.evaluate(el=>getComputedStyle(el).borderRadius),'18px');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).minHeight),'48px');
+    const copyTunnel=remoteDialog.getByRole('button',{name:'Copy tunnel URL'});
+    await tunnelInput.focus();await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
+    await page.keyboard.press('Space');await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
+    assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
+    await page.evaluate(()=>window.clipboardFails=true);await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).click();await remoteDialog.getByRole('button',{name:'Copy tunnel URL'}).waitFor();
+    assert.match(await remoteDialog.getByRole('status').innerText(),/Could not copy the tunnel URL/);
+    await page.evaluate(()=>window.clipboardFails=false);await tunnelInput.focus();await page.keyboard.press('Tab');await page.keyboard.press('Space');
+    await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
+    assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
+    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key','https://sample.trycloudflare.com','https://sample.trycloudflare.com']);
     await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-dark.png')});
     await page.setViewportSize({width:800,height:750});await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-narrow-dark.png')});
     await page.setViewportSize({width:1100,height:900});

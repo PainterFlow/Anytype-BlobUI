@@ -56,17 +56,6 @@
   flex: 1 1 200px;
 }
 
-.anyblob-remote-dialog .anyblob-remote-dialog-row input {
-  flex: 1 1 160px;
-  min-width: 0;
-  min-height: 48px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 18px;
-  background: var(--input-bg);
-  color: var(--text);
-}
-
 .anyblob-remote-dialog .anyblob-remote-key-field {
   gap: 12px;
   padding: 8px 0;

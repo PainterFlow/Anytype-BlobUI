@@ -9,6 +9,19 @@ export function IconButton({ className = "neutral-icon-button", ...props }) {
   return <Button className={className} {...props} />;
 }
 
+export function CopyIcon() {
+  return <svg className="copy-icon" viewBox="0 0 20 20" aria-hidden="true">
+    <rect x="7" y="7" width="10" height="10" rx="2" />
+    <path d="M12 4V3H3v9h1" />
+  </svg>;
+}
+
+export function CopySuccessIcon() {
+  return <svg className="copy-success-icon" viewBox="0 0 20 20" aria-hidden="true">
+    <path d="m4 10 4 4 8-8" />
+  </svg>;
+}
+
 export function DeleteIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8 4.5h9.5v11H8L3.5 10 8 4.5Z" /><path d="m11 8 4 4m0-4-4 4" />
