@@ -71,6 +71,11 @@
   color: var(--color-green);
 }
 
+.copy-text-field[data-copied="true"] .copy-text-field-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-green) 16%, transparent);
+  color: var(--color-green);
+}
+
 .copy-text-field[data-copied="true"] .copy-text-field-button .copy-icon {
   display: none;
 }

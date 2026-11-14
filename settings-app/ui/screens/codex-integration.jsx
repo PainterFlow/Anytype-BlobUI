@@ -5,27 +5,45 @@ import { RemoteAccessDialog } from "./remote-access-dialog.jsx";
 
 const UI=()=>window.BlobUI;
 
+function clearCopyTimer(timer) {
+  if (timer.current !== null) window.clearTimeout(timer.current);
+  timer.current = null;
+}
+
+function showCopiedFeedback(timer, setCopied, setStatus, message) {
+  clearCopyTimer(timer);
+  setCopied(true);
+  setStatus(message);
+  timer.current = window.setTimeout(() => {
+    timer.current = null;
+    setCopied(false);
+    setStatus(current => current === message ? "" : current);
+  }, 1400);
+}
+
 export function CodexIntegration() {
   const page=UI().CodexPage,api=useSyncExternalStore(page.subscribe,page.getSnapshot,page.getSnapshot);
   const [enabled,setEnabled]=useState(false),[installation,setInstallation]=useState(null),[status,setStatus]=useState(""),[changing,setChanging]=useState(false),[installing,setInstalling]=useState(false),[completion,setCompletion]=useState(null);
   const [remote,setRemote]=useState(false),[remoteToken,setRemoteToken]=useState(""),[remoteChanging,setRemoteChanging]=useState(false),[remoteCopied,setRemoteCopied]=useState(false),[tunnelUrl,setTunnelUrl]=useState(""),[tunnelChanging,setTunnelChanging]=useState(false),[tunnelCopied,setTunnelCopied]=useState(false),[remoteDialogRequested,setRemoteDialogRequested]=useState(false);
   const integrationEpoch=useRef(0),installationEpoch=useRef(0),backdrop=useRef(null),dialog=useRef(null),done=useRef(null),modal=useRef(null),remoteBackdrop=useRef(null),remoteDialog=useRef(null),remoteClose=useRef(null),remoteModal=useRef(null);
+  const remoteCopyTimer=useRef(null),tunnelCopyTimer=useRef(null);
   const refresh=async()=>{if(!api)return;const epoch=++integrationEpoch.current;try{const value=await api.invoke("anyblob_status");if(epoch===integrationEpoch.current){setEnabled(value.enabled);setRemote(value.enabled&&value.remoteAccess===true);}}catch(error){if(epoch===integrationEpoch.current)setStatus(String(error.message||error));}};
   const refreshInstallation=async()=>{if(!api||installing)return;const epoch=++installationEpoch.current;try{const value=await api.invoke("anyblob_installation_status");if(epoch===installationEpoch.current)setInstallation(value);}catch(error){if(epoch===installationEpoch.current){setInstallation(null);setStatus(String(error.message||error));}}};
   useEffect(()=>{if(!api)return;void refresh();void refreshInstallation();return()=>{integrationEpoch.current++;installationEpoch.current++;};},[api]);
   useEffect(()=>UI().AppReload?.register(()=>Promise.allSettled([refresh(),refreshInstallation()])),[api,installing]);
   useEffect(()=>{const listener=()=>{void refresh();void refreshInstallation();};window.addEventListener("blobui-codex-integration-refresh",listener);return()=>window.removeEventListener("blobui-codex-integration-refresh",listener);},[api]);
+  useEffect(()=>()=>{clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);},[]);
   useEffect(()=>{if(!backdrop.current||!dialog.current)return;modal.current=UI().createModalController({backdrop:backdrop.current,dialog:dialog.current,initialFocus:()=>done.current,inertTargets:[document.getElementById("settings-react-root")],onClose:()=>setCompletion(null)});return()=>{modal.current?.destroy();modal.current=null;};},[api]);
   useEffect(()=>{if(!remoteBackdrop.current||!remoteDialog.current)return;remoteModal.current=UI().createModalController({backdrop:remoteBackdrop.current,dialog:remoteDialog.current,initialFocus:()=>remoteClose.current,fallbackFocus:()=>document.getElementById("enable-anyblob"),inertTargets:[document.getElementById("settings-react-root")],onClose:()=>setRemoteDialogRequested(false)});return()=>{remoteModal.current?.destroy();remoteModal.current=null;};},[api]);
   useEffect(()=>{if(completion)modal.current?.open();else if(modal.current?.isOpen())modal.current.close();},[completion]);
   useEffect(()=>{if(remoteDialogRequested&&enabled&&remote&&!changing&&!remoteChanging)remoteModal.current?.open();else if(remoteModal.current?.isOpen())remoteModal.current.close();},[remoteDialogRequested,enabled,remote,changing,remoteChanging]);
-  async function configure(value){if(!api||changing)return;if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setChanging(true);integrationEpoch.current++;setStatus("");try{const result=await api.invoke("configure_anyblob",{enabled:value});setEnabled(result.enabled);setRemote(false);setRemoteToken("");setTunnelUrl("");setRemoteDialogRequested(false);}catch(error){setStatus(String(error.message||error));await refresh();}finally{setChanging(false);}}
-  async function configureRemote(value){if(!api||remoteChanging||(value&&!enabled))return;if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setRemoteChanging(true);setStatus("");setRemoteCopied(false);try{const result=await api.invoke("configure_anyblob_remote",{enabled:value});setRemote(result.enabled===true);setRemoteToken(result.token||"");if(!value){setTunnelUrl("");setRemoteDialogRequested(false);}else if(result.enabled===true){setRemoteDialogRequested(true);}}catch(error){setStatus(String(error.message||error));await refresh();}finally{setRemoteChanging(false);}}
+  async function configure(value){if(!api||changing)return;clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);setRemoteCopied(false);setTunnelCopied(false);if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setChanging(true);integrationEpoch.current++;setStatus("");try{const result=await api.invoke("configure_anyblob",{enabled:value});setEnabled(result.enabled);setRemote(false);setRemoteToken("");setTunnelUrl("");setRemoteDialogRequested(false);}catch(error){setStatus(String(error.message||error));await refresh();}finally{setChanging(false);}}
+  async function configureRemote(value){if(!api||remoteChanging||(value&&!enabled))return;clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);setRemoteCopied(false);setTunnelCopied(false);if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setRemoteChanging(true);setStatus("");try{const result=await api.invoke("configure_anyblob_remote",{enabled:value});setRemote(result.enabled===true);setRemoteToken(result.token||"");if(!value){setTunnelUrl("");setRemoteDialogRequested(false);}else if(result.enabled===true){setRemoteDialogRequested(true);}}catch(error){setStatus(String(error.message||error));await refresh();}finally{setRemoteChanging(false);}}
   function openRemoteDialog(){if(enabled&&remote&&!changing&&!remoteChanging)setRemoteDialogRequested(true);}
-  async function copyRemoteToken(){setRemoteCopied(false);setStatus("");try{await navigator.clipboard.writeText(remoteToken);setRemoteCopied(true);setStatus("Remote access key copied.");}catch(error){setStatus("Could not copy the remote key. Select and copy it manually.");}}
-  async function startTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;setTunnelChanging(true);setStatus("");try{const result=await api.invoke("start_cloudflare_tunnel");setTunnelUrl(result.url);setTunnelCopied(false);}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
-  async function stopTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;setTunnelChanging(true);try{await api.invoke("stop_cloudflare_tunnel");setTunnelUrl("");}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
-  async function copyTunnelUrl(){setTunnelCopied(false);setStatus("");try{await navigator.clipboard.writeText(tunnelUrl);setTunnelCopied(true);setStatus("Tunnel URL copied.");}catch(error){setStatus("Could not copy the tunnel URL. Select and copy it manually.");}}
+  async function copyRemoteToken(){clearCopyTimer(remoteCopyTimer);setRemoteCopied(false);setStatus("");try{await navigator.clipboard.writeText(remoteToken);showCopiedFeedback(remoteCopyTimer,setRemoteCopied,setStatus,"Remote access key copied.");}catch(error){setStatus("Could not copy the remote key. Select and copy it manually.");}}
+  async function startTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setTunnelChanging(true);setStatus("");try{const result=await api.invoke("start_cloudflare_tunnel");setTunnelUrl(result.url);}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
+  async function stopTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setTunnelChanging(true);setStatus("");try{await api.invoke("stop_cloudflare_tunnel");setTunnelUrl("");}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
+  async function copyTunnelUrl(){clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setStatus("");try{await navigator.clipboard.writeText(tunnelUrl);showCopiedFeedback(tunnelCopyTimer,setTunnelCopied,setStatus,"Tunnel URL copied.");}catch(error){setStatus("Could not copy the tunnel URL. Select and copy it manually.");}}
   async function installMarketplace(){if(!api||installing)return;const updating=!!installation?.updateAvailable;setInstalling(true);installationEpoch.current++;setStatus("");try{await api.invoke("install_anyblob_marketplace");const next=await api.invoke("anyblob_installation_status");setInstallation(next);setCompletion({updating});}catch(error){setStatus(String(error.message||error));}finally{setInstalling(false);}}
   const refreshRequired=installation?.installed && installation?.codexRefreshRequired && !installation?.updateAvailable;
   if(!api)return null;
