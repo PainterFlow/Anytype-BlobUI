@@ -32,11 +32,12 @@
 
 *Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
 
-## Anyblob (0.2.25 -> 0.2.29)
+## Anyblob (0.2.25 -> 0.3.0)
 
 - Added Linux support. (User#pxlarified)
 - Added support for cloud agents. (User#pxlarified)
-- The agent is now able to use the `list_objects` tool even when it doesn't have access to all objects in a space, the tool will just return all objects the agent does have access to now.
+- The agent is now able to use the `list_objects` tool even when it doesn't have access space-wide access, the tool will just return all objects the agent has access to.
+- The agent is now able to use the `list_types` tool even when it doesn't have space-wide access, the tool will just return all object types the agent has access to.
 - I hope I fixed a few stale mcp server that could spawn when re-compiling the app.
 - You should no longer experience a variety of cases where an agent would ask you twice for approval.
 
