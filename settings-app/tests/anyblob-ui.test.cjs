@@ -79,6 +79,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
     await remoteDialog.getByRole('button',{name:'Copy key'}).click();await remoteDialog.getByRole('button',{name:'Copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Remote access key copied.');assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key']);
+    await remoteDialog.getByRole('button',{name:'Copy key'}).waitFor();
     await remoteDialog.getByRole('button',{name:'Show remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'text');
     await remoteDialog.getByRole('button',{name:'Hide remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
     await remoteDialog.getByRole('button',{name:'Start tunnel'}).click();await remoteDialog.getByRole('button',{name:'Stop tunnel'}).waitFor();
@@ -89,6 +90,16 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await tunnelInput.focus();await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
     await page.keyboard.press('Space');await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
+    const copiedTunnel=remoteDialog.getByRole('button',{name:'Tunnel URL copied'});
+    assert.equal(await copiedTunnel.evaluate(el=>el.parentElement.dataset.copied),'true');
+    await copiedTunnel.hover();
+    const copiedHover=await copiedTunnel.evaluate(el=>{
+      const buttonStyle=getComputedStyle(el),probe=document.createElement('div');
+      probe.style.backgroundColor='color-mix(in srgb, var(--color-green) 16%, transparent)';document.body.append(probe);
+      const expectedBackground=getComputedStyle(probe).backgroundColor;probe.remove();
+      return{color:buttonStyle.color,background:buttonStyle.backgroundColor,expectedBackground};
+    });
+    assert.equal(copiedHover.color,'rgb(78, 204, 78)');assert.equal(copiedHover.background,copiedHover.expectedBackground);
     await page.evaluate(()=>window.clipboardFails=true);await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).click();await remoteDialog.getByRole('button',{name:'Copy tunnel URL'}).waitFor();
     assert.match(await remoteDialog.getByRole('status').innerText(),/Could not copy the tunnel URL/);
     await page.evaluate(()=>window.clipboardFails=false);await tunnelInput.focus();await page.keyboard.press('Tab');await page.keyboard.press('Space');
@@ -98,6 +109,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-dark.png')});
     await page.setViewportSize({width:800,height:750});await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-narrow-dark.png')});
     await page.setViewportSize({width:1100,height:900});
+    await remoteDialog.getByRole('button',{name:'Copy tunnel URL'}).waitFor();assert.equal(await remoteDialog.getByRole('status').innerText(),'');
     await remoteDialog.getByRole('button',{name:'Stop tunnel'}).click();await remoteDialog.getByRole('button',{name:'Start tunnel'}).waitFor();
     await remoteDialog.getByRole('button',{name:'Close remote access'}).click();await remoteDialog.waitFor({state:'hidden'});
     assert.equal(await remoteToggle.isChecked(),true);assert.equal(await remoteLabel.isDisabled(),false);
