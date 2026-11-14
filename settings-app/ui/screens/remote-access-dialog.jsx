@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { CopyTextField } from "../shared/copy-text-field.jsx";
 import { Button, SettingsRow, VisibilityTextField } from "../shared/settings-controls.jsx";
 import "./remote-access-dialog.css";
 
@@ -83,10 +84,14 @@ export function RemoteAccessDialog({
           </Button>
         </SettingsRow>
         {tunnelUrl && <div className="settings-row anyblob-remote-dialog-row">
-          <input aria-label="Cloudflare Tunnel URL" value={tunnelUrl} readOnly />
-          <Button className="banner-image-button" onClick={onCopyTunnelUrl}>
-            {tunnelCopied ? "Copied" : "Copy URL"}
-          </Button>
+          <CopyTextField
+            value={tunnelUrl}
+            inputAttributes={{ "aria-label": "Cloudflare Tunnel URL" }}
+            copied={tunnelCopied}
+            copyLabel="Copy tunnel URL"
+            copiedLabel="Tunnel URL copied"
+            onCopy={onCopyTunnelUrl}
+          />
         </div>}
       </div>
       <p className="anyblob-remote-dialog-status" role="status">{status}</p>

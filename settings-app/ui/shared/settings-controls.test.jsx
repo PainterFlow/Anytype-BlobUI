@@ -1,11 +1,43 @@
 import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CopyTextField } from "./copy-text-field.jsx";
 import { ExpandableSearch } from "./search.jsx";
 import { DialogSwitch } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
 
 describe("Settings controls", () => {
+  it("renders a read-only copy field with the shared Logs icons", () => {
+    const onCopy = vi.fn();
+    const { rerender } = render(<CopyTextField
+      value="https://sample.trycloudflare.com"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      copyLabel="Copy tunnel URL"
+      copiedLabel="Tunnel URL copied"
+      onCopy={onCopy}
+    />);
+
+    const input = screen.getByRole("textbox", { name: "Cloudflare Tunnel URL" });
+    expect(input.value).toBe("https://sample.trycloudflare.com");
+    expect(input.readOnly).toBe(true);
+
+    const copyButton = screen.getByRole("button", { name: "Copy tunnel URL" });
+    expect(copyButton.querySelector(".copy-icon")).not.toBeNull();
+    expect(copyButton.querySelector(".copy-success-icon")).not.toBeNull();
+    fireEvent.click(copyButton);
+    expect(onCopy).toHaveBeenCalledTimes(1);
+
+    rerender(<CopyTextField
+      value="https://sample.trycloudflare.com"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      copied
+      copyLabel="Copy tunnel URL"
+      copiedLabel="Tunnel URL copied"
+      onCopy={onCopy}
+    />);
+    expect(screen.getByRole("button", { name: "Tunnel URL copied" }).parentElement.dataset.copied).toBe("true");
+  });
+
   it("keeps the same input and its draft when switching tabs with the keyboard", () => {
     function Example() {
       const [selected, setSelected] = useState(0);
