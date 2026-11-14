@@ -40,10 +40,12 @@ impl ContentRequest {
         self.specification()
             .is_ok_and(|s| s["irreversible"] == true)
     }
-    /// Creation, deletion and uploads always need one-shot confirmation.
+    /// Validation-only requests never require confirmation.
     pub fn requires_confirmation(&self, approval: &str) -> bool {
-        approval == "alwaysAsk" || self.irreversible()
-            || (approval == "approveForMe" && self.capability() == "createDelete")
+        self.arguments["dry_run"] != true
+            && (approval == "alwaysAsk"
+                || self.irreversible()
+                || (approval == "approveForMe" && self.capability() == "createDelete"))
     }
     pub fn capability(&self) -> &str {
         fn contains_views(value: &Value) -> bool {
@@ -350,6 +352,32 @@ mod tests {
             };
             assert!(request.requires_confirmation("approveForMe"));
         }
+    }
+    #[test]
+    fn dry_run_content_operations_do_not_require_confirmation() {
+        let crate::Operation::Content { content: dry_run } = crate::operation(
+            "create_object",
+            json!({"space_id":"s","body":{"type":"page","name":"preview"},"dry_run":true}),
+        )
+        .unwrap() else {
+            panic!("create_object must produce a content request")
+        };
+        let crate::Operation::Content { content: mutation } = crate::operation(
+            "create_object",
+            json!({"space_id":"s","body":{"type":"page","name":"preview"}}),
+        )
+        .unwrap() else {
+            panic!("create_object must produce a content request")
+        };
+
+        for approval in ["alwaysAsk", "approveForMe", "fullAccess"] {
+            assert!(
+                !dry_run.requires_confirmation(approval),
+                "dry_run unexpectedly requested confirmation under {approval}"
+            );
+        }
+        assert!(mutation.requires_confirmation("alwaysAsk"));
+        assert!(mutation.requires_confirmation("approveForMe"));
     }
     #[test]
     fn catalog_has_no_arbitrary_routes_or_admin_tools() {

@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "blobui-mcp"
-version = "0.2.29"
+version = "0.2.30"
 dependencies = [
  "reqwest 0.12.28",
  "serde",

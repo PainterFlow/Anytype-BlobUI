@@ -1287,7 +1287,7 @@ pub fn dispatch(
                 }
                 return Ok(result(&record, "unknown", Some("An earlier creation attempt exists. Requirements cannot authorize a new payload or an automatic retry.".into())));
             }
-            if source.permission.approval == "alwaysAsk" {
+            if source.permission.approval == "alwaysAsk" && req.arguments["dry_run"] != true {
                 approve(
                     &creation_prompt(req, source),
                     check,
