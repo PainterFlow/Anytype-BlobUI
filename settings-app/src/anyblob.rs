@@ -585,11 +585,50 @@ fn dispatch_resolved_with(
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
     resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
 ) -> Result<Value, String> {
+    dispatch_with_identity_policy(
+        request, connected, load_state, load_config, connect, approve, resolve, false,
+    )
+}
+fn dispatch_remote_resolved_with(
+    request: Request,
+    connected: impl Fn() -> bool,
+    load_state: impl Fn() -> Result<Value, String>,
+    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
+    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
+    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
+) -> Result<Value, String> {
+    dispatch_with_identity_policy(
+        request, connected, load_state, load_config, connect, approve, resolve, true,
+    )
+}
+fn dispatch_with_identity_policy(
+    request: Request,
+    connected: impl Fn() -> bool,
+    load_state: impl Fn() -> Result<Value, String>,
+    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
+    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
+    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
+    require_identity_for_mentions: bool,
+) -> Result<Value, String> {
     request.request.validate()?;
     blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
     let config = load_config()?;
+    let mentions = matches!(&request.request, Operation::SearchMentions { .. });
+    let restricted = config
+        .projects
+        .values()
+        .any(|project| !project.sources.is_empty());
+    let membership = if restricted && (!mentions || require_identity_for_mentions) {
+        Some(resolve()?.ok_or(
+            "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
+        )?)
+    } else {
+        None
+    };
     if let Operation::SearchMentions { query } = &request.request {
         let revision = REVISION.load(Ordering::Acquire);
         let check = || {
@@ -606,6 +645,18 @@ fn dispatch_resolved_with(
                     "Anyblob mention filters or integration changed. Retry the search.".into(),
                 );
             }
+            if require_identity_for_mentions {
+                if load_config()?.projects != config.projects {
+                    return Err(
+                        "BlobUI project permissions changed. Retry the mention search.".into(),
+                    );
+                }
+                if restricted && resolve()? != membership {
+                    return Err(
+                        "Codex chat project changed during the request. Retry the search.".into(),
+                    );
+                }
+            }
             Ok(())
         };
         check()?;
@@ -614,17 +665,6 @@ fn dispatch_resolved_with(
         check()?;
         return Ok(result);
     }
-    let restricted = config
-        .projects
-        .values()
-        .any(|project| !project.sources.is_empty());
-    let membership = if restricted {
-        Some(resolve()?.ok_or(
-            "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
-        )?)
-    } else {
-        None
-    };
     let project = match &membership {
         Some(crate::codex_identity::Membership::Project(id)) => config
             .projects
@@ -1237,7 +1277,7 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
             }
             Ok(current)
         };
-        let result = dispatch_resolved_with(
+        let result = dispatch_remote_resolved_with(
             request,
             || Instant::now() < deadline && bridge.connected(),
             load_remote_state,
@@ -1913,6 +1953,37 @@ mod tests {
             )
             .is_err());
         }
+    }
+    #[test]
+    fn remote_mention_search_requires_verified_identity_when_project_scopes_exist() {
+        let config = project_config(
+            json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"alwaysAsk"}}),
+        );
+        let operation = || Operation::SearchMentions {
+            query: String::new(),
+        };
+        let missing = dispatch_remote_resolved_with(
+            request(operation()),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || panic!("missing identity must deny before connecting"),
+            |_, _| panic!("mention metadata must not prompt"),
+            || Ok(None),
+        )
+        .unwrap_err();
+        assert!(missing.contains("verified chat identity"));
+
+        assert!(dispatch_remote_resolved_with(
+            request(operation()),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || panic!("invalid identity must deny before connecting"),
+            |_, _| panic!("mention metadata must not prompt"),
+            || Err("Remote Codex identity is not in the synced project catalog.".into()),
+        )
+        .is_err());
     }
     fn project_config(source: Value) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":"none"}},
