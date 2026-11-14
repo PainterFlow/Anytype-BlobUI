@@ -1,5 +1,5 @@
 import React from "react";
-import { Button } from "../shared/settings-controls.jsx";
+import { Button, CopyIcon, CopySuccessIcon } from "../shared/settings-controls.jsx";
 
 function CloseIcon() {
   return <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>;
@@ -7,12 +7,12 @@ function CloseIcon() {
 
 function Features({ useApi }) {
   const labels = [
-    "Custom Accent Color", "Custom Font", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Codex Integration",
+    "Custom Accent Color", "Custom Themes", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Custom Font", "Codex Integration",
     "Colored Calendar Events", "Read and use your data for BlobUI features", "Corrupt your Data", "Sell/Collect your Data",
   ];
   return <span className="onboarding-features" role="list">
     {labels.map((label, index) => {
-      const included = index < (useApi ? 8 : 5);
+      const included = index < (useApi ? 9 : 6);
       return <span className="onboarding-feature" role="listitem" key={label}>
         <span>{label}</span>
         <svg className={`feature-mark ${included ? "available" : "unavailable"}`} viewBox={included ? "0 0 20 20" : "0 0 12 12"} aria-hidden="true">
@@ -129,7 +129,7 @@ export function Sidebar({ navigation, saveVisible, saveDisabled, discardDisabled
       <div className="log-control" id="log-control">
         <Button id="log-button" className="sidebar-action log-button" title={logSeverity === "error" ? "Logs contain errors" : logSeverity === "warning" ? "Logs contain warnings" : "Logs"} aria-expanded="false" aria-controls="log-popup" hidden={logRows.length === 0} data-severity={logSeverity}><svg className="action-icon" viewBox="0 0 20 20" aria-hidden="true">{logSeverity === "error" || logSeverity === "warning" ? <><path d="M10 4v8" strokeWidth="3" /><circle cx="10" cy="16" r="1.5" fill="currentColor" stroke="none" /></> : <path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01" />}</svg><span id="log-label" className="sr-only">{logSeverity === "error" ? "Errors and logs" : logSeverity === "warning" ? "Warnings and logs" : "Logs"}</span></Button>
         <section id="log-popup" className="log-popup" aria-labelledby="log-title" hidden>
-          <div className="log-heading"><h2 id="log-title">Logs</h2><div className="log-heading-actions"><Button id="copy-logs" className="copy-logs" aria-label={copyLogsCopied ? "Logs copied" : "Copy all logs"} title={copyLogsCopied ? "Logs copied" : "Copy all logs"} data-copied={String(copyLogsCopied)}><svg className="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M12 4V3H3v9h1" /></svg><svg className="copy-success-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8" /></svg></Button><Button id="clear-logs" className="clear-logs" aria-label="Clear logs"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg></Button></div></div>
+          <div className="log-heading"><h2 id="log-title">Logs</h2><div className="log-heading-actions"><Button id="copy-logs" className="copy-logs" aria-label={copyLogsCopied ? "Logs copied" : "Copy all logs"} title={copyLogsCopied ? "Logs copied" : "Copy all logs"} data-copied={String(copyLogsCopied)}><CopyIcon /><CopySuccessIcon /></Button><Button id="clear-logs" className="clear-logs" aria-label="Clear logs"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg></Button></div></div>
           <div id="log-entries" className="log-entries" role="log" aria-live="polite">{logRows.map(({ text, level }, index) => <p key={index} className={"log-entry " + level}>{text}</p>)}</div><span id="copy-status" className="sr-only" role="status" />
         </section>
       </div>

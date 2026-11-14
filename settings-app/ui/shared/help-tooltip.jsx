@@ -1,9 +1,10 @@
 import React, { useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "../help-tooltip.css";
 
 const popoverGap = 7;
 
-export function HelpTooltip({ label, text, size = "normal" }) {
+export function HelpTooltip({ label, text, size = "normal", icon = null }) {
   const tooltipId = `help-tooltip-${useId()}`;
   const rootRef = useRef(null);
   const popoverRef = useRef(null);
@@ -12,16 +13,21 @@ export function HelpTooltip({ label, text, size = "normal" }) {
   const open = hovered || focused;
 
   useLayoutEffect(() => {
-    if (!open) return;
-
     const root = rootRef.current;
     const popover = popoverRef.current;
+    if (!root || !popover) return;
+    if (!open) {
+      root.removeAttribute("data-positioned");
+      popover.removeAttribute("data-positioned");
+      return;
+    }
+
     const panel = root.closest('[role="tabpanel"], .component-catalog-card, .settings-content');
     const scrollPane = root.closest(".page-content, .component-catalog-scroll");
 
     const placePopover = () => {
       const anchor = root.getBoundingClientRect();
-      const row = root.parentElement.getBoundingClientRect();
+      const row = root.parentElement?.getBoundingClientRect() ?? anchor;
       const panelRect = panel?.getBoundingClientRect();
       const paneRect = scrollPane?.getBoundingClientRect();
       const left = Math.max(panelRect?.left ?? 0, paneRect?.left ?? 0);
@@ -31,6 +37,7 @@ export function HelpTooltip({ label, text, size = "normal" }) {
       const inView = anchor.width > 0 && anchor.right > left && anchor.left < right
         && anchor.bottom > top && anchor.top < bottom;
       root.toggleAttribute("data-positioned", inView);
+      popover.toggleAttribute("data-positioned", inView);
       if (!inView) return;
 
       popover.style.setProperty("--help-max-width", `${right - left}px`);
@@ -40,14 +47,19 @@ export function HelpTooltip({ label, text, size = "normal" }) {
       let y = anchor.top + (anchor.height - height) / 2;
 
       if (x + width > right) {
-        x = Math.max(left, Math.min(anchor.left, right - width));
-        const below = row.bottom + popoverGap;
-        const above = row.top - popoverGap - height;
-        y = below + height <= bottom || above < top ? below : above;
+        const before = anchor.left - popoverGap - width;
+        if (before >= left) {
+          x = before;
+        } else {
+          x = Math.max(left, Math.min(anchor.left, right - width));
+          const below = row.bottom + popoverGap;
+          const above = row.top - popoverGap - height;
+          y = below + height <= bottom || above < top ? below : above;
+        }
       }
 
-      popover.style.setProperty("--help-left", `${x - anchor.left}px`);
-      popover.style.setProperty("--help-top", `${Math.max(top, Math.min(y, bottom - height)) - anchor.top}px`);
+      popover.style.setProperty("--help-left", `${x}px`);
+      popover.style.setProperty("--help-top", `${Math.max(top, Math.min(y, bottom - height))}px`);
     };
 
     placePopover();
@@ -64,16 +76,18 @@ export function HelpTooltip({ label, text, size = "normal" }) {
     };
   }, [open, text]);
 
-  return <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}`} data-open={open}
-    onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
-    <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={tooltipId}
-      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
-      <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="10" cy="10" r="8.25" />
-        <path d="M7.65 7.45a2.37 2.37 0 0 1 4.7.4c0 1.65-2.35 1.8-2.35 3.45" />
-        <path d="M10 14.2h.01" strokeWidth="1.65" />
-      </svg>
-    </button>
-    <span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip">{text}</span>
-  </span>;
+  return <>
+    <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}`} data-open={open}
+      onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
+      <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={tooltipId}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
+        {icon || <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="10" cy="10" r="8.25" />
+          <path d="M7.65 7.45a2.37 2.37 0 0 1 4.7.4c0 1.65-2.35 1.8-2.35 3.45" />
+          <path d="M10 14.2h.01" strokeWidth="1.65" />
+        </svg>}
+      </button>
+    </span>
+    {createPortal(<span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip" data-open={open}>{text}</span>, document.body)}
+  </>;
 }

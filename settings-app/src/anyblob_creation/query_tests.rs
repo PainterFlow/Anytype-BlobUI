@@ -26,6 +26,26 @@ fn captured_type_rows() -> Value {
 }
 
 #[test]
+fn list_type_candidates_intersect_property_sources_with_view_type_filters() {
+    let definition = json!({
+        "document":{"query_source":{"properties":["project"]}},
+        "views":[{"id":"tasks","filters":[{"property":"type","condition":"in","value":["task"]}]}]
+    });
+    let (client, capture, server) = fixture(vec![
+        page(json!([{"key":"project","format":"text"},{"key":"type","format":"objects"}])),
+        json!({"id":"task-id","type_settings":{"property_definitions":[{"property":"project","internal_key":"project-key"}]}}),
+        json!({"id":"page-id","type_settings":{"property_definitions":[]}}),
+    ]);
+    let mut types = vec![json!({"id":"task-id","key":"task"}),json!({"id":"page-id","key":"page"})];
+    assert_eq!(
+        query::type_candidates(&client, &source("query", "read"), &definition, &mut types, &|| Ok(())).unwrap(),
+        std::collections::BTreeSet::from(["task-id".into()])
+    );
+    server.join().unwrap();
+    assert_eq!(capture.lock().unwrap().len(), 3);
+}
+
+#[test]
 fn normalized_file_type_ids_still_require_file_permission() {
     let mut request = req("query");
     request.arguments["body"]["type"] = json!("file-object-id");
@@ -451,6 +471,38 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
     for create in creates {
         assert!(create.contains("\"Status\":\"Ready\""));
     }
+}
+
+#[test]
+fn dry_run_missing_query_inputs_skips_confirmation_and_does_not_write() {
+    let mut request = req("query");
+    request.arguments["dry_run"] = json!(true);
+    let mut p = project(source("query", "createDelete"));
+    p.sources[0].permission.approval = "alwaysAsk".into();
+    let mut responses = vec![property_doc(json!([])), views()];
+    responses.extend(assessment_reads());
+    let (client, capture, server) = fixture(responses);
+    let answer = dispatch(
+        &client,
+        "dry-run-needs-input",
+        &p,
+        &request,
+        &|| Ok(()),
+        &|_, _| panic!("Dry-run validation must not request confirmation"),
+    )
+    .unwrap();
+
+    assert_eq!(answer["outcome"], "needs_input");
+    assert_eq!(answer["creation"]["outcome"], "not_attempted");
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+    assert!(!record_path("dry-run-needs-input", &request)
+        .unwrap()
+        .exists());
 }
 
 #[test]

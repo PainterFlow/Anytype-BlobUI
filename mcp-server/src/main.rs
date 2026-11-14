@@ -68,6 +68,7 @@ fn elicit(
     result
 }
 fn main() {
+    blobui_mcp::codex_projects::start_remote_sync_monitor();
     let answers: Answers = Arc::default();
     let sequence = Arc::new(std::sync::atomic::AtomicU64::new(1));
     let mut forms = false;
@@ -193,6 +194,7 @@ fn main() {
                     }
                 };
                 let key = id.to_string();
+                let remote = std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some();
                 let cancel = Arc::new(AtomicBool::new(false));
                 {
                     let mut map = pending.lock().unwrap();
@@ -206,12 +208,27 @@ fn main() {
                 let answers = answers.clone();
                 let sequence = sequence.clone();
                 std::thread::spawn(move || {
+                    let remote_membership = if remote {
+                        thread_id.as_deref().and_then(|thread| {
+                            match blobui_mcp::codex_identity::resolve_remote(thread) {
+                                Ok(membership) => Some(membership),
+                                Err(error) => {
+                                    eprintln!("Anyblob could not resolve the remote Codex chat project: {error}");
+                                    None
+                                }
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    let request_thread_id = if remote { None } else { thread_id };
                     let result = blobui_mcp::credential::read().and_then(|token| {
                         transport::call_with_approval(
                             &Request {
                                 id: key.clone(),
                                 token,
-                                thread_id,
+                                thread_id: request_thread_id,
+                                remote_membership,
                                 request: op.clone(),
                             },
                             &cancel,

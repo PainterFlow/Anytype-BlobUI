@@ -28,6 +28,11 @@
 
 .codex-space-top .input-hint { flex: 1 1 100%; margin: 0; }
 
+.project-catalog-entry { display: flex; align-items: center; gap: 4px; min-width: 0; padding-right: 8px; border-radius: 10px; }
+.project-catalog-entry[hidden] { display: none; }
+.project-catalog-entry .formula-view-row { flex: 1 1 auto; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.project-catalog-entry .help-tooltip { margin-inline: 4px; }
+
 .anyblob-version { display: block; color: var(--text-secondary); font-size: 11px; line-height: 14px; margin-top: 3px; }
 .anyblob-version-available { color: var(--color-green); }
 .anyblob-version[hidden] { display: none; }

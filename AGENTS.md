@@ -1,6 +1,5 @@
 ## Rules:
 - Never modify files outside this workspace.
-- The custom.css is located at `C:\Users\{user}}\AppData\Roaming\anytype\custom.css` and the data is located at: `C:\Users\{user}}\AppData\Roaming\anytype\blob\*`
 - Use `scripts/Build-Installer.ps1` to build the installer and `scripts/Build-App.ps1 -s -c` to build the app.
 - When building the Settings app, always run `scripts/Build-App.ps1 -s -c`.
 - Make sure to preserve existing changes!

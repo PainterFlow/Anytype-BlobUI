@@ -89,6 +89,14 @@ pub fn encrypt(token: &str) -> Result<Vec<u8>, String> {
     crypt(token.as_bytes(), true)
 }
 pub fn read() -> Result<String, String> {
+    if std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some() {
+        let token = std::env::var("ANYBLOB_REMOTE_TOKEN")
+            .map_err(|_| "Set ANYBLOB_REMOTE_TOKEN for the HTTPS Cloudflare Tunnel connection.")?;
+        if token.len() != 64 || !token.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return Err("Invalid remote Anyblob credential.".into());
+        }
+        return Ok(token);
+    }
     read_at(&path()?)
 }
 pub fn read_at(path: &std::path::Path) -> Result<String, String> {

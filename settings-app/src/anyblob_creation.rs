@@ -18,6 +18,16 @@ mod query;
 #[cfg(test)]
 mod query_tests;
 
+pub(crate) fn query_type_candidates(
+    client: &Client,
+    source: &SourcePermission,
+    definition: &Value,
+    types: &mut Vec<Value>,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    query::type_candidates(client, source, definition, types, check)
+}
+
 static OPERATIONS: Mutex<()> = Mutex::new(());
 fn normalize(key: &str) -> String {
     key.chars()
@@ -947,6 +957,55 @@ mod tests {
         }
     }
     #[test]
+    fn global_creation_targets_use_space_create_delete_and_find_empty_sources() {
+        let config = Configuration { spaces: std::collections::BTreeMap::from([("s".into(), crate::codex::Permission {
+            access:"createDelete".into(), approval:"fullAccess".into(), files_enabled:false,
+        })]), ..Default::default() };
+        let request = ContentRequest { tool:"list_creation_targets".into(), arguments:json!({"space_id":"s"}) };
+        let (client, capture, server) = fixture(vec![
+            page(json!([{"id":"empty","type":"collection","name":"Empty"},{"id":"other","type":"page","name":"Page"}])) ,
+            json!({"id":"empty","type":"collection","etag":"empty-etag"}),
+        ]);
+        let result = dispatch_global(&client, &config, &request, &|| Ok(()), &|_, _| panic!("full access does not prompt")).unwrap();
+        assert_eq!(result, json!({"targets":[{"kind":"collection","id":"empty","name":"Empty","requirements":null}]}));
+        server.join().unwrap();
+        let requests = capture.lock().unwrap();
+        assert!(requests[0].starts_with(b"POST /v2/spaces/s/search?ids=full&limit=100&offset=0 "));
+        assert!(requests[1].starts_with(b"GET /v2/spaces/s/objects/empty?ids=full "));
+    }
+    #[test]
+    fn global_collection_creation_uses_global_access_and_rejects_read_only_access() {
+        let request = req("collection");
+        let readonly = Configuration { spaces: std::collections::BTreeMap::from([("s".into(), crate::codex::Permission {
+            access:"readWrite".into(), approval:"fullAccess".into(), files_enabled:false,
+        })]), ..Default::default() };
+        let client = Client::with_connection("fixture", "127.0.0.1", 1);
+        assert!(dispatch_global(&client, &readonly, &request, &|| Ok(()), &|_, _| panic!("denied access must not prompt"))
+            .unwrap_err().contains("Create-Delete"));
+
+        let config = Configuration { spaces: std::collections::BTreeMap::from([("s".into(), crate::codex::Permission {
+            access:"createDelete".into(), approval:"fullAccess".into(), files_enabled:false,
+        })]), ..Default::default() };
+        let responses = vec![
+            doc("collection"),
+            json!({"valid":true}),
+            doc("collection"),
+            json!({"id":"created"}),
+            page(json!([])),
+            doc("collection"),
+            schema(),
+            json!({"valid":true}),
+            json!({"applied":true}),
+            page(json!([{"id":"created"}])),
+        ];
+        let (client, capture, server) = fixture(responses);
+        let result = dispatch_global(&client, &config, &request, &|| Ok(()), &|_, _| panic!("full access does not prompt")).unwrap();
+        assert_eq!(result["object_id"], "created");
+        assert_eq!(result["placement"]["outcome"], "confirmed");
+        server.join().unwrap();
+        assert!(capture.lock().unwrap().iter().any(|row| String::from_utf8_lossy(row).starts_with("POST /v2/spaces/s/objects?dry_run=true ")));
+    }
+    #[test]
     fn approval_denial_cancellation_files_and_schema_payloads_do_not_write() {
         let request = req("collection");
         let mut p = project(source("collection", "createDelete"));
@@ -1287,7 +1346,7 @@ pub fn dispatch(
                 }
                 return Ok(result(&record, "unknown", Some("An earlier creation attempt exists. Requirements cannot authorize a new payload or an automatic retry.".into())));
             }
-            if source.permission.approval == "alwaysAsk" {
+            if source.permission.approval == "alwaysAsk" && req.arguments["dry_run"] != true {
                 approve(
                     &creation_prompt(req, source),
                     check,
@@ -1541,4 +1600,66 @@ pub fn dispatch(
         return Ok(result(&record, "unknown", Some(e)));
     }
     Ok(answer)
+}
+
+pub fn dispatch_global(
+    client: &Client,
+    config: &Configuration,
+    req: &ContentRequest,
+    check: &impl Fn() -> Result<(), String>,
+    approve: &impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
+) -> Result<Value, String> {
+    req.validate()?;
+    let space_id = req.arguments["space_id"].as_str().ok_or("Missing space ID.")?;
+    let permission = config.spaces.get(space_id)
+        .filter(|permission| permission.permits("createDelete"))
+        .cloned()
+        .ok_or("Access denied by saved BlobUI space permissions. Save Create-Delete access first.")?;
+    check()?;
+
+    if req.tool == "list_creation_targets" {
+        let rows = client.pages("POST", &format!("{}/search?ids=full", base(space_id)), Some(&json!({})))?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut sources = Vec::new();
+        for row in rows {
+            check()?;
+            let kind = match row["type"].as_str() {
+                Some("collection") => "collection",
+                Some("query" | "set") => "query",
+                _ => continue,
+            };
+            let id = row["id"].as_str().filter(|id| !id.is_empty())
+                .ok_or("Anytype returned a creation destination without an ID.")?;
+            if !seen.insert((kind.to_string(), id.to_string())) { continue; }
+            sources.push(SourcePermission {
+                space_id: space_id.into(),
+                kind: kind.into(),
+                id: id.into(),
+                name: row["name"].as_str().unwrap_or("").into(),
+                space: space_id.into(),
+                permission: permission.clone(),
+            });
+        }
+        return dispatch(client, "global", &ProjectConfiguration { sources, ..Default::default() }, req, check, approve);
+    }
+
+    if req.tool != "create_object" {
+        return Err("Global creation destinations only support create_object and list_creation_targets.".into());
+    }
+    let kind = req.arguments.pointer("/destination/kind").and_then(Value::as_str)
+        .ok_or("Missing destination kind.")?;
+    let id = req.arguments.pointer("/destination/id").and_then(Value::as_str)
+        .filter(|id| !id.is_empty()).ok_or("Missing destination ID.")?;
+    if !matches!(kind, "query" | "collection") {
+        return Err("Creation destination must be a query or collection.".into());
+    }
+    let source = SourcePermission {
+        space_id: space_id.into(),
+        kind: kind.into(),
+        id: id.into(),
+        name: id.into(),
+        space: space_id.into(),
+        permission,
+    };
+    dispatch(client, "global", &ProjectConfiguration { sources: vec![source], ..Default::default() }, req, check, approve)
 }

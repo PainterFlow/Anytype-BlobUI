@@ -1,10 +1,45 @@
 import React, { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CopyTextField } from "./copy-text-field.jsx";
+import { HelpTooltip } from "./help-tooltip.jsx";
+import { GlobeIcon } from "./catalog-icons.jsx";
 import { ExpandableSearch } from "./search.jsx";
+import { DialogSwitch } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
 
 describe("Settings controls", () => {
+  it("renders a read-only copy field with the shared Logs icons", () => {
+    const onCopy = vi.fn();
+    const { rerender } = render(<CopyTextField
+      value="https://sample.trycloudflare.com"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      copyLabel="Copy tunnel URL"
+      copiedLabel="Tunnel URL copied"
+      onCopy={onCopy}
+    />);
+
+    const input = screen.getByRole("textbox", { name: "Cloudflare Tunnel URL" });
+    expect(input.value).toBe("https://sample.trycloudflare.com");
+    expect(input.readOnly).toBe(true);
+
+    const copyButton = screen.getByRole("button", { name: "Copy tunnel URL" });
+    expect(copyButton.querySelector(".copy-icon")).not.toBeNull();
+    expect(copyButton.querySelector(".copy-success-icon")).not.toBeNull();
+    fireEvent.click(copyButton);
+    expect(onCopy).toHaveBeenCalledTimes(1);
+
+    rerender(<CopyTextField
+      value="https://sample.trycloudflare.com"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      copied
+      copyLabel="Copy tunnel URL"
+      copiedLabel="Tunnel URL copied"
+      onCopy={onCopy}
+    />);
+    expect(screen.getByRole("button", { name: "Tunnel URL copied" }).parentElement.dataset.copied).toBe("true");
+  });
+
   it("keeps the same input and its draft when switching tabs with the keyboard", () => {
     function Example() {
       const [selected, setSelected] = useState(0);
@@ -45,5 +80,35 @@ describe("Settings controls", () => {
     expect(input.tabIndex).toBe(-1);
     expect(document.activeElement).toBe(button);
     expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("portals help popovers out of clipped settings groups", () => {
+    render(<div className="settings-list" style={{ overflow: "hidden" }}>
+      <DialogSwitch id="remote-toggle" dialogId="remote-dialog" label="Remote access" help="This text stays above the row." checked={false} onChange={() => {}} onOpen={() => {}} />
+    </div>);
+    const trigger = screen.getByRole("button", { name: "Remote access information" });
+    fireEvent.focus(trigger);
+    const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
+    expect(popover.parentElement).toBe(document.body);
+    expect(popover.dataset.open).toBe("true");
+    expect(popover.textContent).toBe("This text stays above the row.");
+  });
+
+  it("keeps globe help on the shared focus and hover tooltip behavior", () => {
+    render(<HelpTooltip label="Cloud project information" text="Cloud access is scoped to its host." icon={<GlobeIcon />} />);
+    const trigger = screen.getByRole("button", { name: "Cloud project information" });
+    expect(trigger.querySelector("svg circle")).not.toBeNull();
+    expect(trigger.querySelector("svg path")).not.toBeNull();
+    const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
+    expect(popover.getAttribute("role")).toBe("tooltip");
+
+    fireEvent.focus(trigger);
+    expect(popover.dataset.open).toBe("true");
+    fireEvent.blur(trigger);
+    expect(popover.dataset.open).toBe("false");
+    fireEvent.pointerEnter(trigger.parentElement);
+    expect(popover.dataset.open).toBe("true");
+    fireEvent.pointerLeave(trigger.parentElement);
+    expect(popover.dataset.open).toBe("false");
   });
 });
