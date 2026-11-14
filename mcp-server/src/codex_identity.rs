@@ -304,7 +304,9 @@ mod sqlite {
         ffi::{c_char, c_int, c_void, CStr, CString},
         ptr,
     };
-    #[link(name = "sqlite3")]
+    // Keep Cargo's bundled SQLite native library dependency attached to this crate.
+    const _: i32 = libsqlite3_sys::SQLITE_VERSION_NUMBER;
+    #[link(name = "sqlite3", kind = "static")]
     unsafe extern "C" {
         fn sqlite3_open_v2(
             name: *const c_char,
