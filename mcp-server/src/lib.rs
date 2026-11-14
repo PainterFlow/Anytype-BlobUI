@@ -108,7 +108,30 @@ pub struct ProjectSync {
 }
 /// Host metadata is deliberately separate from model-controlled tool arguments.
 pub fn thread_id(params: &Value) -> Result<Option<String>, String> {
-    match params.pointer("/_meta/threadId") {
+    let meta = params.get("_meta");
+    let direct = metadata_thread_id(meta.and_then(|meta| meta.get("threadId")))?;
+    let turn_metadata = match meta.and_then(|meta| meta.get("x-codex-turn-metadata")) {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(metadata)) => Some(Value::Object(metadata.clone())),
+        Some(Value::String(metadata)) => {
+            let metadata: Value = serde_json::from_str(metadata)
+                .map_err(|_| "Codex supplied invalid chat identity metadata.")?;
+            if !metadata.is_object() {
+                return Err("Codex supplied invalid chat identity metadata.".into());
+            }
+            Some(metadata)
+        }
+        _ => return Err("Codex supplied invalid chat identity metadata.".into()),
+    };
+    let turn = metadata_thread_id(turn_metadata.as_ref().and_then(|value| value.get("thread_id")))?;
+    match (direct, turn) {
+        (Some(direct), Some(turn)) if direct != turn => Err("Codex supplied conflicting chat identity metadata.".into()),
+        (Some(direct), _) => Ok(Some(direct)),
+        (None, turn) => Ok(turn),
+    }
+}
+fn metadata_thread_id(value: Option<&Value>) -> Result<Option<String>, String> {
+    match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(id)) if !id.is_empty() && id.len() <= 128
             && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') => Ok(Some(id.clone())),
@@ -206,6 +229,11 @@ mod tests {
     #[test]
     fn chat_identity_comes_only_from_host_metadata() {
         assert_eq!(thread_id(&json!({"_meta":{"threadId":"chat-123"},"arguments":{"threadId":"spoof"}})).unwrap(),Some("chat-123".into()));
+        assert_eq!(thread_id(&json!({"_meta":{"x-codex-turn-metadata":{"thread_id":"chat-456"}},"arguments":{"thread_id":"spoof"}})).unwrap(),Some("chat-456".into()));
+        assert_eq!(thread_id(&json!({"_meta":{"x-codex-turn-metadata":"{\"thread_id\":\"chat-789\"}"}})).unwrap(),Some("chat-789".into()));
+        assert!(thread_id(&json!({"_meta":{"threadId":"chat-123","x-codex-turn-metadata":{"thread_id":"chat-456"}}})).is_err());
+        assert!(thread_id(&json!({"_meta":{"x-codex-turn-metadata":"invalid json"}})).is_err());
+        assert!(thread_id(&json!({"_meta":{"x-codex-turn-metadata":{"thread_id":"../escape"}}})).is_err());
         assert_eq!(thread_id(&json!({"arguments":{"threadId":"spoof"}})).unwrap(),None);
         for bad in [json!(""),json!(false),json!("../escape"),json!("x".repeat(129))] {
             assert!(thread_id(&json!({"_meta":{"threadId":bad}})).is_err());
