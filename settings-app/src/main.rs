@@ -2878,8 +2878,13 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running BlobUI Settings");
+        .build(tauri::generate_context!())
+        .expect("error while building BlobUI Settings")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                let _ = anyblob::stop_cloudflare_tunnel();
+            }
+        });
 }
 
 impl Default for SettingsDraft {
