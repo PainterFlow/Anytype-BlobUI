@@ -756,7 +756,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List objects. ",
+    "description": "List objects. In a project with restricted access, Anyblob returns only objects admitted by that project's saved sources and applies offset and limit after filtering.",
     "query": [
       "fields",
       "offset",

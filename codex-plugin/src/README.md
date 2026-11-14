@@ -21,7 +21,7 @@ For Codex running on another PC or server, enable remote access in BlobUI's Code
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.2.28. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge, and can use Cloudflare Quick Tunnels or a named tunnel. See [remote access setup](../../docs/anyblob-remote-access.md).
+The current Anyblob release version is 0.2.29. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge, and can use Cloudflare Quick Tunnels or a named tunnel. See [remote access setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 
@@ -31,7 +31,7 @@ Filter Incomplete Tasks excludes objects whose built-in Done checkbox is checked
 
 Suggestions show only object titles and space metadata. They may include objects your current project cannot read. Selecting a suggestion grants no access. Resource reads use existing project/global permissions and Always Ask. Missing host identity retains the existing denial behavior. See the repository's [implementation and validation notes](../../docs/anyblob-mentions-compatibility.md) for the isolated host probe and its limits.
 
-`list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. Continue search pagination only when needed. Linked objects and attachments remain references. These existing tools remain read-only. See Content tools below for explicit changes.
+`list_spaces` returns readable space IDs and names. `search_objects` requires `space_id` and `query`, defaults to 20 results and accepts `limit` up to 100 and `offset`. `read_object` requires `space_id` and `object_id`, returning identity, properties and Markdown. In project-scoped chats, `list_objects` filters rows to the objects admitted by the project's readable sources and applies pagination after filtering. Continue search pagination only when needed. Linked objects and attachments remain references. These existing tools remain read-only. See Content tools below for explicit changes.
 
 Always Ask requires a separate native Codex approval for every content search or object read. Mention metadata searches and space discovery need no extra read approval. Approve for me and Never Ask permit reads within saved space access. Unsaved permission edits have no effect. Denial, dismissal, cancellation, app exit and the two-minute approval timeout deny access. Prompts are serialized. Codex may require additional approvals, which cannot override BlobUI restrictions. The legacy launcher sets a three-minute tool timeout. The portable launcher uses Codex's default one-minute timeout.
 
