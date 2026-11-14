@@ -223,7 +223,7 @@ impl Scope {
     }
     pub fn content_permission(&self, request: &blobui_mcp::content::ContentRequest, files: bool) -> Option<Permission> {
         let space=self.spaces.get(request.arguments["space_id"].as_str()?)?;
-        let grants=if matches!(request.tool.as_str(), "list_schemas" | "get_schema" | "get_op_schema" | "list_properties") {
+        let grants=if matches!(request.tool.as_str(), "list_schemas" | "get_schema" | "get_op_schema" | "list_properties" | "list_objects") {
             &space.schema_grants
         } else if request.space_wide() { &space.all_grants } else {
             request.target().and_then(|id|space.object_grants.get(id)).unwrap_or(&space.all_grants)
@@ -299,6 +299,28 @@ impl Scope {
             json!({"data":selected,"total":total,"has_more":(offset as usize).saturating_add(limit as usize)<total}),
         )
     }
+    pub(crate) fn list_objects(
+        &self,
+        client: &Client,
+        request: &blobui_mcp::content::ContentRequest,
+        check: &impl Fn() -> Result<(), String>,
+    ) -> Result<Value, String> {
+        let space = request.arguments["space_id"].as_str().ok_or("Missing space ID.")?;
+        let mut path = format!("/v2/spaces/{}/objects?ids=full", encoded(space));
+        if let Some(fields) = request.arguments["fields"].as_str() {
+            path.push_str("&fields=");
+            path.push_str(&encoded(fields));
+        }
+        check()?;
+        let rows = client.pages("GET", &path, None)?;
+        check()?;
+        self.filter_search(
+            space,
+            rows,
+            request.arguments["offset"].as_u64().unwrap_or(0) as u32,
+            request.arguments["limit"].as_u64().unwrap_or(25) as u32,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -349,6 +371,72 @@ mod tests {
         let scope = Scope {spaces:BTreeMap::from([("s".into(),Space {schema_grants:vec![p("none","fullAccess")],..Default::default()})])};
         assert!(scope.content_permission(&req("list_properties",json!({"space_id":"s"})),false).is_none());
         assert!(scope.content_permission(&req("list_properties",json!({"space_id":"other"})),false).is_none());
+    }
+    #[test]
+    fn restricted_object_listing_filters_all_source_members_before_pagination() {
+        let readable = p("read", "fullAccess");
+        let denied = p("none", "alwaysAsk");
+        let scope = Scope {
+            spaces: BTreeMap::from([("s".into(), Space {
+                schema_grants: vec![readable.clone(), readable.clone(), readable.clone()],
+                object_grants: BTreeMap::from([
+                    ("query-member".into(), vec![readable.clone()]),
+                    ("collection-member".into(), vec![readable.clone()]),
+                    ("type-member".into(), vec![readable.clone()]),
+                    ("denied-member".into(), vec![denied.clone()]),
+                ]),
+                objects: BTreeMap::from([
+                    ("query-member".into(), readable.clone()),
+                    ("collection-member".into(), readable.clone()),
+                    ("type-member".into(), readable.clone()),
+                    ("denied-member".into(), denied),
+                ]),
+                ..Space::default()
+            })]),
+        };
+        let request = req("list_objects", json!({"space_id":"s","fields":"status,due","offset":1,"limit":1}));
+        assert!(scope.content_permission(&request, false).is_some());
+        let (client, requests, server) = crate::anyblob_content::tests::fixture(vec![json!({
+            "data":[
+                {"id":"hidden"},
+                {"id":"query-member"},
+                {"id":"collection-member"},
+                {"id":"denied-member"},
+                {"id":"type-member"}
+            ],
+            "total":5,
+            "has_more":false
+        })]);
+        let result = scope.list_objects(&client, &request, &|| Ok(())).unwrap();
+        assert_eq!(result, json!({"data":[{"id":"collection-member"}],"total":3,"has_more":true}));
+        server.join().unwrap();
+        let request = String::from_utf8_lossy(&requests.lock().unwrap()[0]).to_string();
+        assert!(request.starts_with("GET /v2/spaces/s/objects?ids=full&fields=status%2Cdue&limit=100&offset=0 "));
+    }
+    #[test]
+    fn whole_space_listing_keeps_explicit_project_object_denials() {
+        let readable = p("read", "fullAccess");
+        let denied = p("none", "alwaysAsk");
+        let scope = Scope {
+            spaces: BTreeMap::from([("s".into(), Space {
+                all: Some(readable.clone()),
+                all_grants: vec![readable.clone()],
+                schema_grants: vec![readable, denied.clone()],
+                object_grants: BTreeMap::from([("denied-member".into(), vec![denied.clone()])]),
+                objects: BTreeMap::from([("denied-member".into(), denied)]),
+                ..Space::default()
+            })]),
+        };
+        let request = req("list_objects", json!({"space_id":"s"}));
+        assert!(scope.content_permission(&request, false).is_some());
+        let (client, _, server) = crate::anyblob_content::tests::fixture(vec![json!({
+            "data":[{"id":"denied-member"},{"id":"ordinary-member"}],
+            "total":2,
+            "has_more":false
+        })]);
+        let result = scope.list_objects(&client, &request, &|| Ok(())).unwrap();
+        assert_eq!(result, json!({"data":[{"id":"ordinary-member"}],"total":1,"has_more":false}));
+        server.join().unwrap();
     }
     #[test]
     fn member_properties_and_type_definitions_are_visible_without_exposing_other_metadata() {
@@ -453,6 +541,7 @@ mod mutation_permission_tests {
             ] {
                 assert!(scope.content_permission(&req(name,args),false).is_none());
             }
+            assert_eq!(scope.content_permission(&req("list_objects",json!({"space_id":"s"})),false).is_some(), access != "none");
         }
     }
     fn grant(access:&str,approval:&str,files:bool)->Permission {Permission{access:access.into(),approval:approval.into(),files_enabled:files,}}

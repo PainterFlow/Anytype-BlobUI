@@ -870,6 +870,11 @@ pub fn execute_validated(
     let etag = req.arguments["etag"].as_str();
     if !req.mutates() {
         check()?;
+        if req.tool == "list_objects" {
+            if let Some(scope) = scope {
+                return scope.list_objects(client, req, check);
+            }
+        }
         return request(client, method, &route(req, false)?, body, etag, None);
     }
     let key = prepared
