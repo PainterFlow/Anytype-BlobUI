@@ -1037,6 +1037,7 @@ pub fn start_cloudflare_tunnel() -> Result<Value, String> {
         return Err("Enable remote access before starting the Cloudflare Tunnel.".into());
     }
     stop_cloudflared();
+    use std::os::windows::process::CommandExt;
     let mut child = std::process::Command::new("cloudflared")
         .args([
             "tunnel",
@@ -1044,6 +1045,7 @@ pub fn start_cloudflare_tunnel() -> Result<Value, String> {
             &format!("http://127.0.0.1:{REMOTE_HTTP_PORT}"),
             "--no-autoupdate",
         ])
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
