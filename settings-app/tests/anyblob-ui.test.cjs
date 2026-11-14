@@ -67,7 +67,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const remoteHelp=panel.getByRole('button',{name:'Allow Cloudflare Tunnel remote access information'});await remoteHelp.focus();
     const remoteTooltip=page.locator(`#${await remoteHelp.getAttribute('aria-describedby')}`);await remoteTooltip.waitFor({state:'visible'});
     assert.equal(await remoteTooltip.evaluate(el=>el.parentElement===document.body),true);
-    assert.match(await remoteTooltip.innerText(),/Project-specific permissions are unavailable/);
+    assert.match(await remoteTooltip.innerText(),/cloud rows appear under the remote PC name/);
+    assert.match(await remoteTooltip.innerText(),/Missing or invalid membership is denied when scopes exist/);
     await page.screenshot({path:path.join(fixture,'remote-access-help-tooltip-dark.png')});
     await toggle.check();await page.waitForFunction(()=>window.enabled);assert.equal(await remoteToggle.isDisabled(),false);assert.equal(await remoteLabel.isDisabled(),true);
     await remoteToggle.check();await page.waitForFunction(()=>window.remoteAccess);

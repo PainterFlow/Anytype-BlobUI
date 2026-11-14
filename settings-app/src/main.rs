@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
 
 mod anyblob;
+mod anyblob_cloud_projects;
 mod anyblob_blobui;
 mod anyblob_content;
 mod anyblob_creation;

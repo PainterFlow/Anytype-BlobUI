@@ -35,6 +35,86 @@ fn bridge_path() -> Result<PathBuf, String> {
         Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json"))
     }
 }
+fn cloud_projects_path() -> Result<PathBuf, String> {
+    Ok(bridge_path()?
+        .parent()
+        .ok_or("Anyblob settings have no parent folder.")?
+        .join("cloud-projects.json"))
+}
+pub(crate) fn synced_cloud_projects() -> Result<Vec<crate::anyblob_cloud_projects::ProjectSummary>, String> {
+    let catalog = crate::anyblob_cloud_projects::read_at(&cloud_projects_path()?)?;
+    Ok(crate::anyblob_cloud_projects::projects(&catalog))
+}
+fn sync_cloud_projects_at(
+    state: &Value,
+    path: &std::path::Path,
+    payload: &Value,
+) -> Result<(), String> {
+    let fields = payload
+        .as_object()
+        .ok_or("Invalid remote project sync message.")?;
+    if fields.len() != 4
+        || !["token", "hostId", "computerName", "projects"]
+            .iter()
+            .all(|field| fields.contains_key(*field))
+    {
+        return Err("Invalid remote project sync message.".into());
+    }
+    let token = payload["token"]
+        .as_str()
+        .ok_or("Invalid remote project sync message.")?;
+    authenticate_remote(state, token)?;
+    let host_id = payload["hostId"]
+        .as_str()
+        .ok_or("Invalid remote project sync message.")?;
+    let computer_name = payload["computerName"]
+        .as_str()
+        .ok_or("Invalid remote project sync message.")?;
+    let rows = payload["projects"]
+        .as_array()
+        .ok_or("Invalid remote project sync message.")?;
+    let mut projects = Vec::with_capacity(rows.len());
+    for row in rows {
+        let fields = row
+            .as_object()
+            .ok_or("Invalid remote project sync message.")?;
+        if fields.len() != 2 || !fields.contains_key("id") || !fields.contains_key("name") {
+            return Err("Invalid remote project sync message.".into());
+        }
+        projects.push(crate::anyblob_cloud_projects::ProjectEntry {
+            id: row["id"]
+                .as_str()
+                .ok_or("Invalid remote project sync message.")?
+                .into(),
+            name: row["name"]
+                .as_str()
+                .ok_or("Invalid remote project sync message.")?
+                .into(),
+        });
+    }
+    crate::anyblob_cloud_projects::update_at(path, host_id, computer_name, projects)
+}
+
+fn resolve_remote_membership(
+    identity: &blobui_mcp::RemoteMembership,
+) -> Result<crate::codex_identity::Membership, String> {
+    resolve_remote_membership_at(&cloud_projects_path()?, identity)
+}
+
+fn resolve_remote_membership_at(
+    path: &std::path::Path,
+    identity: &blobui_mcp::RemoteMembership,
+) -> Result<crate::codex_identity::Membership, String> {
+    let key = crate::anyblob_cloud_projects::resolve_at(
+        path,
+        &identity.host_id,
+        identity.project_id.as_deref(),
+    )?;
+    Ok(key.map_or(
+        crate::codex_identity::Membership::Projectless,
+        crate::codex_identity::Membership::Project,
+    ))
+}
 fn state() -> Result<Value, String> {
     let path = bridge_path()?;
     if !path.exists() {
@@ -484,17 +564,9 @@ fn dispatch_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
-    dispatch_with_mode(request, connected, load_state, load_config, connect, approve, false)
-}
-fn dispatch_with_mode(
-    request: Request,
-    connected: impl Fn() -> bool,
-    load_state: impl Fn() -> Result<Value, String>,
-    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
-    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
-    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
-    remote_global_only: bool,
-) -> Result<Value, String> {
+    if request.remote_membership.is_some() {
+        return Err("Remote project identity is valid only on the authenticated tunnel.".into());
+    }
     let thread = request.thread_id.clone();
     let resolve = || {
         thread
@@ -502,13 +574,7 @@ fn dispatch_with_mode(
             .map(crate::codex_identity::resolve)
             .transpose()
     };
-    if remote_global_only {
-        dispatch_resolved_with_mode(
-            request, connected, load_state, load_config, connect, approve, resolve, true,
-        )
-    } else {
-        dispatch_resolved_with(request, connected, load_state, load_config, connect, approve, resolve)
-    }
+    dispatch_resolved_with(request, connected, load_state, load_config, connect, approve, resolve)
 }
 fn dispatch_resolved_with(
     request: Request,
@@ -518,18 +584,6 @@ fn dispatch_resolved_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
     resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
-) -> Result<Value, String> {
-    dispatch_resolved_with_mode(request, connected, load_state, load_config, connect, approve, resolve, false)
-}
-fn dispatch_resolved_with_mode(
-    request: Request,
-    connected: impl Fn() -> bool,
-    load_state: impl Fn() -> Result<Value, String>,
-    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
-    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
-    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
-    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
-    remote_global_only: bool,
 ) -> Result<Value, String> {
     request.request.validate()?;
     blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
@@ -564,7 +618,7 @@ fn dispatch_resolved_with_mode(
         .projects
         .values()
         .any(|project| !project.sources.is_empty());
-    let membership = if restricted && !remote_global_only {
+    let membership = if restricted {
         Some(resolve()?.ok_or(
             "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
         )?)
@@ -594,7 +648,7 @@ fn dispatch_resolved_with_mode(
         {
             return Err("BlobUI permissions or integration changed. Retry the request.".into());
         }
-        if restricted && !remote_global_only && resolve()? != membership {
+        if restricted && resolve()? != membership {
             return Err("Codex chat project changed during the request. Retry the request.".into());
         }
         Ok(())
@@ -619,7 +673,7 @@ fn dispatch_resolved_with_mode(
                     &approve,
                 );
             }
-            if remote_global_only || !restricted || membership.is_some() {
+            if !restricted || membership.is_some() {
                 return crate::anyblob_creation::dispatch_global(
                     &client,
                     &effective,
@@ -1147,24 +1201,46 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
         if envelope["version"] != VERSION {
             return Err(blobui_mcp::approval::UPDATE.into());
         }
+        let fields = envelope.as_object().ok_or("Invalid remote Anyblob request.")?;
+        if fields.contains_key("projectSync") {
+            if fields.len() != 2 || !fields.contains_key("version") {
+                return Err("Invalid remote Anyblob project sync message.".into());
+            }
+            sync_cloud_projects_at(&state()?, &cloud_projects_path()?, &envelope["projectSync"])?;
+            use tauri::Emitter;
+            let _ = app.emit("anyblob-cloud-projects-changed", ());
+            eprintln!(
+                "anyblob remote operation=project_sync elapsed_ms={} outcome=allowed",
+                started.elapsed().as_millis()
+            );
+            return Ok(json!({"synced":true}));
+        }
+        if fields.len() != 2 || !fields.contains_key("request") {
+            return Err("Invalid remote Anyblob request.".into());
+        }
         let mut request: Request = serde_json::from_value(envelope["request"].clone())
             .map_err(|_| "Invalid remote Anyblob request.")?;
-        if state()
-            .map(|value| value["remoteAccess"] == true)
-            .unwrap_or(false)
-            == false
-        {
+        let initial = state()?;
+        if initial["remoteAccess"] != true {
             return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
         }
-        // A remote thread ID cannot prove membership in the host's local Codex project.
+        // Thread IDs are host-local. The separately supplied, verified host membership is used.
         request.thread_id = None;
+        let remote_membership = request.remote_membership.clone();
         let operation = request.request.name().to_owned();
         let requested_operation = request.request.clone();
         let operation_id = request.id.clone();
-        let result = dispatch_with_mode(
+        let load_remote_state = || {
+            let current = state()?;
+            if current["remoteAccess"] != true {
+                return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
+            }
+            Ok(current)
+        };
+        let result = dispatch_resolved_with(
             request,
             || Instant::now() < deadline && bridge.connected(),
-            state,
+            load_remote_state,
             saved,
             || {
                 crate::kanban_api::Client::connect().map_err(|_| {
@@ -1172,7 +1248,7 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
                 })
             },
             |op, check| pipe_prompt(&bridge, &operation_id, op, check),
-            true,
+            || remote_membership.as_ref().map(resolve_remote_membership).transpose(),
         );
         if let Some(payload) = publication_event(&requested_operation, &result) {
             use tauri::Emitter;
@@ -1715,7 +1791,7 @@ mod tests {
         assert!(allowed(&config("read", "fullAccess"), &Operation::ListSpaces {}).is_ok());
     }
     #[test]
-    fn remote_creation_uses_global_space_permission_when_project_sources_exist() {
+    fn verified_projectless_remote_creation_uses_global_space_permission() {
         let mut config = config("createDelete", "fullAccess");
         config.projects.insert("saved-project".into(), crate::codex::ProjectConfiguration {
             sources: vec![crate::codex::SourcePermission {
@@ -1730,15 +1806,14 @@ mod tests {
             "POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),
             json!({"_fixture_request_body":{},"data":[],"has_more":false}),
         )], None);
-        let result = dispatch_resolved_with_mode(
+        let result = dispatch_resolved_with(
             request(operation),
             || true,
             || Ok(enabled()),
             || Ok(config.clone()),
             || Ok(client.clone_for_fixture()),
             |_, _| panic!("global full access does not prompt"),
-            || panic!("remote calls must not resolve local project identity"),
-            true,
+            || Ok(Some(crate::codex_identity::Membership::Projectless)),
         ).unwrap();
         assert_eq!(result["targets"], json!([]));
         server.join().unwrap();
@@ -1751,15 +1826,14 @@ mod tests {
             "idempotency_key":"remote-global-denial",
             "body":{"type":"page","name":"fixture"}
         })).unwrap();
-        let error = dispatch_resolved_with_mode(
+        let error = dispatch_resolved_with(
             request(create),
             || true,
             || Ok(enabled()),
             || Ok(project_only.clone()),
             || Ok(crate::kanban_api::Client::with_connection("fixture", "127.0.0.1", 1)),
             |_, _| panic!("denied global access must not prompt"),
-            || panic!("remote calls must not resolve local project identity"),
-            true,
+            || Ok(Some(crate::codex_identity::Membership::Projectless)),
         ).unwrap_err();
         assert!(error.contains("global space permissions") || error.contains("Create-Delete"), "{error}");
     }
@@ -1768,6 +1842,7 @@ mod tests {
             id: "fixture".into(),
             token: "a".repeat(64),
             thread_id: None,
+            remote_membership: None,
             request: op,
         }
     }
@@ -1988,6 +2063,57 @@ mod tests {
         }
     }
     #[test]
+    fn cloud_membership_selects_a_host_scoped_override() {
+        use crate::codex_identity::Membership;
+        let mut config = project_config(
+            json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"fullAccess"}}),
+        );
+        let project = config.projects.remove("project").unwrap();
+        config.projects.insert("cloud:host-a:same-id".into(), project);
+        let (client, server) = mock(
+            vec![
+                (
+                    "GET /v2/spaces/space/objects/object?ids=full ".into(),
+                    json!({"id":"object","name":"Allowed","type":"page","properties":{}}),
+                ),
+                (
+                    "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
+                    json!({"id":"object","markdown":"cloud project content"}),
+                ),
+            ],
+            None,
+        );
+        let result = dispatch_resolved_with(
+            request(Operation::ReadObject {
+                space_id: "space".into(),
+                object_id: "object".into(),
+            }),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("full access does not prompt"),
+            || Ok(Some(Membership::Project("cloud:host-a:same-id".into()))),
+        )
+        .unwrap();
+        assert_eq!(result["markdown"], "cloud project content");
+        server.join().unwrap();
+
+        assert!(dispatch_resolved_with(
+            request(Operation::ReadObject {
+                space_id: "space".into(),
+                object_id: "object".into(),
+            }),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || panic!("the other host must not use host-a's project override"),
+            |_, _| panic!("a missing host-scoped grant must not prompt"),
+            || Ok(Some(Membership::Project("cloud:host-b:same-id".into()))),
+        )
+        .is_err());
+    }
+    #[test]
     fn query_search_filters_membership_before_pagination_and_hides_global_totals() {
         use crate::codex_identity::Membership;
         let config = project_config(
@@ -2073,9 +2199,10 @@ mod tests {
             "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
             json!({"data":[{"id":"space","name":"Global"},{"id":"other","name":"Other project"}],"has_more":false}),
         );
-        let (client, server) = mock(vec![page.clone(), page], None);
+        let (client, server) = mock(vec![page.clone(), page.clone(), page], None);
         for membership in [
             Membership::Project("unconfigured".into()),
+            Membership::Project("cloud:host:unconfigured".into()),
             Membership::Projectless,
         ] {
             let result = dispatch_resolved_with(
@@ -2935,6 +3062,123 @@ mod tests {
                 approve_with(|| Err(reason.into()), Duration::from_secs(1), || Some(true)).is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cloud_sync_tests {
+    use super::*;
+
+    fn fixture_path() -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.test-run/cloud-project-sync")
+            .join(format!("{}-{nonce}.json", std::process::id()));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn project_sync_authenticates_before_replacing_the_saved_catalog() {
+        let path = fixture_path();
+        let token = "a".repeat(64);
+        let enabled = json!({"enabled":true,"remoteAccess":true,"verifier":digest(&token)});
+        crate::anyblob_cloud_projects::update_at(
+            &path,
+            "host",
+            "OLD-PC",
+            vec![crate::anyblob_cloud_projects::ProjectEntry {
+                id: "old".into(),
+                name: "Old project".into(),
+            }],
+        )
+        .unwrap();
+        let original = crate::anyblob_cloud_projects::read_at(&path).unwrap();
+        let incoming = json!({
+            "token": "b".repeat(64),
+            "hostId": "host",
+            "computerName": "NEW-PC",
+            "projects": [{"id":"new","name":"New project"}]
+        });
+        assert!(sync_cloud_projects_at(&enabled, &path, &incoming).is_err());
+        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
+
+        let disabled = json!({"enabled":true,"remoteAccess":false,"verifier":digest(&token)});
+        let mut incoming = incoming;
+        incoming["token"] = token.clone().into();
+        assert!(sync_cloud_projects_at(&disabled, &path, &incoming).is_err());
+        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
+
+        assert!(sync_cloud_projects_at(&enabled, &path, &json!({
+            "token":token,
+            "hostId":"host",
+            "computerName":"NEW-PC",
+            "projects":[{"id":"bad/id","name":"Invalid"}]
+        })).is_err());
+        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
+
+        sync_cloud_projects_at(&enabled, &path, &json!({
+            "token":"a".repeat(64),
+            "hostId":"host",
+            "computerName":"NEW-PC",
+            "projects":[]
+        })).unwrap();
+        let refreshed = crate::anyblob_cloud_projects::read_at(&path).unwrap();
+        assert_eq!(refreshed.hosts["host"].computer_name, "NEW-PC");
+        assert!(refreshed.hosts["host"].projects.is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn remote_membership_requires_a_synced_host_and_project() {
+        let path = fixture_path();
+        crate::anyblob_cloud_projects::update_at(
+            &path,
+            "host-a",
+            "CLOUD-PC",
+            vec![crate::anyblob_cloud_projects::ProjectEntry {
+                id: "same-id".into(),
+                name: "Work".into(),
+            }],
+        )
+        .unwrap();
+        crate::anyblob_cloud_projects::update_at(&path, "host-b", "OTHER-PC", vec![]).unwrap();
+        let project = blobui_mcp::RemoteMembership {
+            host_id: "host-a".into(),
+            project_id: Some("same-id".into()),
+        };
+        assert_eq!(
+            resolve_remote_membership_at(&path, &project).unwrap(),
+            crate::codex_identity::Membership::Project("cloud:host-a:same-id".into())
+        );
+        let projectless = blobui_mcp::RemoteMembership {
+            host_id: "host-b".into(),
+            project_id: None,
+        };
+        assert_eq!(
+            resolve_remote_membership_at(&path, &projectless).unwrap(),
+            crate::codex_identity::Membership::Projectless
+        );
+        assert!(resolve_remote_membership_at(
+            &path,
+            &blobui_mcp::RemoteMembership {
+                host_id: "host-b".into(),
+                project_id: Some("same-id".into()),
+            }
+        )
+        .is_err());
+        assert!(resolve_remote_membership_at(
+            &path,
+            &blobui_mcp::RemoteMembership {
+                host_id: "unknown".into(),
+                project_id: None,
+            }
+        )
+        .is_err());
+        let _ = std::fs::remove_file(path);
     }
 }
 

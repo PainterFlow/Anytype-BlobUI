@@ -55,7 +55,7 @@ export function CodexIntegration() {
     </div>
     <div className="settings-list anyblob-integration-settings">
       <DialogSwitch id="enable-anyblob-remote" dialogId="anyblob-remote-access-dialog" label="Allow Cloudflare Tunnel remote access"
-        help="The tunnel exposes only the authenticated Anyblob bridge. It does not expose Anytype's Local API or API key. Remote chats use saved global space permissions. Project-specific permissions are unavailable."
+        help="The tunnel exposes only the authenticated Anyblob bridge, not Anytype's Local API or API key. Launch or reconnect remote Anyblob to sync its project catalog. In Settings > Anyblob > Projects, cloud rows appear under the remote PC name. Select rows to save host-scoped sources. Configured projects use those scopes, while projectless or unconfigured chats use global permissions. Missing or invalid membership is denied when scopes exist."
         checked={remote} disabled={!enabled||changing||remoteChanging} labelDisabled={!enabled||changing||remoteChanging||!remote}
         expanded={remoteDialogRequested&&enabled&&remote} onOpen={openRemoteDialog} onChange={configureRemote} />
     </div>
