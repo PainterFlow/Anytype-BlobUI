@@ -7,12 +7,12 @@ function CloseIcon() {
 
 function Features({ useApi }) {
   const labels = [
-    "Custom Accent Color", "Custom Font", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Codex Integration",
+    "Custom Accent Color", "Custom Themes", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Custom Font", "Codex Integration",
     "Colored Calendar Events", "Read and use your data for BlobUI features", "Corrupt your Data", "Sell/Collect your Data",
   ];
   return <span className="onboarding-features" role="list">
     {labels.map((label, index) => {
-      const included = index < (useApi ? 8 : 5);
+      const included = index < (useApi ? 9 : 6);
       return <span className="onboarding-feature" role="listitem" key={label}>
         <span>{label}</span>
         <svg className={`feature-mark ${included ? "available" : "unavailable"}`} viewBox={included ? "0 0 20 20" : "0 0 12 12"} aria-hidden="true">
