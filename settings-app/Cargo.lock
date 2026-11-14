@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "blobui-mcp"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "libsqlite3-sys",
  "reqwest 0.12.28",
