@@ -95,26 +95,6 @@ fn sync_cloud_projects_at(
     crate::anyblob_cloud_projects::update_at(path, host_id, computer_name, projects)
 }
 
-fn resolve_remote_membership(
-    identity: &blobui_mcp::RemoteMembership,
-) -> Result<crate::codex_identity::Membership, String> {
-    resolve_remote_membership_at(&cloud_projects_path()?, identity)
-}
-
-fn resolve_remote_membership_at(
-    path: &std::path::Path,
-    identity: &blobui_mcp::RemoteMembership,
-) -> Result<crate::codex_identity::Membership, String> {
-    let key = crate::anyblob_cloud_projects::resolve_at(
-        path,
-        &identity.host_id,
-        identity.project_id.as_deref(),
-    )?;
-    Ok(key.map_or(
-        crate::codex_identity::Membership::Projectless,
-        crate::codex_identity::Membership::Project,
-    ))
-}
 fn state() -> Result<Value, String> {
     let path = bridge_path()?;
     if !path.exists() {
@@ -577,9 +557,6 @@ fn dispatch_with(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
-    if request.remote_membership.is_some() {
-        return Err("Remote project identity is valid only on the authenticated tunnel.".into());
-    }
     let thread = request.thread_id.clone();
     let resolve = || {
         thread
@@ -1271,15 +1248,14 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
         if fields.len() != 2 || !fields.contains_key("request") {
             return Err("Invalid remote Anyblob request.".into());
         }
-        let mut request: Request = serde_json::from_value(envelope["request"].clone())
+        let request: Request = serde_json::from_value(envelope["request"].clone())
             .map_err(|_| "Invalid remote Anyblob request.")?;
         let initial = state()?;
         if initial["remoteAccess"] != true {
             return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
         }
-        // Thread IDs are host-local. The separately supplied, verified host membership is used.
-        request.thread_id = None;
-        let remote_membership = request.remote_membership.clone();
+        // The local Codex state file verifies the thread ID and remote host membership.
+        let thread = request.thread_id.clone();
         let operation = request.request.name().to_owned();
         let requested_operation = request.request.clone();
         let operation_id = request.id.clone();
@@ -1301,7 +1277,12 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
                 })
             },
             |op, check| pipe_prompt(&bridge, &operation_id, op, check),
-            || remote_membership.as_ref().map(resolve_remote_membership).transpose(),
+            || {
+                thread
+                    .as_deref()
+                    .map(crate::codex_identity::resolve)
+                    .transpose()
+            },
         );
         if let Some(payload) = publication_event(&requested_operation, &result) {
             use tauri::Emitter;
@@ -1895,7 +1876,6 @@ mod tests {
             id: "fixture".into(),
             token: "a".repeat(64),
             thread_id: None,
-            remote_membership: None,
             request: op,
         }
     }
@@ -3216,54 +3196,6 @@ mod cloud_sync_tests {
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn remote_membership_requires_a_synced_host_and_project() {
-        let path = fixture_path();
-        crate::anyblob_cloud_projects::update_at(
-            &path,
-            "host-a",
-            "CLOUD-PC",
-            vec![crate::anyblob_cloud_projects::ProjectEntry {
-                id: "same-id".into(),
-                name: "Work".into(),
-            }],
-        )
-        .unwrap();
-        crate::anyblob_cloud_projects::update_at(&path, "host-b", "OTHER-PC", vec![]).unwrap();
-        let project = blobui_mcp::RemoteMembership {
-            host_id: "host-a".into(),
-            project_id: Some("same-id".into()),
-        };
-        assert_eq!(
-            resolve_remote_membership_at(&path, &project).unwrap(),
-            crate::codex_identity::Membership::Project("cloud:host-a:same-id".into())
-        );
-        let projectless = blobui_mcp::RemoteMembership {
-            host_id: "host-b".into(),
-            project_id: None,
-        };
-        assert_eq!(
-            resolve_remote_membership_at(&path, &projectless).unwrap(),
-            crate::codex_identity::Membership::Projectless
-        );
-        assert!(resolve_remote_membership_at(
-            &path,
-            &blobui_mcp::RemoteMembership {
-                host_id: "host-b".into(),
-                project_id: Some("same-id".into()),
-            }
-        )
-        .is_err());
-        assert!(resolve_remote_membership_at(
-            &path,
-            &blobui_mcp::RemoteMembership {
-                host_id: "unknown".into(),
-                project_id: None,
-            }
-        )
-        .is_err());
-        let _ = std::fs::remove_file(path);
-    }
 }
 
 #[cfg(all(test, windows))]

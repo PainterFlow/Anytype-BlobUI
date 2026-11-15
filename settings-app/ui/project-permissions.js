@@ -6,6 +6,7 @@
   const kindName = kind => kinds.find(item => item.value === kind)?.label || 'Unknown source';
   const identity = source => JSON.stringify([source.spaceId,source.kind,source.id]);
   const fallback = () => ({access:'none',filesEnabled:false,approval:'approveForMe'});
+  const isHostProject = project => project?.kind === 'cloud' || project?.kind === 'remote';
 
   function cloudCoordinates(key) {
     if (typeof key !== 'string' || !key.startsWith('cloud:')) return null;
@@ -17,7 +18,7 @@
   }
 
   function projectKey(project) {
-    return project?.kind === 'cloud' ? `cloud:${project.hostId || ''}:${project.id || ''}` : String(project?.id || '');
+    return isHostProject(project) ? `cloud:${project.hostId || ''}:${project.id || ''}` : String(project?.id || '');
   }
 
   function normalize(value) {
@@ -25,14 +26,14 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
     for (const [key, entry] of Object.entries(value)) {
       const coordinates = cloudCoordinates(key);
-      const isCloud = entry?.kind === 'cloud' || Boolean(coordinates);
+      const isHostScoped = isHostProject(entry) || Boolean(coordinates);
       const sources = (Array.isArray(entry?.sources) ? entry.sources : entry?.sources == null ? [] : [null]).map(source=>(
         {spaceId:typeof source?.spaceId==='string'?source.spaceId:'',kind:typeof source?.kind==='string'?source.kind:'',id:typeof source?.id==='string'?source.id:'',
           name:typeof source?.name==='string'?source.name:'Unavailable source',space:typeof source?.space==='string'?source.space:'',
           permission:{access:['none','read','readWrite','createDelete'].includes(source?.permission?.access)?source.permission.access:'none',filesEnabled:source?.permission?.filesEnabled===true,approval:['alwaysAsk','approveForMe','fullAccess'].includes(source?.permission?.approval)?source.permission.approval:'approveForMe'}}));
       result[key] = {
         id: typeof entry?.id === 'string' ? entry.id : coordinates?.id || key,
-        kind: isCloud ? 'cloud' : 'local',
+        kind: entry?.kind === 'remote' ? 'remote' : isHostScoped ? 'cloud' : 'local',
         hostId: typeof entry?.hostId === 'string' ? entry.hostId : coordinates?.hostId || '',
         computerName: typeof entry?.computerName === 'string' ? entry.computerName : '',
         name: typeof entry?.name === 'string' ? entry.name : key,
@@ -47,31 +48,31 @@
     if (!project || typeof project.id !== 'string' || typeof project.name !== 'string' || !Array.isArray(project.rootPaths)) {
       throw new Error('Unsupported Codex project metadata.');
     }
-    const kind = project.kind === 'cloud' ? 'cloud' : 'local';
-    if (project.kind !== undefined && project.kind !== 'local' && project.kind !== 'cloud') {
+    const kind = project.kind === 'remote' ? 'remote' : project.kind === 'cloud' ? 'cloud' : 'local';
+    if (project.kind !== undefined && !['local','cloud','remote'].includes(project.kind)) {
       throw new Error('Unsupported Codex project metadata.');
     }
-    if (kind === 'cloud' && (typeof project.hostId !== 'string' || !project.hostId)) {
-      throw new Error('Unsupported Codex cloud project metadata.');
+    if (kind !== 'local' && (typeof project.hostId !== 'string' || !project.hostId)) {
+      throw new Error('Unsupported Codex remote project metadata.');
     }
-    if (kind === 'cloud' && project.computerName !== undefined && typeof project.computerName !== 'string') {
-      throw new Error('Unsupported Codex cloud project metadata.');
+    if (kind !== 'local' && project.computerName !== undefined && typeof project.computerName !== 'string') {
+      throw new Error('Unsupported Codex remote project metadata.');
     }
     return {
       ...project,
       kind,
-      hostId: kind === 'cloud' ? project.hostId : '',
-      computerName: kind === 'cloud' ? project.computerName || '' : '',
+      hostId: kind !== 'local' ? project.hostId : '',
+      computerName: kind !== 'local' ? project.computerName || '' : '',
       rootPaths: project.rootPaths.filter(path => typeof path === 'string'),
     };
   }
 
   function savedProject(key, saved) {
     const coordinates = cloudCoordinates(key);
-    const isCloud = saved?.kind === 'cloud' || Boolean(coordinates);
+    const isHostScoped = isHostProject(saved) || Boolean(coordinates);
     return {
       id: typeof saved?.id === 'string' ? saved.id : coordinates?.id || key,
-      kind: isCloud ? 'cloud' : 'local',
+      kind: saved?.kind === 'remote' ? 'remote' : isHostScoped ? 'cloud' : 'local',
       hostId: typeof saved?.hostId === 'string' ? saved.hostId : coordinates?.hostId || '',
       computerName: typeof saved?.computerName === 'string' ? saved.computerName : '',
       name: typeof saved?.name === 'string' ? saved.name : key,
@@ -149,8 +150,9 @@
         const normalized=result.map(normalizeCatalogProject);
         const local=normalized.filter(project=>project.kind==='local');
         const cloud=normalized.filter(project=>project.kind==='cloud');
+        const remote=normalized.filter(project=>project.kind==='remote');
         if(replaceCloud||!cloudCatalogLoaded||cloud.length){cloudProjects=cloud;cloudCatalogLoaded=true;}
-        projects=local.concat(cloudProjects);
+        projects=local.concat(remote,cloudProjects);
         scanned=true;
         publish({projects,scanned,projectStatus:''});
         if(active){

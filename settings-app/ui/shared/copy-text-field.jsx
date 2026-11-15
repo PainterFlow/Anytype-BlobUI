@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, CopyIcon, CopySuccessIcon } from "./settings-controls.jsx";
+import { Button, CopyIcon, CopySuccessIcon, ReadOnlyTextInput } from "./settings-controls.jsx";
 import "./copy-text-field.css";
 
 export function CopyTextField({
@@ -14,7 +14,7 @@ export function CopyTextField({
   const fieldClassName = ["copy-text-field", className].filter(Boolean).join(" ");
 
   return <div className={fieldClassName} data-copied={String(copied)}>
-    <input {...inputAttributes} value={value} readOnly />
+    <ReadOnlyTextInput inputAttributes={{ ...inputAttributes, value }} />
     <Button
       className="copy-text-field-button"
       aria-label={copied ? copiedLabel : copyLabel}

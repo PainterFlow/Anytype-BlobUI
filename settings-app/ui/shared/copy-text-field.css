@@ -24,9 +24,7 @@
 }
 
 .copy-text-field > input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -3px;
-  border-radius: 14px;
+  outline: none;
 }
 
 .copy-text-field-button {

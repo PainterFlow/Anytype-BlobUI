@@ -82,15 +82,7 @@ pub struct Request {
     pub token: String,
     #[serde(default)]
     pub thread_id: Option<String>,
-    #[serde(default, rename = "remoteMembership", skip_serializing_if = "Option::is_none")]
-    pub remote_membership: Option<RemoteMembership>,
     pub request: Operation,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RemoteMembership {
-    pub host_id: String,
-    pub project_id: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -247,23 +239,19 @@ mod tests {
         let request: Request = serde_json::from_value(json!({
             "id":"request",
             "token":"a".repeat(64),
+            "thread_id":"chat-123",
             "request":{"operation":"list_spaces"},
-            "remoteMembership":{"hostId":"host_1","projectId":"project_1"}
         })).unwrap();
-        assert_eq!(request.remote_membership, Some(RemoteMembership {
-            host_id:"host_1".into(), project_id:Some("project_1".into())
-        }));
+        assert_eq!(request.thread_id.as_deref(), Some("chat-123"));
         let envelope = serde_json::to_value(&request).unwrap();
-        assert_eq!(envelope["remoteMembership"]["hostId"], "host_1");
-        assert_eq!(envelope["remoteMembership"]["projectId"], "project_1");
-        assert!(envelope.get("remote_membership").is_none());
-        let projectless: Request = serde_json::from_value(json!({
+        assert_eq!(envelope["thread_id"], "chat-123");
+        assert!(envelope.get("remoteMembership").is_none());
+        assert!(serde_json::from_value::<Request>(json!({
             "id":"request",
             "token":"a".repeat(64),
             "request":{"operation":"list_spaces"},
             "remoteMembership":{"hostId":"host_1","projectId":null}
-        })).unwrap();
-        assert_eq!(projectless.remote_membership.unwrap().project_id, None);
+        })).is_err());
     }
     #[test]
     fn strict_arguments() {

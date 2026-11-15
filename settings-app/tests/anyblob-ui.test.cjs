@@ -72,7 +72,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const remoteHelp=panel.getByRole('button',{name:'Allow Cloudflare Tunnel remote access information'});await remoteHelp.focus();
     const remoteTooltip=page.locator(`#${await remoteHelp.getAttribute('aria-describedby')}`);await remoteTooltip.waitFor({state:'visible'});
     assert.equal(await remoteTooltip.evaluate(el=>el.parentElement===document.body),true);
-    assert.match(await remoteTooltip.innerText(),/cloud rows appear under the remote PC name/);
+    assert.match(await remoteTooltip.innerText(),/remote rows use their Codex host ID/);
+    assert.match(await remoteTooltip.innerText(),/local Codex state/);
     assert.match(await remoteTooltip.innerText(),/Missing or invalid membership is denied when scopes exist/);
     await page.screenshot({path:path.join(fixture,'remote-access-help-tooltip-dark.png')});
     await toggle.check();await page.waitForFunction(()=>window.enabled);assert.equal(await remoteToggle.isDisabled(),false);assert.equal(await remoteLabel.isDisabled(),true);
@@ -81,6 +82,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await remoteToggle.isChecked(),true);assert.equal(await remoteDialog.locator('.settings-list').count(),0);assert.equal(await remoteDialog.locator('.anyblob-remote-dialog-group').count(),2);
     assert.equal(await remoteDialog.locator('.anyblob-remote-dialog-group').first().evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
     assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
+    const keyInput=remoteDialog.getByRole('textbox',{name:'Key',exact:true});assert.equal(await keyInput.evaluate(el=>el.readOnly),true);
+    await keyInput.pressSequentially('x');assert.equal(await keyInput.inputValue(),'fixture-remote-key');
     assert.match(await remoteDialog.innerText(),/Quick Tunnel URLs are temporary/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
     assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
     await remoteDialog.getByRole('button',{name:'Copy key'}).click();await remoteDialog.getByRole('button',{name:'Copied'}).waitFor();
@@ -93,7 +96,9 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await tunnelInput.inputValue(),'https://sample.trycloudflare.com');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
     assert.equal(await tunnelField.evaluate(el=>getComputedStyle(el).borderRadius),'18px');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).minHeight),'48px');
     const copyTunnel=remoteDialog.getByRole('button',{name:'Copy tunnel URL'});
-    await tunnelInput.focus();await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
+    await tunnelInput.focus();assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).outlineStyle),'none');
+    await tunnelInput.pressSequentially('x');assert.equal(await tunnelInput.inputValue(),'https://sample.trycloudflare.com');
+    await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
     await page.keyboard.press('Space');await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
     const copiedTunnel=remoteDialog.getByRole('button',{name:'Tunnel URL copied'});

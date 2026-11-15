@@ -90,6 +90,10 @@
   outline-offset: 2px;
 }
 
+.anyblob-remote-dialog .copy-text-field > input:focus-visible {
+  outline: none;
+}
+
 .anyblob-remote-dialog .anyblob-remote-dialog-instructions {
   display: grid;
   gap: 8px;

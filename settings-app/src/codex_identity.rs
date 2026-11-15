@@ -1,11 +1,42 @@
 //! Resolve host-supplied chat IDs from local Codex metadata, never from tool arguments.
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Membership {
     Project(String),
     Projectless,
+}
+
+fn valid_state_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        && !matches!(value, "." | "..")
+}
+
+fn remote_project(state: &Value, host_id: &str, project_id: &str) -> Result<Membership, String> {
+    if !valid_state_id(host_id) || !valid_state_id(project_id) {
+        return Err("Codex returned invalid remote project membership.".into());
+    }
+    let projects = state["remote-projects"]
+        .as_array()
+        .ok_or("Codex remote project membership is unavailable.")?;
+    let matches = projects
+        .iter()
+        .filter(|project| {
+            project["hostId"].as_str() == Some(host_id)
+                && project["id"].as_str() == Some(project_id)
+        })
+        .count();
+    if matches != 1 {
+        return Err(
+            "Codex chat project is not present in the current remote project catalog.".into(),
+        );
+    }
+    Ok(Membership::Project(format!("cloud:{host_id}:{project_id}")))
 }
 
 fn canonical_project(state: &Value, id: &str) -> Result<Membership, String> {
@@ -33,39 +64,57 @@ fn canonical_project(state: &Value, id: &str) -> Result<Membership, String> {
 }
 
 pub fn resolve_at(home: &Path, thread: &str) -> Result<Membership, String> {
+    if !valid_state_id(thread) {
+        return Err("Codex supplied invalid chat identity metadata.".into());
+    }
     let state: Value = serde_json::from_str(
         &std::fs::read_to_string(home.join(".codex-global-state.json")).map_err(|_| {
             "Could not read Codex chat membership. Retry after opening the chat in Codex."
         })?,
     )
     .map_err(|_| "Codex chat membership is not valid JSON.")?;
-    // A host marker alone does not prove that SQLite has the project assignment.
-    // Explicit desktop assignments take precedence over the database fallback.
-    let migrated = state["thread-project-membership-host-ids"].get(thread);
-    if migrated.is_some_and(|host| host.as_str() != Some("local")) {
-        return Err("Anyblob project permissions support local Windows chats only.".into());
+    // Local state assignments are authoritative. Remote MCP requests pass their thread ID
+    // unchanged so this process can check it against the local Codex state file.
+    let host_id = state["thread-project-membership-host-ids"]
+        .get(thread)
+        .map(|host| {
+            host.as_str()
+                .filter(|host| valid_state_id(host))
+                .ok_or("Codex returned invalid chat host membership.")
+        })
+        .transpose()?;
+    let projectless = state["projectless-thread-ids"]
+        .as_array()
+        .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread)));
+    if let Some(assignment) = state["thread-project-assignments"].get(thread) {
+        if projectless {
+            return Err("Codex chat project membership conflicts between local records. Refresh the chat's project assignment and retry.".into());
+        }
+        let kind = assignment["projectKind"]
+            .as_str()
+            .ok_or("Codex returned invalid chat project membership.")?;
+        let id = assignment["projectId"]
+            .as_str()
+            .filter(|id| valid_state_id(id))
+            .ok_or("Codex returned invalid chat project membership.")?;
+        return match kind {
+            "local" if host_id.is_none_or(|host| host == "local") => {
+                canonical_project(&state, id)
+            }
+            "remote" => {
+                let host_id = host_id
+                    .filter(|host| *host != "local")
+                    .ok_or("Codex remote chat has no verified host membership.")?;
+                remote_project(&state, host_id, id)
+            }
+            _ => Err("Codex chat project membership conflicts with its host.".into()),
+        };
     }
-    {
-        if let Some(assignment) = state["thread-project-assignments"].get(thread) {
-            if state["projectless-thread-ids"].as_array()
-                .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread))) {
-                return Err("Codex chat project membership conflicts between local records. Refresh the chat's project assignment and retry.".into());
-            }
-            if assignment["projectKind"] != "local" {
-                return Err("Anyblob project permissions support local Windows chats only.".into());
-            }
-            let id = assignment["projectId"]
-                .as_str()
-                .filter(|id| !id.is_empty())
-                .ok_or("Codex returned invalid chat project membership.")?;
-            return canonical_project(&state, id);
-        }
-        if state["projectless-thread-ids"]
-            .as_array()
-            .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread)))
-        {
-            return Ok(Membership::Projectless);
-        }
+    if projectless {
+        return Ok(Membership::Projectless);
+    }
+    if host_id.is_some_and(|host| host != "local") {
+        return Err("Codex remote chat has no verified project membership.".into());
     }
     let mut databases = Vec::new();
     for entry in std::fs::read_dir(home).map_err(|_| "Could not inspect Codex chat membership.")? {
@@ -102,10 +151,7 @@ pub fn resolve(thread: &str) -> Result<Membership, String> {
     }
     #[cfg(not(test))]
     {
-        let home = PathBuf::from(
-            std::env::var_os("USERPROFILE").ok_or("Windows user profile is unavailable.")?,
-        )
-        .join(".codex");
+        let home = crate::codex_projects::codex_home_path()?;
         resolve_at(&home, thread)
     }
 }
@@ -266,10 +312,80 @@ fn database_project(_: &Path, _: &str) -> Result<Option<Option<String>>, String>
     Err("Codex membership requires Windows.".into())
 }
 
+#[cfg(test)]
+mod remote_membership_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn resolves_remote_assignments_only_from_local_codex_state() {
+        let home = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.test-run/remote-codex-membership")
+            .join(std::process::id().to_string());
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let mut state = json!({
+            "remote-projects": [
+                {"hostId":"remote-host","id":"project-a","label":"Remote work","remotePath":"/private/path"},
+                {"hostId":"other-host","id":"project-a","label":"Other work","remotePath":"/other/path"}
+            ],
+            "thread-project-assignments": {
+                "remote-chat":{"projectKind":"remote","projectId":"project-a"}
+            },
+            "thread-project-membership-host-ids": {
+                "remote-chat":"remote-host",
+                "remote-projectless":"remote-host"
+            },
+            "projectless-thread-ids":["remote-projectless"]
+        });
+        let save = |state: &Value| {
+            std::fs::write(home.join(".codex-global-state.json"), state.to_string()).unwrap()
+        };
+        save(&state);
+
+        assert_eq!(
+            resolve_at(&home, "remote-chat").unwrap(),
+            Membership::Project("cloud:remote-host:project-a".into())
+        );
+        assert_eq!(
+            resolve_at(&home, "remote-projectless").unwrap(),
+            Membership::Projectless
+        );
+
+        state["thread-project-assignments"].as_object_mut().unwrap().remove("remote-chat");
+        save(&state);
+        assert!(resolve_at(&home, "remote-chat")
+            .unwrap_err()
+            .contains("no verified project membership"));
+        state["thread-project-assignments"]["remote-chat"] = json!({"projectKind":"remote","projectId":"project-a"});
+
+        state["thread-project-membership-host-ids"]["remote-chat"] = json!("other-host");
+        save(&state);
+        assert_eq!(
+            resolve_at(&home, "remote-chat").unwrap(),
+            Membership::Project("cloud:other-host:project-a".into())
+        );
+        state["thread-project-membership-host-ids"]["remote-chat"] = json!("unknown-host");
+        save(&state);
+        assert!(resolve_at(&home, "remote-chat").is_err());
+        state["thread-project-membership-host-ids"]["remote-chat"] = json!("remote-host");
+        state["remote-projects"][0]["id"] = json!("different-project");
+        save(&state);
+        assert!(resolve_at(&home, "remote-chat").is_err());
+        state["remote-projects"][0]["id"] = json!("project-a");
+        state["thread-project-assignments"]["remote-chat"]["projectKind"] = json!("local");
+        save(&state);
+        assert!(resolve_at(&home, "remote-chat").is_err());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
     #[test]
     fn resolves_migrated_and_legacy_chats_without_active_project_inference() {
         let home = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.test-run/codex-membership");

@@ -18,6 +18,27 @@ pub struct Project {
 
 fn local_kind() -> String { "local".into() }
 
+fn valid_project_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        && !matches!(value, "." | "..")
+}
+
+pub(crate) fn codex_home_path() -> Result<std::path::PathBuf, String> {
+    if let Some(path) = std::env::var_os("CODEX_HOME") {
+        if !path.is_empty() {
+            return Ok(path.into());
+        }
+    }
+    let profile = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or("Codex home directory is unavailable.")?;
+    Ok(std::path::PathBuf::from(profile).join(".codex"))
+}
+
 fn combine_project_catalogs(
     local: Result<Vec<Project>, String>,
     cloud: Result<Vec<crate::anyblob_cloud_projects::ProjectSummary>, String>,
@@ -41,13 +62,27 @@ fn combine_project_catalogs(
     };
 
     if let Some(cloud) = cloud {
-        projects.extend(cloud.into_iter().map(|project| Project {
-            id: project.id,
-            name: project.name,
-            root_paths: Vec::new(),
-            kind: "cloud".into(),
-            host_id: Some(project.host_id),
-            computer_name: Some(project.computer_name),
+        let codex_remote_projects = projects
+            .iter()
+            .filter(|project| project.kind == "remote")
+            .filter_map(|project| {
+                project
+                    .host_id
+                    .clone()
+                    .map(|host_id| (host_id, project.id.clone()))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        projects.extend(cloud.into_iter().filter_map(|project| {
+            let already_in_codex_state = codex_remote_projects
+                .contains(&(project.host_id.clone(), project.id.clone()));
+            (!already_in_codex_state).then_some(Project {
+                id: project.id,
+                name: project.name,
+                root_paths: Vec::new(),
+                kind: "cloud".into(),
+                host_id: Some(project.host_id),
+                computer_name: Some(project.computer_name),
+            })
         }));
     }
     projects.sort_by(|a, b| {
@@ -65,11 +100,11 @@ pub fn parse(text: &str) -> Result<Vec<Project>, String> {
     let state: Value = serde_json::from_str(text).map_err(|_| "Codex project metadata is not valid JSON.")?;
     let entries = state.get("local-projects").and_then(Value::as_object)
         .ok_or("Unsupported Codex project metadata. Expected a local-projects object.")?;
-    let mut projects = Vec::new();
+    let mut projects = Vec::with_capacity(entries.len());
     for (key, value) in entries {
         let mut project: Project = serde_json::from_value(value.clone())
             .map_err(|_| "Unsupported Codex project metadata. Each project needs an ID, name and rootPaths list.")?;
-        if project.id.is_empty() || project.id != *key || project.name.trim().is_empty()
+        if !valid_project_id(&project.id) || project.id != *key || project.name.trim().is_empty()
             || project.root_paths.is_empty() || project.root_paths.iter().any(|path| path.trim().is_empty()) {
             return Err("Unsupported Codex project metadata. Project IDs, names and folders must be present and consistent.".into());
         }
@@ -78,7 +113,39 @@ pub fn parse(text: &str) -> Result<Vec<Project>, String> {
         project.computer_name = None;
         projects.push(project);
     }
-    projects.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
+    if let Some(remote_entries) = state.get("remote-projects") {
+        let remote_entries = remote_entries
+            .as_array()
+            .ok_or("Unsupported Codex project metadata. Expected a remote-projects list.")?;
+        let mut seen = std::collections::BTreeSet::new();
+        for entry in remote_entries {
+            let host_id = entry["hostId"]
+                .as_str()
+                .filter(|host_id| valid_project_id(host_id))
+                .ok_or("Unsupported Codex project metadata. A remote project needs a valid host ID.")?;
+            let id = entry["id"]
+                .as_str()
+                .filter(|id| valid_project_id(id))
+                .ok_or("Unsupported Codex project metadata. A remote project needs a valid ID.")?;
+            let name = entry["label"]
+                .as_str()
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && name.len() <= 512 && !name.chars().any(char::is_control))
+                .ok_or("Unsupported Codex project metadata. A remote project needs a valid label.")?;
+            if !seen.insert((host_id.to_owned(), id.to_owned())) {
+                return Err("Unsupported Codex project metadata. Remote project identities must be unique per host.".into());
+            }
+            projects.push(Project {
+                id: id.into(),
+                name: name.into(),
+                root_paths: Vec::new(),
+                kind: "remote".into(),
+                host_id: Some(host_id.into()),
+                computer_name: None,
+            });
+        }
+    }
+    projects.sort_by(|a,b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.kind.cmp(&b.kind)).then(a.host_id.cmp(&b.host_id)).then(a.id.cmp(&b.id)));
     Ok(projects)
 }
 
@@ -86,9 +153,7 @@ pub fn parse(text: &str) -> Result<Vec<Project>, String> {
 pub async fn discover_codex_projects() -> Result<Vec<Project>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let local = (|| {
-            let profile = std::env::var_os("USERPROFILE")
-                .ok_or("Windows user profile is unavailable.")?;
-            let path = std::path::PathBuf::from(profile).join(".codex/.codex-global-state.json");
+            let path = codex_home_path()?.join(".codex-global-state.json");
             let text = std::fs::read_to_string(path).map_err(|_| {
                 "Could not read Codex project metadata. The previous project list has been kept."
             })?;
@@ -123,6 +188,47 @@ mod tests {
             r#"{"local-projects":{"a":{"id":"a","name":"X","rootPaths":[2]}}}"#] {
             assert!(parse(text).is_err(),"{text}");
         }
+    }
+
+    #[test]
+    fn discovers_remote_projects_with_host_scoped_identity() {
+        let projects = parse(r#"{"local-projects":{},"remote-projects":[
+            {"hostId":"remote-host","id":"same-id","label":"Remote work","remotePath":"/private/path"},
+            {"hostId":"other-host","id":"same-id","label":"Other work","remotePath":"/other/path"}
+        ]}"#).unwrap();
+
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].kind, "remote");
+        assert_eq!(projects[0].id, "same-id");
+        assert_eq!(projects[0].host_id.as_deref(), Some("other-host"));
+        assert_eq!(projects[0].name, "Other work");
+        assert!(projects.iter().all(|project| project.root_paths.is_empty()));
+        assert!(!serde_json::to_string(&projects).unwrap().contains("private/path"));
+
+        assert!(parse(r#"{"local-projects":{},"remote-projects":[
+            {"hostId":"remote-host","id":"same-id","label":"Remote work"},
+            {"hostId":"remote-host","id":"same-id","label":"Duplicate"}
+        ]}"#).is_err());
+    }
+
+    #[test]
+    fn codex_remote_projects_replace_matching_synced_cloud_rows() {
+        let local = parse(r#"{"local-projects":{},"remote-projects":[
+            {"hostId":"shared-host","id":"project-a","label":"Codex project"}
+        ]}"#).unwrap();
+        let projects = combine_project_catalogs(
+            Ok(local),
+            Ok(vec![crate::anyblob_cloud_projects::ProjectSummary {
+                id: "project-a".into(),
+                name: "Synced project".into(),
+                host_id: "shared-host".into(),
+                computer_name: "Remote PC".into(),
+            }]),
+        ).unwrap();
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].kind, "remote");
+        assert_eq!(projects[0].name, "Codex project");
     }
 
     #[test]

@@ -5,10 +5,17 @@ import { CopyTextField } from "./copy-text-field.jsx";
 import { HelpTooltip } from "./help-tooltip.jsx";
 import { GlobeIcon } from "./catalog-icons.jsx";
 import { ExpandableSearch } from "./search.jsx";
-import { DialogSwitch } from "./settings-controls.jsx";
+import { DialogSwitch, ReadOnlyTextInput } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
 
 describe("Settings controls", () => {
+  it("renders a reusable non-editable text input", () => {
+    render(<ReadOnlyTextInput inputAttributes={{ id: "locked-value", "aria-label": "Locked value", defaultValue: "fixed" }} />);
+    const input = screen.getByRole("textbox", { name: "Locked value" });
+    expect(input.value).toBe("fixed");
+    expect(input.readOnly).toBe(true);
+  });
+
   it("renders a read-only copy field with the shared Logs icons", () => {
     const onCopy = vi.fn();
     const { rerender } = render(<CopyTextField
