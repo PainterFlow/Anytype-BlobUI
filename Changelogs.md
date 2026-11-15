@@ -32,10 +32,10 @@
 
 *Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
 
-## Anyblob (0.2.25 -> 0.3.0)
+## Anyblob (0.2.25 -> 0.4.0)
 
 - Added Linux support. (User#pxlarified)
-- Added support for cloud agents. (User#pxlarified)
+- Added remote support using tailscale. (User#pxlarified & User#PainterFlow)
 - The agent is now able to use the `list_objects` tool even when it doesn't have access space-wide access, the tool will just return all objects the agent has access to.
 - The agent is now able to use the `list_types` tool even when it doesn't have space-wide access, the tool will just return all object types the agent has access to.
 - I hope I fixed a few stale mcp servers that could spawn when re-compiling the app.
