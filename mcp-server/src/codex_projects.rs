@@ -60,7 +60,9 @@ pub fn parse(text: &str) -> Result<Vec<ProjectInfo>, String> {
 
 pub fn read_at(home: &std::path::Path) -> Result<Vec<ProjectInfo>, String> {
     let text = std::fs::read_to_string(home.join(CATALOG_FILE))
-        .map_err(|_| "Could not read the Codex project catalog.")?;
+        .map_err(|_| {
+            "Could not read the Codex project catalog. Verify that CODEX_HOME points to the active Codex home and that .codex-global-state.json is readable."
+        })?;
     parse(&text)
 }
 
@@ -183,6 +185,25 @@ mod tests {
         ] {
             assert!(parse(source).is_err(), "{source}");
         }
+    }
+
+    #[test]
+    fn missing_catalog_error_identifies_the_codex_home_setting() {
+        let home = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.test-run/mcp-missing-project-catalog")
+            .join(format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&home).unwrap();
+        let error = read_at(&home).unwrap_err();
+        assert!(error.contains("CODEX_HOME"));
+        assert!(error.contains(CATALOG_FILE));
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

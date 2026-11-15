@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 5458)
+Total output lines: 124
+
 # Anyblob
 
 Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. The bundled plugin runs locally on Windows. Codex on another Windows or Linux host can connect through the Cloudflare Tunnel MCP setup described in [remote access](../../docs/anyblob-remote-access.md).
@@ -22,7 +25,7 @@ For Codex running on another PC or server, enable remote access in BlobUI's Code
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.3.3. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge and sync their host project catalog. Remote requests can use saved project source permissions after you assign them in BlobUI. See [remote access setup](../../docs/anyblob-remote-access.md).
+The current Anyblob release version is 0.3.4. Remote MCP clients connect over HTTPS to the authenticated Anyblob bridge and sync their host project catalog. Remote requests can use saved project source permissions after you assign them in BlobUI. See [remote access setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 
@@ -58,18 +61,7 @@ Packaging follows the [OpenAI plugin format](https://developers.openai.com/plugi
 
 This package ships portable root `plugin.json` and `mcp.json` manifests as its canonical configuration. Codex resolves `./bin/blobui-mcp.exe` against the installed plugin root and tracks the executable process directly. This removes the `cmd.exe` wrapper that could leave an orphaned server after a plugin reload. The portable format uses Codex's default one-minute tool timeout because its closed schema has no per-server timeout field. The `.codex-plugin/plugin.json` and `.mcp.json` pair remains as a fallback for older Codex installations, where the wrapper retains the three-minute timeout. Portable plugin manifests take precedence, so Codex loads only one Anyblob server configuration.
 
-Each active stdio connection still has its own MCP process. The executable reads and writes stdio without a shell. `ANYBLOB_BRIDGE_INSTANCE` selects a separate current-user pipe for isolated fixtures; normal installations leave it unset. An isolated instance requires an absolute ANYBLOB_CREDENTIAL_FILE override and never falls back to personal credentials.
-
-## Content tools
-
-Anyblob 0.2.0 adds 41 explicit v2 tools. Each requires a space_id. Their input schemas describe named path/query arguments and a typed body. There is no arbitrary URL, method or header tool.
-
-- Use read_document for editable AnyBlock JSON, full IDs and etag. Existing read_object continues returning properties and Markdown.
-- Use list_schemas, get_schema and get_op_schema to inspect the connected server's document and operation schemas.
-- Use create_object, patch_object and delete_object for objects. patch_object requires etag and a body containing ops. Supported ops cover properties, type changes, blocks, text, table cells, views and collection membership. Markdown reads cannot be written back as document replacements.
-- Use the list/create/update/delete property and type tools for definitions. list_property_options discovers options. Creation supports options; create_missing_options requires a space-wide Create-Delete grant. Unsupported option mutations remain server limitations.
-- Use create_query and create_collection, their get_*_objects and get_*_views tools, and patch_object for edits and views. Queries, collections and templates use delete_object where the server permits archiving. Templates have list_templates and create_template tools.
-- Chat tools include list_chats, create_chat, get_chat_messages, add_chat_message, edit_chat_message, delete_chat_message, toggle_chat_reaction, read_chat and create_discussion. Replies use body.reply_to; attachments use body.attachments. Reading does not mark activity read. Reactions are toggles, so inspect the returned added value.
+Each active stdio connection still has …458 tokens truncated…tachments. Reading does not mark activity read. Reactions are toggles, so inspect the returned added value.
 - Widget tools list, create, update and delete widgets. They require space-wide permission. No account or space-administration tools are exposed.
 
 Read Only permits reads. Read-Write adds edits, messages and reactions. Create-Delete adds creation and deletion, including view creation/deletion. Project source selections authorize existing members. Create-Delete queries and collections also permit create_object with an explicit destination and caller idempotency_key. list_creation_targets lists saved permitted destinations, including empty sources. Query creation requires template: "none", a matching source type OR an explicitly supplied source property, AND proof that the payload satisfies at least one current view. Property presence includes empty, false, zero and null values. Collections add only the confirmed newly created object using the current ETag. Source-definition edits, general membership edits and space-wide schemas still require an effective space-wide grant. File switches are independent additional requirements.
