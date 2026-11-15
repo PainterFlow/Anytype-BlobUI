@@ -147,6 +147,32 @@ fn api_error_details(response: &Value) -> &Value {
     }
 }
 
+const STALE_PATCH_ETAG_ERROR: &str =
+    "Object changed since it was read. Re-read it and rebuild the patch.";
+
+fn is_stale_patch_etag(req: &ContentRequest, value: &Value) -> bool {
+    if req.tool != "patch_object" {
+        return false;
+    }
+    let status = value["_http_error"].as_u64();
+    let error = api_error_details(value);
+    let code = error["code"]
+        .as_str()
+        .or_else(|| value.pointer("/error/code").and_then(Value::as_str))
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(status, Some(409 | 412))
+        || matches!(
+            code.as_str(),
+            "etag_mismatch"
+                | "stale_etag"
+                | "etag_conflict"
+                | "precondition_failed"
+                | "revision_conflict"
+                | "object_changed"
+        )
+}
+
 fn missing_option_detail(
     client: &Client,
     req: &ContentRequest,
@@ -346,6 +372,9 @@ fn response_for_request(
     value: Value,
 ) -> Result<Value, String> {
     if value.get("_http_error").is_some() {
+        if is_stale_patch_etag(req, &value) {
+            return Err(STALE_PATCH_ETAG_ERROR.into());
+        }
         if req.tool == "create_object" {
             return Err(create_object_error(client, req, config, scope, check, &value));
         }
@@ -890,7 +919,9 @@ pub fn execute_validated(
     check()?;
     match client.content_request(method, &route(req, false)?, body, etag, Some(key), file) {
         Ok(value) if value.get("_http_error").is_some() => {
-            if req.tool == "create_object" {
+            if is_stale_patch_etag(req, &value) {
+                Ok(json!({"outcome":"rejected","error":STALE_PATCH_ETAG_ERROR,"idempotency_key":key}))
+            } else if req.tool == "create_object" {
                 let error = create_object_error(client, req, config, scope, check, &value);
                 Ok(json!({"outcome":"rejected","error":error,"technical_details":value,"receipt":value,"idempotency_key":key}))
             } else {
@@ -1121,14 +1152,34 @@ pub(crate) mod tests {
             "patch_object",
             json!({"space_id":"s","object_id":"o","etag":"old","body":{"ops":[{"op":"delete_block","id":"b"}]}}),
         ));
-        assert!(execute(&client, &mut prepared, &|| Ok(()))
-            .unwrap_err()
-            .contains("conflict"));
+        assert_eq!(
+            execute(&client, &mut prepared, &|| Ok(())).unwrap_err(),
+            STALE_PATCH_ETAG_ERROR
+        );
         server.join().unwrap();
         assert_eq!(capture.lock().unwrap().len(), 2);
         assert!(execute(&client, &mut prepared, &|| Err("cancelled".into()))
             .unwrap_err()
             .contains("cancelled"));
+    }
+
+    #[test]
+    fn stale_etag_on_commit_returns_a_short_error_without_a_raw_receipt() {
+        let (client, capture, server) = fixture(vec![
+            json!({"schema":{"type":"object"}}),
+            json!({"dry_run":true}),
+            json!({"fixture_status":412,"code":"precondition_failed","etag":"current"}),
+        ]);
+        let mut prepared = prepared(content(
+            "patch_object",
+            json!({"space_id":"s","object_id":"o","etag":"old","body":{"ops":[{"op":"delete_block","id":"b"}]}}),
+        ));
+        let result = execute(&client, &mut prepared, &|| Ok(())).unwrap();
+        server.join().unwrap();
+        assert_eq!(result["outcome"], "rejected");
+        assert_eq!(result["error"], STALE_PATCH_ETAG_ERROR);
+        assert!(result.get("receipt").is_none());
+        assert_eq!(capture.lock().unwrap().len(), 3);
     }
     #[test]
     fn unknown_sends_are_reported_without_retries() {

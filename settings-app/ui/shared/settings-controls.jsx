@@ -89,7 +89,8 @@ export function TextField({ label, inputAttributes }) {
 }
 
 export function ReadOnlyTextInput({ inputAttributes }) {
-  return <input {...inputAttributes} readOnly />;
+  const className = ["read-only-text-input", inputAttributes.className].filter(Boolean).join(" ");
+  return <input {...inputAttributes} className={className} readOnly />;
 }
 
 export function VisibilityTextField({ label, inputAttributes, buttonAttributes, readOnly = false, className = "input-field advanced-row" }) {

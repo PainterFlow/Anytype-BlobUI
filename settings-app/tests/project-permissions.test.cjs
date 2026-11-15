@@ -208,12 +208,18 @@ test('remote project scopes use colon-bearing host IDs from local Codex metadata
 
     await page.evaluate(()=>{window.projectError='';window.projects=[
       {id:'duplicate-id',name:'Same',rootPaths:['C:/local'],kind:'local'},
-      {id:'duplicate-id',name:'Remote one',rootPaths:[],kind:'remote',hostId:'codex-host:device_01'},
+      {id:'duplicate-id',name:'Remote project with a longer label',rootPaths:[],kind:'remote',hostId:'codex-host:device_01'},
       {id:'duplicate-id',name:'Remote two',rootPaths:[],kind:'remote',hostId:'codex-host:device_02'},
     ];});
     await page.locator('#projects-reload').click();
     await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
     assert.equal(await rows.count(),4,'the local scan lists two remote hosts and retains old saved scopes');
+    const localEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="duplicate-id"]')});
+    const remoteEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:codex-host:device_01:duplicate-id"]')});
+    const localEntryBox=await localEntry.boundingBox(),remoteEntryBox=await remoteEntry.boundingBox();
+    assert.equal(Math.round(remoteEntryBox.width),Math.round(localEntryBox.width));assert.equal(Math.round(remoteEntryBox.height),Math.round(localEntryBox.height));
+    const remoteNameBox=await remoteEntry.locator('.formula-view-name').boundingBox(),remoteGlobeBox=await remoteEntry.getByRole('button',{name:'Remote project information for Remote project with a longer label'}).boundingBox();
+    assert.ok(remoteGlobeBox.x>=remoteNameBox.x+remoteNameBox.width);assert.ok(remoteGlobeBox.x-remoteNameBox.x-remoteNameBox.width<32);
     const keys=await rows.evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
     assert.deepEqual(keys.sort(),[
       'cloud:codex-host:device_01:duplicate-id','cloud:codex-host:device_02:duplicate-id',
