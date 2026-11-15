@@ -1,60 +1,58 @@
-# Remote Anyblob access with Tailscale Funnel
+# Anyblob Secure MCP Tunnel
 
-BlobUI exposes only its authenticated Anyblob bridge through Tailscale Funnel. The bridge listens on the PC running Anytype at `127.0.0.1:31420`. A separate HTTP adapter listens at `127.0.0.1:31421` for Funnel traffic. Both listeners bind to loopback. The Anytype Local API, its API key, and other BlobUI services are not routed through Funnel.
+BlobUI runs Anyblob's MCP server on the Windows computer that runs Anytype. The OpenAI `tunnel-client` starts that server over stdio and polls OpenAI over outbound HTTPS. BlobUI does not open an inbound listener or publish a server URL. Its health check binds to `127.0.0.1` on an ephemeral port.
 
-Remote access is off by default. Enabling it creates a secret 64-character key. The bridge rejects requests without that key. Disabling and enabling access rotates the key. Treat the key as a secret. The `*.ts.net` address is stable while the Tailscale device identity and name stay the same.
+The tunnel keeps the MCP server on the BlobUI computer and carries requests from a supported OpenAI product surface. The `tunnel_id` identifies the tunnel. It is not a public address. See the [OpenAI Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) for current product setup and account permissions.
 
-The remote MCP server is a connector. It holds the Funnel address and remote key, then forwards each request to local BlobUI. The request carries its Codex chat ID. BlobUI verifies remote chat assignments against the local `.codex-global-state.json`, including the assigned project's host ID, before checking saved permissions. Tool arguments cannot choose a project.
+## Requirements
 
-BlobUI reads remote project names and host IDs from its local `.codex-global-state.json`. The remote MCP process does not verify project membership. A missing or unreadable local state file prevents BlobUI from verifying configured remote project permissions.
+- BlobUI and Anytype must run on the same Windows computer.
+- Install or update Anyblob through BlobUI's marketplace action in Integrations > Anyblob > Settings.
+- Install the official `tunnel-client-runtime` and add its directory to `PATH` before starting BlobUI. BlobUI starts one tunnel client per configured tunnel ID.
+- Create or select a Secure MCP Tunnel in OpenAI Platform. The runtime key needs Tunnels Read and Use. Creating or changing the tunnel also requires Tunnels Manage.
+- Keep BlobUI running while remote MCP requests need access to Anytype.
 
-In BlobUI Settings > Anyblob > Projects, remote projects appear with their Codex host ID. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats assigned to configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
+The tunnel runtime sends outbound HTTPS requests to OpenAI and starts the local Anyblob MCP executable. It does not need an inbound firewall rule. Do not run a second `tunnel-client` process with the same tunnel ID while BlobUI is running.
 
-## Set up remote access
+## Start the tunnel
 
-1. Install [Tailscale for Windows](https://tailscale.com/download/windows) on the PC running Anytype and sign in to your tailnet. BlobUI requires Tailscale 1.52 or later.
-2. Enable Funnel for your tailnet in the Tailscale admin policy. Tailscale may ask you to approve Funnel the first time it starts.
-3. Open BlobUI Settings on the PC, enable Anyblob, then enable **Allow Tailscale Funnel remote access**.
-4. Select **Start tunnel**. BlobUI runs `tailscale funnel --https=443 --set-path=/anyblob http://127.0.0.1:31421` and shows the device's HTTPS `*.ts.net` address. Tailscale maps only the `/anyblob` path to the loopback adapter. The route stops when you select **Stop tunnel**, disable remote access, or close BlobUI.
-5. On the remote server, build the MCP connector with this command.
+1. Open BlobUI Settings > Integrations > Anyblob > Settings and enable Anyblob.
+2. Enable Secure MCP Tunnel and enter the tunnel ID and runtime API key. Select Start tunnel.
+3. Wait for the status to say the tunnel is ready. BlobUI stores the runtime key with Windows DPAPI and does not show it again.
+4. In the OpenAI product surface that will make MCP calls, add Anyblob as a tunnel-backed MCP server and select the same tunnel ID. Associate that tunnel with the Platform organization and workspace used by Codex, as required by the OpenAI guide.
 
-   ```sh
-   cargo build --locked --release --manifest-path mcp-server/Cargo.toml
-   ```
+Use the supported tunnel-backed MCP target in Codex or the OpenAI API. Do not configure an OpenAI tunnel endpoint as a `server_url`. The bundled Anyblob Codex plugin remains the local stdio integration. For ChatGPT, choose Tunnel when adding a custom MCP server.
 
-   Install the Anyblob skills from this checkout with this command.
+BlobUI starts the configured tunnel when it opens and stops it when Anyblob is disabled or BlobUI exits. A tunnel ID and runtime API key are required. No public URL or public listener is created on the BlobUI computer.
 
-   ```sh
-   ./scripts/Install-Remote-Skills.sh
-   ```
+## Configure project folders
 
-   The installer copies the skills to `~/.agents/skills` and their shared workflow reference to `~/.agents/references`. It refuses to replace an unrelated skill or a different reference file with the same name. Start a new Codex session after installation.
+Choose Local Projects Folder in the same Settings section for projects on the BlobUI computer. BlobUI scans its immediate child folders and treats each folder with an `anyblob.config.toml` file as a project.
 
-6. Configure Codex's local stdio MCP server with the address and key from BlobUI. This example belongs in `~/.codex/config.toml`.
+For projects marked remote, set a folder path in Codex's `config.toml` on the BlobUI computer:
 
-   ```toml
-   [mcp_servers.anyblob]
-   command = "/absolute/path/to/Anytype-BlobUI/mcp-server/target/release/blobui-mcp"
-   args = []
+```toml
+[anyblob]
+remote_projects_folder = "D:/Anyblob Remote Projects"
+```
 
-   [mcp_servers.anyblob.env]
-   ANYBLOB_REMOTE_ADDRESS = "https://device.tailnet.ts.net"
-   ANYBLOB_REMOTE_TOKEN = "paste-the-key-from-BlobUI-here"
-   ```
+The remote projects folder must be readable from the BlobUI computer. The tunnel does not mount or copy files from another computer. BlobUI scans immediate child folders in both configured roots. Each project's `remote` value identifies whether that project is in the remote folder.
 
-   The MCP client sends authenticated HTTPS requests to the address's `/anyblob` path. The server requires only the connector binary, address, and key. It does not need an Anytype API key or a copy of BlobUI's project state. Protect the config file and do not put the key in a public repository. On Windows, use the built `blobui-mcp.exe` path.
+Create an `anyblob.config.toml` in each project folder:
 
-7. Launch or reconnect the remote Anyblob MCP server. Confirm that the local Codex state contains the remote project and chat assignment. In BlobUI Settings > Anyblob > Projects, select the matching remote project row to save source permissions for its host.
+```toml
+# Agents must not edit this file under any circumstances, regardless of prompt authorization.
+name = "Work"
+key = "a-project-specific-key"
+remote = false
+```
 
-## Network and uptime notes
+Use a unique key for each project. BlobUI identifies the project by the SHA-256 hash of its key. A chat authenticates once by calling `authenticate_project` with the contents of that file. The MCP server uses the Codex thread ID from request metadata. It stores authenticated chat IDs in `Settings/anyblob/projects.json`.
 
-Tailscale Funnel exposes the mapped path to the public internet. The bridge still requires the Anyblob key on every request. Funnel is currently in beta, and Tailscale applies a non-configurable bandwidth limit without publishing a numeric allowance. BlobUI keeps the route on while it runs, so remote access is unavailable when the Anytype PC or BlobUI is offline.
+Project source permissions live in `Settings/anyblob/permissions.json`. The `projectless` entry holds global permissions. The `projects` entries hold project-specific permissions keyed by the project key hash. Chats that have not authenticated to a configured project use the projectless permissions.
 
-Funnel works when the remote Codex host is outside your tailnet. If that host can join your tailnet, Tailscale Serve can keep the same service private to tailnet members, but BlobUI's remote access controls configure Funnel.
+Existing project permission entries remain in the settings store after migration. Codex project IDs and host-qualified IDs cannot be matched safely to new config-key hashes, so review the Projects tab and reselect the saved sources for each new project. Existing chats also need to call `authenticate_project` once in the project chat.
 
-## Security notes
+## Object mentions
 
-- Never expose Anytype's Local API or its API key through Tailscale. The only origin used by this feature is the Anyblob HTTP adapter on loopback port `31421`.
-- Keep the key private. Disable remote access in BlobUI to invalidate it. Enabling access again creates a new key.
-- Remote chats for configured projects use saved project source permissions. Projectless chats and projects without saved sources use global permissions. Review both before enabling remote access. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
-- Funnel URLs have a stable Tailscale hostname, but Funnel's public availability and bandwidth limits are controlled by Tailscale. Keep the key requirement enabled.
+Anyblob keeps the `search_mentions` tool and the saved Object Mentions filters. Mention results include object titles and space metadata. Selecting a mention does not grant read access. Object reads continue to use the saved global or project permissions.

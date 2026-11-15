@@ -164,7 +164,7 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
   } finally {await browser.close();}
 });
 
-test('remote project scopes use colon-bearing host IDs from local Codex metadata', async()=>{
+test('file based and legacy remote projects keep separate permission keys', async()=>{
   const fixture=path.join(workspace,'.test-run/remote-project-permissions');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
   try {
@@ -210,10 +210,11 @@ test('remote project scopes use colon-bearing host IDs from local Codex metadata
       {id:'duplicate-id',name:'Same',rootPaths:['C:/local'],kind:'local'},
       {id:'duplicate-id',name:'Remote project with a longer label',rootPaths:[],kind:'remote',hostId:'codex-host:device_01'},
       {id:'duplicate-id',name:'Remote two',rootPaths:[],kind:'remote',hostId:'codex-host:device_02'},
+      {id:'a'.repeat(64),name:'File based remote project',rootPaths:['C:/remote'],kind:'remote'},
     ];});
     await page.locator('#projects-reload').click();
     await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
-    assert.equal(await rows.count(),4,'the local scan lists two remote hosts and retains old saved scopes');
+    assert.equal(await rows.count(),5,'the scan lists file based and legacy remote projects and retains old saved scopes');
     const localEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="duplicate-id"]')});
     const remoteEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:codex-host:device_01:duplicate-id"]')});
     const localEntryBox=await localEntry.boundingBox(),remoteEntryBox=await remoteEntry.boundingBox();
@@ -223,7 +224,7 @@ test('remote project scopes use colon-bearing host IDs from local Codex metadata
     const keys=await rows.evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
     assert.deepEqual(keys.sort(),[
       'cloud:codex-host:device_01:duplicate-id','cloud:codex-host:device_02:duplicate-id',
-      'cloud:host-old:removed-id','duplicate-id',
+      'cloud:host-old:removed-id','duplicate-id','a'.repeat(64),
     ].sort());
     const stale=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:host-old:removed-id"]')});
     await stale.getByText('Unavailable project. Saved selections are retained.').waitFor();
@@ -241,15 +242,22 @@ test('remote project scopes use colon-bearing host IDs from local Codex metadata
     await queryRow.locator('.formula-view-name').click();
     await access().click();await page.locator('#project-source-dialog').getByRole('option',{name:'Create-Delete',exact:true}).click();
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
+    await page.locator(`#codex-project-list [data-project-key="${'a'.repeat(64)}"]`).click();
+    await queryRow.locator('.formula-view-name').click();
+    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
     await page.locator('#save-button').click();
     await page.waitForFunction(()=>window.saved?.codexIntegration.projects['cloud:codex-host:device_02:duplicate-id']?.sources[0]?.permission.access==='createDelete');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id'].sources[0].permission.access),'readWrite');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['duplicate-id'].sources[0].permission.access),'read');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id']?.hostId),'codex-host:device_01');
+    assert.deepEqual(await page.evaluate(()=>{
+      const {kind,hostId,sources}=saved.codexIntegration.projects['a'.repeat(64)];
+      return {kind,hostId,access:sources[0].permission.access};
+    }),{kind:'remote',hostId:'',access:'read'});
 
     await page.evaluate(()=>{window.projectError='Offline refresh';});await page.locator('#projects-reload').click();
     await page.getByRole('status').filter({hasText:'Offline refresh'}).waitFor();
-    assert.equal(await rows.count(),4,'failed reload keeps the last local catalog and saved overrides');
+    assert.equal(await rows.count(),5,'failed reload keeps the last local catalog and saved overrides');
     await page.evaluate(()=>{window.projectError='';window.projects=window.projects.filter(project=>project.kind==='local'||project.hostId==='codex-host:device_02');});
     await page.locator('#projects-reload').click();
     await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');

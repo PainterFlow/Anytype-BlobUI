@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Button,
+  FolderPathInput,
   SettingsGroup,
   SettingsHeading,
   SettingsRow,
@@ -94,7 +95,7 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
       <SettingsSection aria-labelledby="anytype-installation-heading">
         <SettingsHeading id="anytype-installation-heading" title="Anytype Folder" description="Choose the Anytype data folder that contains custom.css." />
         <div className="app-install-directory-row">
-          <input id="install-directory" className="color-text-input" type="text" readOnly role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autoComplete="off" spellCheck={false} maxLength={1024} placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+          <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
         </div>
         <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
       </SettingsSection>

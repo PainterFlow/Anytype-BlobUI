@@ -93,6 +93,11 @@ export function ReadOnlyTextInput({ inputAttributes }) {
   return <input {...inputAttributes} className={className} readOnly />;
 }
 
+export function FolderPathInput({ className = "", ...attributes }) {
+  return <input {...attributes} className={`color-text-input ${className}`.trim()} type="text" readOnly
+    role="button" aria-haspopup="dialog" autoComplete="off" spellCheck={false} maxLength={1024} />;
+}
+
 export function VisibilityTextField({ label, inputAttributes, buttonAttributes, readOnly = false, className = "input-field advanced-row" }) {
   const fieldId = `${inputAttributes.id}-field`;
   return <div className={className}>

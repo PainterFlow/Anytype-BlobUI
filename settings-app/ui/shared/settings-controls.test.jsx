@@ -20,32 +20,32 @@ describe("Settings controls", () => {
   it("renders a read-only copy field with the shared Logs icons", () => {
     const onCopy = vi.fn();
     const { rerender } = render(<CopyTextField
-      value="https://sample.tailnet.ts.net"
-      inputAttributes={{ id: "tunnel-url", "aria-label": "Tailscale Funnel URL" }}
-      copyLabel="Copy tunnel URL"
-      copiedLabel="Tunnel URL copied"
+      value="C:/Projects"
+      inputAttributes={{ id: "local-projects-folder", "aria-label": "Local Projects Folder" }}
+      copyLabel="Copy folder path"
+      copiedLabel="Folder path copied"
       onCopy={onCopy}
     />);
 
-    const input = screen.getByRole("textbox", { name: "Tailscale Funnel URL" });
-    expect(input.value).toBe("https://sample.tailnet.ts.net");
+    const input = screen.getByRole("textbox", { name: "Local Projects Folder" });
+    expect(input.value).toBe("C:/Projects");
     expect(input.readOnly).toBe(true);
 
-    const copyButton = screen.getByRole("button", { name: "Copy tunnel URL" });
+    const copyButton = screen.getByRole("button", { name: "Copy folder path" });
     expect(copyButton.querySelector(".copy-icon")).not.toBeNull();
     expect(copyButton.querySelector(".copy-success-icon")).not.toBeNull();
     fireEvent.click(copyButton);
     expect(onCopy).toHaveBeenCalledTimes(1);
 
     rerender(<CopyTextField
-      value="https://sample.tailnet.ts.net"
-      inputAttributes={{ id: "tunnel-url", "aria-label": "Tailscale Funnel URL" }}
+      value="C:/Projects"
+      inputAttributes={{ id: "local-projects-folder", "aria-label": "Local Projects Folder" }}
       copied
-      copyLabel="Copy tunnel URL"
-      copiedLabel="Tunnel URL copied"
+      copyLabel="Copy folder path"
+      copiedLabel="Folder path copied"
       onCopy={onCopy}
     />);
-    expect(screen.getByRole("button", { name: "Tunnel URL copied" }).parentElement.dataset.copied).toBe("true");
+    expect(screen.getByRole("button", { name: "Folder path copied" }).parentElement.dataset.copied).toBe("true");
   });
 
   it("keeps the same input and its draft when switching tabs with the keyboard", () => {

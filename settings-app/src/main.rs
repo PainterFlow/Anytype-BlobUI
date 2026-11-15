@@ -35,6 +35,7 @@ mod kanban_css;
 mod kanban_snapshot;
 mod marketplace;
 mod settings_store;
+mod secure_mcp_tunnel;
 mod storage;
 mod themes;
 mod updater;
@@ -801,6 +802,20 @@ async fn select_blob_backup_folder(
     select_blob_folder(app, current_directory, "Import BlobUI Backup", "Import").await
 }
 
+#[tauri::command]
+async fn select_anyblob_projects_folder(
+    app: tauri::AppHandle,
+    current_directory: Option<String>,
+) -> Result<Option<String>, String> {
+    select_blob_folder(
+        app,
+        current_directory,
+        "Select Local Projects Folder",
+        "Select",
+    )
+    .await
+}
+
 async fn select_blob_folder(
     app: tauri::AppHandle,
     current_directory: Option<String>,
@@ -902,7 +917,7 @@ async fn apply_update(
     if state.status == "restarting" {
         // The installer has been verified and started. Exit only on this
         // explicit handoff state so every earlier failure leaves Settings open.
-        let _ = anyblob::stop_tailscale_funnel();
+        let _ = secure_mcp_tunnel::stop_for_exit();
         app.exit(0);
     }
     Ok(state)
@@ -972,7 +987,7 @@ fn uninstall_blobui(app: tauri::AppHandle) -> Result<(), String> {
             return Err(error);
         }
     }
-    anyblob::stop_tailscale_funnel()?;
+    secure_mcp_tunnel::stop_for_exit()?;
     app.exit(0);
     Ok(())
 }
@@ -1375,7 +1390,7 @@ fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
             "Wait for the current save or updater operation to finish before quitting.".into(),
         );
     }
-    anyblob::stop_tailscale_funnel()?;
+    secure_mcp_tunnel::stop_for_exit()?;
     app.exit(0);
     Ok(())
 }
@@ -2742,12 +2757,13 @@ fn main() {
             codex::discover_codex_sources,
             codex_projects::discover_codex_projects,
             anyblob::anyblob_status,
+            anyblob::set_anyblob_projects_folder,
+            select_anyblob_projects_folder,
             marketplace::anyblob_installation_status,
             marketplace::install_anyblob_marketplace,
             anyblob::configure_anyblob,
-            anyblob::configure_anyblob_remote,
-            anyblob::start_tailscale_funnel,
-            anyblob::stop_tailscale_funnel,
+            secure_mcp_tunnel::secure_mcp_tunnel_status,
+            secure_mcp_tunnel::configure_secure_mcp_tunnel,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -2869,6 +2885,7 @@ fn main() {
                 hotkey::start(app.handle().clone(), &shortcuts);
             }
             anyblob::start(app.handle().clone());
+            secure_mcp_tunnel::start_if_configured();
             let pending_background = consume_pending_launch_request(".blobui-background-next");
             if !pending_background && !env::args().any(|argument| argument == "--background") {
                 show_settings_window(app.handle());
@@ -2881,7 +2898,7 @@ fn main() {
         .expect("error while building BlobUI Settings")
         .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
-                let _ = anyblob::stop_tailscale_funnel();
+                let _ = secure_mcp_tunnel::stop_for_exit();
             }
         });
 }

@@ -1,0 +1,17 @@
+.anyblob-integration-settings + .anyblob-integration-settings { margin-top: 16px; }
+
+.anyblob-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.anyblob-folder-row .kanban-setting-copy { grid-column: 1 / -1; }
+.anyblob-folder-row input { cursor: pointer; }
+.anyblob-tunnel-input { width: min(50%, 22rem); }
+
+.anyblob-integration-settings input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

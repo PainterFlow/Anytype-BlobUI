@@ -1,6 +1,15 @@
-//! Reads local Codex projects without exporting remote folder paths.
+//! Discovers Anyblob projects under the configured local and remote roots.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::{ErrorKind, Read},
+    path::{Path, PathBuf},
+};
+
+const PROJECT_FILE: &str = "anyblob.config.toml";
+const MAX_PROJECT_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -8,28 +17,38 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub root_paths: Vec<String>,
-    #[serde(default = "local_kind")]
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub host_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub computer_name: Option<String>,
 }
 
-fn local_kind() -> String {
-    "local".into()
+pub(crate) struct ProjectConfig {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) remote: bool,
 }
 
-fn valid_project_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-        && !matches!(value, "." | "..")
+#[derive(Deserialize)]
+struct ProjectFile {
+    name: String,
+    key: String,
+    remote: bool,
 }
 
-pub(crate) fn codex_home_path() -> Result<std::path::PathBuf, String> {
+#[derive(Deserialize, Default)]
+struct CodexConfig {
+    #[serde(default)]
+    anyblob: AnyblobConfig,
+}
+
+#[derive(Deserialize, Default)]
+struct AnyblobConfig {
+    remote_projects_folder: Option<PathBuf>,
+}
+
+pub(crate) fn codex_home_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("CODEX_HOME") {
         if !path.is_empty() {
             return Ok(path.into());
@@ -38,148 +57,232 @@ pub(crate) fn codex_home_path() -> Result<std::path::PathBuf, String> {
     let profile = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .ok_or("Codex home directory is unavailable.")?;
-    Ok(std::path::PathBuf::from(profile).join(".codex"))
+    Ok(PathBuf::from(profile).join(".codex"))
 }
 
-pub fn parse(text: &str) -> Result<Vec<Project>, String> {
-    let state: Value = serde_json::from_str(text)
-        .map_err(|_| "Codex project metadata is not valid JSON.")?;
-    let entries = state
-        .get("local-projects")
-        .and_then(Value::as_object)
-        .ok_or("Unsupported Codex project metadata. Expected a local-projects object.")?;
-    let mut projects = Vec::with_capacity(entries.len());
-    for (key, value) in entries {
-        let mut project: Project = serde_json::from_value(value.clone())
-            .map_err(|_| "Unsupported Codex project metadata. Each project needs an ID, name and rootPaths list.")?;
-        if !valid_project_id(&project.id)
-            || project.id != *key
-            || project.name.trim().is_empty()
-            || project.root_paths.is_empty()
-            || project.root_paths.iter().any(|path| path.trim().is_empty())
-        {
-            return Err("Unsupported Codex project metadata. Project IDs, names and folders must be present and consistent.".into());
-        }
-        project.kind = local_kind();
-        project.host_id = None;
-        project.computer_name = None;
-        projects.push(project);
+pub(crate) fn parse_config(text: &str) -> Result<ProjectConfig, String> {
+    if text.len() > MAX_PROJECT_BYTES {
+        return Err("Anyblob project config exceeds 16 KiB.".into());
     }
+    let file: ProjectFile = toml::from_str(text)
+        .map_err(|_| "Anyblob project config must specify a name, key, and remote flag.")?;
+    let name = file.name.trim();
+    if name.is_empty()
+        || name.len() > 512
+        || name.chars().any(char::is_control)
+        || file.key.trim().is_empty()
+        || file.key.chars().any(char::is_control)
+    {
+        return Err("Anyblob project config contains an invalid name or key.".into());
+    }
+    Ok(ProjectConfig {
+        id: format!("{:x}", Sha256::digest(file.key.as_bytes())),
+        name: name.into(),
+        remote: file.remote,
+    })
+}
 
-    if let Some(remote_entries) = state.get("remote-projects") {
-        let remote_entries = remote_entries
-            .as_array()
-            .ok_or("Unsupported Codex project metadata. Expected a remote-projects list.")?;
-        let mut seen = std::collections::BTreeSet::new();
-        for entry in remote_entries {
-            let host_id = entry["hostId"]
-                .as_str()
-                .filter(|host_id| crate::codex_identity::valid_host_id(host_id))
-                .ok_or("Unsupported Codex project metadata. A remote project needs a valid host ID.")?;
-            let id = entry["id"]
-                .as_str()
-                .filter(|id| valid_project_id(id))
-                .ok_or("Unsupported Codex project metadata. A remote project needs a valid ID.")?;
-            let name = entry["label"]
-                .as_str()
-                .map(str::trim)
-                .filter(|name| {
-                    !name.is_empty() && name.len() <= 512 && !name.chars().any(char::is_control)
-                })
-                .ok_or("Unsupported Codex project metadata. A remote project needs a valid label.")?;
-            if !seen.insert((host_id.to_owned(), id.to_owned())) {
-                return Err("Unsupported Codex project metadata. Remote project identities must be unique per host.".into());
+fn scan_root(root: &Path) -> Result<Vec<Project>, String> {
+    if !root.is_absolute() {
+        return Err("An Anyblob projects folder must be an absolute path.".into());
+    }
+    crate::reject_reparse_component(root)?;
+    let mut projects = Vec::new();
+    let entries = fs::read_dir(root)
+        .map_err(|error| format!("Could not read Anyblob projects folder {}: {error}", root.display()))?;
+    for entry in entries {
+        let directory = entry.map_err(|error| error.to_string())?.path();
+        let metadata = fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
+        if !metadata.is_dir() || crate::is_windows_reparse_point(&metadata) {
+            continue;
+        }
+        let path = directory.join(PROJECT_FILE);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Could not inspect {}: {error}", path.display())),
+        };
+        if !metadata.is_file() || crate::is_windows_reparse_point(&metadata) {
+            return Err(format!("{} must be a regular file.", path.display()));
+        }
+        let mut text = String::new();
+        fs::File::open(&path)
+            .and_then(|file| file.take(MAX_PROJECT_BYTES as u64 + 1).read_to_string(&mut text))
+            .map_err(|_| format!("Could not read {} as UTF-8.", path.display()))?;
+        let config = parse_config(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+        projects.push(Project {
+            id: config.id,
+            name: config.name,
+            root_paths: vec![directory.to_string_lossy().into_owned()],
+            kind: if config.remote { "remote" } else { "local" }.into(),
+            host_id: None,
+            computer_name: None,
+        });
+    }
+    Ok(projects)
+}
+
+fn read_remote_root(codex_directory: &Path) -> Result<Option<PathBuf>, String> {
+    let content = match fs::read_to_string(codex_directory.join("config.toml")) {
+        Ok(content) => content,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Could not read the Codex config: {error}")),
+    };
+    let config: CodexConfig =
+        toml::from_str(&content).map_err(|_| "Could not parse the Codex config.")?;
+    Ok(config.anyblob.remote_projects_folder)
+}
+
+fn discover_in(local: Option<&Path>, remote: Option<&Path>) -> Result<Vec<Project>, String> {
+    let mut projects = Vec::new();
+    let mut ids = BTreeSet::new();
+    for root in [local, remote.filter(|path| Some(*path) != local)].into_iter().flatten() {
+        for project in scan_root(root)? {
+            if !ids.insert(project.id.clone()) {
+                return Err("Anyblob projects must have unique keys.".into());
             }
-            projects.push(Project {
-                id: id.into(),
-                name: name.into(),
-                root_paths: Vec::new(),
-                kind: "remote".into(),
-                host_id: Some(host_id.into()),
-                computer_name: None,
-            });
+            projects.push(project);
         }
     }
-
     projects.sort_by(|left, right| {
         left.name
             .to_lowercase()
             .cmp(&right.name.to_lowercase())
             .then(left.kind.cmp(&right.kind))
-            .then(left.host_id.cmp(&right.host_id))
             .then(left.id.cmp(&right.id))
     });
     Ok(projects)
 }
 
+pub(crate) fn discover() -> Result<Vec<Project>, String> {
+    let install = crate::resolve_install_directory(&crate::app_data_directory())?;
+    let _ = crate::settings_data_path(&install)?;
+    let settings_path =
+        crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json");
+    crate::reject_reparse_component(&settings_path)?;
+    let local = if settings_path.exists() {
+        crate::read_json_file(&settings_path)?["localProjectsFolder"]
+            .as_str()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+    } else {
+        None
+    };
+    let remote = read_remote_root(&codex_home_path()?)?;
+    discover_in(local.as_deref(), remote.as_deref())
+}
+
 #[tauri::command]
 pub async fn discover_codex_projects() -> Result<Vec<Project>, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let path = codex_home_path()?.join(".codex-global-state.json");
-        let text = std::fs::read_to_string(path)
-            .map_err(|_| "Could not read Codex project metadata. The previous project list has been kept.")?;
-        parse(&text)
+        let projects = discover()?;
+        crate::anyblob::synchronize_project_registry(&projects)?;
+        Ok(projects)
     })
-    .await
-    .map_err(|_| "Project discovery stopped. Reload to retry.".to_string())?
+        .await
+        .map_err(|_| "Project discovery stopped. Reload to retry.".to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    #[test]
-    fn metadata_ignores_unrelated_state_and_preserves_stable_ids() {
-        let mut value = json!({"local-projects":{
-            "a":{"id":"a","name":"Same","rootPaths":["C:\\one","C:\\two"],"unknown":42},
-            "b":{"id":"b","name":"Same","rootPaths":["C:\\worktree"]}},"selected-project":"ignore"});
-        let first = parse(&value.to_string()).unwrap();
-        assert_eq!(first.len(), 2);
-        assert_eq!(first[0].root_paths.len(), 2);
-        value["local-projects"]["a"]["name"] = "Renamed".into();
-        assert_eq!(parse(&value.to_string()).unwrap()[0].id, first[0].id);
-        value["local-projects"].as_object_mut().unwrap().remove("a");
-        assert_eq!(parse(&value.to_string()).unwrap().len(), 1);
-        assert!(parse(r#"{"local-projects":{}}"#).unwrap().is_empty());
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../.test-run/anyblob-project-discovery")
+                .join(format!("{}-{name}", std::process::id()));
+            fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let path = self.0.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
     }
 
-    #[test]
-    fn rejects_unsupported_and_malformed_metadata() {
-        for text in [
-            "{",
-            "null",
-            "{}",
-            r#"{"local-projects":[]}"#,
-            r#"{"local-projects":{"a":{"id":"b","name":"X","rootPaths":["C:\\x"]}}}"#,
-            r#"{"local-projects":{"a":{"id":"a","name":"X","rootPaths":[]}}}"#,
-            r#"{"local-projects":{"a":{"id":"a","name":"X","rootPaths":[2]}}}"#,
-        ] {
-            assert!(parse(text).is_err(), "{text}");
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            // Clean up only the files created by the fixture.
+            let mut directories = Vec::new();
+            let mut pending = vec![self.0.clone()];
+            while let Some(directory) = pending.pop() {
+                if let Ok(entries) = fs::read_dir(&directory) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                            pending.push(path);
+                        } else {
+                            let _ = fs::remove_file(path);
+                        }
+                    }
+                }
+                directories.push(directory);
+            }
+            for directory in directories.into_iter().rev() {
+                let _ = fs::remove_dir(directory);
+            }
         }
     }
 
     #[test]
-    fn discovers_remote_projects_with_colon_bearing_host_ids() {
-        let projects = parse(r#"{"local-projects":{},"remote-projects":[
-            {"hostId":"remote-host:instance_01","id":"same-id","label":"Remote work","remotePath":"/private/path"},
-            {"hostId":"other-host:instance_02","id":"same-id","label":"Other work","remotePath":"/other/path"}
-        ]}"#).unwrap();
-
+    fn discovers_projects_in_both_folders_using_their_actual_paths() {
+        let fixture = Fixture::new("roots");
+        fixture.write(
+            "local/first/anyblob.config.toml",
+            "name = 'Local'\nkey = 'local secret'\nremote = false",
+        );
+        fixture.write(
+            "remote/second/anyblob.config.toml",
+            "name = 'Remote'\nkey = 'remote secret'\nremote = true",
+        );
+        fixture.write(
+            "remote/other/nested/anyblob.config.toml",
+            "name = 'Nested'\nkey = 'nested secret'\nremote = true",
+        );
+        fixture.write(
+            "codex/config.toml",
+            &format!(
+                "[anyblob]\nremote_projects_folder = {}",
+                serde_json::to_string(&fixture.0.join("remote")).unwrap()
+            ),
+        );
+        let local = fixture.0.join("local");
+        let remote = read_remote_root(&fixture.0.join("codex")).unwrap().unwrap();
+        let projects = discover_in(Some(&local), Some(&remote)).unwrap();
         assert_eq!(projects.len(), 2);
-        assert_eq!(projects[0].kind, "remote");
-        assert_eq!(projects[0].id, "same-id");
-        assert_eq!(projects[0].host_id.as_deref(), Some("other-host:instance_02"));
-        assert_eq!(projects[0].name, "Other work");
-        assert!(projects.iter().all(|project| project.root_paths.is_empty()));
-        assert!(!serde_json::to_string(&projects).unwrap().contains("private/path"));
+        assert_eq!(projects[0].kind, "local");
+        assert_eq!(projects[1].kind, "remote");
+        assert_eq!(Path::new(&projects[1].root_paths[0]), remote.join("second"));
+        let exported = serde_json::to_string(&projects).unwrap();
+        assert!(!exported.contains("secret"));
+    }
 
-        assert!(parse(r#"{"local-projects":{},"remote-projects":[
-            {"hostId":"remote-host:instance_01","id":"same-id","label":"Remote work"},
-            {"hostId":"remote-host:instance_01","id":"same-id","label":"Duplicate"}
-        ]}"#).is_err());
-        assert!(parse(r#"{"local-projects":{},"remote-projects":[
-            {"hostId":"invalid/host","id":"same-id","label":"Invalid host"}
-        ]}"#).is_err());
+    #[test]
+    fn rejects_invalid_configs_without_echoing_credentials() {
+        for invalid in [
+            "name = 'Missing key'\nremote = true",
+            "name = 'Invalid flag'\nkey = 'secret'\nremote = 'yes'",
+            "name = ''\nkey = 'secret'\nremote = true",
+        ] {
+            assert!(!parse_config(invalid).err().unwrap().contains("secret"));
+        }
+    }
+
+    #[test]
+    fn project_identity_survives_a_rename_and_rejects_shared_keys() {
+        let first = "name = 'First'\nkey = 'same key'\nremote = false";
+        let second = "name = 'Second'\nkey = 'same key'\nremote = true";
+        let id = parse_config(first).unwrap().id;
+        assert_eq!(id.len(), 64);
+        assert_eq!(parse_config(second).unwrap().id, id);
+        let fixture = Fixture::new("duplicate");
+        fixture.write("first/anyblob.config.toml", first);
+        fixture.write("second/anyblob.config.toml", second);
+        assert!(discover_in(Some(&fixture.0), None).is_err());
     }
 }
