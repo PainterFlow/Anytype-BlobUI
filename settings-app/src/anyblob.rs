@@ -64,7 +64,7 @@ fn authenticate(state: &Value, token: &str) -> Result<(), String> {
 }
 fn authenticate_remote(state: &Value, token: &str) -> Result<(), String> {
     if state["remoteAccess"] != true {
-        return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
+        return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
     }
     authenticate(state, token)
 }
@@ -208,7 +208,7 @@ pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     )?;
     #[cfg(windows)]
     if !enabled {
-        stop_cloudflared();
+        let _ = stop_tailscale_funnel();
     }
     Ok(json!({"enabled":enabled,"remoteAccess":false}))
 }
@@ -223,7 +223,7 @@ pub fn configure_anyblob_remote(enabled: bool) -> Result<Value, String> {
     configure_at(&path, &credential, true, enabled)?;
     #[cfg(windows)]
     if !enabled {
-        stop_cloudflared();
+        let _ = stop_tailscale_funnel();
     }
     let token = if enabled {
         blobui_mcp::credential::read_at(&credential)?
@@ -954,8 +954,36 @@ fn publication_event(operation: &Operation, result: &Result<Value, String>) -> O
 #[cfg(windows)]
 const REMOTE_HTTP_PORT: u16 = 31421;
 #[cfg(windows)]
-static CLOUDFLARED_CHILD: std::sync::Mutex<Option<std::process::Child>> =
+static TAILSCALE_FUNNEL_CHILD: std::sync::Mutex<Option<std::process::Child>> =
     std::sync::Mutex::new(None);
+
+fn tailscale_funnel_url(output: &str) -> Option<String> {
+    for token in output.split_whitespace() {
+        let candidate = token
+            .trim_matches(|character: char| matches!(character, '"' | '\'' | '(' | ')' | '[' | ']' | ',' | ';'))
+            .trim_end_matches(['.', '/']);
+        let Some(host) = candidate.strip_prefix("https://") else {
+            continue;
+        };
+        let Some(host) = host.split('/').next() else {
+            continue;
+        };
+        let host = host.strip_suffix('.').unwrap_or(host);
+        if host.ends_with(".ts.net")
+            && host.split('.').all(|label| {
+                !label.is_empty()
+                    && label
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+            })
+        {
+            return Some(format!("https://{host}"));
+        }
+    }
+    None
+}
 
 #[cfg(windows)]
 fn http_reply(stream: &mut std::net::TcpStream, status: &str, body: &[u8]) {
@@ -1081,71 +1109,98 @@ fn start_remote_http_bridge() {
 }
 
 #[cfg(windows)]
-fn stop_cloudflared() {
-    if let Ok(mut child) = CLOUDFLARED_CHILD.lock() {
-        if let Some(mut child) = child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-#[cfg(windows)]
 #[tauri::command]
-pub fn start_cloudflare_tunnel() -> Result<Value, String> {
+pub fn start_tailscale_funnel() -> Result<Value, String> {
     if state().map_err(|error| error.to_string())?["remoteAccess"] != true {
-        return Err("Enable remote access before starting the Cloudflare Tunnel.".into());
+        return Err("Enable remote access before starting Tailscale Funnel.".into());
     }
-    stop_cloudflared();
+    stop_tailscale_funnel()?;
     use std::os::windows::process::CommandExt;
-    let mut child = std::process::Command::new("cloudflared")
+    let mut child = std::process::Command::new("tailscale")
         .args([
-            "tunnel",
-            "--url",
+            "funnel",
+            "--https=443",
+            "--set-path=/anyblob",
             &format!("http://127.0.0.1:{REMOTE_HTTP_PORT}"),
-            "--no-autoupdate",
         ])
         .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|error| {
-            format!("Could not start cloudflared. Install it and make sure it is on PATH. {error}")
-        })?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or("Could not read cloudflared output.")?;
+        .map_err(|_| "Tailscale CLI not found. Install Tailscale and sign in first.")?;
+    let stdout = child.stdout.take().ok_or("Could not read Tailscale output.")?;
+    let stderr = child.stderr.take().ok_or("Could not read Tailscale output.")?;
     let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        for line in BufReader::new(stderr).lines().flatten() {
-            if let Some(start) = line.find("https://") {
-                let value = &line[start..];
-                if let Some(end) = value.find(".trycloudflare.com") {
-                    let _ = sender.send(format!("{}", &value[..end + ".trycloudflare.com".len()]));
-                    return;
+    for stream in [
+        Box::new(stdout) as Box<dyn std::io::Read + Send>,
+        Box::new(stderr) as Box<dyn std::io::Read + Send>,
+    ] {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            for line in BufReader::new(stream).lines().flatten() {
+                let _ = sender.send(line);
+            }
+        });
+    }
+    drop(sender);
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut output = String::new();
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(200)) {
+            Ok(line) => {
+                output.push_str(&line);
+                output.push('\n');
+                if let Some(url) = tailscale_funnel_url(&output) {
+                    *TAILSCALE_FUNNEL_CHILD
+                        .lock()
+                        .map_err(|_| "Tailscale Funnel process state is unavailable.")? =
+                        Some(child);
+                    return Ok(json!({"url":url}));
                 }
             }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
         }
-    });
-    *CLOUDFLARED_CHILD
-        .lock()
-        .map_err(|_| "Tunnel process state is unavailable.")? = Some(child);
-    match receiver.recv_timeout(Duration::from_secs(30)) {
-        Ok(url) => Ok(json!({"url":url})),
-        Err(_) => {
-            stop_cloudflared();
-            Err("cloudflared did not provide a Quick Tunnel URL. Check that cloudflared can reach Cloudflare.".into())
+        if child.try_wait().map_err(|_| "Could not check Tailscale Funnel status.")?.is_some() {
+            while let Ok(line) = receiver.try_recv() {
+                output.push_str(&line);
+                output.push('\n');
+            }
+            let detail = output.to_ascii_lowercase();
+            return if detail.contains("1.52") || detail.contains("unknown flag") || detail.contains("unknown shorthand") {
+                Err("Update Tailscale to version 1.52 or newer, then try again.".into())
+            } else {
+                Err("Tailscale Funnel could not start. Check that Tailscale is connected and Funnel is enabled.".into())
+            };
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Tailscale Funnel did not provide a .ts.net address. Check that Funnel is enabled.".into());
         }
     }
 }
 
 #[cfg(windows)]
 #[tauri::command]
-pub fn stop_cloudflare_tunnel() -> Result<(), String> {
-    stop_cloudflared();
+pub fn stop_tailscale_funnel() -> Result<(), String> {
+    let mut child = TAILSCALE_FUNNEL_CHILD
+        .lock()
+        .map_err(|_| "Tailscale Funnel process state is unavailable.")?
+        .take();
+    if let Some(ref mut child) = child {
+        let stopped = std::process::Command::new("tailscale")
+            .args(["funnel", "--https=443", "--set-path=/anyblob", "off"])
+            .output()
+            .is_ok_and(|output| output.status.success());
+        let _ = child.kill();
+        let _ = child.wait();
+        if !stopped {
+            return Err("Could not stop Tailscale Funnel. Check Tailscale status.".into());
+        }
+    }
     Ok(())
 }
 
@@ -1179,7 +1234,7 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
             .map_err(|_| "Invalid remote Anyblob request.")?;
         let initial = state()?;
         if initial["remoteAccess"] != true {
-            return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
+            return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
         }
         // The local Codex state file verifies the thread ID and remote host membership.
         let thread = request.thread_id.clone();
@@ -1189,7 +1244,7 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
         let load_remote_state = || {
             let current = state()?;
             if current["remoteAccess"] != true {
-                return Err("Cloudflare Tunnel remote access is disabled in BlobUI.".into());
+                return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
             }
             Ok(current)
         };
@@ -1414,18 +1469,35 @@ pub fn start(_app: tauri::AppHandle) {
 }
 #[cfg(not(windows))]
 #[tauri::command]
-pub fn start_cloudflare_tunnel() -> Result<Value, String> {
-    Err("Cloudflare Tunnel management is supported on Windows.".into())
+pub fn start_tailscale_funnel() -> Result<Value, String> {
+    Err("Tailscale Funnel management is supported on Windows.".into())
 }
 #[cfg(not(windows))]
 #[tauri::command]
-pub fn stop_cloudflare_tunnel() -> Result<(), String> {
+pub fn stop_tailscale_funnel() -> Result<(), String> {
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tailscale_funnel_url_accepts_only_ts_net_hosts() {
+        assert_eq!(
+            tailscale_funnel_url("Available on the internet: https://blobui.tailnet.ts.net"),
+            Some("https://blobui.tailnet.ts.net".into())
+        );
+        assert_eq!(
+            tailscale_funnel_url("https://blobui.tailnet.ts.net/anyblob"),
+            Some("https://blobui.tailnet.ts.net".into())
+        );
+        assert_eq!(tailscale_funnel_url("https://example.com"), None);
+        assert_eq!(
+            tailscale_funnel_url("https://blobui.tailnet.ts.net.evil.example"),
+            None
+        );
+    }
+
     #[test]
     fn saved_state_notifications_only_follow_confirmed_blobui_publications() {
         let confirmed = Ok(

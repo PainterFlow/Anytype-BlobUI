@@ -1,6 +1,6 @@
 # Anyblob
 
-Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. The bundled plugin runs locally on Windows. Codex on another Windows or Linux host can connect through the Cloudflare Tunnel MCP setup described in [remote access](../../docs/anyblob-remote-access.md).
+Anyblob reads and manages Anytype content through the running BlobUI Settings app on Windows. The bundled plugin runs locally on Windows. Codex on another Windows or Linux host can connect through the Tailscale Funnel MCP setup described in [remote access](../../docs/anyblob-remote-access.md).
 
 ## Setup
 
@@ -16,7 +16,7 @@ Developers can build the plugin ZIP and bundled marketplace payload with scripts
 
 ## Remote access
 
-For Codex running on another PC or server, enable remote access in BlobUI's Codex integration settings and follow the [remote MCP setup guide](../../docs/anyblob-remote-access.md). The remote Anyblob MCP server passes each chat ID through the authenticated tunnel. BlobUI verifies remote project assignments against its local Codex state. In BlobUI Settings > Anyblob > Projects, remote rows use the Codex host ID. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats assigned to configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
+For Codex running on another PC or server, enable remote access in BlobUI's Codex integration settings and follow the [remote MCP setup guide](../../docs/anyblob-remote-access.md). The remote Anyblob MCP server passes each chat ID through Tailscale Funnel to local BlobUI. BlobUI verifies remote project assignments against its local Codex state. In BlobUI Settings > Anyblob > Projects, remote rows use the Codex host ID. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats assigned to configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
 
 ## Updates
 

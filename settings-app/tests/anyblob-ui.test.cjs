@@ -19,8 +19,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
         if(name==='anyblob_status'){if(window.statusError)throw Error(window.statusError);return{enabled:window.enabled,remoteAccess:window.remoteAccess};}
         if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;if(!args.enabled)window.remoteAccess=false;return{enabled:args.enabled};}
         if(name==='configure_anyblob_remote'){if(window.remoteToggleError)throw Error('Could not save remote access.');window.remoteAccess=args.enabled;return{enabled:args.enabled,token:args.enabled?'fixture-remote-key':''};}
-        if(name==='start_cloudflare_tunnel'){window.tunnelStarts=(window.tunnelStarts||0)+1;return{url:'https://sample.trycloudflare.com'};}
-        if(name==='stop_cloudflare_tunnel'){window.tunnelStops=(window.tunnelStops||0)+1;return null;}
+        if(name==='start_tailscale_funnel'){window.tunnelStarts=(window.tunnelStarts||0)+1;return{url:'https://sample.tailnet.ts.net'};}
+        if(name==='stop_tailscale_funnel'){window.tunnelStops=(window.tunnelStops||0)+1;return null;}
         if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,codexRefreshRequired:!!window.codexRefreshRequired,bundledVersion:'0.1.1',installedVersion:window.installed?(window.installedVersion||'0.1.0'):null};
         if(name==='install_anyblob_marketplace'){window.installCalls++;await new Promise(resolve=>window.finishInstall=resolve);if(window.installError)throw Error('Fixture install failed');window.installed=true;return null;}
         return null;
@@ -66,15 +66,14 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await page.waitForFunction(message=>document.querySelector('#codex-panel-0 [role=status]')?.textContent===message,saveBusyMessage);
     await page.evaluate(()=>{window.statusError=null;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
     await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]')?.textContent==='');
-    const remoteToggle=panel.locator('#enable-anyblob-remote'),remoteLabel=panel.getByRole('button',{name:'Allow Cloudflare Tunnel remote access',exact:true});
+    const remoteToggle=panel.locator('#enable-anyblob-remote'),remoteLabel=panel.getByRole('button',{name:'Allow Tailscale Funnel remote access',exact:true});
     assert.equal(await toggle.isChecked(),false);assert.equal(await remoteToggle.isDisabled(),true);assert.equal(await remoteLabel.isDisabled(),true);
     await remoteLabel.evaluate(el=>el.click());assert.equal(await page.locator('#anyblob-remote-access-dialog').isVisible(),false);
-    const remoteHelp=panel.getByRole('button',{name:'Allow Cloudflare Tunnel remote access information'});await remoteHelp.focus();
+    const remoteHelp=panel.getByRole('button',{name:'Allow Tailscale Funnel remote access information'});await remoteHelp.focus();
     const remoteTooltip=page.locator(`#${await remoteHelp.getAttribute('aria-describedby')}`);await remoteTooltip.waitFor({state:'visible'});
     assert.equal(await remoteTooltip.evaluate(el=>el.parentElement===document.body),true);
-    assert.match(await remoteTooltip.innerText(),/remote rows use their Codex host ID/);
-    assert.match(await remoteTooltip.innerText(),/local Codex state/);
-    assert.match(await remoteTooltip.innerText(),/Missing or invalid membership is denied when scopes exist/);
+    assert.match(await remoteTooltip.innerText(),/local BlobUI/);
+    assert.match(await remoteTooltip.innerText(),/saved project permissions/);
     await page.screenshot({path:path.join(fixture,'remote-access-help-tooltip-dark.png')});
     await toggle.check();await page.waitForFunction(()=>window.enabled);assert.equal(await remoteToggle.isDisabled(),false);assert.equal(await remoteLabel.isDisabled(),true);
     await remoteToggle.check();await page.waitForFunction(()=>window.remoteAccess);
@@ -84,7 +83,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
     const keyInput=remoteDialog.getByRole('textbox',{name:'Key',exact:true});assert.equal(await keyInput.evaluate(el=>el.readOnly),true);
     await keyInput.pressSequentially('x');assert.equal(await keyInput.inputValue(),'fixture-remote-key');
-    assert.match(await remoteDialog.innerText(),/Quick Tunnel URLs are temporary/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
+    assert.match(await remoteDialog.innerText(),/stable while this device keeps its Tailscale identity/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
     assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
     await remoteDialog.getByRole('button',{name:'Copy key'}).click();await remoteDialog.getByRole('button',{name:'Copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Remote access key copied.');assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key']);
@@ -92,12 +91,12 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await remoteDialog.getByRole('button',{name:'Show remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'text');
     await remoteDialog.getByRole('button',{name:'Hide remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
     await remoteDialog.getByRole('button',{name:'Start tunnel'}).click();await remoteDialog.getByRole('button',{name:'Stop tunnel'}).waitFor();
-    const tunnelInput=remoteDialog.getByRole('textbox',{name:'Cloudflare Tunnel URL'}),tunnelField=remoteDialog.locator('.copy-text-field');
-    assert.equal(await tunnelInput.inputValue(),'https://sample.trycloudflare.com');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
+    const tunnelInput=remoteDialog.getByRole('textbox',{name:'Tailscale Funnel URL'}),tunnelField=remoteDialog.locator('.copy-text-field');
+    assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
     assert.equal(await tunnelField.evaluate(el=>getComputedStyle(el).borderRadius),'18px');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).minHeight),'48px');
     const copyTunnel=remoteDialog.getByRole('button',{name:'Copy tunnel URL'});
     await tunnelInput.focus();assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).outlineStyle),'none');
-    await tunnelInput.pressSequentially('x');assert.equal(await tunnelInput.inputValue(),'https://sample.trycloudflare.com');
+    await tunnelInput.pressSequentially('x');assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');
     await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
     await page.keyboard.press('Space');await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
@@ -116,7 +115,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await page.evaluate(()=>window.clipboardFails=false);await tunnelInput.focus();await page.keyboard.press('Tab');await page.keyboard.press('Space');
     await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
     assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
-    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key','https://sample.trycloudflare.com','https://sample.trycloudflare.com']);
+    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key','https://sample.tailnet.ts.net','https://sample.tailnet.ts.net']);
     await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-dark.png')});
     await page.setViewportSize({width:800,height:750});await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-narrow-dark.png')});
     await page.setViewportSize({width:1100,height:900});

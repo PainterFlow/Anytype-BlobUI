@@ -680,7 +680,7 @@ pub fn call_with_approval(
     {
         let _ = (request, cancel, approve);
         Err(
-            "Set ANYBLOB_REMOTE_ADDRESS to the HTTPS Cloudflare Tunnel URL before using remote Anyblob."
+            "Set ANYBLOB_REMOTE_ADDRESS to the HTTPS Tailscale Funnel URL before using remote Anyblob."
                 .into(),
         )
     }
@@ -787,15 +787,15 @@ mod tcp_tests {
     #[test]
     fn remote_url_requires_https_and_targets_only_the_bridge() {
         assert_eq!(
-            tunnel_endpoint("https://example.trycloudflare.com").unwrap(),
-            "https://example.trycloudflare.com/anyblob"
+            tunnel_endpoint("https://blobui.tailnet.ts.net").unwrap(),
+            "https://blobui.tailnet.ts.net/anyblob"
         );
         assert_eq!(
             tunnel_endpoint("https://anyblob.example.com/base").unwrap(),
             "https://anyblob.example.com/base/anyblob"
         );
         for invalid in [
-            "http://example.trycloudflare.com",
+            "http://blobui.tailnet.ts.net",
             "https://user:pass@example.com",
             "https://example.com/?token=secret",
             "https://example.com/#secret",
