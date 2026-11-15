@@ -6,6 +6,8 @@ Remote access is off by default. Enabling it creates a secret 64-character key. 
 
 After you configure the remote MCP URL and key below, launch or reconnect the remote Anyblob MCP server. It syncs its Codex host and project catalog at startup and refreshes the catalog when the Codex project list changes. Sync sends project IDs and names, not project folder paths. BlobUI validates each request's remote project membership against that catalog and saved permissions. The MCP request carries membership separately from tool arguments, so a tool argument cannot choose a project.
 
+The MCP process must inherit the active Codex home that contains `.codex-global-state.json`. If `CODEX_HOME` is set, point it to that directory. Anyblob needs the catalog to verify chat project membership. A missing or unreadable catalog stops remote requests before BlobUI can check their permissions.
+
 In BlobUI Settings > Anyblob > Projects, synced projects appear under the cloud PC name. A globe tooltip shows the computer name. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats with verified membership in configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
 
 ## Quick Tunnel without an account
