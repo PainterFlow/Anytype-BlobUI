@@ -7,8 +7,6 @@ pub mod credential;
 pub mod content;
 pub mod sources;
 pub mod blobui;
-pub mod codex_identity;
-pub mod codex_projects;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -83,20 +81,6 @@ pub struct Request {
     #[serde(default)]
     pub thread_id: Option<String>,
     pub request: Operation,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProjectInfo {
-    pub id: String,
-    pub name: String,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProjectSync {
-    pub token: String,
-    pub host_id: String,
-    pub computer_name: String,
-    pub projects: Vec<ProjectInfo>,
 }
 /// Host metadata is deliberately separate from model-controlled tool arguments.
 pub fn thread_id(params: &Value) -> Result<Option<String>, String> {

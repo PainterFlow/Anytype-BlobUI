@@ -71,7 +71,7 @@ export function CodexProjects() {
         </button>
         {(project.kind==="cloud"||project.kind==="remote")&&<HelpTooltip label={`${project.kind==="remote"?"Remote":"Cloud"} project information for ${project.name}`} text={`${project.kind==="remote"?"Remote":"Cloud"} project permissions are saved separately for ${host} and project ${project.id}.`} icon={<GlobeIcon />} />}
       </div>;
-    })}{state.scanned&&!projects.some(projectMatches)&&<p className="input-hint">{query?"No matching results.":"No local, remote, or cloud projects found."}</p>}</div>
+    })}{state.scanned&&!projects.some(projectMatches)&&<p className="input-hint">{query?"No matching results.":"No local or remote projects found."}</p>}</div>
     {createPortal(<div id="project-source-backdrop" className="confirm-backdrop" hidden ref={backdrop}>
       <section id="project-source-dialog" className="confirm-dialog calendar-rule-dialog project-source-dialog" role="dialog" aria-modal="true" aria-labelledby="project-source-title" tabIndex={-1} ref={dialog}>
         <header className="calendar-modal-header"><h2 id="project-source-title">{state.active?.name||"Project sources"}</h2><button ref={close} type="button" className="neutral-icon-button calendar-modal-close" aria-label="Close project sources" onClick={()=>modal.current?.close()}>×</button></header>

@@ -68,7 +68,6 @@ fn elicit(
     result
 }
 fn main() {
-    blobui_mcp::codex_projects::start_remote_sync_monitor();
     let answers: Answers = Arc::default();
     let sequence = Arc::new(std::sync::atomic::AtomicU64::new(1));
     let mut forms = false;

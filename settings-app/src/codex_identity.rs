@@ -17,8 +17,20 @@ fn valid_state_id(value: &str) -> bool {
         && !matches!(value, "." | "..")
 }
 
+pub(crate) fn valid_host_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')
+        })
+        && !value.starts_with(':')
+        && !value.ends_with(':')
+        && !value.contains("::")
+        && !matches!(value, "." | "..")
+}
+
 fn remote_project(state: &Value, host_id: &str, project_id: &str) -> Result<Membership, String> {
-    if !valid_state_id(host_id) || !valid_state_id(project_id) {
+    if !valid_host_id(host_id) || !valid_state_id(project_id) {
         return Err("Codex returned invalid remote project membership.".into());
     }
     let projects = state["remote-projects"]
@@ -79,7 +91,7 @@ pub fn resolve_at(home: &Path, thread: &str) -> Result<Membership, String> {
         .get(thread)
         .map(|host| {
             host.as_str()
-                .filter(|host| valid_state_id(host))
+                .filter(|host| valid_host_id(host))
                 .ok_or("Codex returned invalid chat host membership.")
         })
         .transpose()?;
@@ -326,15 +338,15 @@ mod remote_membership_tests {
         std::fs::create_dir_all(&home).unwrap();
         let mut state = json!({
             "remote-projects": [
-                {"hostId":"remote-host","id":"project-a","label":"Remote work","remotePath":"/private/path"},
-                {"hostId":"other-host","id":"project-a","label":"Other work","remotePath":"/other/path"}
+                {"hostId":"remote-host:instance_01","id":"project-a","label":"Remote work","remotePath":"/private/path"},
+                {"hostId":"other-host:instance_02","id":"project-a","label":"Other work","remotePath":"/other/path"}
             ],
             "thread-project-assignments": {
                 "remote-chat":{"projectKind":"remote","projectId":"project-a"}
             },
             "thread-project-membership-host-ids": {
-                "remote-chat":"remote-host",
-                "remote-projectless":"remote-host"
+                "remote-chat":"remote-host:instance_01",
+                "remote-projectless":"remote-host:instance_01"
             },
             "projectless-thread-ids":["remote-projectless"]
         });
@@ -345,7 +357,7 @@ mod remote_membership_tests {
 
         assert_eq!(
             resolve_at(&home, "remote-chat").unwrap(),
-            Membership::Project("cloud:remote-host:project-a".into())
+            Membership::Project("cloud:remote-host:instance_01:project-a".into())
         );
         assert_eq!(
             resolve_at(&home, "remote-projectless").unwrap(),
@@ -359,13 +371,13 @@ mod remote_membership_tests {
             .contains("no verified project membership"));
         state["thread-project-assignments"]["remote-chat"] = json!({"projectKind":"remote","projectId":"project-a"});
 
-        state["thread-project-membership-host-ids"]["remote-chat"] = json!("other-host");
+        state["thread-project-membership-host-ids"]["remote-chat"] = json!("other-host:instance_02");
         save(&state);
         assert_eq!(
             resolve_at(&home, "remote-chat").unwrap(),
-            Membership::Project("cloud:other-host:project-a".into())
+            Membership::Project("cloud:other-host:instance_02:project-a".into())
         );
-        state["thread-project-membership-host-ids"]["remote-chat"] = json!("unknown-host");
+        state["thread-project-membership-host-ids"]["remote-chat"] = json!("unknown-host:instance_03");
         save(&state);
         assert!(resolve_at(&home, "remote-chat").is_err());
         state["thread-project-membership-host-ids"]["remote-chat"] = json!("remote-host");

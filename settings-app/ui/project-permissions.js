@@ -10,7 +10,7 @@
 
   function cloudCoordinates(key) {
     if (typeof key !== 'string' || !key.startsWith('cloud:')) return null;
-    const separator = key.indexOf(':', 6);
+    const separator = key.lastIndexOf(':');
     if (separator < 0) return null;
     const hostId = key.slice(6, separator);
     const id = key.slice(separator + 1);
@@ -48,8 +48,8 @@
     if (!project || typeof project.id !== 'string' || typeof project.name !== 'string' || !Array.isArray(project.rootPaths)) {
       throw new Error('Unsupported Codex project metadata.');
     }
-    const kind = project.kind === 'remote' ? 'remote' : project.kind === 'cloud' ? 'cloud' : 'local';
-    if (project.kind !== undefined && !['local','cloud','remote'].includes(project.kind)) {
+    const kind = project.kind === 'remote' ? 'remote' : 'local';
+    if (project.kind !== undefined && !['local','remote'].includes(project.kind)) {
       throw new Error('Unsupported Codex project metadata.');
     }
     if (kind !== 'local' && (typeof project.hostId !== 'string' || !project.hostId)) {
@@ -82,9 +82,9 @@
   }
 
   function createController() {
-    let api, locked=true, projects=[], cloudProjects=[], cloudCatalogLoaded=false, sources=[], scanned=false, sourcesScanned=false;
-    let busy=false, sourceBusy=false, active=null, openRequested=false, pendingCloudRefresh=false;
-    let destroyed=false, cloudUnlisten=null;
+    let api, locked=true, projects=[], sources=[], scanned=false, sourcesScanned=false;
+    let busy=false, sourceBusy=false, active=null, openRequested=false;
+    let destroyed=false;
     let snapshot={projects:[],sources:[],scanned:false,sourcesScanned:false,busy:false,sourceBusy:false,locked:true,active:null,modal:false,projectStatus:'',sourceStatus:''};
     const listeners=new Set();
     const subscribe=listener=>{listeners.add(listener);return()=>listeners.delete(listener);};
@@ -97,14 +97,7 @@
       const wasLocked=locked;
       locked=value===true;
       publish({locked});
-      if (wasLocked && !locked) {
-        if (pendingCloudRefresh && !busy) {
-          pendingCloudRefresh=false;
-          void reloadProjects({replaceCloud:true});
-        } else if (openRequested && !scanned && !busy) {
-          void reloadProjects();
-        }
-      }
+      if (wasLocked && !locked && openRequested && !scanned && !busy) void reloadProjects();
     }
 
     function saveSources(nextSources) {
@@ -133,26 +126,19 @@
       const catalog=projects.map(project=>({...project}));
       if(api)for(const[key,saved]of Object.entries(configuration().projects))if(!catalogHasProject(catalog,savedProject(key,saved))){
         const project=savedProject(key,saved);
-        const known=project.kind==='cloud'?cloudCatalogLoaded:scanned;
-        const available=project.kind==='cloud'?cloudProjects:projects;
-        catalog.push({...project,unavailable:known&&!catalogHasProject(available,project)});
+        catalog.push({...project,unavailable:scanned&&!catalogHasProject(projects,project)});
       }
       return catalog.sort((a,b)=>a.name.localeCompare(b.name)||projectKey(a).localeCompare(projectKey(b)));
     }
 
-    async function reloadProjects({replaceCloud=false}={}) {
+    async function reloadProjects() {
       if(locked||destroyed)return;
-      if(busy){if(replaceCloud)pendingCloudRefresh=true;return;}
+      if(busy)return;
       busy=true;publish({busy:true,projectStatus:'Loading projects…'});
       try {
         const result=await api.invoke('discover_codex_projects');
         if(!Array.isArray(result))throw new Error('Unsupported Codex project metadata.');
-        const normalized=result.map(normalizeCatalogProject);
-        const local=normalized.filter(project=>project.kind==='local');
-        const cloud=normalized.filter(project=>project.kind==='cloud');
-        const remote=normalized.filter(project=>project.kind==='remote');
-        if(replaceCloud||!cloudCatalogLoaded||cloud.length){cloudProjects=cloud;cloudCatalogLoaded=true;}
-        projects=local.concat(remote,cloudProjects);
+        projects=result.map(normalizeCatalogProject);
         scanned=true;
         publish({projects,scanned,projectStatus:''});
         if(active){
@@ -162,7 +148,6 @@
       } catch(error) { publish({projectStatus:String(error.message||error)}); }
       finally {
         busy=false;publish({busy:false});
-        if(pendingCloudRefresh&&!locked&&!destroyed){pendingCloudRefresh=false;void reloadProjects({replaceCloud:true});}
       }
     }
 
@@ -175,21 +160,10 @@
       finally{sourceBusy=false;publish({sourceBusy:false});}
     }
 
-    function onCloudProjectsChanged() {
-      pendingCloudRefresh=true;
-      if(!locked&&!busy){pendingCloudRefresh=false;void reloadProjects({replaceCloud:true});}
-    }
-
     return {
       subscribe,getSnapshot,kinds,
       init(options){
         api=options;destroyed=false;UI.AppReload?.register(()=>reloadSources(true));
-        if(typeof api.listen==='function'){
-          Promise.resolve(api.listen('anyblob-cloud-projects-changed',onCloudProjectsChanged)).then(unlisten=>{
-            if(typeof unlisten!=='function')return;
-            if(destroyed)unlisten();else cloudUnlisten=unlisten;
-          }).catch(()=>{});
-        }
       },
       normalize,identity,kindName,projectKey,
       open(){openRequested=true;if(!scanned&&!busy&&!locked)void reloadProjects();},
@@ -202,7 +176,7 @@
       toggleSource(source,checked){if(!active||locked)return;const key=identity(source),entries=selectedSources().filter(row=>identity(row)!==key);if(checked)entries.push({...source,permission:copy(configuration().spaces[source.spaceId]||fallback())});saveSources(entries);},
       setPermission(source,permission){if(!active||locked)return;const key=identity(source);saveSources(selectedSources().map(row=>identity(row)===key?{...row,permission}:row));},
       render(){publish({});},
-      destroy(){destroyed=true;pendingCloudRefresh=false;cloudUnlisten?.();cloudUnlisten=null;listeners.clear();}
+      destroy(){destroyed=true;listeners.clear();}
     };
   }
   const controller=createController();
