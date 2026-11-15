@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const SETTINGS_DIR: &str = "Settings";
 const FORMAT_VERSION: u64 = 2;
+const ANYBLOB_REGISTRY_VERSION: u64 = 1;
 const MAX_JSON_BYTES: u64 = 64 * 1024 * 1024;
 const DATA_FILE: &str = "data.json";
 const META_FILE: &str = "blob.meta.json";
@@ -84,6 +85,20 @@ fn load_unlocked(root: &Path) -> Result<Value, String> {
     }
 
     let shape = object_field(&data, "shape", "settings data")?;
+    let has_project_registry = anyblob_projects["projects"].is_array();
+    if version == FORMAT_VERSION && has_current_anyblob_registry(&metadata) && !has_project_registry {
+        return Err("The Anyblob project registry is malformed.".into());
+    }
+    let project_permissions = anyblob_permissions.get("projects");
+    let global_permissions = anyblob_permissions.get("projectless");
+    let (project_permissions, global_permissions) = if has_project_registry {
+        (project_permissions, global_permissions)
+    } else {
+        (
+            project_permissions.or_else(|| anyblob_projects.get("projects")),
+            global_permissions.or_else(|| anyblob_permissions.get("spaces")),
+        )
+    };
     if version == 1 {
         restore_legacy_locations(&mut aggregate, shape, &basic, &advanced, &anyblob_settings, &anyblob_projects, &anyblob_permissions)?;
         crate::consolidate_legacy_settings(&mut aggregate);
@@ -92,8 +107,8 @@ fn load_unlocked(root: &Path) -> Result<Value, String> {
         Some(&basic["settings"]),
         Some(&advanced["settings"]),
         anyblob_settings.get("integration"),
-        anyblob_projects.get("projects"),
-        anyblob_permissions.get("spaces"),
+        project_permissions,
+        global_permissions,
     )? {
         aggregate.insert("settings".into(), settings);
     }
@@ -170,7 +185,10 @@ pub fn ensure(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
     reject_directory_link(&directory)?;
     if directory.is_dir() {
         let metadata = read_json(&directory.join(META_FILE), "settings metadata")?;
-        if metadata.get("formatVersion").and_then(Value::as_u64) == Some(1) {
+        let version = metadata.get("formatVersion").and_then(Value::as_u64);
+        let legacy_anyblob_layout =
+            version == Some(FORMAT_VERSION) && !has_current_anyblob_registry(&metadata);
+        if version == Some(1) || legacy_anyblob_layout {
             let data = load_unlocked(root)?;
             save_unlocked(root, &data, MigrationSeed::default())?;
         }
@@ -184,6 +202,10 @@ pub fn ensure(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+fn has_current_anyblob_registry(metadata: &Value) -> bool {
+    metadata["anyblobRegistryVersion"].as_u64() == Some(ANYBLOB_REGISTRY_VERSION)
+}
+
 /// Save a settings aggregate into `root/Settings` with a staged directory swap.
 ///
 /// Non-JSON files already in Settings are copied into the staged directory and
@@ -191,6 +213,47 @@ pub fn ensure(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
 /// `DO-NOT-SHARE`; credential bytes are handled only by the migration helper.
 pub fn save(root: &Path, data: &Value) -> Result<(), String> {
     save_internal(root, data, MigrationSeed::default())
+}
+
+pub fn load_anyblob_project_registry(root: &Path) -> Result<Vec<Value>, String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    let Some(document) = read_project_registry(root)? else {
+        return Ok(Vec::new());
+    };
+    document["projects"]
+        .as_array()
+        .cloned()
+        .ok_or_else(|| "The Anyblob project registry is malformed.".into())
+}
+
+pub fn update_anyblob_project_registry(
+    root: &Path,
+    update: impl FnOnce(&mut Vec<Value>) -> Result<(), String>,
+) -> Result<(), String> {
+    let _guard = STORE_LOCK.lock().map_err(|_| "The Settings store lock is unavailable.")?;
+    let mut document = read_project_registry(root)?.ok_or("The Anyblob project registry is missing.")?;
+    let projects = document["projects"].as_array_mut().ok_or("The Anyblob project registry is malformed.")?;
+    let previous = projects.clone();
+    update(projects)?;
+    if *projects != previous {
+        let bytes = crate::serialize_data(&document)?;
+        if bytes.len() as u64 > MAX_JSON_BYTES {
+            return Err("The Anyblob project registry exceeds the Settings file size limit.".into());
+        }
+        crate::storage::write_atomic(&root.join(SETTINGS_DIR).join(ANYBLOB_PROJECTS_FILE), &bytes)?;
+    }
+    Ok(())
+}
+
+fn read_project_registry(root: &Path) -> Result<Option<Value>, String> {
+    let directory = root.join(SETTINGS_DIR);
+    reject_directory_link(&directory)?;
+    reject_directory_link(&directory.join("anyblob"))?;
+    let document = read_optional_json(&directory.join(ANYBLOB_PROJECTS_FILE), "Anyblob projects")?;
+    if let Some(document) = &document {
+        require_format(document, FORMAT_VERSION, "Anyblob projects")?;
+    }
+    Ok(document)
 }
 
 pub fn read_formula(root: &Path) -> Result<Option<Value>, String> {
@@ -438,6 +501,7 @@ fn prepare_staged(
 
     let mut meta = existing_metadata(staged, seed.metadata.as_ref())?;
     set_field(&mut meta, "formatVersion", json!(FORMAT_VERSION));
+    set_field(&mut meta, "anyblobRegistryVersion", json!(ANYBLOB_REGISTRY_VERSION));
     set_field(&mut meta, "blobuiVersion", json!(env!("BLOBUI_BUILD_VERSION")));
     let plugin: Value = serde_json::from_str(include_str!("../../codex-plugin/src/plugin.json"))
         .map_err(|_| "The bundled Anyblob version could not be read.")?;
@@ -473,8 +537,29 @@ fn prepare_staged(
     }
     set_field(&mut anyblob_settings, "formatVersion", json!(FORMAT_VERSION));
 
-    let projects_file = section_file("projects", anyblob_projects);
-    let permissions_file = section_file("spaces", anyblob_permissions);
+    let mut projects_file = read_optional_json(&staged.join(ANYBLOB_PROJECTS_FILE), "Anyblob projects")?
+        .unwrap_or_else(empty_object);
+    let registry = projects_file.get("projects")
+        .filter(|value| value.is_array())
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    set_field(&mut projects_file, "formatVersion", json!(FORMAT_VERSION));
+    set_field(&mut projects_file, "projects", registry);
+    projects_file.as_object_mut().unwrap().remove("aggregate");
+
+    let mut permissions_file = read_optional_json(&staged.join(ANYBLOB_PERMISSIONS_FILE), "Anyblob permissions")?
+        .unwrap_or_else(empty_object);
+    set_field(&mut permissions_file, "formatVersion", json!(FORMAT_VERSION));
+    let permission_fields = permissions_file.as_object_mut().unwrap();
+    for key in ["aggregate", "spaces", "projectless", "projects"] {
+        permission_fields.remove(key);
+    }
+    if let Some(value) = anyblob_permissions {
+        permission_fields.insert("projectless".into(), value);
+    }
+    if let Some(value) = anyblob_projects {
+        permission_fields.insert("projects".into(), value);
+    }
     let mut advanced_file = json!({ "formatVersion": FORMAT_VERSION, "settings": advanced_settings });
     if let Some(preferences) = updater_preferences {
         set_field(&mut advanced_file, "updaterPreferences", preferences);
@@ -646,14 +731,6 @@ fn is_advanced_setting(key: &str) -> bool {
 
 fn shape_missing() -> Value {
     json!({ "kind": "missing" })
-}
-
-fn section_file(key: &str, value: Option<Value>) -> Value {
-    let mut section = json!({ "formatVersion": FORMAT_VERSION });
-    if let Some(value) = value {
-        set_field(&mut section, key, value);
-    }
-    section
 }
 
 fn merge_managed_file(existing: Option<Value>, managed_key: &str, managed_value: Value) -> Value {
@@ -979,8 +1056,12 @@ mod tests {
         assert_eq!(basic["settings"]["themePreset"], "dark-mode-plus.css");
         assert_eq!(basic["settings"]["themeColor"], "#334455");
         assert_eq!(advanced["settings"]["backgroundExperiment"], "autostart-background");
-        assert_eq!(projects["projects"]["stable-id"]["future"], true);
-        assert_eq!(permissions, json!({"formatVersion":2,"spaces":{"full-space-id":{"access":"createDelete","future":1}}}));
+        assert_eq!(projects, json!({"formatVersion": 2, "projects": []}));
+        assert_eq!(permissions, json!({
+            "formatVersion": 2,
+            "projectless": {"full-space-id": {"access": "createDelete", "future": 1}},
+            "projects": {"stable-id": {"name": "Project", "future": true}}
+        }));
         assert!(directory.join(PRIVATE_CONNECTION_FILE).is_file());
         assert!(directory.join(PRIVATE_CREDENTIAL_FILE).parent().unwrap().is_dir());
         let generated_theme_css = fs::read_to_string(directory.join("themes/generated.css")).unwrap();
@@ -1030,11 +1111,75 @@ mod tests {
         assert!(settings.get("settingsV2").is_none());
         assert_eq!(
             read_json(&directory.join(ANYBLOB_PERMISSIONS_FILE), "permissions").unwrap(),
-            json!({"formatVersion": 2, "spaces": {"kept": {"access": "read"}}})
+            json!({"formatVersion": 2, "projectless": {"kept": {"access": "read"}}})
         );
         assert_eq!(read_formula(root).unwrap().unwrap()["version"], 2);
         assert_eq!(read_json(&directory.join(ANYBLOB_SETTINGS_FILE), "Anyblob settings").unwrap()["enabled"], true);
         assert_eq!(read_json(&directory.join(META_FILE), "metadata").unwrap()["futureMetadata"], true);
+    }
+
+    #[test]
+    fn registry_survives_permission_saves_and_preserves_existing_chat_ids() {
+        let temp = TempDir::new();
+        let root = &temp.0;
+        let mut preferences = json!({"settings": {"codexIntegration": {
+            "spaces": {"space-1": {"access": "read"}},
+            "projects": {"project-id": {"name": "Work", "sources": []}}
+        }}});
+        save(root, &preferences).unwrap();
+        let record = json!({
+            "id": "project-id", "keyHash": "key-hash", "name": "Work",
+            "remote": true, "authenticatedChats": ["authenticated-chat"]
+        });
+        update_anyblob_project_registry(root, |projects| {
+            projects.push(record.clone());
+            Ok(())
+        }).unwrap();
+
+        preferences["settings"]["codexIntegration"]["spaces"] = empty_object();
+        preferences["settings"]["codexIntegration"]["projects"] = empty_object();
+        save(root, &preferences).unwrap();
+
+        assert_eq!(load_anyblob_project_registry(root).unwrap(), vec![record]);
+        assert_eq!(load(root).unwrap(), preferences);
+    }
+
+    #[test]
+    fn migrates_version_two_project_permissions_and_preserves_revocations() {
+        let temp = TempDir::new();
+        let root = &temp.0;
+        let preferences = json!({"settings": {"codexIntegration": {
+            "spaces": {"space-1": {"access": "none"}},
+            "projects": {"legacy-project": {"name": "Work", "sources": []}}
+        }}});
+        save(root, &preferences).unwrap();
+        let directory = root.join(SETTINGS_DIR);
+        let projects_path = directory.join(ANYBLOB_PROJECTS_FILE);
+        let permissions_path = directory.join(ANYBLOB_PERMISSIONS_FILE);
+        write_json(&projects_path, &json!({
+            "formatVersion": 2,
+            "projects": {"legacy-project": {"name": "Work", "sources": []}},
+            "unknown": true
+        })).unwrap();
+        write_json(&permissions_path, &json!({
+            "formatVersion": 2,
+            "spaces": {"space-1": {"access": "none"}}
+        })).unwrap();
+        let metadata_path = directory.join(META_FILE);
+        let mut metadata = read_json(&metadata_path, "metadata").unwrap();
+        metadata.as_object_mut().unwrap().remove("anyblobRegistryVersion");
+        write_json(&metadata_path, &metadata).unwrap();
+
+        ensure(root, &root.join("legacy")).unwrap();
+
+        assert_eq!(load(root).unwrap(), preferences);
+        assert_eq!(read_json(&projects_path, "projects").unwrap(),
+            json!({"formatVersion": 2, "projects": [], "unknown": true}));
+        assert_eq!(read_json(&permissions_path, "permissions").unwrap(), json!({
+            "formatVersion": 2,
+            "projectless": {"space-1": {"access": "none"}},
+            "projects": {"legacy-project": {"name": "Work", "sources": []}}
+        }));
     }
 
     #[test]

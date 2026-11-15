@@ -10,17 +10,20 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
   try {
     const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.addInitScript(()=>{
-      window.events={};window.decisions=[];window.enabled=false;window.remoteAccess=false;window.installed=false;window.installCalls=0;window.clipboardWrites=[];
-      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{if(window.clipboardFails)throw Error('Clipboard unavailable.');window.clipboardWrites.push(value);}}});
+      window.events={};window.decisions=[];window.enabled=false;window.localProjectsFolder='';window.installed=false;window.installCalls=0;
       window.__TAURI__={event:{listen:async(name,callback)=>{window.events[name]=callback;return()=>{};}},core:{invoke:async(name,args)=>{
         if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
-        if(name==='anyblob_status'){if(window.statusError)throw Error(window.statusError);return{enabled:window.enabled,remoteAccess:window.remoteAccess};}
-        if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;if(!args.enabled)window.remoteAccess=false;return{enabled:args.enabled};}
-        if(name==='configure_anyblob_remote'){if(window.remoteToggleError)throw Error('Could not save remote access.');window.remoteAccess=args.enabled;return{enabled:args.enabled,token:args.enabled?'fixture-remote-key':''};}
-        if(name==='start_tailscale_funnel'){window.tunnelStarts=(window.tunnelStarts||0)+1;return{url:'https://sample.tailnet.ts.net'};}
-        if(name==='stop_tailscale_funnel'){window.tunnelStops=(window.tunnelStops||0)+1;return null;}
+        if(name==='anyblob_status'){if(window.statusError)throw Error(window.statusError);return{enabled:window.enabled,localProjectsFolder:window.localProjectsFolder};}
+        if(name==='configure_anyblob'){if(window.toggleError)throw Error('Could not save Anyblob.');window.enabled=args.enabled;return{enabled:args.enabled};}
+        if(name==='select_anyblob_projects_folder')return window.folderSelection || null;
+        if(name==='set_anyblob_projects_folder'){window.localProjectsFolder=args.folder;return null;}
+        if(name==='secure_mcp_tunnel_status')return window.tunnel || {enabled:false,tunnelId:'',keyConfigured:false,runtimeAvailable:true,running:false,ready:false};
+        if(name==='configure_secure_mcp_tunnel'){
+          window.tunnel={enabled:args.enabled,tunnelId:args.tunnelId,keyConfigured:!!args.runtimeApiKey||!!window.tunnel?.keyConfigured,runtimeAvailable:true,running:args.enabled,ready:args.enabled};
+          return null;
+        }
         if(name==='anyblob_installation_status')return{installed:window.installed,updateAvailable:!!window.updateAvailable,codexRefreshRequired:!!window.codexRefreshRequired,bundledVersion:'0.1.1',installedVersion:window.installed?(window.installedVersion||'0.1.0'):null};
         if(name==='install_anyblob_marketplace'){window.installCalls++;await new Promise(resolve=>window.finishInstall=resolve);if(window.installError)throw Error('Fixture install failed');window.installed=true;return null;}
         return null;
@@ -29,9 +32,9 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await loadSettings(page);await page.waitForFunction(()=>window.appReady);await page.locator('#codex-nav').click();
     const panel=page.locator('#codex-panel-0'),toggle=panel.locator('input[type=checkbox]').first(),install=panel.getByRole('button',{name:'Install',exact:true});
     assert.equal(await page.locator('#codex-nav .nav-label').count() ? await page.locator('#codex-nav .nav-label').innerText() : await page.locator('#codex-nav').innerText(),'Anyblob');
-    assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),6);
+    assert.deepEqual(await panel.locator('h2').allTextContents(),['General','Object Mentions']);assert.equal(await panel.locator('.settings-list > .settings-row').count(),10);
     assert.equal(await panel.getByRole('heading',{name:'Remote Codex',exact:true}).count(),0);
-    const integrationGroups=panel.locator('.anyblob-integration-settings');assert.equal(await integrationGroups.count(),2);
+    const integrationGroups=panel.locator('.anyblob-integration-settings');assert.equal(await integrationGroups.count(),3);
     const firstIntegrationGroup=await integrationGroups.nth(0).boundingBox(),secondIntegrationGroup=await integrationGroups.nth(1).boundingBox();
     assert(secondIntegrationGroup.y-firstIntegrationGroup.y-firstIntegrationGroup.height>=16);
     assert.equal(await panel.locator('#enable-anyblob').evaluate(el=>getComputedStyle(el.closest('label').querySelector('span:first-child')).fontSize),'16px');
@@ -60,80 +63,42 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
       optionWithoutHelper:'16px',optionWithHelper:'14px',
       warningWithoutHelper:'16px',warningWithHelper:'14px',
     });
-    assert.equal(await panel.getByRole('textbox').count(),0);assert.doesNotMatch(await panel.innerText(),/token|Build-Codex|environment|Copy/);
     const saveBusyMessage='Wait for the current save before changing Anyblob.';
     await page.evaluate(message=>{window.statusError=message;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));},saveBusyMessage);
-    await page.waitForFunction(message=>document.querySelector('#codex-panel-0 [role=status]')?.textContent===message,saveBusyMessage);
+    await page.waitForFunction(message=>document.querySelector('#anyblob-integration-status')?.textContent===message,saveBusyMessage);
     await page.evaluate(()=>{window.statusError=null;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
-    await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]')?.textContent==='');
-    const remoteToggle=panel.locator('#enable-anyblob-remote'),remoteLabel=panel.getByRole('button',{name:'Allow Tailscale Funnel remote access',exact:true});
-    assert.equal(await toggle.isChecked(),false);assert.equal(await remoteToggle.isDisabled(),true);assert.equal(await remoteLabel.isDisabled(),true);
-    await remoteLabel.evaluate(el=>el.click());assert.equal(await page.locator('#anyblob-remote-access-dialog').isVisible(),false);
-    const remoteHelp=panel.getByRole('button',{name:'Allow Tailscale Funnel remote access information'});await remoteHelp.focus();
-    const labelBounds=await remoteLabel.boundingBox(),helpBounds=await remoteHelp.boundingBox();
-    assert.ok(helpBounds.x>=labelBounds.x+labelBounds.width-2);assert.ok(helpBounds.x-labelBounds.x-labelBounds.width<12);
-    const remoteTooltip=page.locator(`#${await remoteHelp.getAttribute('aria-describedby')}`);await remoteTooltip.waitFor({state:'visible'});
-    assert.equal(await remoteTooltip.evaluate(el=>el.parentElement===document.body),true);
-    assert.equal(await remoteTooltip.evaluate(el=>getComputedStyle(el).zIndex),'120');
-    assert.match(await remoteTooltip.innerText(),/local BlobUI/);
-    assert.match(await remoteTooltip.innerText(),/saved project permissions/);
-    await page.screenshot({path:path.join(fixture,'remote-access-help-tooltip-dark.png')});
-    await toggle.check();await page.waitForFunction(()=>window.enabled);assert.equal(await remoteToggle.isDisabled(),false);assert.equal(await remoteLabel.isDisabled(),true);
-    await remoteToggle.check();await page.waitForFunction(()=>window.remoteAccess);
-    const remoteDialog=page.getByRole('dialog',{name:'Remote access'});await remoteDialog.waitFor();
-    assert.equal(await remoteToggle.isChecked(),true);assert.equal(await remoteDialog.locator('.settings-list').count(),0);assert.equal(await remoteDialog.locator('.anyblob-remote-dialog-group').count(),2);
-    assert.equal(await remoteDialog.locator('.anyblob-remote-dialog-group').first().evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
-    assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
-    const keyInput=remoteDialog.getByRole('textbox',{name:'Key',exact:true});assert.equal(await keyInput.evaluate(el=>el.readOnly),true);
-    assert.equal(await keyInput.evaluate(el=>getComputedStyle(el).pointerEvents),'none');assert.equal(await keyInput.evaluate(el=>getComputedStyle(el).cursor),'default');
-    await keyInput.pressSequentially('x');assert.equal(await keyInput.inputValue(),'fixture-remote-key');
-    assert.match(await remoteDialog.innerText(),/stable while this device keeps its Tailscale identity/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
-    assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
-    await remoteDialog.getByRole('button',{name:'Copy key'}).click();await remoteDialog.getByRole('button',{name:'Copied'}).waitFor();
-    assert.equal(await remoteDialog.getByRole('status').innerText(),'Remote access key copied.');assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key']);
-    await remoteDialog.getByRole('button',{name:'Copy key'}).waitFor();
-    await remoteDialog.getByRole('button',{name:'Show remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'text');
-    await remoteDialog.getByRole('button',{name:'Hide remote access key'}).click();assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
-    await remoteDialog.getByRole('button',{name:'Start tunnel'}).click();await remoteDialog.getByRole('button',{name:'Stop tunnel'}).waitFor();
-    const tunnelInput=remoteDialog.getByRole('textbox',{name:'Tailscale Funnel URL'}),tunnelField=remoteDialog.locator('.copy-text-field');
-    assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
-    assert.equal(await tunnelField.evaluate(el=>getComputedStyle(el).borderRadius),'18px');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).minHeight),'48px');
-    assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).pointerEvents),'none');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).cursor),'default');
-    await tunnelField.click({position:{x:25,y:24}});assert.equal(await tunnelInput.evaluate(el=>el===document.activeElement),false);
-    const copyTunnel=remoteDialog.getByRole('button',{name:'Copy tunnel URL'});
-    await tunnelInput.focus();assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).outlineStyle),'none');
-    await tunnelInput.pressSequentially('x');assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');
-    await page.keyboard.press('Tab');assert.equal(await copyTunnel.evaluate(el=>el===document.activeElement),true);
-    await page.keyboard.press('Space');await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
-    assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
-    const copiedTunnel=remoteDialog.getByRole('button',{name:'Tunnel URL copied'});
-    assert.equal(await copiedTunnel.evaluate(el=>el.parentElement.dataset.copied),'true');
-    await copiedTunnel.hover();
-    const copiedHover=await copiedTunnel.evaluate(el=>{
-      const buttonStyle=getComputedStyle(el),probe=document.createElement('div');
-      probe.style.backgroundColor='color-mix(in srgb, var(--color-green) 16%, transparent)';document.body.append(probe);
-      const expectedBackground=getComputedStyle(probe).backgroundColor;probe.remove();
-      return{color:buttonStyle.color,background:buttonStyle.backgroundColor,expectedBackground};
-    });
-    assert.equal(copiedHover.color,'rgb(78, 204, 78)');assert.equal(copiedHover.background,copiedHover.expectedBackground);
-    await page.evaluate(()=>window.clipboardFails=true);await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).click();await remoteDialog.getByRole('button',{name:'Copy tunnel URL'}).waitFor();
-    assert.match(await remoteDialog.getByRole('status').innerText(),/Could not copy the tunnel URL/);
-    await page.evaluate(()=>window.clipboardFails=false);await tunnelInput.focus();await page.keyboard.press('Tab');await page.keyboard.press('Space');
-    await remoteDialog.getByRole('button',{name:'Tunnel URL copied'}).waitFor();
-    assert.equal(await remoteDialog.getByRole('status').innerText(),'Tunnel URL copied.');
-    assert.deepEqual(await page.evaluate(()=>window.clipboardWrites),['fixture-remote-key','https://sample.tailnet.ts.net','https://sample.tailnet.ts.net']);
-    await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-dark.png')});
-    await page.setViewportSize({width:800,height:750});await remoteDialog.screenshot({path:path.join(fixture,'remote-access-dialog-narrow-dark.png')});
-    await page.setViewportSize({width:1100,height:900});
-    await remoteDialog.getByRole('button',{name:'Copy tunnel URL'}).waitFor();assert.equal(await remoteDialog.getByRole('status').innerText(),'');
-    await remoteDialog.getByRole('button',{name:'Stop tunnel'}).click();await remoteDialog.getByRole('button',{name:'Start tunnel'}).waitFor();
-    await remoteDialog.getByRole('button',{name:'Close remote access'}).click();await remoteDialog.waitFor({state:'hidden'});
-    assert.equal(await remoteToggle.isChecked(),true);assert.equal(await remoteLabel.isDisabled(),false);
-    await remoteLabel.click();await remoteDialog.waitFor();assert.equal(await remoteToggle.isChecked(),true);
-    await remoteDialog.getByRole('button',{name:'Close remote access'}).click();await remoteDialog.waitFor({state:'hidden'});
-    await remoteToggle.uncheck();await page.waitForFunction(()=>!window.remoteAccess);assert.equal(await remoteDialog.isVisible(),false);assert.equal(await remoteLabel.isDisabled(),true);
-    await toggle.uncheck();await page.waitForFunction(()=>!window.enabled);assert.equal(await remoteToggle.isDisabled(),true);assert.equal(await remoteLabel.isDisabled(),true);
-    await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#codex-panel-0 [role=status]').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);
+    await page.waitForFunction(()=>document.querySelector('#anyblob-integration-status')?.textContent==='');
+    const browse = panel.getByRole('button', { name: 'Browse for Local Projects Folder' });
+    const folder = panel.getByRole('button', { name: 'Local Projects Folder', exact: true });
+    const tunnelToggle = panel.getByRole('switch', { name: 'Secure MCP Tunnel' });
+    const startTunnel = panel.getByRole('button', { name: 'Start tunnel' });
+    assert.equal(await toggle.isChecked(), false);
+    assert.equal(await browse.isDisabled(), true);
+    assert.equal(await tunnelToggle.isDisabled(), true);
+    await toggle.check();
+    await browse.click();
+    assert.equal(await folder.inputValue(), '');
+    await page.evaluate(() => { window.folderSelection = 'C:/Fixture Projects'; });
+    await browse.click();
+    assert.equal(await folder.inputValue(), 'C:/Fixture Projects');
+    await tunnelToggle.check();
+    assert.equal(await startTunnel.isDisabled(), true);
+    await panel.getByLabel('Tunnel ID').fill('tunnel_fixture');
+    const key = panel.getByLabel('Runtime API key');
+    assert.equal(await key.getAttribute('type'), 'password');
+    await key.fill('fixture-runtime-key');
+    await startTunnel.click();
+    const stopTunnel = panel.getByRole('button', { name: 'Stop tunnel' });
+    await stopTunnel.waitFor();
+    assert.equal(await key.inputValue(), '');
+    assert.match(await panel.innerText(), /Tunnel is ready/);
+    await stopTunnel.click();
+    await startTunnel.waitFor();
+    assert.equal(await tunnelToggle.isChecked(), false);
+    await toggle.uncheck();
+    assert.equal(await browse.isDisabled(), true);
+    assert.equal(await tunnelToggle.isDisabled(), true);
+    await page.evaluate(()=>window.toggleError=true);await toggle.click();await page.waitForFunction(()=>document.querySelector('#anyblob-integration-status').textContent.includes('Could not save'));assert.equal(await toggle.isChecked(),false);await page.evaluate(()=>window.toggleError=false);
     const original=await install.boundingBox();await install.click();const installing=panel.getByRole('button',{name:'Installing…',exact:true});assert.equal(await installing.isDisabled(),true);assert.equal((await installing.boundingBox()).width,original.width);
     await installing.evaluate(el=>el.click());assert.equal(await page.evaluate(()=>window.installCalls),1);await page.evaluate(()=>window.finishInstall());
     const complete=page.getByRole('dialog',{name:'Anyblob marketplace installed'});await complete.waitFor();assert.match(await complete.innerText(),/Plugins Directory/);await page.keyboard.press('Escape');await complete.waitFor({state:'hidden'});
@@ -162,7 +127,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     await page.keyboard.press('Escape');await refreshDialog.waitFor({state:'hidden'});
     await page.evaluate(()=>{window.codexRefreshRequired=false;window.dispatchEvent(new Event('blobui-codex-integration-refresh'));});
     await page.locator('#preferences-nav').click();await page.evaluate(()=>window.installed=false);await page.locator('#codex-nav').click();await install.waitFor();
-    await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('[role=status]').first().innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
+    await page.evaluate(()=>window.installError=true);await install.click();await page.evaluate(()=>window.finishInstall());await install.waitFor();assert.match(await panel.locator('#anyblob-integration-status').innerText(),/Fixture install failed/);await page.evaluate(()=>window.installError=false);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('End');assert.equal(await page.locator('#codex-tab-2').getAttribute('aria-selected'),'true');await page.keyboard.press('Home');assert.equal(await page.locator('#codex-tab-0').getAttribute('aria-selected'),'true');
     await page.screenshot({path:path.join(fixture,'settings-original-dark.png')});
     if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').first().click();

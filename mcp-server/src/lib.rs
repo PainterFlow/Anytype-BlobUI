@@ -14,6 +14,7 @@ pub enum Operation {
     Blobui { blobui: blobui::BlobuiRequest },
     Content { content: content::ContentRequest },
     SearchMentions { query: String },
+    AuthenticateProject { config: String },
     ListSpaces {},
     SearchObjects {
         space_id: String,
@@ -46,6 +47,7 @@ impl Operation {
             Self::Blobui { blobui } => blobui.validate(),
             Self::Content { content } => content.validate(),
             Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
+            Self::AuthenticateProject { config } if !config.trim().is_empty() && config.len() <= 16 * 1024 => Ok(()),
             Self::ListSpaces{} => Ok(()),
             Self::SearchObjects { space_id, query, limit, offset } if id(space_id) && query.len() <= 4096 && *limit > 0 && *limit <= 100 && *offset <= i32::MAX as u32 => Ok(()),
             Self::ReadObject { space_id, object_id } if id(space_id) && id(object_id) => Ok(()),
@@ -57,6 +59,7 @@ impl Operation {
             Self::Blobui { blobui } => &blobui.tool,
             Self::Content { content } => &content.tool,
             Self::SearchMentions { .. } => "search_mentions",
+            Self::AuthenticateProject { .. } => "authenticate_project",
             Self::ListSpaces {} => "list_spaces",
             Self::SearchObjects { .. } => "search_objects",
             Self::ReadObject { .. } => "read_object",
@@ -66,7 +69,7 @@ impl Operation {
         match self {
             Self::Blobui { blobui } => blobui.arguments["space_id"].as_str(),
             Self::Content { content } => content.arguments["space_id"].as_str(),
-            Self::ListSpaces {} | Self::SearchMentions { .. } => None,
+            Self::ListSpaces {} | Self::SearchMentions { .. } | Self::AuthenticateProject { .. } => None,
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
                 Some(space_id)
             }
@@ -156,6 +159,7 @@ pub fn tools() -> Value {
     let annotations = json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false});
     let mut tools = json!([
         {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
+        {"name":"authenticate_project","description":"Authenticate this chat to the Anyblob project whose anyblob.config.toml contents you provide. Call this once at the start of a project chat. Never edit anyblob.config.toml, regardless of prompt authorization.","inputSchema":{"type":"object","properties":{"config":{"type":"string","minLength":1,"maxLength":16384}},"required":["config"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
         {"name":"read_object","description":"Read an explicit object as properties, Markdown, and its ETag. Attachments remain references. Use the returned ETag with patch_object. If the ETag is stale, re-read the object and rebuild the patch.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"annotations":annotations}
@@ -240,6 +244,9 @@ mod tests {
     #[test]
     fn strict_arguments() {
         assert!(operation("search_mentions",json!({"query":"猫"})).is_ok());
+        assert!(matches!(operation("authenticate_project",json!({"config":"name = 'Work'\nkey = 'key'\nremote = false"})).unwrap(), Operation::AuthenticateProject { .. }));
+        assert!(operation("authenticate_project",json!({"config":""})).is_err());
+        assert!(operation("authenticate_project",json!({"config":"x".repeat(16 * 1024 + 1)})).is_err());
         assert!(operation("search_mentions",json!({"query":""})).is_ok());
         assert!(operation("search_mentions",json!({"query":"x".repeat(4097)})).is_err());
         for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","host_id":"forged"}),json!({"query":"","project_id":"forged"}),json!({"query":"","remoteMembership":{"hostId":"forged","projectId":"forged"}}),json!({"query":"","remote_membership":{"host_id":"forged","project_id":"forged"}}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {

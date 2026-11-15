@@ -18,7 +18,7 @@
   }
 
   function projectKey(project) {
-    return isHostProject(project) ? `cloud:${project.hostId || ''}:${project.id || ''}` : String(project?.id || '');
+    return isHostProject(project) && project.hostId ? `cloud:${project.hostId}:${project.id || ''}` : String(project?.id || '');
   }
 
   function normalize(value) {
@@ -52,7 +52,7 @@
     if (project.kind !== undefined && !['local','remote'].includes(project.kind)) {
       throw new Error('Unsupported Codex project metadata.');
     }
-    if (kind !== 'local' && (typeof project.hostId !== 'string' || !project.hostId)) {
+    if (kind !== 'local' && project.hostId !== undefined && typeof project.hostId !== 'string') {
       throw new Error('Unsupported Codex remote project metadata.');
     }
     if (kind !== 'local' && project.computerName !== undefined && typeof project.computerName !== 'string') {
@@ -61,7 +61,7 @@
     return {
       ...project,
       kind,
-      hostId: kind !== 'local' ? project.hostId : '',
+      hostId: kind !== 'local' ? project.hostId || '' : '',
       computerName: kind !== 'local' ? project.computerName || '' : '',
       rootPaths: project.rootPaths.filter(path => typeof path === 'string'),
     };

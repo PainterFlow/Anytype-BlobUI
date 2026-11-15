@@ -1,6 +1,6 @@
 //! Anyblob's trust boundary. Only saved settings authorize reads.
 use blobui_mcp::{
-    transport::{Bridge, TcpBridge},
+    transport::Bridge,
     Operation, Request, Response,
 };
 use serde_json::{json, Value};
@@ -23,7 +23,7 @@ pub fn invalidate() {
 fn install() -> Result<PathBuf, String> {
     crate::resolve_install_directory(&crate::app_data_directory())
 }
-fn bridge_path() -> Result<PathBuf, String> {
+pub(crate) fn bridge_path() -> Result<PathBuf, String> {
     let install = install()?;
     #[cfg(test)]
     {
@@ -35,7 +35,7 @@ fn bridge_path() -> Result<PathBuf, String> {
         Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json"))
     }
 }
-fn state() -> Result<Value, String> {
+pub(crate) fn state() -> Result<Value, String> {
     let path = bridge_path()?;
     if !path.exists() {
         return Ok(json!({"enabled":false}));
@@ -62,18 +62,11 @@ fn authenticate(state: &Value, token: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn authenticate_remote(state: &Value, token: &str) -> Result<(), String> {
-    if state["remoteAccess"] != true {
-        return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
-    }
-    authenticate(state, token)
-}
 // The save guard serializes migration, toggles and permission saves.
 fn configure_at(
     path: &std::path::Path,
     credential: &std::path::Path,
     enabled: bool,
-    remote_access: bool,
 ) -> Result<(), String> {
     use crate::storage as store;
     blobui_mcp::credential::reject_links(credential)?;
@@ -101,7 +94,7 @@ fn configure_at(
         .as_object_mut()
         .ok_or("Anyblob settings must contain an object.")?;
     fields.insert("enabled".into(), json!(enabled));
-    fields.insert("remoteAccess".into(), json!(enabled && remote_access));
+    fields.remove("remoteAccess");
     fields.insert(
         "verifier".into(),
         json!(if enabled {
@@ -157,7 +150,7 @@ fn migrate() -> Result<bool, String> {
     migrate_at(&bridge_path()?, &blobui_mcp::credential::path()?)
 }
 fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bool, String> {
-    let value = if path.exists() {
+    let mut value = if path.exists() {
         crate::read_json_file(path)?
     } else {
         json!({"enabled":false})
@@ -168,14 +161,22 @@ fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bo
             .ok()
             .is_none_or(|token| authenticate(&value, &token).is_err())
     {
-        configure_at(path, credential, true, false)?;
+        configure_at(path, credential, true)?;
+        value = crate::read_json_file(path)?;
     } else if !enabled && credential.exists() {
-        configure_at(path, credential, false, false)?;
+        configure_at(path, credential, false)?;
+        value = crate::read_json_file(path)?;
+    }
+    if let Some(fields) = value.as_object_mut() {
+        if fields.remove("remoteAccess").is_some() {
+            let bytes = serde_json::to_vec(&value)
+                .map_err(|_| "Could not encode Anyblob settings during migration.")?;
+            crate::storage::write_atomic(path, &bytes)?;
+            invalidate();
+        }
     }
     Ok(enabled)
 }
-pub const REMOTE_BRIDGE_PORT: u16 = 31420;
-
 #[tauri::command]
 pub fn anyblob_status() -> Result<Value, String> {
     let current = match crate::acquire_save_guard(
@@ -193,49 +194,134 @@ pub fn anyblob_status() -> Result<Value, String> {
         Err(error) => return Err(error),
     };
     let enabled = current["enabled"] == true;
-    Ok(
-        json!({"enabled":enabled,"remoteAccess":current["remoteAccess"] == true,"remotePort":REMOTE_BRIDGE_PORT}),
-    )
+    Ok(json!({"enabled":enabled,"localProjectsFolder":current["localProjectsFolder"].as_str().unwrap_or("")}))
 }
 #[tauri::command]
 pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
-    configure_at(
-        &bridge_path()?,
-        &blobui_mcp::credential::path()?,
-        enabled,
-        false,
-    )?;
-    #[cfg(windows)]
+    configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
     if !enabled {
-        let _ = stop_tailscale_funnel();
+        crate::secure_mcp_tunnel::disable_for_anyblob();
     }
-    Ok(json!({"enabled":enabled,"remoteAccess":false}))
+    Ok(json!({"enabled":enabled}))
 }
+
 #[tauri::command]
-pub fn configure_anyblob_remote(enabled: bool) -> Result<Value, String> {
+pub fn set_anyblob_projects_folder(folder: String) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
     let path = bridge_path()?;
-    let credential = blobui_mcp::credential::path()?;
-    if !migrate_at(&path, &credential)? {
-        return Err("Enable Anyblob before allowing remote connections.".into());
+    let current = state()?;
+    if current["enabled"] != true {
+        return Err("Enable Anyblob before choosing a local projects folder.".into());
     }
-    configure_at(&path, &credential, true, enabled)?;
-    #[cfg(windows)]
-    if !enabled {
-        let _ = stop_tailscale_funnel();
+    let folder = PathBuf::from(folder);
+    if !folder.is_absolute() {
+        return Err("Choose an absolute Local Projects Folder path.".into());
     }
-    let token = if enabled {
-        blobui_mcp::credential::read_at(&credential)?
-    } else {
-        String::new()
-    };
-    Ok(json!({"enabled":enabled,"remotePort":REMOTE_BRIDGE_PORT,"token":token}))
+    crate::reject_reparse_component(&folder)?;
+    if !folder.is_dir() {
+        return Err("The Local Projects Folder must be an existing folder.".into());
+    }
+    let folder = folder
+        .canonicalize()
+        .map_err(|_| "Could not resolve the Local Projects Folder.")?;
+    let mut next = current;
+    next["localProjectsFolder"] = json!(folder.to_string_lossy().to_string());
+    let bytes = serde_json::to_vec(&next).map_err(|_| "Could not encode Anyblob settings.")?;
+    crate::storage::write_atomic(&path, &bytes)?;
+    invalidate();
+    Ok(json!({"localProjectsFolder":folder.to_string_lossy().to_string()}))
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
     let data = crate::load_settings_data(&install()?)?;
     Ok(crate::settings_from_data(&data).codex_integration)
 }
+
+fn valid_chat_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+pub(crate) fn synchronize_project_registry(
+    projects: &[crate::codex_projects::Project],
+) -> Result<(), String> {
+    let install = install()?;
+    let _ = crate::settings_data_path(&install)?;
+    let root = crate::settings_root_for_install(&install)?;
+    crate::settings_store::update_anyblob_project_registry(&root, |records| {
+        let previous = std::mem::take(records);
+        let mut next = Vec::with_capacity(projects.len());
+        for project in projects {
+            let chats = previous
+                .iter()
+                .find(|record| record["id"].as_str() == Some(project.id.as_str()))
+                .and_then(|record| record["authenticatedChats"].as_array())
+                .map(|chats| {
+                    chats
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|chat| valid_chat_id(chat))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            next.push(json!({
+                "id": project.id,
+                "name": project.name,
+                "keyHash": project.id,
+                "remote": project.kind == "remote",
+                "authenticatedChats": chats,
+            }));
+        }
+        *records = next;
+        Ok(())
+    })
+}
+
+fn authenticate_project_chat(thread_id: &str, text: &str) -> Result<Value, String> {
+    if !valid_chat_id(thread_id) {
+        return Err("Codex did not supply a valid chat identity for project authentication.".into());
+    }
+    let config = crate::codex_projects::parse_config(text)?;
+    let projects = crate::codex_projects::discover()?;
+    let project = projects
+        .iter()
+        .find(|project| {
+            project.id == config.id
+                && project.name == config.name
+                && (project.kind == "remote") == config.remote
+        })
+        .ok_or("This project config does not match a discovered Anyblob project.")?;
+    synchronize_project_registry(&projects)?;
+    let install = install()?;
+    let _ = crate::settings_data_path(&install)?;
+    let root = crate::settings_root_for_install(&install)?;
+    crate::settings_store::update_anyblob_project_registry(&root, |records| {
+        for saved in records.iter_mut() {
+            if saved["id"].as_str() != Some(project.id.as_str()) {
+                if let Some(chats) = saved["authenticatedChats"].as_array_mut() {
+                    chats.retain(|chat| chat.as_str() != Some(thread_id));
+                }
+            }
+        }
+        let record = records
+            .iter_mut()
+            .find(|record| record["id"].as_str() == Some(project.id.as_str()))
+            .ok_or("The project registry changed during authentication. Retry.")?;
+        let chats = record["authenticatedChats"]
+            .as_array_mut()
+            .ok_or("The project registry contains an invalid chat list.")?;
+        if !chats.iter().any(|chat| chat.as_str() == Some(thread_id)) {
+            chats.push(json!(thread_id));
+        }
+        Ok(())
+    })?;
+    invalidate();
+    Ok(json!({"authenticated":true,"project":project.name,"project_id":project.id,"remote":config.remote}))
+}
+
 pub(crate) fn readable(config: &crate::codex::Configuration, space: &str) -> bool {
     config.spaces.get(space).is_some_and(|p| p.permits("read"))
 }
@@ -305,6 +391,9 @@ fn execute_scoped(
         }
         Operation::SearchMentions { .. } => {
             Err("Metadata searches require the authenticated global search path.".into())
+        }
+        Operation::AuthenticateProject { .. } => {
+            Err("Project authentication must be handled before Anytype access.".into())
         }
         Operation::ListSpaces {} => {
             let rows = client
@@ -526,20 +615,7 @@ fn dispatch_resolved_with(
     resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
 ) -> Result<Value, String> {
     dispatch_with_identity_policy(
-        request, connected, load_state, load_config, connect, approve, resolve, false,
-    )
-}
-fn dispatch_remote_resolved_with(
-    request: Request,
-    connected: impl Fn() -> bool,
-    load_state: impl Fn() -> Result<Value, String>,
-    load_config: impl Fn() -> Result<crate::codex::Configuration, String>,
-    connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
-    approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
-    resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
-) -> Result<Value, String> {
-    dispatch_with_identity_policy(
-        request, connected, load_state, load_config, connect, approve, resolve, true,
+        request, connected, load_state, load_config, connect, approve, resolve,
     )
 }
 fn dispatch_with_identity_policy(
@@ -550,19 +626,28 @@ fn dispatch_with_identity_policy(
     connect: impl Fn() -> Result<crate::kanban_api::Client, String>,
     approve: impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
     resolve: impl Fn() -> Result<Option<crate::codex_identity::Membership>, String>,
-    require_identity_for_mentions: bool,
 ) -> Result<Value, String> {
     request.request.validate()?;
     blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
+    if let Operation::AuthenticateProject { config } = &request.request {
+        if !connected() {
+            return Err("MCP request cancelled or disconnected.".into());
+        }
+        let thread_id = request
+            .thread_id
+            .as_deref()
+            .ok_or("Codex did not attach a chat ID. Update Anyblob in Codex and retry.")?;
+        return authenticate_project_chat(thread_id, config);
+    }
     let config = load_config()?;
     let mentions = matches!(&request.request, Operation::SearchMentions { .. });
     let restricted = config
         .projects
         .values()
         .any(|project| !project.sources.is_empty());
-    let membership = if restricted && (!mentions || require_identity_for_mentions) {
+    let membership = if restricted && !mentions {
         Some(resolve()?.ok_or(
             "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
         )?)
@@ -584,18 +669,6 @@ fn dispatch_with_identity_policy(
                 return Err(
                     "Anyblob mention filters or integration changed. Retry the search.".into(),
                 );
-            }
-            if require_identity_for_mentions {
-                if load_config()?.projects != config.projects {
-                    return Err(
-                        "BlobUI project permissions changed. Retry the mention search.".into(),
-                    );
-                }
-                if restricted && resolve()? != membership {
-                    return Err(
-                        "Codex chat project changed during the request. Retry the search.".into(),
-                    );
-                }
             }
             Ok(())
         };
@@ -961,407 +1034,9 @@ fn publication_event(operation: &Operation, result: &Result<Value, String>) -> O
     )
 }
 
-#[cfg(windows)]
-const REMOTE_HTTP_PORT: u16 = 31421;
-#[cfg(windows)]
-static TAILSCALE_FUNNEL_CHILD: std::sync::Mutex<Option<std::process::Child>> =
-    std::sync::Mutex::new(None);
-
-fn tailscale_funnel_url(output: &str) -> Option<String> {
-    for token in output.split_whitespace() {
-        let candidate = token
-            .trim_matches(|character: char| matches!(character, '"' | '\'' | '(' | ')' | '[' | ']' | ',' | ';'))
-            .trim_end_matches(['.', '/']);
-        let Some(host) = candidate.strip_prefix("https://") else {
-            continue;
-        };
-        let Some(host) = host.split('/').next() else {
-            continue;
-        };
-        let host = host.strip_suffix('.').unwrap_or(host);
-        if host.ends_with(".ts.net")
-            && host.split('.').all(|label| {
-                !label.is_empty()
-                    && label
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                    && !label.starts_with('-')
-                    && !label.ends_with('-')
-            })
-        {
-            return Some(format!("https://{host}"));
-        }
-    }
-    None
-}
-
-#[cfg(windows)]
-fn http_reply(stream: &mut std::net::TcpStream, status: &str, body: &[u8]) {
-    use std::io::Write;
-    let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
-        body.len()
-    );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(body);
-}
-
-#[cfg(windows)]
-fn serve_remote_http(mut client: std::net::TcpStream) {
-    use std::io::{Read, Write};
-    const MAX_HEADER: usize = 16 * 1024;
-    const MAX_BODY: usize = 16 * 1024 * 1024;
-    let _ = client.set_read_timeout(Some(Duration::from_secs(180)));
-    let mut header = Vec::new();
-    let mut byte = [0; 1];
-    while header.len() < MAX_HEADER {
-        if client.read_exact(&mut byte).is_err() {
-            return;
-        }
-        header.push(byte[0]);
-        if header.ends_with(b"\r\n\r\n") {
-            break;
-        }
-    }
-    if !header.ends_with(b"\r\n\r\n") {
-        http_reply(&mut client, "431 Request Header Fields Too Large", b"");
-        return;
-    }
-    let text = String::from_utf8_lossy(&header);
-    let mut lines = text.split("\r\n");
-    if lines.next() != Some("POST /anyblob HTTP/1.1") {
-        http_reply(&mut client, "404 Not Found", b"");
-        return;
-    }
-    let mut token = None;
-    let mut length = None;
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("authorization") {
-                token = value.trim().strip_prefix("Bearer ").map(str::to_owned);
-            } else if name.eq_ignore_ascii_case("content-length") {
-                length = value.trim().parse::<usize>().ok();
-            } else if name.eq_ignore_ascii_case("transfer-encoding") {
-                http_reply(&mut client, "400 Bad Request", b"");
-                return;
-            }
-        }
-    }
-    let Some(token) = token else {
-        http_reply(&mut client, "401 Unauthorized", b"");
-        return;
-    };
-    let Some(length) = length.filter(|length| *length > 0 && *length <= MAX_BODY) else {
-        http_reply(&mut client, "413 Content Too Large", b"");
-        return;
-    };
-    let authorized = state().and_then(|settings| authenticate_remote(&settings, &token));
-    if authorized.is_err() {
-        http_reply(&mut client, "401 Unauthorized", b"");
-        return;
-    }
-    let mut body = vec![0; length];
-    if client.read_exact(&mut body).is_err() {
-        http_reply(&mut client, "400 Bad Request", b"");
-        return;
-    }
-    let mut origin = match std::net::TcpStream::connect(("127.0.0.1", REMOTE_BRIDGE_PORT)) {
-        Ok(stream) => stream,
-        Err(_) => {
-            http_reply(&mut client, "503 Service Unavailable", b"");
-            return;
-        }
-    };
-    let _ = origin.set_read_timeout(Some(Duration::from_secs(180)));
-    let result = (|| -> std::io::Result<Vec<u8>> {
-        origin.write_all(&(body.len() as u32).to_le_bytes())?;
-        origin.write_all(&body)?;
-        let mut frame = [0; 4];
-        origin.read_exact(&mut frame)?;
-        let size = u32::from_le_bytes(frame) as usize;
-        if size > MAX_BODY {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Oversized bridge response.",
-            ));
-        }
-        let mut response = Vec::with_capacity(size + 4);
-        response.extend_from_slice(&frame);
-        response.resize(size + 4, 0);
-        origin.read_exact(&mut response[4..])?;
-        Ok(response)
-    })();
-    match result {
-        Ok(response) => http_reply(&mut client, "200 OK", &response),
-        Err(_) => http_reply(&mut client, "502 Bad Gateway", b""),
-    }
-}
-
-#[cfg(windows)]
-fn start_remote_http_bridge() {
-    use std::net::TcpListener;
-    std::thread::spawn(|| {
-        let listener = loop {
-            match TcpListener::bind(("127.0.0.1", REMOTE_HTTP_PORT)) {
-                Ok(listener) => break listener,
-                Err(error) => {
-                    eprintln!("Anyblob HTTP bridge could not start: {error}");
-                    std::thread::sleep(Duration::from_secs(1));
-                }
-            }
-        };
-        for connection in listener.incoming() {
-            if let Ok(stream) = connection {
-                std::thread::spawn(|| serve_remote_http(stream));
-            }
-        }
-    });
-}
-
-#[cfg(windows)]
-#[tauri::command]
-pub fn start_tailscale_funnel() -> Result<Value, String> {
-    if state().map_err(|error| error.to_string())?["remoteAccess"] != true {
-        return Err("Enable remote access before starting Tailscale Funnel.".into());
-    }
-    stop_tailscale_funnel()?;
-    use std::os::windows::process::CommandExt;
-    let mut child = std::process::Command::new("tailscale")
-        .args([
-            "funnel",
-            "--https=443",
-            "--set-path=/anyblob",
-            &format!("http://127.0.0.1:{REMOTE_HTTP_PORT}"),
-        ])
-        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|_| "Tailscale CLI not found. Install Tailscale and sign in first.")?;
-    let stdout = child.stdout.take().ok_or("Could not read Tailscale output.")?;
-    let stderr = child.stderr.take().ok_or("Could not read Tailscale output.")?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    for stream in [
-        Box::new(stdout) as Box<dyn std::io::Read + Send>,
-        Box::new(stderr) as Box<dyn std::io::Read + Send>,
-    ] {
-        let sender = sender.clone();
-        std::thread::spawn(move || {
-            use std::io::{BufRead, BufReader};
-            for line in BufReader::new(stream).lines().flatten() {
-                let _ = sender.send(line);
-            }
-        });
-    }
-    drop(sender);
-    let deadline = Instant::now() + Duration::from_secs(90);
-    let mut output = String::new();
-    loop {
-        match receiver.recv_timeout(Duration::from_millis(200)) {
-            Ok(line) => {
-                output.push_str(&line);
-                output.push('\n');
-                if let Some(url) = tailscale_funnel_url(&output) {
-                    *TAILSCALE_FUNNEL_CHILD
-                        .lock()
-                        .map_err(|_| "Tailscale Funnel process state is unavailable.")? =
-                        Some(child);
-                    return Ok(json!({"url":url}));
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-        }
-        if child.try_wait().map_err(|_| "Could not check Tailscale Funnel status.")?.is_some() {
-            while let Ok(line) = receiver.try_recv() {
-                output.push_str(&line);
-                output.push('\n');
-            }
-            let detail = output.to_ascii_lowercase();
-            return if detail.contains("1.52") || detail.contains("unknown flag") || detail.contains("unknown shorthand") {
-                Err("Update Tailscale to version 1.52 or newer, then try again.".into())
-            } else {
-                Err("Tailscale Funnel could not start. Check that Tailscale is connected and Funnel is enabled.".into())
-            };
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("Tailscale Funnel did not provide a .ts.net address. Check that Funnel is enabled.".into());
-        }
-    }
-}
-
-#[cfg(windows)]
-#[tauri::command]
-pub fn stop_tailscale_funnel() -> Result<(), String> {
-    let mut child = TAILSCALE_FUNNEL_CHILD
-        .lock()
-        .map_err(|_| "Tailscale Funnel process state is unavailable.")?
-        .take();
-    if let Some(ref mut child) = child {
-        let stopped = std::process::Command::new("tailscale")
-            .args(["funnel", "--https=443", "--set-path=/anyblob", "off"])
-            .output()
-            .is_ok_and(|output| output.status.success());
-        let _ = child.kill();
-        let _ = child.wait();
-        if !stopped {
-            return Err("Could not stop Tailscale Funnel. Check Tailscale status.".into());
-        }
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
-    use blobui_mcp::approval::{Frame, VERSION};
-    if !matches!(stream.peer_addr(), Ok(peer) if peer.ip().is_loopback()) {
-        return;
-    }
-    let bridge = match TcpBridge::from_stream(stream) {
-        Ok(bridge) => bridge,
-        Err(_) => return,
-    };
-    let cancel = AtomicBool::new(false);
-    let deadline = Instant::now() + blobui_mcp::transport::CALL_TIMEOUT;
-    let started = Instant::now();
-    let result = (|| {
-        let bytes = bridge
-            .receive(&cancel, Instant::now() + Duration::from_secs(5))
-            .map_err(|_| "Invalid remote Anyblob request.")?;
-        let envelope: Value =
-            serde_json::from_slice(&bytes).map_err(|_| "Invalid remote Anyblob request.")?;
-        if envelope["version"] != VERSION {
-            return Err(blobui_mcp::approval::UPDATE.into());
-        }
-        let fields = envelope.as_object().ok_or("Invalid remote Anyblob request.")?;
-        if fields.len() != 2 || !fields.contains_key("request") {
-            return Err("Invalid remote Anyblob request.".into());
-        }
-        let request: Request = serde_json::from_value(envelope["request"].clone())
-            .map_err(|_| "Invalid remote Anyblob request.")?;
-        let initial = state()?;
-        if initial["remoteAccess"] != true {
-            return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
-        }
-        // The local Codex state file verifies the thread ID and remote host membership.
-        let thread = request.thread_id.clone();
-        let operation = request.request.name().to_owned();
-        let requested_operation = request.request.clone();
-        let operation_id = request.id.clone();
-        let load_remote_state = || {
-            let current = state()?;
-            if current["remoteAccess"] != true {
-                return Err("Tailscale Funnel remote access is disabled in BlobUI.".into());
-            }
-            Ok(current)
-        };
-        let result = dispatch_remote_resolved_with(
-            request,
-            || Instant::now() < deadline && bridge.connected(),
-            load_remote_state,
-            saved,
-            || {
-                crate::kanban_api::Client::connect().map_err(|_| {
-                    "Configure the saved Anytype API v2 connection in BlobUI Advanced Settings.".into()
-                })
-            },
-            |op, check| pipe_prompt(&bridge, &operation_id, op, check),
-            || {
-                thread
-                    .as_deref()
-                    .map(crate::codex_identity::resolve)
-                    .transpose()
-            },
-        );
-        if let Some(payload) = publication_event(&requested_operation, &result) {
-            use tauri::Emitter;
-            let _ = app.emit("blobui-saved-state-changed", payload);
-        }
-        eprintln!(
-            "anyblob remote operation={operation} elapsed_ms={} outcome={}",
-            started.elapsed().as_millis(),
-            if result.is_ok() { "allowed" } else { "denied" }
-        );
-        result
-    })();
-    let response = match result {
-        Ok(value) => Response {
-            result: Some(value),
-            error: None,
-        },
-        Err(error) => Response {
-            result: None,
-            error: Some(error),
-        },
-    };
-    let frame = Frame::Response {
-        version: VERSION,
-        response,
-    };
-    if let Ok(bytes) = serde_json::to_vec(&frame) {
-        let _ = bridge.send(&bytes, &cancel, deadline);
-    }
-}
-
-#[cfg(windows)]
-fn start_remote_bridge(app: tauri::AppHandle) {
-    use std::{
-        net::TcpListener,
-        sync::{atomic::AtomicUsize, Arc},
-    };
-    std::thread::spawn(move || {
-        let active = Arc::new(AtomicUsize::new(0));
-        loop {
-            let listener = match TcpListener::bind(("127.0.0.1", REMOTE_BRIDGE_PORT)) {
-                Ok(listener) => listener,
-                Err(error) => {
-                    eprintln!("Anyblob bridge could not bind its loopback port: {error}");
-                    std::thread::sleep(Duration::from_secs(1));
-                    continue;
-                }
-            };
-            if listener.set_nonblocking(true).is_err() {
-                std::thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-            loop {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        if active.load(Ordering::Acquire) >= 15 {
-                            continue;
-                        }
-                        active.fetch_add(1, Ordering::AcqRel);
-                        let active = active.clone();
-                        let app = app.clone();
-                        std::thread::spawn(move || {
-                            serve_remote_connection(stream, app);
-                            active.fetch_sub(1, Ordering::AcqRel);
-                        });
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(30));
-                    }
-                    Err(error) => {
-                        eprintln!("Anyblob SSH bridge accept failed: {error}");
-                        break;
-                    }
-                }
-            }
-        }
-    });
-}
-
 pub fn start(_app: tauri::AppHandle) {
     if migrate().is_err() {
         eprintln!("Anyblob credential setup needs attention in Settings.");
-    }
-    #[cfg(windows)]
-    {
-        start_remote_bridge(_app.clone());
-        start_remote_http_bridge();
     }
     #[cfg(windows)]
     std::thread::spawn(move || {
@@ -1477,37 +1152,9 @@ pub fn start(_app: tauri::AppHandle) {
     #[cfg(not(windows))]
     let _ = _app;
 }
-#[cfg(not(windows))]
-#[tauri::command]
-pub fn start_tailscale_funnel() -> Result<Value, String> {
-    Err("Tailscale Funnel management is supported on Windows.".into())
-}
-#[cfg(not(windows))]
-#[tauri::command]
-pub fn stop_tailscale_funnel() -> Result<(), String> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn tailscale_funnel_url_accepts_only_ts_net_hosts() {
-        assert_eq!(
-            tailscale_funnel_url("Available on the internet: https://blobui.tailnet.ts.net"),
-            Some("https://blobui.tailnet.ts.net".into())
-        );
-        assert_eq!(
-            tailscale_funnel_url("https://blobui.tailnet.ts.net/anyblob"),
-            Some("https://blobui.tailnet.ts.net".into())
-        );
-        assert_eq!(tailscale_funnel_url("https://example.com"), None);
-        assert_eq!(
-            tailscale_funnel_url("https://blobui.tailnet.ts.net.evil.example"),
-            None
-        );
-    }
-
     #[test]
     fn saved_state_notifications_only_follow_confirmed_blobui_publications() {
         let confirmed = Ok(
@@ -1955,37 +1602,6 @@ mod tests {
             )
             .is_err());
         }
-    }
-    #[test]
-    fn remote_mention_search_requires_verified_identity_when_project_scopes_exist() {
-        let config = project_config(
-            json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"alwaysAsk"}}),
-        );
-        let operation = || Operation::SearchMentions {
-            query: String::new(),
-        };
-        let missing = dispatch_remote_resolved_with(
-            request(operation()),
-            || true,
-            || Ok(enabled()),
-            || Ok(config.clone()),
-            || panic!("missing identity must deny before connecting"),
-            |_, _| panic!("mention metadata must not prompt"),
-            || Ok(None),
-        )
-        .unwrap_err();
-        assert!(missing.contains("verified chat identity"));
-
-        assert!(dispatch_remote_resolved_with(
-            request(operation()),
-            || true,
-            || Ok(enabled()),
-            || Ok(config.clone()),
-            || panic!("invalid identity must deny before connecting"),
-            |_, _| panic!("mention metadata must not prompt"),
-            || Err("Remote Codex identity is not in the synced project catalog.".into()),
-        )
-        .is_err());
     }
     fn project_config(source: Value) -> crate::codex::Configuration {
         crate::codex::normalize(&json!({"spaces":{"space":{"access":"none"}},
@@ -3130,12 +2746,6 @@ mod tests {
         assert!(authenticate(&state, &token).is_ok());
         assert!(authenticate(&state, &"b".repeat(64)).is_err());
         assert!(authenticate(&json!({"enabled":false}), &token).is_err());
-        let paired = json!({"enabled":true,"remoteAccess":true,"verifier":digest(&token)});
-        assert!(authenticate_remote(&paired, &token).is_ok());
-        assert!(authenticate_remote(&paired, "").is_err());
-        assert!(authenticate_remote(&paired, &"b".repeat(64)).is_err());
-        let disabled = json!({"enabled":true,"remoteAccess":false,"verifier":digest(&token)});
-        assert!(authenticate_remote(&disabled, &token).is_err());
     }
     #[test]
     fn approval_is_bound_and_cancellable() {
@@ -3171,7 +2781,7 @@ mod credential_tests {
         let old = "a".repeat(64);
         std::fs::write(
             &state_path,
-            json!({"enabled":true,"verifier":digest(&old)}).to_string(),
+            json!({"enabled":true,"verifier":digest(&old),"remoteAccess":{"enabled":true}}).to_string(),
         )
         .unwrap();
         assert!(migrate_at(&state_path, &secret).unwrap());
@@ -3179,6 +2789,14 @@ mod credential_tests {
         assert_ne!(token, old);
         let value = crate::read_json_file(&state_path).unwrap();
         authenticate(&value, &token).unwrap();
+        assert!(value.get("remoteAccess").is_none());
+        let mut value = value;
+        value["remoteAccess"] = json!({"enabled":true});
+        std::fs::write(&state_path, value.to_string()).unwrap();
+        assert!(migrate_at(&state_path, &secret).unwrap());
+        let value = crate::read_json_file(&state_path).unwrap();
+        assert!(value.get("remoteAccess").is_none());
+        assert_eq!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
         assert!(authenticate(&value, &old).is_err());
         assert!(!std::fs::read(&secret)
             .unwrap()
@@ -3235,7 +2853,7 @@ mod credential_tests {
             }
             let acl = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
             LocalFree(text.cast());
-            assert!(acl.starts_with("D:P"));
+            assert!(acl.contains("D:P"), "credential DACL was not protected: {acl}");
             assert!(acl.contains("(A;;FA;;;OW)"));
             assert_eq!(acl.matches('(').count(), 1);
         }
@@ -3245,14 +2863,14 @@ mod credential_tests {
         assert_eq!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
         for failed in [&secret, &state_path] {
             crate::storage::FAIL_AFTER_REPLACE.with(|v| *v.borrow_mut() = Some(failed.clone()));
-            assert!(configure_at(&state_path, &secret, true, false).is_err());
+            assert!(configure_at(&state_path, &secret, true).is_err());
             assert_eq!(std::fs::read(&secret).unwrap(), saved_secret);
             assert_eq!(std::fs::read(&state_path).unwrap(), saved_state);
         }
-        configure_at(&state_path, &secret, false, false).unwrap();
+        configure_at(&state_path, &secret, false).unwrap();
         assert!(!secret.exists());
         assert!(authenticate(&crate::read_json_file(&state_path).unwrap(), &token).is_err());
-        configure_at(&state_path, &secret, true, false).unwrap();
+        configure_at(&state_path, &secret, true).unwrap();
         assert_ne!(blobui_mcp::credential::read_at(&secret).unwrap(), token);
         std::fs::write(&secret, b"corrupted credential").unwrap();
         assert!(migrate_at(&state_path, &secret).unwrap());

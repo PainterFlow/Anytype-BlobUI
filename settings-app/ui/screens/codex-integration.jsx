@@ -1,72 +1,207 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { clearStaleSaveStatus } from "../anyblob-status.js";
-import { DialogSwitch, Switch } from "../shared/settings-controls.jsx";
-import { RemoteAccessDialog } from "./remote-access-dialog.jsx";
+import { Button, FolderPathInput, SettingsGroup, SettingsRow, Switch } from "../shared/settings-controls.jsx";
+import "./codex-integration.css";
 
 const UI=()=>window.BlobUI;
-
-function clearCopyTimer(timer) {
-  if (timer.current !== null) window.clearTimeout(timer.current);
-  timer.current = null;
-}
-
-function showCopiedFeedback(timer, setCopied, setStatus, message) {
-  clearCopyTimer(timer);
-  setCopied(true);
-  setStatus(message);
-  timer.current = window.setTimeout(() => {
-    timer.current = null;
-    setCopied(false);
-    setStatus(current => current === message ? "" : current);
-  }, 1400);
-}
 
 export function CodexIntegration() {
   const page=UI().CodexPage,api=useSyncExternalStore(page.subscribe,page.getSnapshot,page.getSnapshot);
   const [enabled,setEnabled]=useState(false),[installation,setInstallation]=useState(null),[status,setStatus]=useState(""),[changing,setChanging]=useState(false),[installing,setInstalling]=useState(false),[completion,setCompletion]=useState(null);
-  const [remote,setRemote]=useState(false),[remoteToken,setRemoteToken]=useState(""),[remoteChanging,setRemoteChanging]=useState(false),[remoteCopied,setRemoteCopied]=useState(false),[tunnelUrl,setTunnelUrl]=useState(""),[tunnelChanging,setTunnelChanging]=useState(false),[tunnelCopied,setTunnelCopied]=useState(false),[remoteDialogRequested,setRemoteDialogRequested]=useState(false);
-  const integrationEpoch=useRef(0),installationEpoch=useRef(0),backdrop=useRef(null),dialog=useRef(null),done=useRef(null),modal=useRef(null),remoteBackdrop=useRef(null),remoteDialog=useRef(null),remoteClose=useRef(null),remoteModal=useRef(null);
-  const remoteCopyTimer=useRef(null),tunnelCopyTimer=useRef(null);
-  const refresh=async()=>{if(!api)return;const epoch=++integrationEpoch.current;try{const value=await api.invoke("anyblob_status");if(epoch===integrationEpoch.current){setEnabled(value.enabled);setRemote(value.enabled&&value.remoteAccess===true);setStatus(clearStaleSaveStatus);}}catch(error){if(epoch===integrationEpoch.current)setStatus(String(error.message||error));}};
+  const [folder, setFolder] = useState("");
+  const [folderChanging, setFolderChanging] = useState(false);
+  const [tunnel, setTunnel] = useState(null);
+  const [tunnelEnabled, setTunnelEnabled] = useState(false);
+  const [tunnelId, setTunnelId] = useState("");
+  const [runtimeApiKey, setRuntimeApiKey] = useState("");
+  const [tunnelChanging, setTunnelChanging] = useState(false);
+  const [tunnelError, setTunnelError] = useState("");
+  const integrationEpoch = useRef(0), installationEpoch = useRef(0), tunnelEpoch = useRef(0);
+  const tunnelSettingsLoaded = useRef(false);
+  const backdrop = useRef(null), dialog = useRef(null), done = useRef(null), modal = useRef(null);
+
+  const refresh = async () => {
+    if (!api) return;
+    const epoch = ++integrationEpoch.current;
+    try {
+      const value = await api.invoke("anyblob_status");
+      if (epoch !== integrationEpoch.current) return;
+      setEnabled(value.enabled);
+      setFolder(value.localProjectsFolder || "");
+      setStatus(clearStaleSaveStatus);
+    } catch (error) {
+      if (epoch === integrationEpoch.current) setStatus(String(error.message || error));
+    }
+  };
   const refreshInstallation=async()=>{if(!api||installing)return;const epoch=++installationEpoch.current;try{const value=await api.invoke("anyblob_installation_status");if(epoch===installationEpoch.current)setInstallation(value);}catch(error){if(epoch===installationEpoch.current){setInstallation(null);setStatus(String(error.message||error));}}};
-  useEffect(()=>{if(!api)return;void refresh();void refreshInstallation();return()=>{integrationEpoch.current++;installationEpoch.current++;};},[api]);
-  useEffect(()=>UI().AppReload?.register(()=>Promise.allSettled([refresh(),refreshInstallation()])),[api,installing]);
-  useEffect(()=>{const listener=()=>{void refresh();void refreshInstallation();};window.addEventListener("blobui-codex-integration-refresh",listener);return()=>window.removeEventListener("blobui-codex-integration-refresh",listener);},[api]);
-  useEffect(()=>()=>{clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);},[]);
+  const refreshTunnel = async () => {
+    if (!api) return;
+    const epoch = ++tunnelEpoch.current;
+    try {
+      const value = await api.invoke("secure_mcp_tunnel_status");
+      if (epoch !== tunnelEpoch.current) return;
+      setTunnel(value);
+      if (!tunnelSettingsLoaded.current) {
+        tunnelSettingsLoaded.current = true;
+        setTunnelEnabled(value.enabled);
+        setTunnelId(value.tunnelId || "");
+      }
+    } catch (error) {
+      if (epoch === tunnelEpoch.current) setTunnelError(String(error.message || error));
+    }
+  };
+  useEffect(() => {
+    if (!api) return;
+    void refresh();
+    void refreshInstallation();
+    void refreshTunnel();
+    return () => {
+      integrationEpoch.current++;
+      installationEpoch.current++;
+      tunnelEpoch.current++;
+      tunnelSettingsLoaded.current = false;
+    };
+  }, [api]);
+  useEffect(() => UI().AppReload?.register(() => Promise.allSettled([refresh(), refreshInstallation(), refreshTunnel()])), [api, installing]);
+  useEffect(() => {
+    const listener = () => { void refresh(); void refreshInstallation(); void refreshTunnel(); };
+    window.addEventListener("blobui-codex-integration-refresh", listener);
+    return () => window.removeEventListener("blobui-codex-integration-refresh", listener);
+  }, [api]);
+  useEffect(() => {
+    if (!api || !tunnel?.running || tunnelChanging) return;
+    const timer = window.setInterval(() => void refreshTunnel(), 1500);
+    return () => window.clearInterval(timer);
+  }, [api, tunnel?.running, tunnelChanging]);
   useEffect(()=>{if(!backdrop.current||!dialog.current)return;modal.current=UI().createModalController({backdrop:backdrop.current,dialog:dialog.current,initialFocus:()=>done.current,inertTargets:[document.getElementById("settings-react-root")],onClose:()=>setCompletion(null)});return()=>{modal.current?.destroy();modal.current=null;};},[api]);
-  useEffect(()=>{if(!remoteBackdrop.current||!remoteDialog.current)return;remoteModal.current=UI().createModalController({backdrop:remoteBackdrop.current,dialog:remoteDialog.current,initialFocus:()=>remoteClose.current,fallbackFocus:()=>document.getElementById("enable-anyblob"),inertTargets:[document.getElementById("settings-react-root")],onClose:()=>setRemoteDialogRequested(false)});return()=>{remoteModal.current?.destroy();remoteModal.current=null;};},[api]);
   useEffect(()=>{if(completion)modal.current?.open();else if(modal.current?.isOpen())modal.current.close();},[completion]);
-  useEffect(()=>{if(remoteDialogRequested&&enabled&&remote&&!changing&&!remoteChanging)remoteModal.current?.open();else if(remoteModal.current?.isOpen())remoteModal.current.close();},[remoteDialogRequested,enabled,remote,changing,remoteChanging]);
-  async function configure(value){if(!api||changing)return;clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);setRemoteCopied(false);setTunnelCopied(false);if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setChanging(true);integrationEpoch.current++;setStatus("");try{const result=await api.invoke("configure_anyblob",{enabled:value});setEnabled(result.enabled);setRemote(false);setRemoteToken("");setTunnelUrl("");setRemoteDialogRequested(false);}catch(error){setStatus(String(error.message||error));await refresh();}finally{setChanging(false);}}
-  async function configureRemote(value){if(!api||remoteChanging||(value&&!enabled))return;clearCopyTimer(remoteCopyTimer);clearCopyTimer(tunnelCopyTimer);setRemoteCopied(false);setTunnelCopied(false);if(!value){setRemoteDialogRequested(false);remoteModal.current?.close();}setRemoteChanging(true);setStatus("");try{const result=await api.invoke("configure_anyblob_remote",{enabled:value});setRemote(result.enabled===true);setRemoteToken(result.token||"");if(!value){setTunnelUrl("");setRemoteDialogRequested(false);}else if(result.enabled===true){setRemoteDialogRequested(true);}}catch(error){setStatus(String(error.message||error));await refresh();}finally{setRemoteChanging(false);}}
-  function openRemoteDialog(){if(enabled&&remote&&!changing&&!remoteChanging)setRemoteDialogRequested(true);}
-  async function copyRemoteToken(){clearCopyTimer(remoteCopyTimer);setRemoteCopied(false);setStatus("");try{await navigator.clipboard.writeText(remoteToken);showCopiedFeedback(remoteCopyTimer,setRemoteCopied,setStatus,"Remote access key copied.");}catch(error){setStatus("Could not copy the remote key. Select and copy it manually.");}}
-  async function startTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setTunnelChanging(true);setStatus("");try{const result=await api.invoke("start_tailscale_funnel");setTunnelUrl(result.url);}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
-  async function stopTunnel(){if(!api||!enabled||!remote||tunnelChanging)return;clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setTunnelChanging(true);setStatus("");try{await api.invoke("stop_tailscale_funnel");setTunnelUrl("");}catch(error){setStatus(String(error.message||error));}finally{setTunnelChanging(false);}}
-  async function copyTunnelUrl(){clearCopyTimer(tunnelCopyTimer);setTunnelCopied(false);setStatus("");try{await navigator.clipboard.writeText(tunnelUrl);showCopiedFeedback(tunnelCopyTimer,setTunnelCopied,setStatus,"Tunnel URL copied.");}catch(error){setStatus("Could not copy the tunnel URL. Select and copy it manually.");}}
+
+  async function configure(value) {
+    if (!api || changing || folderChanging || tunnelChanging) return;
+    setChanging(true);
+    integrationEpoch.current++;
+    setStatus("");
+    try {
+      const result = await api.invoke("configure_anyblob", { enabled: value });
+      setEnabled(result.enabled);
+      if (!result.enabled) setRuntimeApiKey("");
+      await refreshTunnel();
+    } catch (error) {
+      await refresh();
+      setStatus(String(error.message || error));
+    } finally {
+      setChanging(false);
+    }
+  }
+
+  async function browseFolder() {
+    if (!enabled || changing || folderChanging) return;
+    setFolderChanging(true);
+    setStatus("");
+    try {
+      const selected = await api.invoke("select_anyblob_projects_folder", { currentDirectory: folder || null });
+      if (selected == null) return;
+      integrationEpoch.current++;
+      await api.invoke("set_anyblob_projects_folder", { folder: selected });
+      setFolder(selected);
+      void UI().ProjectPermissions?.reloadProjects();
+    } catch (error) {
+      setStatus(String(error.message || error));
+    } finally {
+      setFolderChanging(false);
+    }
+  }
+
+  async function configureTunnel(value) {
+    if (!enabled || tunnelChanging || changing) return;
+    setTunnelChanging(true);
+    setTunnelError("");
+    tunnelEpoch.current++;
+    try {
+      await api.invoke("configure_secure_mcp_tunnel", {
+        enabled: value,
+        tunnelId: tunnelId.trim(),
+        runtimeApiKey: value ? runtimeApiKey.trim() || null : null,
+      });
+      setTunnelEnabled(value);
+      setRuntimeApiKey("");
+    } catch (error) {
+      setTunnelError(String(error.message || error));
+    } finally {
+      await refreshTunnel();
+      setTunnelChanging(false);
+    }
+  }
+
+  function changeTunnelEnabled(value) {
+    setTunnelError("");
+    if (!value && (tunnel?.running || tunnel?.enabled)) {
+      void configureTunnel(false);
+      return;
+    }
+    setTunnelEnabled(value);
+    if (!value) setRuntimeApiKey("");
+  }
+
   async function installMarketplace(){if(!api||installing)return;const updating=!!installation?.updateAvailable;setInstalling(true);installationEpoch.current++;setStatus("");try{await api.invoke("install_anyblob_marketplace");const next=await api.invoke("anyblob_installation_status");setInstallation(next);setCompletion({updating});}catch(error){setStatus(String(error.message||error));}finally{setInstalling(false);}}
   const refreshRequired=installation?.installed && installation?.codexRefreshRequired && !installation?.updateAvailable;
-  if(!api)return null;
+  if (!api) return null;
+  const tunnelLocked = !enabled || changing || tunnelChanging;
+  const tunnelFieldsDisabled = tunnelLocked || !tunnelEnabled || !!tunnel?.running;
+  const canStart = tunnelEnabled && tunnel?.runtimeAvailable && tunnelId.trim() &&
+    (runtimeApiKey.trim() || (tunnel.keyConfigured && tunnelId.trim() === tunnel.tunnelId));
+  let tunnelStatus = "";
+  if (enabled && tunnel) {
+    if (tunnel.ready) tunnelStatus = "Tunnel is ready.";
+    else if (tunnel.running) tunnelStatus = "Connecting to OpenAI…";
+    else if (!tunnel.runtimeAvailable) tunnelStatus = "Install OpenAI tunnel-client to use the tunnel.";
+    else if (!tunnelId.trim() || !(runtimeApiKey.trim() || tunnel.keyConfigured)) tunnelStatus = "Enter a tunnel ID and runtime API key to start.";
+    else tunnelStatus = "Tunnel is stopped.";
+  }
   return <>
     <div className="section-heading"><h2>General</h2></div>
     <div className="settings-list anyblob-integration-settings">
-      <Switch id="enable-anyblob" label="Enable Anyblob" className="native-accent-control settings-row" checked={enabled} disabled={changing} onChange={configure} />
+      <Switch id="enable-anyblob" label="Enable Anyblob" className="native-accent-control settings-row" checked={enabled} disabled={changing || folderChanging || tunnelChanging} onChange={configure} />
       <div className="settings-row kanban-setting-row"><div className="kanban-setting-copy"><span className="kanban-setting-title">Install Marketplace</span><span className="anyblob-version settings-row-description" hidden={!installation?.installedVersion&&!installation?.updateAvailable}>{installation?.installedVersion&&<>v{installation.installedVersion}</>}{installation?.updateAvailable&&installation?.bundledVersion&&installation.bundledVersion!==installation.installedVersion&&<>{installation.installedVersion?" → ":""}<span className="anyblob-version-available">v{installation.bundledVersion}</span></>}</span></div><button type="button" className="banner-image-button update-check-button" disabled={installing} title={installation?.bundledVersion?`Anyblob ${installation.bundledVersion}`:""} onClick={()=>refreshRequired?setCompletion({refresh:true}):void installMarketplace()}>{installing?(installation?.updateAvailable?"Updating…":"Installing…"):installation?.updateAvailable?"Update":refreshRequired?"Refresh in Codex":installation?.installed?"Installed":"Install"}</button></div>
     </div>
-    <div className="settings-list anyblob-integration-settings">
-      <DialogSwitch id="enable-anyblob-remote" dialogId="anyblob-remote-access-dialog" label="Allow Tailscale Funnel remote access"
-        help="Funnel exposes only the authenticated Anyblob bridge, not Anytype's Local API or API key. Remote MCP requests are forwarded to local BlobUI, which checks each Codex chat ID against local Codex state and applies saved project permissions."
-        checked={remote} disabled={!enabled||changing||remoteChanging} labelDisabled={!enabled||changing||remoteChanging||!remote}
-        expanded={remoteDialogRequested&&enabled&&remote} onOpen={openRemoteDialog} onChange={configureRemote} />
-    </div>
-    <p className="input-hint" role="status">{status}</p>
-    {createPortal(<div ref={remoteBackdrop} className="confirm-backdrop" hidden>
-      <RemoteAccessDialog dialogRef={remoteDialog} closeRef={remoteClose} remoteToken={remoteToken}
-        remoteCopied={remoteCopied} tunnelUrl={tunnelUrl} tunnelChanging={tunnelChanging} tunnelCopied={tunnelCopied} status={status}
-        onClose={()=>remoteModal.current?.close()} onCopyRemoteToken={copyRemoteToken}
-        onStartTunnel={startTunnel} onStopTunnel={stopTunnel} onCopyTunnelUrl={copyTunnelUrl} />
-    </div>, document.body)}
+    <SettingsGroup className="settings-list anyblob-integration-settings">
+      <SettingsRow className="settings-row anyblob-folder-row" label="Local Projects Folder">
+        <FolderPathInput id="anyblob-local-projects-folder" aria-label="Local Projects Folder" value={folder}
+          placeholder="No folder selected" disabled={!enabled || changing || folderChanging} onClick={browseFolder}
+          onKeyDown={event => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              void browseFolder();
+            }
+          }} />
+        <Button className="banner-image-button" aria-haspopup="dialog" aria-label="Browse for Local Projects Folder"
+          disabled={!enabled || changing || folderChanging} onClick={browseFolder}>Browse</Button>
+      </SettingsRow>
+    </SettingsGroup>
+    <SettingsGroup className="settings-list anyblob-integration-settings">
+      <Switch id="enable-secure-mcp-tunnel" label="Secure MCP Tunnel" checked={enabled && tunnelEnabled}
+        disabled={tunnelLocked || !tunnel} onChange={changeTunnelEnabled} />
+      <SettingsRow label={<label htmlFor="anyblob-tunnel-id">Tunnel ID</label>}>
+        <input id="anyblob-tunnel-id" className="color-text-input anyblob-tunnel-input" value={tunnelId}
+          autoComplete="off" spellCheck={false} disabled={tunnelFieldsDisabled}
+          onChange={event => setTunnelId(event.currentTarget.value)} />
+      </SettingsRow>
+      <SettingsRow label={<label htmlFor="anyblob-tunnel-key">Runtime API key</label>}>
+        <input id="anyblob-tunnel-key" className="color-text-input anyblob-tunnel-input" type="password"
+          autoComplete="new-password" spellCheck={false} value={runtimeApiKey}
+          placeholder={tunnel?.keyConfigured ? "Key saved" : ""} disabled={tunnelFieldsDisabled}
+          onChange={event => setRuntimeApiKey(event.currentTarget.value)} />
+      </SettingsRow>
+      <SettingsRow description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : "Tunnel stopped"}
+        descriptionAttributes={{ role: "status" }}>
+        <Button className="banner-image-button" disabled={tunnelLocked || (!tunnel?.running && !canStart)}
+          onClick={() => void configureTunnel(!tunnel?.running)}>
+          {tunnelChanging ? "Please wait…" : tunnel?.running ? "Stop tunnel" : "Start tunnel"}
+        </Button>
+      </SettingsRow>
+    </SettingsGroup>
+    <p className="input-hint" role="status" id="anyblob-integration-status">{status}</p>
     {createPortal(<div ref={backdrop} className="confirm-backdrop" hidden>
       <section ref={dialog} className="confirm-dialog" role="dialog" aria-modal="true" aria-label={completion?.refresh?"Refresh Anyblob in Codex":completion?.updating?"Anyblob marketplace updated":"Anyblob marketplace installed"} tabIndex={-1}>
         <h2>{completion?.refresh?"Refresh Anyblob in Codex":completion?.updating?"Anyblob marketplace updated":"Anyblob marketplace installed"}</h2>

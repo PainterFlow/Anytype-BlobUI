@@ -50,6 +50,15 @@ fn profile() -> Result<PathBuf, String> {
         .filter(|p| p.is_absolute())
         .ok_or("The Windows profile is unavailable.".into())
 }
+
+pub(crate) fn mcp_executable_path() -> Result<PathBuf, String> {
+    let executable = profile()?.join(".codex/plugins/anyblob/bin/blobui-mcp.exe");
+    storage::reject_reparse_path(&executable)?;
+    if !executable.is_file() {
+        return Err("Install or update the Anyblob Codex plugin before starting the Secure MCP Tunnel.".into());
+    }
+    Ok(executable)
+}
 fn tree(path: &Path) -> Result<(), String> {
     storage::reject_reparse_path(path)?;
     if path.is_dir() {

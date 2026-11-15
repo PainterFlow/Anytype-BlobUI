@@ -1,5 +1,9 @@
 //! Private bridge credential. This module never reads an Anytype API key.
 use std::path::PathBuf;
+#[cfg(not(windows))]
+pub(crate) const WINDOWS_HOST_REQUIRED: &str =
+    "Anyblob runs with BlobUI on Windows. Use OpenAI Secure MCP Tunnel to connect to the Windows host remotely.";
+
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
         if instance != "default" {
@@ -88,16 +92,28 @@ fn crypt(_: &[u8], _: bool) -> Result<Vec<u8>, String> {
 pub fn encrypt(token: &str) -> Result<Vec<u8>, String> {
     crypt(token.as_bytes(), true)
 }
+pub fn encrypt_secret(secret: &str) -> Result<Vec<u8>, String> {
+    crypt(secret.as_bytes(), true)
+}
+pub fn read_secret_at(path: &std::path::Path) -> Result<String, String> {
+    reject_links(path)?;
+    let data = std::fs::read(path)
+        .map_err(|_| "The Secure MCP Tunnel runtime API key is not saved.")?;
+    let mut plaintext = crypt(&data, false)?;
+    let value = String::from_utf8(std::mem::take(&mut plaintext))
+        .map_err(|_| "The saved Secure MCP Tunnel key is invalid.")?;
+    plaintext.iter_mut().for_each(|byte| unsafe {
+        std::ptr::write_volatile(byte, 0)
+    });
+    Ok(value)
+}
 pub fn read() -> Result<String, String> {
-    if std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some() {
-        let token = std::env::var("ANYBLOB_REMOTE_TOKEN")
-            .map_err(|_| "Set ANYBLOB_REMOTE_TOKEN for the HTTPS Tailscale Funnel connection.")?;
-        if token.len() != 64 || !token.bytes().all(|c| c.is_ascii_hexdigit()) {
-            return Err("Invalid remote Anyblob credential.".into());
-        }
-        return Ok(token);
+    #[cfg(windows)]
+    {
+        read_at(&path()?)
     }
-    read_at(&path()?)
+    #[cfg(not(windows))]
+    Err(WINDOWS_HOST_REQUIRED.into())
 }
 pub fn read_at(path: &std::path::Path) -> Result<String, String> {
     reject_links(path)?;
