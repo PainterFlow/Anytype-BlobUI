@@ -80,10 +80,6 @@ fn validate_catalog(catalog: &Catalog) -> Result<(), String> {
     Ok(())
 }
 
-pub fn project_key(host_id: &str, project_id: &str) -> String {
-    format!("cloud:{host_id}:{project_id}")
-}
-
 pub fn read_at(path: &std::path::Path) -> Result<Catalog, String> {
     crate::reject_reparse_component(path)?;
     if !path.exists() {
@@ -146,32 +142,6 @@ pub fn projects(catalog: &Catalog) -> Vec<ProjectSummary> {
     projects
 }
 
-/// Verify a remote identity against the latest saved catalog before it can select a scope.
-/// `Ok(None)` is an explicitly verified projectless chat.
-pub fn resolve_at(
-    path: &std::path::Path,
-    host_id: &str,
-    project_id: Option<&str>,
-) -> Result<Option<String>, String> {
-    if !valid_identifier(host_id, 128) {
-        return Err("Remote Codex supplied an invalid host identity.".into());
-    }
-    let catalog = read_at(path)?;
-    let host = catalog
-        .hosts
-        .get(host_id)
-        .ok_or("Remote Codex host is not in the synced project catalog.")?;
-    let Some(project_id) = project_id else {
-        return Ok(None);
-    };
-    if !valid_identifier(project_id, 512)
-        || !host.projects.iter().any(|project| project.id == project_id)
-    {
-        return Err("Remote Codex project is not in the synced project catalog.".into());
-    }
-    Ok(Some(project_key(host_id, project_id)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,8 +182,6 @@ mod tests {
             "CLOUD-TWO",
             vec![ProjectEntry { id: "same-id".into(), name: "Work".into() }],
         ).unwrap();
-        assert_eq!(resolve_at(&fixture.0, "host_a", Some("same-id")).unwrap(), Some("cloud:host_a:same-id".into()));
-        assert_eq!(resolve_at(&fixture.0, "host_b", Some("same-id")).unwrap(), Some("cloud:host_b:same-id".into()));
         update_at(
             &fixture.0,
             "host_a",
@@ -223,6 +191,11 @@ mod tests {
         let catalog = read_at(&fixture.0).unwrap();
         assert_eq!(catalog.hosts["host_a"].computer_name, "RENAMED-PC");
         assert_eq!(projects(&catalog)[0].computer_name, "RENAMED-PC");
+        let host_ids = projects(&catalog)
+            .into_iter()
+            .map(|project| project.host_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(host_ids, BTreeSet::from(["host_a".into(), "host_b".into()]));
         let saved = std::fs::read_to_string(&fixture.0).unwrap();
         assert!(!saved.contains("rootPaths") && !saved.contains("CLOUD-ONE"));
     }
@@ -245,9 +218,6 @@ mod tests {
             vec![ProjectEntry { id: "bad/id".into(), name: "Invalid".into() }],
         ).is_err());
         assert!(read_at(&fixture.0).unwrap().hosts["host"].projects.is_empty());
-        assert!(resolve_at(&fixture.0, "host", None).unwrap().is_none());
-        assert!(resolve_at(&fixture.0, "host", Some("gone")).is_err());
-        assert!(resolve_at(&fixture.0, "missing-host", None).is_err());
     }
 
     #[test]

@@ -4,11 +4,11 @@ BlobUI can expose only its authenticated Anyblob bridge through a Cloudflare Tun
 
 Remote access is off by default. Enabling it creates a secret 64-character key. The bridge rejects requests without that key. Disabling and enabling access rotates the key. Treat both the tunnel URL and key as secrets.
 
-After you configure the remote MCP URL and key below, launch or reconnect the remote Anyblob MCP server. It syncs its Codex host and project catalog at startup and refreshes the catalog when the Codex project list changes. Sync sends project IDs and names, not project folder paths. BlobUI validates each request's remote project membership against that catalog and saved permissions. The MCP request carries membership separately from tool arguments, so a tool argument cannot choose a project.
+After you configure the remote MCP URL and key below, launch or reconnect the remote Anyblob MCP server. Each MCP request carries its Codex chat ID through the authenticated tunnel. BlobUI verifies remote chat assignments against the local `.codex-global-state.json`, including the assigned project's host ID, before checking saved permissions. Tool arguments cannot choose a project.
 
-The MCP process must inherit the active Codex home that contains `.codex-global-state.json`. If `CODEX_HOME` is set, point it to that directory. Anyblob needs the catalog to verify chat project membership. A missing or unreadable catalog stops remote requests before BlobUI can check their permissions.
+BlobUI reads remote project names and host IDs from its local `.codex-global-state.json`. The remote MCP process does not verify project membership. A missing or unreadable local state file prevents BlobUI from verifying configured remote project permissions.
 
-In BlobUI Settings > Anyblob > Projects, synced projects appear under the cloud PC name. A globe tooltip shows the computer name. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats with verified membership in configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
+In BlobUI Settings > Anyblob > Projects, remote projects appear with their Codex host ID. Select a project row to save source permissions for that host and project. Those project scopes override global space permissions for chats assigned to configured projects. Projectless chats and projects without saved sources use global permissions. If project scopes are saved, missing or invalid project identity denies requests. Creation uses the effective project or global permission.
 
 ## Quick Tunnel without an account
 
@@ -45,7 +45,7 @@ Quick Tunnels provide a temporary `trycloudflare.com` URL and do not require a C
 
    The MCP client sends authenticated HTTPS requests to the tunnel's `/anyblob` endpoint. Protect the config file and do not put the key in a public repository. On Windows, use the built `blobui-mcp.exe` path.
 
-6. Launch or reconnect the remote Anyblob MCP server. In BlobUI Settings > Anyblob > Projects, select cloud project rows under the remote PC name to save source permissions for that host. The catalog syncs at startup and refreshes when the remote Codex project list changes.
+6. Launch or reconnect the remote Anyblob MCP server. Confirm that the local Codex state contains the remote project and chat assignment. In BlobUI Settings > Anyblob > Projects, select the matching remote project row to save source permissions for its host.
 
 The random Quick Tunnel URL is not the authentication mechanism. The bridge checks the bearer key on every request and rejects missing or invalid keys. Quick Tunnel URLs can change and do not have an uptime guarantee. Use a named tunnel for a stable hostname.
 

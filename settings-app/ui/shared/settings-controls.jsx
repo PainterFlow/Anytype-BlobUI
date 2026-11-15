@@ -88,12 +88,16 @@ export function TextField({ label, inputAttributes }) {
   </label>;
 }
 
-export function VisibilityTextField({ label, inputAttributes, buttonAttributes, className = "input-field advanced-row" }) {
+export function ReadOnlyTextInput({ inputAttributes }) {
+  return <input {...inputAttributes} readOnly />;
+}
+
+export function VisibilityTextField({ label, inputAttributes, buttonAttributes, readOnly = false, className = "input-field advanced-row" }) {
   const fieldId = `${inputAttributes.id}-field`;
   return <div className={className}>
     <label htmlFor={inputAttributes.id}>{label}</label>
     <div id={fieldId} className="visibility-field" data-filled="false">
-      <input {...inputAttributes} />
+      {readOnly ? <ReadOnlyTextInput inputAttributes={inputAttributes} /> : <input {...inputAttributes} />}
       <button type="button" {...buttonAttributes}>
         <svg className="visibility-icon" viewBox="0 0 20 20" aria-hidden="true">
           <path className="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" />

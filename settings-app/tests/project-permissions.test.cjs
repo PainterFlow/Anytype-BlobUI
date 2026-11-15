@@ -175,6 +175,7 @@ test('cloud project keys stay isolated and their catalog survives offline reload
       window.calls=[];window.projectError='Codex cloud catalog is offline';
       window.projects=[
         {id:'duplicate-id',name:'Same',rootPaths:['C:\\local'],kind:'local'},
+        {id:'duplicate-id',name:'Remote same',rootPaths:[],kind:'remote',hostId:'codex-host'},
         {id:'duplicate-id',name:'Same',rootPaths:[],kind:'cloud',hostId:'host-a',computerName:'Cloud A'},
         {id:'duplicate-id',name:'Same',rootPaths:[],kind:'cloud',hostId:'host-b',computerName:'Cloud B'},
       ];
@@ -212,9 +213,13 @@ test('cloud project keys stay isolated and their catalog survives offline reload
     await page.mouse.move(5,5);await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='false',tooltipId);
 
     await page.evaluate(()=>{window.projectError='';window.cloudProjectHandlers['anyblob-cloud-projects-changed']?.({payload:null});});
-    await page.waitForFunction(()=>document.querySelectorAll('#codex-project-list .formula-view-row').length===4);
+    await page.waitForFunction(()=>document.querySelectorAll('#codex-project-list .formula-view-row').length===5);
     const keys=await page.locator('#codex-project-list .formula-view-row').evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
-    assert.deepEqual(keys.sort(),['cloud:host-a:duplicate-id','cloud:host-b:duplicate-id','cloud:host-old:removed-id','duplicate-id'].sort());
+    assert.deepEqual(keys.sort(),['cloud:codex-host:duplicate-id','cloud:host-a:duplicate-id','cloud:host-b:duplicate-id','cloud:host-old:removed-id','duplicate-id'].sort());
+    const remoteHelp=page.getByRole('button',{name:'Remote project information for Remote same'});await remoteHelp.focus();
+    const remoteTooltipId=await remoteHelp.getAttribute('aria-describedby');
+    await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='true',remoteTooltipId);
+    assert.match(await page.evaluate(id=>document.getElementById(id).textContent,remoteTooltipId),/codex-host/);
     const stale=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:host-old:removed-id"]')});
     await stale.getByText('Unavailable project. Saved selections are retained.').waitFor();
 
@@ -231,14 +236,21 @@ test('cloud project keys stay isolated and their catalog survives offline reload
     await queryRow.locator('.formula-view-name').click();
     await access().click();await page.locator('#project-source-dialog').getByRole('option',{name:'Create-Delete',exact:true}).click();
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
+    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:duplicate-id"]').click();
+    await queryRow.waitFor();assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),false);
+    await queryRow.locator('.formula-view-name').click();
+    assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),true);
+    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
     await page.locator('#save-button').click();
     await page.waitForFunction(()=>window.saved?.codexIntegration.projects['cloud:host-b:duplicate-id']?.sources[0]?.permission.access==='createDelete');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:host-a:duplicate-id'].sources[0].permission.access),'readWrite');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['duplicate-id'].sources[0].permission.access),'read');
+    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:duplicate-id']?.kind),'remote');
+    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:duplicate-id']?.hostId),'codex-host');
 
     await page.evaluate(()=>{window.projectError='Offline refresh';});await page.locator('#projects-reload').click();
     await page.getByRole('status').filter({hasText:'Offline refresh'}).waitFor();
-    assert.equal(await rows.count(),4,'failed reload keeps the last cloud catalog and saved overrides');
+    assert.equal(await rows.count(),5,'failed reload keeps the last project catalog and saved overrides');
     await page.evaluate(()=>{window.projectError='';window.projects=window.projects.filter(project=>project.kind==='local');});
     await page.locator('#projects-reload').click();
     await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');

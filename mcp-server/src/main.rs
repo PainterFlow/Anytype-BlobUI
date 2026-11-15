@@ -20,16 +20,6 @@ fn reply(id: Value, result: Value) {
 fn error(id: Value, code: i32, message: &str) {
     output(json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}));
 }
-fn resolve_remote_membership<T>(
-    remote: bool,
-    thread_id: Option<&str>,
-    resolve: impl FnOnce(&str) -> Result<T, String>,
-) -> Result<Option<T>, String> {
-    if !remote {
-        return Ok(None);
-    }
-    thread_id.map(resolve).transpose()
-}
 type Answers = Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<Value>>>>;
 fn elicit(
     answers: &Answers,
@@ -204,7 +194,6 @@ fn main() {
                     }
                 };
                 let key = id.to_string();
-                let remote = std::env::var_os("ANYBLOB_REMOTE_ADDRESS").is_some();
                 let cancel = Arc::new(AtomicBool::new(false));
                 {
                     let mut map = pending.lock().unwrap();
@@ -218,28 +207,19 @@ fn main() {
                 let answers = answers.clone();
                 let sequence = sequence.clone();
                 std::thread::spawn(move || {
-                    let remote_membership = resolve_remote_membership(
-                        remote,
-                        thread_id.as_deref(),
-                        blobui_mcp::codex_identity::resolve_remote,
-                    );
-                    let request_thread_id = if remote { None } else { thread_id };
-                    let result = remote_membership.and_then(|remote_membership| {
-                        blobui_mcp::credential::read().and_then(|token| {
-                            transport::call_with_approval(
-                                &Request {
-                                    id: key.clone(),
-                                    token,
-                                    thread_id: request_thread_id,
-                                    remote_membership,
-                                    request: op.clone(),
-                                },
-                                &cancel,
-                                &|message, remaining| {
-                                    elicit(&answers, &sequence, &cancel, forms, message, remaining)
-                                },
-                            )
-                        })
+                    let result = blobui_mcp::credential::read().and_then(|token| {
+                        transport::call_with_approval(
+                            &Request {
+                                id: key.clone(),
+                                token,
+                                thread_id,
+                                request: op.clone(),
+                            },
+                            &cancel,
+                            &|message, remaining| {
+                                elicit(&answers, &sequence, &cancel, forms, message, remaining)
+                            },
+                        )
                     });
                     let result = result.and_then(|r| {
                         r.result
@@ -253,10 +233,7 @@ fn main() {
                                 id,
                                 json!({"contents":[{"uri":resource_uri.unwrap(),"mimeType":"application/json","text":value.to_string()}]}),
                             ),
-                            Ok(value) => reply(
-                                id,
-                                blobui_mcp::sources::tool_result(&op, value),
-                            ),
+                            Ok(value) => reply(id, blobui_mcp::sources::tool_result(&op, value)),
                             Err(e) if resource_uri.is_some() => error(id, -32000, &e),
                             Err(e) => reply(
                                 id,
@@ -272,35 +249,5 @@ fn main() {
     }
     for flag in pending.lock().unwrap().values() {
         flag.store(true, Ordering::Release);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn remote_membership_resolution_keeps_missing_and_failed_identity_distinct() {
-        let missing: Option<blobui_mcp::RemoteMembership> = resolve_remote_membership(
-            true,
-            None,
-            |_| panic!("the resolver must not run without a thread ID"),
-        )
-        .unwrap();
-        assert!(missing.is_none());
-        let error = resolve_remote_membership(true, Some("chat-123"), |_| {
-            Err::<blobui_mcp::RemoteMembership, String>(
-                "Codex project is not present in the synced catalog.".into(),
-            )
-        })
-        .unwrap_err();
-        assert_eq!(error, "Codex project is not present in the synced catalog.");
-        let local: Option<blobui_mcp::RemoteMembership> = resolve_remote_membership(
-            false,
-            Some("chat-123"),
-            |_| panic!("local requests do not need remote membership"),
-        )
-        .unwrap();
-        assert!(local.is_none());
     }
 }
