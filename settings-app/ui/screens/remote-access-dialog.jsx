@@ -73,8 +73,8 @@ export function RemoteAccessDialog({
       <div className="anyblob-remote-dialog-group">
         <SettingsRow
           className="settings-row anyblob-remote-dialog-row"
-          label="Cloudflare Quick Tunnel"
-          description="Install cloudflared first. The temporary URL changes each time the tunnel starts."
+          label="Tailscale Funnel"
+          description="Use Tailscale Funnel to get a stable ts.net address without buying a domain."
         >
           <Button
             className="banner-image-button"
@@ -87,7 +87,7 @@ export function RemoteAccessDialog({
         {tunnelUrl && <div className="settings-row anyblob-remote-dialog-row">
           <CopyTextField
             value={tunnelUrl}
-            inputAttributes={{ "aria-label": "Cloudflare Tunnel URL" }}
+            inputAttributes={{ "aria-label": "Tailscale Funnel URL" }}
             copied={tunnelCopied}
             copyLabel="Copy tunnel URL"
             copiedLabel="Tunnel URL copied"
@@ -98,11 +98,11 @@ export function RemoteAccessDialog({
       <p className="anyblob-remote-dialog-status" role="status">{status}</p>
       <div className="anyblob-remote-dialog-instructions">
         <h3>Setup instructions</h3>
-        <p>Install cloudflared on this PC from <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noreferrer">Cloudflare's download instructions</a>, then start the Quick Tunnel above. Quick Tunnels need no Cloudflare account and stop working when BlobUI closes or you stop the tunnel.</p>
-        <p>On the remote Codex machine, build the MCP server and set <code>ANYBLOB_REMOTE_ADDRESS</code> to the tunnel URL and <code>ANYBLOB_REMOTE_TOKEN</code> to this key. Protect your Codex config because the token grants access under saved BlobUI permissions.</p>
-        <p>Launch or reconnect the remote Anyblob MCP server after configuring its URL and key. Each MCP request carries its Codex chat ID through the tunnel. BlobUI verifies that ID against the local <code>.codex-global-state.json</code> before applying project permissions.</p>
+        <p>Install <a href="https://tailscale.com/download/windows" target="_blank" rel="noreferrer">Tailscale for Windows</a>, sign in to your tailnet, and enable Funnel in its policy. BlobUI requires Tailscale 1.52 or later. Start Funnel above. The <code>.ts.net</code> address stays stable while this device keeps its Tailscale identity and name. BlobUI stops the public route when it closes or when you stop Funnel.</p>
+        <p>On the remote Codex machine, build the MCP connector and set <code>ANYBLOB_REMOTE_ADDRESS</code> to this base URL and <code>ANYBLOB_REMOTE_TOKEN</code> to this key. Protect its Codex config because the token grants access under saved BlobUI permissions. Funnel is public, so anyone can reach the bridge, but requests still need this token.</p>
+        <p>The remote MCP server only forwards requests. Each MCP request carries its Codex chat ID to local BlobUI, which checks it against the local <code>.codex-global-state.json</code> before applying project permissions. The Anytype Local API and its API key stay on this PC.</p>
         <p>In BlobUI Settings &gt; Anyblob &gt; Projects, remote rows include their Codex host ID. Select a project row to save source permissions for that host and project. These project scopes override global space permissions for chats assigned to configured projects. Projectless chats and projects without saved sources use global permissions. Missing or invalid identity is denied when project scopes are saved.</p>
-        <p>Quick Tunnel URLs are temporary. For a stable URL, create a named Cloudflare Tunnel and configure it to route to this PC's local Anyblob HTTP bridge at <code>http://127.0.0.1:31421</code>. Keep its origin limited to loopback.</p>
+        <p>Tailscale Funnel uses a public HTTPS endpoint with a stable <code>*.ts.net</code> address. Tailscale limits Funnel to ports <code>443</code>, <code>8443</code>, and <code>10000</code>; BlobUI uses port <code>443</code> and routes only <code>/anyblob</code> to its loopback bridge at <code>http://127.0.0.1:31421</code>. Funnel is currently in beta and Tailscale applies a bandwidth limit.</p>
       </div>
     </div>
   </section>;

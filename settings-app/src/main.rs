@@ -902,7 +902,7 @@ async fn apply_update(
     if state.status == "restarting" {
         // The installer has been verified and started. Exit only on this
         // explicit handoff state so every earlier failure leaves Settings open.
-        let _ = anyblob::stop_cloudflare_tunnel();
+        let _ = anyblob::stop_tailscale_funnel();
         app.exit(0);
     }
     Ok(state)
@@ -972,8 +972,7 @@ fn uninstall_blobui(app: tauri::AppHandle) -> Result<(), String> {
             return Err(error);
         }
     }
-    anyblob::stop_cloudflare_tunnel()?;
-    anyblob::stop_cloudflare_tunnel()?;
+    anyblob::stop_tailscale_funnel()?;
     app.exit(0);
     Ok(())
 }
@@ -1376,7 +1375,7 @@ fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
             "Wait for the current save or updater operation to finish before quitting.".into(),
         );
     }
-    anyblob::stop_cloudflare_tunnel()?;
+    anyblob::stop_tailscale_funnel()?;
     app.exit(0);
     Ok(())
 }
@@ -2747,8 +2746,8 @@ fn main() {
             marketplace::install_anyblob_marketplace,
             anyblob::configure_anyblob,
             anyblob::configure_anyblob_remote,
-            anyblob::start_cloudflare_tunnel,
-            anyblob::stop_cloudflare_tunnel,
+            anyblob::start_tailscale_funnel,
+            anyblob::stop_tailscale_funnel,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,
@@ -2882,7 +2881,7 @@ fn main() {
         .expect("error while building BlobUI Settings")
         .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
-                let _ = anyblob::stop_cloudflare_tunnel();
+                let _ = anyblob::stop_tailscale_funnel();
             }
         });
 }
