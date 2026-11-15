@@ -14,20 +14,21 @@ describe("Settings controls", () => {
     const input = screen.getByRole("textbox", { name: "Locked value" });
     expect(input.value).toBe("fixed");
     expect(input.readOnly).toBe(true);
+    expect(input.classList.contains("read-only-text-input")).toBe(true);
   });
 
   it("renders a read-only copy field with the shared Logs icons", () => {
     const onCopy = vi.fn();
     const { rerender } = render(<CopyTextField
-      value="https://sample.trycloudflare.com"
-      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      value="https://sample.tailnet.ts.net"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Tailscale Funnel URL" }}
       copyLabel="Copy tunnel URL"
       copiedLabel="Tunnel URL copied"
       onCopy={onCopy}
     />);
 
-    const input = screen.getByRole("textbox", { name: "Cloudflare Tunnel URL" });
-    expect(input.value).toBe("https://sample.trycloudflare.com");
+    const input = screen.getByRole("textbox", { name: "Tailscale Funnel URL" });
+    expect(input.value).toBe("https://sample.tailnet.ts.net");
     expect(input.readOnly).toBe(true);
 
     const copyButton = screen.getByRole("button", { name: "Copy tunnel URL" });
@@ -37,8 +38,8 @@ describe("Settings controls", () => {
     expect(onCopy).toHaveBeenCalledTimes(1);
 
     rerender(<CopyTextField
-      value="https://sample.trycloudflare.com"
-      inputAttributes={{ id: "tunnel-url", "aria-label": "Cloudflare Tunnel URL" }}
+      value="https://sample.tailnet.ts.net"
+      inputAttributes={{ id: "tunnel-url", "aria-label": "Tailscale Funnel URL" }}
       copied
       copyLabel="Copy tunnel URL"
       copiedLabel="Tunnel URL copied"

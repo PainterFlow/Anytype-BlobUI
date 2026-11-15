@@ -18,7 +18,7 @@
 .help-tooltip-trigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
 .help-tooltip-popover {
   position: fixed;
-  z-index: 60;
+  z-index: 120;
   top: var(--help-top, 0px);
   left: var(--help-left, 0px);
   width: max-content;

@@ -371,7 +371,16 @@ fn execute_scoped(
                 enc(space_id),
                 enc(object_id)
             );
-            let document = client.request("GET", &path, None).map_err(unavailable)?;
+            let document = client
+                .content_request("GET", &path, None, None, None, None)
+                .map_err(unavailable)?;
+            if document.get("_http_error").is_some() {
+                return Err(unavailable(document.to_string()));
+            }
+            let etag = document["etag"]
+                .as_str()
+                .filter(|etag| !etag.is_empty())
+                .ok_or("Anytype did not return an object ETag. Re-read the object before patching.")?;
             let mut result = identity(&document)?;
             if document["id"] != *object_id || !document["properties"].is_object() {
                 return Err("Anytype returned an invalid object document.".into());
@@ -387,6 +396,7 @@ fn execute_scoped(
                 return Err("Anytype returned Markdown for a different object.".into());
             }
             result["space_id"] = json!(space_id);
+            result["etag"] = json!(etag);
             result["properties"] = document["properties"].clone();
             result["markdown"] = json!(content);
             // Keep file blocks as references. No content endpoint is ever requested.
@@ -2446,12 +2456,23 @@ mod tests {
                 }
                 let status = body["_fixture_status"].as_u64().unwrap_or(200);
                 let mut response = body;
+                let etag_header = response["_fixture_etag_header"]
+                    .as_str()
+                    .map(|etag| format!("ETag: {etag}\r\n"))
+                    .or_else(|| {
+                        (expected.starts_with("GET /v2/spaces/")
+                            && expected.contains("/objects/")
+                            && !expected.contains("format=md"))
+                        .then(|| "ETag: \"fixture-object-rev\"\r\n".into())
+                    })
+                    .unwrap_or_default();
                 if let Some(fields) = response.as_object_mut() {
                     fields.remove("_fixture_status");
                     fields.remove("_fixture_request_body");
+                    fields.remove("_fixture_etag_header");
                 }
                 let body = response.to_string();
-                write!(stream,"HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                write!(stream,"HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\n{etag_header}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
             }
         });
         (
@@ -2478,7 +2499,7 @@ mod tests {
                 ),
                 (
                     "GET /v2/spaces/space/objects/object?ids=full ".into(),
-                    json!({"id":"object","type":"page","properties":{"name":"Note","link":["other-object"]},"blocks":[{"type":"file","id":"file-ref","target":"attachment"}]}),
+                    json!({"_fixture_etag_header":"\"object-rev-1\"","id":"object","type":"page","properties":{"name":"Note","link":["other-object"]},"blocks":[{"type":"file","id":"file-ref","target":"attachment"}]}),
                 ),
                 (
                     "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
@@ -2511,6 +2532,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read["name"], "Note");
+        assert_eq!(read["etag"], "\"object-rev-1\"");
         assert_eq!(read["attachments"][0]["target"], "attachment");
         server.join().unwrap();
     }

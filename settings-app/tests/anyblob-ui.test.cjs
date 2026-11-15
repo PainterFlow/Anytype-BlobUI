@@ -70,8 +70,11 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await toggle.isChecked(),false);assert.equal(await remoteToggle.isDisabled(),true);assert.equal(await remoteLabel.isDisabled(),true);
     await remoteLabel.evaluate(el=>el.click());assert.equal(await page.locator('#anyblob-remote-access-dialog').isVisible(),false);
     const remoteHelp=panel.getByRole('button',{name:'Allow Tailscale Funnel remote access information'});await remoteHelp.focus();
+    const labelBounds=await remoteLabel.boundingBox(),helpBounds=await remoteHelp.boundingBox();
+    assert.ok(helpBounds.x>=labelBounds.x+labelBounds.width-2);assert.ok(helpBounds.x-labelBounds.x-labelBounds.width<12);
     const remoteTooltip=page.locator(`#${await remoteHelp.getAttribute('aria-describedby')}`);await remoteTooltip.waitFor({state:'visible'});
     assert.equal(await remoteTooltip.evaluate(el=>el.parentElement===document.body),true);
+    assert.equal(await remoteTooltip.evaluate(el=>getComputedStyle(el).zIndex),'120');
     assert.match(await remoteTooltip.innerText(),/local BlobUI/);
     assert.match(await remoteTooltip.innerText(),/saved project permissions/);
     await page.screenshot({path:path.join(fixture,'remote-access-help-tooltip-dark.png')});
@@ -82,6 +85,7 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await remoteDialog.locator('.anyblob-remote-dialog-group').first().evaluate(el=>getComputedStyle(el).borderTopWidth),'0px');
     assert.equal(await remoteDialog.getByRole('textbox',{name:'Key',exact:true}).getAttribute('type'),'password');
     const keyInput=remoteDialog.getByRole('textbox',{name:'Key',exact:true});assert.equal(await keyInput.evaluate(el=>el.readOnly),true);
+    assert.equal(await keyInput.evaluate(el=>getComputedStyle(el).pointerEvents),'none');assert.equal(await keyInput.evaluate(el=>getComputedStyle(el).cursor),'default');
     await keyInput.pressSequentially('x');assert.equal(await keyInput.inputValue(),'fixture-remote-key');
     assert.match(await remoteDialog.innerText(),/stable while this device keeps its Tailscale identity/);assert.match(await remoteDialog.innerText(),/ANYBLOB_REMOTE_ADDRESS/);
     assert.equal(await remoteDialog.getByRole('button',{name:'Copy key'}).isDisabled(),false);
@@ -94,6 +98,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     const tunnelInput=remoteDialog.getByRole('textbox',{name:'Tailscale Funnel URL'}),tunnelField=remoteDialog.locator('.copy-text-field');
     assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');assert.equal(await tunnelInput.evaluate(el=>el.readOnly),true);
     assert.equal(await tunnelField.evaluate(el=>getComputedStyle(el).borderRadius),'18px');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).minHeight),'48px');
+    assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).pointerEvents),'none');assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).cursor),'default');
+    await tunnelField.click({position:{x:25,y:24}});assert.equal(await tunnelInput.evaluate(el=>el===document.activeElement),false);
     const copyTunnel=remoteDialog.getByRole('button',{name:'Copy tunnel URL'});
     await tunnelInput.focus();assert.equal(await tunnelInput.evaluate(el=>getComputedStyle(el).outlineStyle),'none');
     await tunnelInput.pressSequentially('x');assert.equal(await tunnelInput.inputValue(),'https://sample.tailnet.ts.net');
