@@ -656,52 +656,6 @@ impl Bridge for HttpBridge {
     }
 }
 
-pub fn sync_project_catalog(sync: crate::ProjectSync) -> Result<(), String> {
-    let bridge = HttpBridge::connect().map_err(|error| error.to_string())?;
-    let cancel = AtomicBool::new(false);
-    sync_project_catalog_on_bridge(
-        &bridge,
-        &sync,
-        &cancel,
-        Instant::now() + Duration::from_secs(15),
-    )
-}
-
-fn sync_project_catalog_on_bridge(
-    bridge: &impl Bridge,
-    sync: &crate::ProjectSync,
-    cancel: &AtomicBool,
-    deadline: Instant,
-) -> Result<(), String> {
-    let request = serde_json::to_vec(&serde_json::json!({
-        "version": crate::approval::VERSION,
-        "projectSync": sync,
-    }))
-    .map_err(|_| "Could not encode the remote project catalog.")?;
-    bridge
-        .send(&request, cancel, deadline)
-        .map_err(|_| "Could not send the remote project catalog.")?;
-    let response = bridge
-        .receive(cancel, deadline)
-        .map_err(|_| "Could not receive the remote project catalog result.")?;
-    let frame: crate::approval::Frame = serde_json::from_slice(&response)
-        .map_err(|_| crate::approval::UPDATE)?;
-    match frame {
-        crate::approval::Frame::Response { version, response }
-            if version == crate::approval::VERSION =>
-        {
-            if response.result.as_ref().is_some_and(|result| result["synced"] == true)
-                && response.error.is_none()
-            {
-                Ok(())
-            } else {
-                Err(response.error.unwrap_or_else(|| "Cloud project catalog sync was not confirmed.".into()))
-            }
-        }
-        _ => Err(crate::approval::UPDATE.into()),
-    }
-}
-
 pub fn call(request: &crate::Request, cancel: &AtomicBool) -> Result<crate::Response, String> {
     call_with_approval(request, cancel, &|_, _| {
         Err("Update Codex or use a client supporting form elicitation.".into())
@@ -794,10 +748,10 @@ fn call_on_bridge(
 
 #[cfg(test)]
 mod tcp_tests {
-    use super::{decode_http_bridge_frame, sync_project_catalog_on_bridge, tunnel_endpoint, valid_remote_token, Bridge, TcpBridge, MAX_FRAME};
+    use super::{decode_http_bridge_frame, tunnel_endpoint, valid_remote_token, Bridge, TcpBridge, MAX_FRAME};
     use std::io::{self, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::{atomic::AtomicBool, Mutex};
+    use std::sync::atomic::AtomicBool;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -815,7 +769,7 @@ mod tcp_tests {
 
     #[test]
     fn remote_http_response_decodes_the_tunnel_adapter_frame() {
-        let payload = br#"{"version":2,"response":{"result":{"synced":true}}}"#;
+        let payload = br#"{"version":2,"response":{"result":{"ok":true}}}"#;
         let mut response = (payload.len() as u32).to_le_bytes().to_vec();
         response.extend_from_slice(payload);
         assert_eq!(decode_http_bridge_frame(&response).unwrap(), payload);
@@ -828,44 +782,6 @@ mod tcp_tests {
         ] {
             assert!(decode_http_bridge_frame(&invalid).is_err());
         }
-    }
-
-    struct FixtureBridge {
-        sent: Mutex<Option<Vec<u8>>>,
-        response: Mutex<Option<Vec<u8>>>,
-    }
-    impl Bridge for FixtureBridge {
-        fn connected(&self) -> bool { true }
-        fn send(&self, bytes: &[u8], _: &AtomicBool, _: Instant) -> io::Result<()> {
-            *self.sent.lock().unwrap() = Some(bytes.to_vec());
-            Ok(())
-        }
-        fn receive(&self, _: &AtomicBool, _: Instant) -> io::Result<Vec<u8>> {
-            self.response.lock().unwrap().take().ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
-        }
-    }
-
-    #[test]
-    fn project_catalog_sync_uses_the_authenticated_versioned_bridge_envelope() {
-        let response = serde_json::to_vec(&crate::approval::Frame::Response {
-            version: crate::approval::VERSION,
-            response: crate::Response { result: Some(serde_json::json!({"synced":true})), error: None },
-        }).unwrap();
-        let bridge = FixtureBridge { sent: Mutex::new(None), response: Mutex::new(Some(response)) };
-        let sync = crate::ProjectSync {
-            token: "a".repeat(64),
-            host_id: "host_fixture".into(),
-            computer_name: "Codex fixture".into(),
-            projects: vec![crate::ProjectInfo { id: "project-id".into(), name: "Renamed".into() }],
-        };
-        assert!(sync_project_catalog_on_bridge(&bridge, &sync, &AtomicBool::new(false), deadline()).is_ok());
-        let envelope: serde_json::Value = serde_json::from_slice(&bridge.sent.lock().unwrap().clone().unwrap()).unwrap();
-        assert_eq!(envelope["version"], crate::approval::VERSION);
-        assert_eq!(envelope["projectSync"]["token"], sync.token);
-        assert_eq!(envelope["projectSync"]["hostId"], "host_fixture");
-        assert_eq!(envelope["projectSync"]["computerName"], "Codex fixture");
-        assert_eq!(envelope["projectSync"]["projects"], serde_json::json!([{"id":"project-id","name":"Renamed"}]));
-        assert!(envelope.get("request").is_none());
     }
 
     #[test]

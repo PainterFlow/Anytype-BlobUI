@@ -35,66 +35,6 @@ fn bridge_path() -> Result<PathBuf, String> {
         Ok(crate::settings_root_for_install(&install)?.join("Settings/anyblob/settings.json"))
     }
 }
-fn cloud_projects_path() -> Result<PathBuf, String> {
-    Ok(bridge_path()?
-        .parent()
-        .ok_or("Anyblob settings have no parent folder.")?
-        .join("cloud-projects.json"))
-}
-pub(crate) fn synced_cloud_projects() -> Result<Vec<crate::anyblob_cloud_projects::ProjectSummary>, String> {
-    let catalog = crate::anyblob_cloud_projects::read_at(&cloud_projects_path()?)?;
-    Ok(crate::anyblob_cloud_projects::projects(&catalog))
-}
-fn sync_cloud_projects_at(
-    state: &Value,
-    path: &std::path::Path,
-    payload: &Value,
-) -> Result<(), String> {
-    let fields = payload
-        .as_object()
-        .ok_or("Invalid remote project sync message.")?;
-    if fields.len() != 4
-        || !["token", "hostId", "computerName", "projects"]
-            .iter()
-            .all(|field| fields.contains_key(*field))
-    {
-        return Err("Invalid remote project sync message.".into());
-    }
-    let token = payload["token"]
-        .as_str()
-        .ok_or("Invalid remote project sync message.")?;
-    authenticate_remote(state, token)?;
-    let host_id = payload["hostId"]
-        .as_str()
-        .ok_or("Invalid remote project sync message.")?;
-    let computer_name = payload["computerName"]
-        .as_str()
-        .ok_or("Invalid remote project sync message.")?;
-    let rows = payload["projects"]
-        .as_array()
-        .ok_or("Invalid remote project sync message.")?;
-    let mut projects = Vec::with_capacity(rows.len());
-    for row in rows {
-        let fields = row
-            .as_object()
-            .ok_or("Invalid remote project sync message.")?;
-        if fields.len() != 2 || !fields.contains_key("id") || !fields.contains_key("name") {
-            return Err("Invalid remote project sync message.".into());
-        }
-        projects.push(crate::anyblob_cloud_projects::ProjectEntry {
-            id: row["id"]
-                .as_str()
-                .ok_or("Invalid remote project sync message.")?
-                .into(),
-            name: row["name"]
-                .as_str()
-                .ok_or("Invalid remote project sync message.")?
-                .into(),
-        });
-    }
-    crate::anyblob_cloud_projects::update_at(path, host_id, computer_name, projects)
-}
-
 fn state() -> Result<Value, String> {
     let path = bridge_path()?;
     if !path.exists() {
@@ -1232,19 +1172,6 @@ fn serve_remote_connection(stream: std::net::TcpStream, app: tauri::AppHandle) {
             return Err(blobui_mcp::approval::UPDATE.into());
         }
         let fields = envelope.as_object().ok_or("Invalid remote Anyblob request.")?;
-        if fields.contains_key("projectSync") {
-            if fields.len() != 2 || !fields.contains_key("version") {
-                return Err("Invalid remote Anyblob project sync message.".into());
-            }
-            sync_cloud_projects_at(&state()?, &cloud_projects_path()?, &envelope["projectSync"])?;
-            use tauri::Emitter;
-            let _ = app.emit("anyblob-cloud-projects-changed", ());
-            eprintln!(
-                "anyblob remote operation=project_sync elapsed_ms={} outcome=allowed",
-                started.elapsed().as_millis()
-            );
-            return Ok(json!({"synced":true}));
-        }
         if fields.len() != 2 || !fields.contains_key("request") {
             return Err("Invalid remote Anyblob request.".into());
         }
@@ -3127,75 +3054,6 @@ mod tests {
             );
         }
     }
-}
-
-#[cfg(test)]
-mod cloud_sync_tests {
-    use super::*;
-
-    fn fixture_path() -> PathBuf {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../.test-run/cloud-project-sync")
-            .join(format!("{}-{nonce}.json", std::process::id()));
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        path
-    }
-
-    #[test]
-    fn project_sync_authenticates_before_replacing_the_saved_catalog() {
-        let path = fixture_path();
-        let token = "a".repeat(64);
-        let enabled = json!({"enabled":true,"remoteAccess":true,"verifier":digest(&token)});
-        crate::anyblob_cloud_projects::update_at(
-            &path,
-            "host",
-            "OLD-PC",
-            vec![crate::anyblob_cloud_projects::ProjectEntry {
-                id: "old".into(),
-                name: "Old project".into(),
-            }],
-        )
-        .unwrap();
-        let original = crate::anyblob_cloud_projects::read_at(&path).unwrap();
-        let incoming = json!({
-            "token": "b".repeat(64),
-            "hostId": "host",
-            "computerName": "NEW-PC",
-            "projects": [{"id":"new","name":"New project"}]
-        });
-        assert!(sync_cloud_projects_at(&enabled, &path, &incoming).is_err());
-        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
-
-        let disabled = json!({"enabled":true,"remoteAccess":false,"verifier":digest(&token)});
-        let mut incoming = incoming;
-        incoming["token"] = token.clone().into();
-        assert!(sync_cloud_projects_at(&disabled, &path, &incoming).is_err());
-        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
-
-        assert!(sync_cloud_projects_at(&enabled, &path, &json!({
-            "token":token,
-            "hostId":"host",
-            "computerName":"NEW-PC",
-            "projects":[{"id":"bad/id","name":"Invalid"}]
-        })).is_err());
-        assert_eq!(crate::anyblob_cloud_projects::read_at(&path).unwrap(), original);
-
-        sync_cloud_projects_at(&enabled, &path, &json!({
-            "token":"a".repeat(64),
-            "hostId":"host",
-            "computerName":"NEW-PC",
-            "projects":[]
-        })).unwrap();
-        let refreshed = crate::anyblob_cloud_projects::read_at(&path).unwrap();
-        assert_eq!(refreshed.hosts["host"].computer_name, "NEW-PC");
-        assert!(refreshed.hosts["host"].projects.is_empty());
-        let _ = std::fs::remove_file(path);
-    }
-
 }
 
 #[cfg(all(test, windows))]

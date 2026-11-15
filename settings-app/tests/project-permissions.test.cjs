@@ -164,28 +164,22 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
   } finally {await browser.close();}
 });
 
-test('cloud project keys stay isolated and their catalog survives offline reloads', async()=>{
-  const fixture=path.join(workspace,'.test-run/cloud-project-permissions');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
+test('remote project scopes use colon-bearing host IDs from local Codex metadata', async()=>{
+  const fixture=path.join(workspace,'.test-run/remote-project-permissions');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
   try {
     const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(()=>{
       const source=(access,approval='alwaysAsk')=>({spaceId:'work',kind:'query',id:'shared-query',name:'Tasks',space:'Work',permission:{access,filesEnabled:false,approval}});
-      window.calls=[];window.projectError='Codex cloud catalog is offline';
-      window.projects=[
-        {id:'duplicate-id',name:'Same',rootPaths:['C:\\local'],kind:'local'},
-        {id:'duplicate-id',name:'Remote same',rootPaths:[],kind:'remote',hostId:'codex-host'},
-        {id:'duplicate-id',name:'Same',rootPaths:[],kind:'cloud',hostId:'host-a',computerName:'Cloud A'},
-        {id:'duplicate-id',name:'Same',rootPaths:[],kind:'cloud',hostId:'host-b',computerName:'Cloud B'},
-      ];
+      window.calls=[];window.projectError='Local Codex catalog is offline';window.projects=[];window.projectListeners=[];
       window.sources=[{spaceId:'work',space:'Work',kind:'query',id:'shared-query',name:'Tasks'}];
-      window.cloudProjectHandlers={};
-      window.__TAURI__={event:{listen:async(name,handler)=>{window.cloudProjectHandlers[name]=handler;return()=>delete window.cloudProjectHandlers[name];}},core:{invoke:async(name,args)=>{
+      window.__TAURI__={event:{listen:async(name)=>{window.projectListeners.push(name);return()=>{};}},core:{invoke:async(name,args)=>{
         calls.push(name);
         if(name==='get_app_state')return {ready:true,onboardingComplete:true,theme:'dark',hasSavedApiKey:true,settings:{codexIntegration:{spaces:{work:{access:'read',approval:'alwaysAsk',filesEnabled:false}},projects:{
-          'duplicate-id':{name:'Same',rootPaths:['C:\\local'],sources:[source('read')]},
-          'cloud:host-a:duplicate-id':{name:'Same',rootPaths:[],sources:[source('readWrite')]},
+          'duplicate-id':{name:'Same',rootPaths:['C:/local'],sources:[source('read')]},
+          'cloud:codex-host:device_01:duplicate-id':{kind:'remote',hostId:'codex-host:device_01',name:'Remote one',rootPaths:[],sources:[source('readWrite')]},
+          'cloud:codex-host:device_02:duplicate-id':{kind:'remote',hostId:'codex-host:device_02',name:'Remote two',rootPaths:[],sources:[]},
           'cloud:host-old:removed-id':{name:'Old cloud',rootPaths:[],sources:[source('createDelete','fullAccess')]},
         }}}};
         if(name==='get_updater_state')return {automaticChecksEnabled:false};
@@ -200,26 +194,31 @@ test('cloud project keys stay isolated and their catalog survives offline reload
     await loadSettings(page);await page.waitForFunction(()=>window.appReady);
     await page.locator('#codex-nav').click();await page.locator('#codex-tab-2').click();
     const rows=page.locator('#codex-project-list .formula-view-row');
-    await page.getByRole('status').filter({hasText:'Codex cloud catalog is offline'}).waitFor();
-    assert.equal(await rows.count(),3,'saved local and cloud overrides remain visible before the first successful catalog read');
+    await page.getByRole('status').filter({hasText:'Local Codex catalog is offline'}).waitFor();
+    assert.equal(await rows.count(),4,'saved project scopes remain visible before the first successful local scan');
     assert.equal(await page.locator('#codex-project-list .formula-view-warning').count(),0,'an offline first scan does not mark saved entries unavailable');
+    assert.equal(await page.evaluate(()=>projectListeners.includes('anyblob-cloud-projects-changed')),false);
 
-    const cloudHelp=page.getByRole('button',{name:'Cloud project information for Same'}).first();
-    await cloudHelp.focus();
-    const tooltipId=await cloudHelp.getAttribute('aria-describedby');
+    const remoteHelp=page.getByRole('button',{name:'Remote project information for Remote one'});await remoteHelp.focus();
+    const tooltipId=await remoteHelp.getAttribute('aria-describedby');
     await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='true'&&document.getElementById(id)?.hasAttribute('data-positioned'),tooltipId);
-    assert.match(await page.evaluate(id=>document.getElementById(id).textContent,tooltipId),/host-a|host-old/);
-    await cloudHelp.blur();await cloudHelp.hover();await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='true',tooltipId);
+    assert.match(await page.evaluate(id=>document.getElementById(id).textContent,tooltipId),/codex-host:device_01/);
+    await remoteHelp.blur();await remoteHelp.hover();await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='true',tooltipId);
     await page.mouse.move(5,5);await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='false',tooltipId);
 
-    await page.evaluate(()=>{window.projectError='';window.cloudProjectHandlers['anyblob-cloud-projects-changed']?.({payload:null});});
-    await page.waitForFunction(()=>document.querySelectorAll('#codex-project-list .formula-view-row').length===5);
-    const keys=await page.locator('#codex-project-list .formula-view-row').evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
-    assert.deepEqual(keys.sort(),['cloud:codex-host:duplicate-id','cloud:host-a:duplicate-id','cloud:host-b:duplicate-id','cloud:host-old:removed-id','duplicate-id'].sort());
-    const remoteHelp=page.getByRole('button',{name:'Remote project information for Remote same'});await remoteHelp.focus();
-    const remoteTooltipId=await remoteHelp.getAttribute('aria-describedby');
-    await page.waitForFunction(id=>document.getElementById(id)?.dataset.open==='true',remoteTooltipId);
-    assert.match(await page.evaluate(id=>document.getElementById(id).textContent,remoteTooltipId),/codex-host/);
+    await page.evaluate(()=>{window.projectError='';window.projects=[
+      {id:'duplicate-id',name:'Same',rootPaths:['C:/local'],kind:'local'},
+      {id:'duplicate-id',name:'Remote one',rootPaths:[],kind:'remote',hostId:'codex-host:device_01'},
+      {id:'duplicate-id',name:'Remote two',rootPaths:[],kind:'remote',hostId:'codex-host:device_02'},
+    ];});
+    await page.locator('#projects-reload').click();
+    await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
+    assert.equal(await rows.count(),4,'the local scan lists two remote hosts and retains old saved scopes');
+    const keys=await rows.evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
+    assert.deepEqual(keys.sort(),[
+      'cloud:codex-host:device_01:duplicate-id','cloud:codex-host:device_02:duplicate-id',
+      'cloud:host-old:removed-id','duplicate-id',
+    ].sort());
     const stale=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:host-old:removed-id"]')});
     await stale.getByText('Unavailable project. Saved selections are retained.').waitFor();
 
@@ -228,42 +227,33 @@ test('cloud project keys stay isolated and their catalog survives offline reload
     await page.locator('#codex-project-list [data-project-key="duplicate-id"]').click();
     await queryRow.waitFor();assert.equal(await access().innerText(),'Read Only');
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#codex-project-list [data-project-key="cloud:host-a:duplicate-id"]').click();
+    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:device_01:duplicate-id"]').click();
     await queryRow.waitFor();assert.equal(await access().innerText(),'Read-Write');
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#codex-project-list [data-project-key="cloud:host-b:duplicate-id"]').click();
+    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:device_02:duplicate-id"]').click();
     await queryRow.waitFor();assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),false);
     await queryRow.locator('.formula-view-name').click();
     await access().click();await page.locator('#project-source-dialog').getByRole('option',{name:'Create-Delete',exact:true}).click();
     await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:duplicate-id"]').click();
-    await queryRow.waitFor();assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),false);
-    await queryRow.locator('.formula-view-name').click();
-    assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),true);
-    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
     await page.locator('#save-button').click();
-    await page.waitForFunction(()=>window.saved?.codexIntegration.projects['cloud:host-b:duplicate-id']?.sources[0]?.permission.access==='createDelete');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:host-a:duplicate-id'].sources[0].permission.access),'readWrite');
+    await page.waitForFunction(()=>window.saved?.codexIntegration.projects['cloud:codex-host:device_02:duplicate-id']?.sources[0]?.permission.access==='createDelete');
+    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id'].sources[0].permission.access),'readWrite');
     assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['duplicate-id'].sources[0].permission.access),'read');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:duplicate-id']?.kind),'remote');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:duplicate-id']?.hostId),'codex-host');
+    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id']?.hostId),'codex-host:device_01');
 
     await page.evaluate(()=>{window.projectError='Offline refresh';});await page.locator('#projects-reload').click();
     await page.getByRole('status').filter({hasText:'Offline refresh'}).waitFor();
-    assert.equal(await rows.count(),5,'failed reload keeps the last project catalog and saved overrides');
-    await page.evaluate(()=>{window.projectError='';window.projects=window.projects.filter(project=>project.kind==='local');});
+    assert.equal(await rows.count(),4,'failed reload keeps the last local catalog and saved overrides');
+    await page.evaluate(()=>{window.projectError='';window.projects=window.projects.filter(project=>project.kind==='local'||project.hostId==='codex-host:device_02');});
     await page.locator('#projects-reload').click();
     await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
-    assert.equal(await page.locator('#codex-project-list [data-project-key="cloud:host-a:duplicate-id"]').count(),1,'a local-only offline result does not erase cached cloud projects');
-    assert.equal(await page.locator('#codex-project-list [data-project-key="cloud:host-b:duplicate-id"]').count(),1);
-
-    await page.evaluate(()=>{window.projects=window.projects.filter(project=>project.kind==='local'||project.hostId==='host-b');window.cloudProjectHandlers['anyblob-cloud-projects-changed']?.({payload:null});});
-    await page.waitForFunction(()=>document.querySelector('#codex-project-list [data-project-key="cloud:host-a:duplicate-id"]')?.closest('.project-catalog-entry')?.innerText.includes('Unavailable project'));
+    const unavailableRemote=page.locator('#codex-project-list .project-catalog-entry')
+      .filter({has:page.locator('[data-project-key="cloud:codex-host:device_01:duplicate-id"]')});
+    await unavailableRemote.getByText('Unavailable project. Saved selections are retained.').waitFor();
     await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:620,height:850});
     assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.help-tooltip-popover')).transitionDuration),'0s');
     assert.equal(await page.evaluate(()=>document.querySelector('.page-content').scrollWidth<=document.querySelector('.page-content').clientWidth),true);
-    await page.screenshot({path:path.join(fixture,'cloud-projects-narrow-dark.png'),fullPage:true});
-    assert.equal(await page.evaluate(()=>window.cloudProjectHandlers['anyblob-cloud-projects-changed']!==undefined),true);
+    await page.screenshot({path:path.join(fixture,'remote-projects-narrow-dark.png'),fullPage:true});
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}
 });
