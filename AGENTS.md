@@ -6,6 +6,7 @@
 - When making UI, always check `./settings-app/UI_REFERENCE.md` and make sure to follow Anytypes UI philosophy.
 - Make sure to always test and build/compile the app after you finished implementing the feature.
 - Anytypes v1 API is completely banned.
+- Never add the workspace's `anyblob.config.toml` to Git or make it publicly accessible. Keep it ignored.
 - Never modify `Changelogs.md` unless I explicitly request it in my prompt.
 - Never modify `dev-guide.md` unless I explicitly request it in my prompt.
 

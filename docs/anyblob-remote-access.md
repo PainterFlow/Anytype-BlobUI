@@ -47,7 +47,7 @@ key = "a-project-specific-key"
 remote = false
 ```
 
-Use a unique key for each project. BlobUI identifies the project by the SHA-256 hash of its key. A chat authenticates once by calling `authenticate_project` with the contents of that file. The MCP server uses the Codex thread ID from request metadata. It stores authenticated chat IDs in `Settings/anyblob/projects.json`.
+Use a unique key for each project. BlobUI identifies the project by the SHA-256 hash of its key. A chat authenticates once by calling `authenticate_project` with the `name`, `key`, and `remote` fields as separate arguments. The MCP server does not send the complete file contents. It uses the Codex thread ID from request metadata and stores authenticated chat IDs in `Settings/anyblob/projects.json`.
 
 Project source permissions live in `Settings/anyblob/permissions.json`. The `projectless` entry holds global permissions. The `projects` entries hold project-specific permissions keyed by the project key hash. Chats that have not authenticated to a configured project use the projectless permissions.
 

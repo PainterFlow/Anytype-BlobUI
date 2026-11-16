@@ -66,19 +66,24 @@ pub(crate) fn parse_config(text: &str) -> Result<ProjectConfig, String> {
     }
     let file: ProjectFile = toml::from_str(text)
         .map_err(|_| "Anyblob project config must specify a name, key, and remote flag.")?;
-    let name = file.name.trim();
+    identify_fields(&file.name, &file.key, file.remote)
+}
+
+pub(crate) fn identify_fields(name: &str, key: &str, remote: bool) -> Result<ProjectConfig, String> {
+    let name = name.trim();
     if name.is_empty()
         || name.len() > 512
         || name.chars().any(char::is_control)
-        || file.key.trim().is_empty()
-        || file.key.chars().any(char::is_control)
+        || key.trim().is_empty()
+        || key.len() > MAX_PROJECT_BYTES
+        || key.chars().any(char::is_control)
     {
-        return Err("Anyblob project config contains an invalid name or key.".into());
+        return Err("Anyblob project identity contains an invalid name or key.".into());
     }
     Ok(ProjectConfig {
-        id: format!("{:x}", Sha256::digest(file.key.as_bytes())),
+        id: format!("{:x}", Sha256::digest(key.as_bytes())),
         name: name.into(),
-        remote: file.remote,
+        remote,
     })
 }
 
@@ -284,5 +289,16 @@ mod tests {
         fixture.write("first/anyblob.config.toml", first);
         fixture.write("second/anyblob.config.toml", second);
         assert!(discover_in(Some(&fixture.0), None).is_err());
+    }
+
+    #[test]
+    fn separate_authentication_fields_match_the_project_file_identity() {
+        let from_file = parse_config("name = ' Work '\nkey = 'same key'\nremote = true").unwrap();
+        let from_fields = identify_fields(" Work ", "same key", true).unwrap();
+        assert_eq!(from_fields.id, from_file.id);
+        assert_eq!(from_fields.name, from_file.name);
+        assert_eq!(from_fields.remote, from_file.remote);
+        assert_eq!(from_fields.name, "Work");
+        assert!(identify_fields("Work", "secret\nkey", true).is_err());
     }
 }

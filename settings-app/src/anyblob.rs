@@ -286,11 +286,11 @@ pub(crate) fn synchronize_project_registry(
     })
 }
 
-fn authenticate_project_chat(thread_id: &str, text: &str) -> Result<Value, String> {
+fn authenticate_project_chat(thread_id: &str, name: &str, key: &str, remote: bool) -> Result<Value, String> {
     if !valid_chat_id(thread_id) {
         return Err("Codex did not supply a valid chat identity for project authentication.".into());
     }
-    let config = crate::codex_projects::parse_config(text)?;
+    let config = crate::codex_projects::identify_fields(name, key, remote)?;
     let projects = crate::codex_projects::discover()?;
     let project = projects
         .iter()
@@ -637,7 +637,7 @@ fn dispatch_with_identity_policy(
     blobui_mcp::thread_id(&json!({"_meta":{"threadId":request.thread_id}}))?;
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
-    if let Operation::AuthenticateProject { config } = &request.request {
+    if let Operation::AuthenticateProject { name, key, remote } = &request.request {
         if !connected() {
             return Err("MCP request cancelled or disconnected.".into());
         }
@@ -645,7 +645,7 @@ fn dispatch_with_identity_policy(
             .thread_id
             .as_deref()
             .ok_or("Codex did not attach a chat ID. Update Anyblob in Codex and retry.")?;
-        return authenticate_project_chat(thread_id, config);
+        return authenticate_project_chat(thread_id, name, key, *remote);
     }
     let config = load_config()?;
     let mentions = matches!(&request.request, Operation::SearchMentions { .. });
