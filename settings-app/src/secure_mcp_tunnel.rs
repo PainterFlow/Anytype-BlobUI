@@ -30,9 +30,42 @@ fn health_path() -> Result<PathBuf, String> {
 
 fn runtime_path() -> Option<PathBuf> {
     let names = ["tunnel-client-runtime.exe", "tunnel-client.exe"];
-    std::env::split_paths(&std::env::var_os("PATH")?)
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut directories: Vec<_> = std::env::split_paths(&inherited).collect();
+    #[cfg(windows)]
+    directories.extend(registered_path_directories());
+    directories.into_iter()
+        .filter(|directory| directory.is_absolute())
         .flat_map(|directory| names.map(|name| directory.join(name)))
         .find(|path| path.is_file())
+}
+
+#[cfg(windows)]
+fn registered_path_directories() -> Vec<PathBuf> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
+    use windows_sys::Win32::{Foundation::ERROR_SUCCESS, System::Registry::*};
+
+    let mut directories = Vec::new();
+    let name: Vec<_> = "Path".encode_utf16().chain([0]).collect();
+    for (root, key) in [
+        (HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (HKEY_CURRENT_USER, "Environment"),
+    ] {
+        let key: Vec<_> = key.encode_utf16().chain([0]).collect();
+        let mut value = vec![0u16; 32768];
+        let mut len = (value.len() * std::mem::size_of::<u16>()) as u32;
+        let result = unsafe {
+            RegGetValueW(
+                root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+                std::ptr::null_mut(), value.as_mut_ptr().cast(), &mut len,
+            )
+        };
+        if result == ERROR_SUCCESS {
+            let end = value.iter().position(|unit| *unit == 0).unwrap_or(value.len());
+            directories.extend(std::env::split_paths(&OsString::from_wide(&value[..end])));
+        }
+    }
+    directories
 }
 
 fn mcp_path() -> Result<PathBuf, String> {
@@ -214,14 +247,13 @@ fn runtime_ready() -> bool {
 }
 
 fn start_process(tunnel_id: &str, secret: SecretString) -> Result<(), String> {
-    stop_process()?;
     let runtime = runtime_path()
         .ok_or("OpenAI tunnel-client-runtime.exe is not installed or is missing from PATH.")?;
     crate::reject_reparse_component(&runtime)?;
     let mcp = mcp_path()?;
     let health = health_path()?;
     crate::reject_reparse_component(&health)?;
-    remove_health_file();
+    stop_process()?;
     let mut command = Command::new(runtime);
     command
         .arg("run")
@@ -358,24 +390,30 @@ pub(crate) fn disable_for_anyblob() {
     let _ = save_configuration(false, &tunnel_id);
 }
 
-pub(crate) fn start_if_configured() {
-    let Ok(state) = crate::anyblob::state() else {
-        return;
-    };
+#[tauri::command]
+pub fn refresh_secure_mcp_tunnel(restart: bool) -> Result<Value, String> {
+    let _guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
+    let running = process_running()?;
+    if (if restart { running } else { !running }) && (restart || runtime_path().is_some()) {
+        start_saved_tunnel()?;
+    }
+    secure_mcp_tunnel_status()
+}
+
+fn start_saved_tunnel() -> Result<(), String> {
+    let state = crate::anyblob::state()?;
     if state["enabled"] != true || state["secureMcpTunnelEnabled"] != true {
-        return;
+        return Ok(());
     }
     let tunnel_id = state["secureMcpTunnelId"].as_str().unwrap_or("");
     if !valid_tunnel_id(tunnel_id) {
-        return;
+        return Err("Enter a valid Secure MCP Tunnel ID.".into());
     }
-    let Ok(path) = secret_path() else {
-        return;
-    };
-    let Ok(secret) = read_saved_secret(&path) else {
-        return;
-    };
-    if let Err(error) = start_process(tunnel_id, secret) {
+    start_process(tunnel_id, read_saved_secret(&secret_path()?)?)
+}
+
+pub(crate) fn start_if_configured() {
+    if let Err(error) = start_saved_tunnel() {
         eprintln!("Secure MCP Tunnel did not start: {error}");
     }
 }
