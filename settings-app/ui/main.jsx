@@ -1,3 +1,4 @@
+import { createAnyblobDraft } from "./anyblob-draft.js";
 import marked from "./vendor/marked.umd.js";
 import "./visibility-field.js";
 import "./modal.js";
@@ -32,6 +33,7 @@ import { createNativeService } from "./native-service.js";
 import { DeveloperGuideReader, MarkdownImageViewer, MarkdownView } from "./screens/documentation.jsx";
 import { ComponentCatalog } from "./screens/component-catalog.jsx";
 
+window.BlobUI.AnyblobDraft = createAnyblobDraft();
 window.marked = marked;
 const calendarController = createCalendarController();
 window.BlobUI.CalendarPage = calendarController;

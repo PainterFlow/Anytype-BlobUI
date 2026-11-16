@@ -1,34 +1,34 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { clearStaleSaveStatus } from "../anyblob-status.js";
-import { Button, FolderPathInput, SettingsGroup, SettingsRow, Switch } from "../shared/settings-controls.jsx";
+import { Button, DialogSwitch, FolderPathInput, SecretTextField, SettingsGroup, SettingsRow, Switch } from "../shared/settings-controls.jsx";
+import { SettingsDialog } from "../shared/settings-dialog.jsx";
 import "./codex-integration.css";
 
 const UI=()=>window.BlobUI;
 
 export function CodexIntegration() {
   const page=UI().CodexPage,api=useSyncExternalStore(page.subscribe,page.getSnapshot,page.getSnapshot);
-  const [enabled,setEnabled]=useState(false),[installation,setInstallation]=useState(null),[status,setStatus]=useState(""),[changing,setChanging]=useState(false),[installing,setInstalling]=useState(false),[completion,setCompletion]=useState(null);
-  const [folder, setFolder] = useState("");
+  const draftController = UI().AnyblobDraft;
+  const draft = useSyncExternalStore(draftController.subscribe, draftController.getSnapshot, draftController.getSnapshot);
+  const { enabled, folder, tunnelEnabled, tunnelId, runtimeApiKey } = draft;
+  const setTunnelId = value => draftController.change({ tunnelId: value });
+  const setRuntimeApiKey = value => draftController.change({ runtimeApiKey: value });
+  const [installation,setInstallation]=useState(null),[status,setStatus]=useState(""),[installing,setInstalling]=useState(false),[completion,setCompletion]=useState(null);
   const [folderChanging, setFolderChanging] = useState(false);
   const [tunnel, setTunnel] = useState(null);
-  const [tunnelEnabled, setTunnelEnabled] = useState(false);
-  const [tunnelId, setTunnelId] = useState("");
-  const [runtimeApiKey, setRuntimeApiKey] = useState("");
   const [tunnelChanging, setTunnelChanging] = useState(false);
   const [tunnelError, setTunnelError] = useState("");
+  const [tunnelOpen, setTunnelOpen] = useState(false);
   const integrationEpoch = useRef(0), installationEpoch = useRef(0), tunnelEpoch = useRef(0);
-  const tunnelSettingsLoaded = useRef(false);
   const backdrop = useRef(null), dialog = useRef(null), done = useRef(null), modal = useRef(null);
 
   const refresh = async () => {
     if (!api) return;
     const epoch = ++integrationEpoch.current;
     try {
-      const value = await api.invoke("anyblob_status");
+      await draftController.load();
       if (epoch !== integrationEpoch.current) return;
-      setEnabled(value.enabled);
-      setFolder(value.localProjectsFolder || "");
       setStatus(clearStaleSaveStatus);
     } catch (error) {
       if (epoch === integrationEpoch.current) setStatus(String(error.message || error));
@@ -42,11 +42,7 @@ export function CodexIntegration() {
       const value = await api.invoke("secure_mcp_tunnel_status");
       if (epoch !== tunnelEpoch.current) return;
       setTunnel(value);
-      if (!tunnelSettingsLoaded.current) {
-        tunnelSettingsLoaded.current = true;
-        setTunnelEnabled(value.enabled);
-        setTunnelId(value.tunnelId || "");
-      }
+
     } catch (error) {
       if (epoch === tunnelEpoch.current) setTunnelError(String(error.message || error));
     }
@@ -60,7 +56,6 @@ export function CodexIntegration() {
       integrationEpoch.current++;
       installationEpoch.current++;
       tunnelEpoch.current++;
-      tunnelSettingsLoaded.current = false;
     };
   }, [api]);
   useEffect(() => UI().AppReload?.register(() => Promise.allSettled([refresh(), refreshInstallation(), refreshTunnel()])), [api, installing]);
@@ -77,35 +72,19 @@ export function CodexIntegration() {
   useEffect(()=>{if(!backdrop.current||!dialog.current)return;modal.current=UI().createModalController({backdrop:backdrop.current,dialog:dialog.current,initialFocus:()=>done.current,inertTargets:[document.getElementById("settings-react-root")],onClose:()=>setCompletion(null)});return()=>{modal.current?.destroy();modal.current=null;};},[api]);
   useEffect(()=>{if(completion)modal.current?.open();else if(modal.current?.isOpen())modal.current.close();},[completion]);
 
-  async function configure(value) {
-    if (!api || changing || folderChanging || tunnelChanging) return;
-    setChanging(true);
-    integrationEpoch.current++;
-    setStatus("");
-    try {
-      const result = await api.invoke("configure_anyblob", { enabled: value });
-      setEnabled(result.enabled);
-      if (!result.enabled) setRuntimeApiKey("");
-      await refreshTunnel();
-    } catch (error) {
-      await refresh();
-      setStatus(String(error.message || error));
-    } finally {
-      setChanging(false);
-    }
+  function configure(value) {
+    draftController.change({ enabled: value });
   }
 
   async function browseFolder() {
-    if (!enabled || changing || folderChanging) return;
+    if (!enabled || folderChanging) return;
     setFolderChanging(true);
     setStatus("");
     try {
       const selected = await api.invoke("select_anyblob_projects_folder", { currentDirectory: folder || null });
       if (selected == null) return;
       integrationEpoch.current++;
-      await api.invoke("set_anyblob_projects_folder", { folder: selected });
-      setFolder(selected);
-      void UI().ProjectPermissions?.reloadProjects();
+      draftController.change({ folder: selected });
     } catch (error) {
       setStatus(String(error.message || error));
     } finally {
@@ -114,18 +93,13 @@ export function CodexIntegration() {
   }
 
   async function configureTunnel(value) {
-    if (!enabled || tunnelChanging || changing) return;
+    if (!enabled || tunnelChanging) return;
     setTunnelChanging(true);
     setTunnelError("");
     tunnelEpoch.current++;
     try {
-      await api.invoke("configure_secure_mcp_tunnel", {
-        enabled: value,
-        tunnelId: tunnelId.trim(),
-        runtimeApiKey: value ? runtimeApiKey.trim() || null : null,
-      });
-      setTunnelEnabled(value);
-      setRuntimeApiKey("");
+      if (value) await draftController.save({ startTunnel: true });
+      else await draftController.stop();
     } catch (error) {
       setTunnelError(String(error.message || error));
     } finally {
@@ -136,18 +110,13 @@ export function CodexIntegration() {
 
   function changeTunnelEnabled(value) {
     setTunnelError("");
-    if (!value && (tunnel?.running || tunnel?.enabled)) {
-      void configureTunnel(false);
-      return;
-    }
-    setTunnelEnabled(value);
-    if (!value) setRuntimeApiKey("");
+    draftController.change({ tunnelEnabled: value });
   }
 
   async function installMarketplace(){if(!api||installing)return;const updating=!!installation?.updateAvailable;setInstalling(true);installationEpoch.current++;setStatus("");try{await api.invoke("install_anyblob_marketplace");const next=await api.invoke("anyblob_installation_status");setInstallation(next);setCompletion({updating});}catch(error){setStatus(String(error.message||error));}finally{setInstalling(false);}}
   const refreshRequired=installation?.installed && installation?.codexRefreshRequired && !installation?.updateAvailable;
   if (!api) return null;
-  const tunnelLocked = !enabled || changing || tunnelChanging;
+  const tunnelLocked = !enabled || draft.locked || tunnelChanging;
   const tunnelFieldsDisabled = tunnelLocked || !tunnelEnabled || !!tunnel?.running;
   const canStart = tunnelEnabled && tunnel?.runtimeAvailable && tunnelId.trim() &&
     (runtimeApiKey.trim() || (tunnel.keyConfigured && tunnelId.trim() === tunnel.tunnelId));
@@ -162,45 +131,46 @@ export function CodexIntegration() {
   return <>
     <div className="section-heading"><h2>General</h2></div>
     <div className="settings-list anyblob-integration-settings">
-      <Switch id="enable-anyblob" label="Enable Anyblob" className="native-accent-control settings-row" checked={enabled} disabled={changing || folderChanging || tunnelChanging} onChange={configure} />
+      <Switch id="enable-anyblob" label="Enable Anyblob" className="native-accent-control settings-row" checked={enabled} disabled={draft.locked || folderChanging || tunnelChanging} onChange={configure} />
       <div className="settings-row kanban-setting-row"><div className="kanban-setting-copy"><span className="kanban-setting-title">Install Marketplace</span><span className="anyblob-version settings-row-description" hidden={!installation?.installedVersion&&!installation?.updateAvailable}>{installation?.installedVersion&&<>v{installation.installedVersion}</>}{installation?.updateAvailable&&installation?.bundledVersion&&installation.bundledVersion!==installation.installedVersion&&<>{installation.installedVersion?" → ":""}<span className="anyblob-version-available">v{installation.bundledVersion}</span></>}</span></div><button type="button" className="banner-image-button update-check-button" disabled={installing} title={installation?.bundledVersion?`Anyblob ${installation.bundledVersion}`:""} onClick={()=>refreshRequired?setCompletion({refresh:true}):void installMarketplace()}>{installing?(installation?.updateAvailable?"Updating…":"Installing…"):installation?.updateAvailable?"Update":refreshRequired?"Refresh in Codex":installation?.installed?"Installed":"Install"}</button></div>
     </div>
     <SettingsGroup className="settings-list anyblob-integration-settings">
       <SettingsRow className="settings-row anyblob-folder-row" label="Local Projects Folder">
         <FolderPathInput id="anyblob-local-projects-folder" aria-label="Local Projects Folder" value={folder}
-          placeholder="No folder selected" disabled={!enabled || changing || folderChanging} onClick={browseFolder}
+          placeholder="No folder selected" disabled={!enabled || draft.locked || folderChanging} onClick={browseFolder}
           onKeyDown={event => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               void browseFolder();
             }
           }} />
-        <Button className="banner-image-button" aria-haspopup="dialog" aria-label="Browse for Local Projects Folder"
-          disabled={!enabled || changing || folderChanging} onClick={browseFolder}>Browse</Button>
       </SettingsRow>
     </SettingsGroup>
     <SettingsGroup className="settings-list anyblob-integration-settings">
-      <Switch id="enable-secure-mcp-tunnel" label="Secure MCP Tunnel" checked={enabled && tunnelEnabled}
-        disabled={tunnelLocked || !tunnel} onChange={changeTunnelEnabled} />
-      <SettingsRow label={<label htmlFor="anyblob-tunnel-id">Tunnel ID</label>}>
-        <input id="anyblob-tunnel-id" className="color-text-input anyblob-tunnel-input" value={tunnelId}
-          autoComplete="off" spellCheck={false} disabled={tunnelFieldsDisabled}
-          onChange={event => setTunnelId(event.currentTarget.value)} />
-      </SettingsRow>
-      <SettingsRow label={<label htmlFor="anyblob-tunnel-key">Runtime API key</label>}>
-        <input id="anyblob-tunnel-key" className="color-text-input anyblob-tunnel-input" type="password"
-          autoComplete="new-password" spellCheck={false} value={runtimeApiKey}
-          placeholder={tunnel?.keyConfigured ? "Key saved" : ""} disabled={tunnelFieldsDisabled}
-          onChange={event => setRuntimeApiKey(event.currentTarget.value)} />
-      </SettingsRow>
-      <SettingsRow description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : "Tunnel stopped"}
+      <DialogSwitch id="enable-secure-mcp-tunnel" label="Secure MCP Tunnel" checked={enabled && tunnelEnabled}
+        dialogId="anyblob-tunnel-dialog" expanded={tunnelOpen} disabled={tunnelLocked || !tunnel}
+        onOpen={() => setTunnelOpen(true)} onChange={value => { changeTunnelEnabled(value); if (value) setTunnelOpen(true); }} />
+    </SettingsGroup>
+    <SettingsDialog id="anyblob-tunnel-dialog" title="Secure MCP Tunnel" open={tunnelOpen} onClose={() => setTunnelOpen(false)} className="anyblob-tunnel-dialog">
+      <div className="anyblob-tunnel-fields">
+        <SecretTextField label="Tunnel ID" resetKey={tunnelOpen} className="input-field anyblob-tunnel-field"
+          inputAttributes={{ id: "anyblob-tunnel-id", className: "color-text-input", value: tunnelId,
+            autoComplete: "off", spellCheck: false, disabled: tunnelFieldsDisabled,
+            onChange: event => setTunnelId(event.currentTarget.value) }} />
+        <SecretTextField label="Runtime API key" resetKey={tunnelOpen} className="input-field anyblob-tunnel-field"
+          inputAttributes={{ id: "anyblob-tunnel-key", className: "color-text-input", value: runtimeApiKey,
+            autoComplete: "new-password", spellCheck: false, disabled: tunnelFieldsDisabled,
+            placeholder: tunnel?.keyConfigured ? "Key saved" : "",
+            onChange: event => setRuntimeApiKey(event.currentTarget.value) }} />
+      </div>
+      <SettingsRow className="settings-row anyblob-tunnel-actions" description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : "Tunnel stopped"}
         descriptionAttributes={{ role: "status" }}>
         <Button className="banner-image-button" disabled={tunnelLocked || (!tunnel?.running && !canStart)}
           onClick={() => void configureTunnel(!tunnel?.running)}>
           {tunnelChanging ? "Please wait…" : tunnel?.running ? "Stop tunnel" : "Start tunnel"}
         </Button>
       </SettingsRow>
-    </SettingsGroup>
+    </SettingsDialog>
     <p className="input-hint" role="status" id="anyblob-integration-status">{status}</p>
     {createPortal(<div ref={backdrop} className="confirm-backdrop" hidden>
       <section ref={dialog} className="confirm-dialog" role="dialog" aria-modal="true" aria-label={completion?.refresh?"Refresh Anyblob in Codex":completion?.updating?"Anyblob marketplace updated":"Anyblob marketplace installed"} tabIndex={-1}>

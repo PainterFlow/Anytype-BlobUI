@@ -298,9 +298,21 @@ pub fn configure_secure_mcp_tunnel(
     enabled: bool,
     tunnel_id: String,
     runtime_api_key: Option<String>,
+    start: Option<bool>,
 ) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     if !enabled {
+        if let Some(key) = runtime_api_key.as_deref().map(str::trim).filter(|key| !key.is_empty()) {
+            if key.len() > 4096 || key.chars().any(char::is_control) {
+                return Err("The Secure MCP Tunnel key is invalid.".into());
+            }
+            save_secret(&secret_path()?, key)?;
+        } else if crate::anyblob::state()?["secureMcpTunnelId"].as_str().unwrap_or("") != tunnel_id.trim() {
+            let path = secret_path()?;
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|_| "Could not remove the previous tunnel key.")?;
+            }
+        }
         stop_process()?;
         return save_configuration(false, tunnel_id.trim());
     }
@@ -327,7 +339,9 @@ pub fn configure_secure_mcp_tunnel(
         }
         None => return Err("Enter the runtime API key for this tunnel.".into()),
     };
-    start_process(tunnel_id, secret)?;
+    if start.unwrap_or(true) {
+        start_process(tunnel_id, secret)?;
+    }
     if let Err(error) = save_configuration(true, tunnel_id) {
         let _ = stop_process();
         return Err(error);

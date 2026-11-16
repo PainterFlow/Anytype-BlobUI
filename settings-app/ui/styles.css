@@ -264,14 +264,61 @@ button:focus-visible, input:focus-visible { outline: none; }
 
 .advanced-row input { width: 54%; }
 .advanced-row input::placeholder { color: var(--text-muted); }
-.read-only-text-input { cursor: default; caret-color: transparent; pointer-events: none; user-select: none; -webkit-user-select: none; }
-.visibility-field { display: flex; align-items: center; gap: 4px; width: 54%; min-width: 0; }
-.input-field .visibility-field input { flex: 1 1 auto; width: 100%; }
-.visibility-toggle { position: relative; isolation: isolate; flex: 0 0 28px; display: grid; place-items: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: color-mix(in srgb, var(--text-secondary) 82%, #000); opacity: 0; pointer-events: none; cursor: pointer; transition: opacity .15s ease, color .15s ease; }
-.visibility-toggle::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
+input[readonly], textarea[readonly], input[role="button"] { caret-color: transparent; }
+input[role="button"] { user-select: none; }
+.read-only-text-input { cursor: default; pointer-events: none; user-select: none; }
+.visibility-field { width: 54%; }
+:is(.visibility-field, .copy-text-field) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 8px 0 14px;
+  border-radius: 18px;
+  background: var(--input-bg);
+}
+:is(.visibility-field, .copy-text-field) > input,
+.visibility-field > input:is(:hover, :focus) {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+:is(.visibility-field, .copy-text-field) > input:focus-visible { outline: none; }
+.visibility-field:has(input:not(:disabled):is(:hover, :focus)) { background: var(--active); }
+.visibility-field:has(input.invalid) { outline: 1px solid #f07878; }
+.visibility-field > input.invalid { outline: none; }
+.visibility-field > input::-ms-reveal { display: none; }
+:is(.visibility-toggle, .copy-text-field-button) {
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 0;
+  cursor: pointer;
+}
+:is(.visibility-toggle, .copy-text-field-button):hover:not(:disabled) {
+  background: var(--active);
+  color: var(--text);
+}
+:is(.visibility-toggle, .copy-text-field-button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.visibility-toggle { opacity: 0; pointer-events: none; transition: opacity .15s ease, color .15s ease; }
 .visibility-field:hover .visibility-toggle, .visibility-field:focus-within .visibility-toggle, .visibility-field[data-filled="true"] .visibility-toggle, .visibility-toggle:focus-visible { opacity: 1; pointer-events: auto; }
-.visibility-toggle:hover:not(:disabled)::before { opacity: 1; }
-.visibility-toggle:focus-visible { outline: none; }
 .visibility-toggle:disabled { cursor: wait; }
 .visibility-toggle svg, svg.visibility-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .visibility-slash { opacity: 0; }
