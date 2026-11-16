@@ -2763,6 +2763,7 @@ fn main() {
             marketplace::install_anyblob_marketplace,
             anyblob::configure_anyblob,
             secure_mcp_tunnel::secure_mcp_tunnel_status,
+            secure_mcp_tunnel::refresh_secure_mcp_tunnel,
             secure_mcp_tunnel::configure_secure_mcp_tunnel,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,

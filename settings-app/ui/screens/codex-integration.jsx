@@ -35,14 +35,16 @@ export function CodexIntegration() {
     }
   };
   const refreshInstallation=async()=>{if(!api||installing)return;const epoch=++installationEpoch.current;try{const value=await api.invoke("anyblob_installation_status");if(epoch===installationEpoch.current)setInstallation(value);}catch(error){if(epoch===installationEpoch.current){setInstallation(null);setStatus(String(error.message||error));}}};
-  const refreshTunnel = async () => {
+  const refreshTunnel = async (restart = null) => {
     if (!api) return;
     const epoch = ++tunnelEpoch.current;
     try {
-      const value = await api.invoke("secure_mcp_tunnel_status");
+      const value = restart === null
+        ? await api.invoke("secure_mcp_tunnel_status")
+        : await api.invoke("refresh_secure_mcp_tunnel", { restart });
       if (epoch !== tunnelEpoch.current) return;
       setTunnel(value);
-
+      if (restart !== null) setTunnelError("");
     } catch (error) {
       if (epoch === tunnelEpoch.current) setTunnelError(String(error.message || error));
     }
@@ -58,7 +60,7 @@ export function CodexIntegration() {
       tunnelEpoch.current++;
     };
   }, [api]);
-  useEffect(() => UI().AppReload?.register(() => Promise.allSettled([refresh(), refreshInstallation(), refreshTunnel()])), [api, installing]);
+  useEffect(() => UI().AppReload?.register(() => Promise.allSettled([refresh(), refreshInstallation(), tunnelChanging ? undefined : refreshTunnel(false)])), [api, installing, tunnelChanging]);
   useEffect(() => {
     const listener = () => { void refresh(); void refreshInstallation(); void refreshTunnel(); };
     window.addEventListener("blobui-codex-integration-refresh", listener);
@@ -92,13 +94,14 @@ export function CodexIntegration() {
     }
   }
 
-  async function configureTunnel(value) {
+  async function configureTunnel(action) {
     if (!enabled || tunnelChanging) return;
     setTunnelChanging(true);
     setTunnelError("");
     tunnelEpoch.current++;
     try {
-      if (value) await draftController.save({ startTunnel: true });
+      if (action === "restart") await refreshTunnel(true);
+      else if (action === "start") await draftController.save({ startTunnel: true });
       else await draftController.stop();
     } catch (error) {
       setTunnelError(String(error.message || error));
@@ -165,10 +168,14 @@ export function CodexIntegration() {
       </div>
       <SettingsRow className="settings-row anyblob-tunnel-actions" description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : "Tunnel stopped"}
         descriptionAttributes={{ role: "status" }}>
-        <Button className="banner-image-button" disabled={tunnelLocked || (!tunnel?.running && !canStart)}
-          onClick={() => void configureTunnel(!tunnel?.running)}>
-          {tunnelChanging ? "Please wait…" : tunnel?.running ? "Stop tunnel" : "Start tunnel"}
-        </Button>
+        <div className="anyblob-tunnel-buttons">
+          <Button className="banner-image-button" disabled={tunnelLocked || (!tunnel?.running && !canStart)}
+            onClick={() => void configureTunnel(tunnel?.running ? "stop" : "start")}>
+            {tunnelChanging ? "Please wait…" : tunnel?.running ? "Stop tunnel" : "Start tunnel"}
+          </Button>
+          {tunnel?.running && <Button className="banner-image-button" disabled={tunnelLocked}
+            onClick={() => void configureTunnel("restart")}>Restart tunnel</Button>}
+        </div>
       </SettingsRow>
     </SettingsDialog>
     <p className="input-hint" role="status" id="anyblob-integration-status">{status}</p>

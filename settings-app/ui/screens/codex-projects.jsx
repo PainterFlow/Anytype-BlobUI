@@ -11,7 +11,13 @@ const approvalOptions = [{value:"alwaysAsk",label:"Always Ask"},{value:"approveF
 
 function ReloadIcon(){return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" fill="none" /></svg>;}
 
-function TrashIcon(){return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h12M7 5.5V4h6v1.5m-8 0 1 10h8l1-10M8 8v5m4-5v5" /></svg>;}
+function TrashIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3.5 5.75h13M7.25 5.75v-1.5A1.25 1.25 0 0 1 8.5 3h3a1.25 1.25 0 0 1 1.25 1.25v1.5" />
+    <path d="m5.25 5.75.65 9.55A1.85 1.85 0 0 0 7.75 17h4.5a1.85 1.85 0 0 0 1.85-1.7l.65-9.55M8.5 9v4.5m3-4.5v4.5" />
+  </svg>;
+}
 
 function CatalogToolbar({prefix,label,onReload,onDeleteUnavailable,showDeleteUnavailable,locked,busy,categories,selectedCategories,onCategoriesChange,query,setQuery}) {
   return <div className="formula-toolbar">
