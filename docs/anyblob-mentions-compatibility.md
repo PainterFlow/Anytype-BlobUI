@@ -26,7 +26,7 @@ Failures return errors without broader fallbacks. Enumeration fails at 100,000 r
 
 ## Resource reads
 
-Object URIs use `anyblob://objects/{space_id}/{object_id}`. Strict raw URI parsing rejects extra segments, encoded IDs, query strings, fragments, alternate schemes and model-controlled identity or consent arguments.
+Object URIs use `anyblob://objects/{space_id}/{object_id}`. Some Codex hosts wrap that URI as one percent-encoded path segment in `mcp-resource://anyblob/{encoded_uri}`. Anyblob decodes exactly that wrapper once, then applies the same strict canonical URI checks. Extra segments, encoded IDs, query strings, fragments, other schemes and model-controlled identity or consent arguments remain rejected.
 
 `resources/read` maps directly to the existing `ReadObject` path with host-provided `_meta.threadId`. Global/project permissions, Always Ask, membership checks, revocation, project moves and cancellation retain their existing behavior. Missing identity still denies reads when saved project restrictions require it. Resource content is JSON text containing the existing authorized object document and Markdown. Denials return MCP errors without content. No approval exceptions or writes were added.
 
