@@ -100,7 +100,22 @@ pub fn tools() -> Vec<Value> {
             }
             if request.mutates() {props["revision"]=json!({"type":"string","minLength":1,"maxLength":128});required.push("revision");props["dry_run"]=json!({"type":"boolean","default":false});}
         }
-        json!({"name":name,"description":format!("{} in one permitted space. Kanban calculations support single-select, multi-select and checkbox grouping. Select categories use exact option names scoped by space and stable property key. Duplicate names exclude the entire property while preserving saved configuration. Multi-select categories use complete sorted name combinations. Results match card IDs within each active view; moves and renames require refresh. Unmatched columns use the formula on empty input. Invalid calendar properties fall through to inheritance or legacy colors. Calendar multi-select colors use the first selected tag. Each single-select category identifies one option; several separate categories are valid. These tools do not create or edit board categories or grouping. Read current revision, preview changes, then publish. Publication requires a manual Anytype reload. Never retry unknown outcomes.",name.replace('_'," ")),
+        let description = match *name {
+            "list_kanban_views" => "List permitted Kanban views and their supported properties.",
+            "get_kanban_calculation" => "Read a Kanban calculation and revision. Exact option names identify categories. Multi-select uses the full sorted combination.",
+            "preview_kanban_calculation" => "Preview typed formula tokens and warnings without publication.",
+            "set_kanban_calculation" => "Publish a previewed Kanban calculation using the current revision. Anytype needs a manual reload.",
+            "remove_kanban_calculation" => "Remove a saved Kanban calculation using the current revision.",
+            "refresh_kanban_calculation" => "Refresh a saved Kanban calculation after changes to cards, options or membership.",
+            "list_calendar_color_targets" => "List permitted calendar targets and their eligible properties.",
+            "get_calendar_color_rule" => "Read a calendar color rule and revision. Omit target for a type default.",
+            "preview_calendar_color_rule" => "Preview a calendar color rule. Multi-select uses the first tag. Missing or invalid properties fall back.",
+            "set_calendar_color_rule" => "Publish a previewed calendar rule using the current revision. Anytype needs a manual reload.",
+            "remove_calendar_color_rule" => "Remove a saved calendar rule using the current revision.",
+            "refresh_calendar_colors" => "Refresh calendar colors from the saved rule using the current revision.",
+            _ => unreachable!("unknown BlobUI tool"),
+        };
+        json!({"name":name,"description":description,
             "inputSchema":{"type":"object","properties":props,"required":required,"additionalProperties":false},
             "annotations":{"readOnlyHint":!request.mutates(),"destructiveHint":false,"idempotentHint":!request.mutates(),"openWorldHint":false}})
     }).collect()
