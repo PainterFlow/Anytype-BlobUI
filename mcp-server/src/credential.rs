@@ -1,8 +1,8 @@
 //! Private bridge credential. This module never reads an Anytype API key.
 use std::path::PathBuf;
-#[cfg(not(windows))]
+#[cfg(any(test, not(windows)))]
 pub(crate) const WINDOWS_HOST_REQUIRED: &str =
-    "This Anyblob MCP process is running outside Windows and cannot reach BlobUI's local bridge. The bundled Codex plugin uses local stdio, and a running Secure MCP Tunnel does not redirect it. Select the separate tunnel-backed Anyblob MCP server in the calling OpenAI app.";
+    "This Anyblob MCP process is running outside the Windows computer that hosts BlobUI, so it cannot reach BlobUI's local bridge. The bundled plugin runs through local stdio; updating or restarting BlobUI does not reroute this process through Secure MCP Tunnel. Use a tunnel-backed MCP target if this Codex surface provides one, or run the chat on the Windows Codex host. Remote Control can connect to that host from another device.";
 
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
@@ -127,13 +127,20 @@ pub fn read_at(path: &std::path::Path) -> Result<String, String> {
     Ok(token)
 }
 
-#[cfg(all(test, not(windows)))]
+#[cfg(test)]
 mod tests {
     #[test]
-    fn non_windows_error_explains_that_the_local_plugin_does_not_use_the_tunnel() {
-        let error = super::read().unwrap_err();
-        assert!(error.contains("running outside Windows"));
-        assert!(error.contains("does not redirect it"));
-        assert!(error.contains("tunnel-backed Anyblob MCP server"));
+    fn non_windows_error_explains_the_execution_host_and_remote_options() {
+        let error = super::WINDOWS_HOST_REQUIRED;
+        assert!(error.contains("running outside the Windows computer"));
+        assert!(error.contains("does not reroute this process"));
+        assert!(error.contains("tunnel-backed MCP target"));
+        assert!(error.contains("Remote Control"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_reads_return_the_host_guidance() {
+        assert_eq!(super::read().unwrap_err(), super::WINDOWS_HOST_REQUIRED);
     }
 }

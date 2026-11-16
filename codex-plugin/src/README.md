@@ -22,7 +22,7 @@ For remote Codex access, configure Secure MCP Tunnel in BlobUI and select the se
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.3.13. Project folders contain an `anyblob.config.toml` file. A project chat calls `authenticate_project` once with the `name`, `key`, and `remote` fields as separate arguments. The call never sends the complete file contents. BlobUI associates the MCP thread ID with the project key hash and applies saved source permissions on later requests. Projectless chats use global permissions. See [project and tunnel setup](../../docs/anyblob-remote-access.md).
+The current Anyblob release version is 0.3.14. Project folders contain an `anyblob.config.toml` file. A project chat calls `authenticate_project` once with the `name`, `key`, and `remote` fields as separate arguments. The call never sends the complete file contents. BlobUI associates the MCP thread ID with the project key hash and applies saved source permissions on later requests. Projectless chats use global permissions. See [project and tunnel setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 
