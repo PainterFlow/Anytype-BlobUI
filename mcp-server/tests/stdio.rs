@@ -60,6 +60,15 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         .contains("call read_object as a tool"));
     assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);
     assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":37,"method":"resources/read","params":{"uri":"mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
+    let auth_error=call(json!({"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":"true"},"_meta":{"threadId":"host-chat"}}}));
+    assert_eq!(auth_error["error"]["code"],-32602);
+    let auth_message=auth_error["error"]["message"].as_str().unwrap();
+    assert!(auth_message.contains("name:string, key:string, and remote:boolean"));
+    assert!(!auth_message.contains("secret-value"));
+    let valid_auth=call(json!({"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":true},"_meta":{"threadId":"host-chat"}}}));
+    assert_eq!(valid_auth["result"]["isError"],true);
+    assert_ne!(valid_auth["result"]["content"][0]["text"],"Unknown tool or invalid arguments.");
     for tool in tools["result"]["tools"].as_array().unwrap() {
         assert!(tool["annotations"]["readOnlyHint"].is_boolean());
         if tool["name"]=="patch_object" {assert_eq!(tool["annotations"]["readOnlyHint"],false);assert!(tool["inputSchema"]["required"].as_array().unwrap().contains(&json!("etag")));}

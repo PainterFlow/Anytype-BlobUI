@@ -2596,11 +2596,12 @@ mod tests {
             mentions["result"]["structuredContent"]["items"][0]["uri"],
             "anyblob://objects/space/object"
         );
+        let wrapped_uri="mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fspace%2Fobject";
         send(
             &mut input,
             8,
             "resources/read",
-            json!({"uri":"anyblob://objects/space/object","_meta":{"threadId":"fixture-chat"}}),
+            json!({"uri":wrapped_uri,"_meta":{"threadId":"fixture-chat"}}),
         );
         let question = receive(&mut output);
         assert_eq!(question["method"], "elicitation/create");
@@ -2614,7 +2615,7 @@ mod tests {
         let resource = receive(&mut output);
         assert_eq!(
             resource["result"]["contents"][0]["uri"],
-            "anyblob://objects/space/object"
+            wrapped_uri
         );
         let document: Value =
             serde_json::from_str(resource["result"]["contents"][0]["text"].as_str().unwrap())
@@ -2639,7 +2640,7 @@ mod tests {
             &mut input,
             9,
             "resources/read",
-            json!({"uri":"anyblob://objects/space/object"}),
+            json!({"uri":wrapped_uri,"_meta":{"threadId":"fixture-chat"}}),
         );
         let denied = receive(&mut output);
         assert_eq!(denied["error"]["code"], -32000);

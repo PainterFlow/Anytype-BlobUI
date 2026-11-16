@@ -150,18 +150,73 @@ pub fn capabilities() -> Value {
 pub fn object_uri(space: &str, object: &str) -> String {
     format!("anyblob://objects/{space}/{object}")
 }
-/// Parse raw canonical URIs without URL normalization, decoding or model-selected paths.
+fn decode_percent_encoded_resource(value: &str) -> Result<String, String> {
+    let bytes=value.as_bytes();
+    let mut decoded=Vec::with_capacity(bytes.len());
+    let mut index=0;
+    while index<bytes.len() {
+        if bytes[index]==b'%' {
+            if index+2>=bytes.len() { return Err("Invalid wrapped Anyblob resource URI.".into()); }
+            let digit=|byte:u8| match byte {
+                b'0'..=b'9'=>Some(byte-b'0'),b'a'..=b'f'=>Some(byte-b'a'+10),b'A'..=b'F'=>Some(byte-b'A'+10),_=>None
+            };
+            let high=digit(bytes[index+1]).ok_or("Invalid wrapped Anyblob resource URI.")?;
+            let low=digit(bytes[index+2]).ok_or("Invalid wrapped Anyblob resource URI.")?;
+            decoded.push((high<<4)|low);
+            index+=3;
+        } else {
+            decoded.push(bytes[index]);
+            index+=1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_|"Invalid wrapped Anyblob resource URI.".into())
+}
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null=>"null",
+        Value::Bool(_)=>"boolean",
+        Value::Number(_)=>"number",
+        Value::String(_)=>"string",
+        Value::Array(_)=>"array",
+        Value::Object(_)=>"object",
+    }
+}
+fn authenticate_project_argument_error(arguments: &Value) -> String {
+    let Some(fields)=arguments.as_object() else {
+        return format!("Invalid authenticate_project arguments. Expected only name:string, key:string, and remote:boolean in an object. Received {}. Keep chat identity in MCP metadata.",json_value_kind(arguments));
+    };
+    let expected=[("name","string"),("key","string"),("remote","boolean")];
+    let missing=expected.iter().filter(|(key,_)|!fields.contains_key(*key)).map(|(key,_)|*key).collect::<Vec<_>>();
+    let wrong=expected.iter().filter_map(|(key,kind)|fields.get(*key).filter(|value|json_value_kind(value)!=*kind).map(|value|format!("{key}:{}",json_value_kind(value)))).collect::<Vec<_>>();
+    let unexpected=fields.keys().filter(|key|!expected.iter().any(|(known,_)|*known==key.as_str())).count();
+    format!("Invalid authenticate_project arguments. Expected only name:string, key:string, and remote:boolean. Missing fields [{}], wrong types [{}], unexpected field count {}. Keep chat identity in MCP metadata.",if missing.is_empty(){"none".into()}else{missing.join(", ")},if wrong.is_empty(){"none".into()}else{wrong.join(", ")},unexpected)
+}
+/// Parse canonical URIs, or the exact single-segment Codex wrapper around one.
 pub fn resource_operation(params: &Value) -> Result<Operation, String> {
     let params=params.as_object().ok_or("Resource read parameters must be an object.")?;
     if params.keys().any(|key| key!="uri" && key!="_meta") {
         return Err("Unknown resource read argument. Chat identity must come from host metadata.".into());
     }
     let uri=params.get("uri").and_then(Value::as_str).ok_or("Resource URI is required.")?;
-    let path=uri.strip_prefix("anyblob://objects/").ok_or("Unsupported Anyblob resource URI.")?;
+    let owned;
+    let canonical=if uri.starts_with("anyblob://objects/") {
+        uri
+    } else {
+        let wrapped=uri.strip_prefix("mcp-resource://anyblob/").ok_or("Unsupported Anyblob resource URI.")?;
+        if wrapped.is_empty() || wrapped.bytes().any(|byte| matches!(byte,b'/'|b'?'|b'#')) {
+            return Err("Invalid wrapped Anyblob resource URI.".into());
+        }
+        owned=decode_percent_encoded_resource(wrapped)?;
+        if !owned.starts_with("anyblob://objects/") {
+            return Err("Invalid wrapped Anyblob resource URI.".into());
+        }
+        &owned
+    };
+    let path=canonical.strip_prefix("anyblob://objects/").ok_or("Unsupported Anyblob resource URI.")?;
     let (space,object)=path.split_once('/').ok_or("Invalid Anyblob object resource URI.")?;
     let op=Operation::ReadObject{space_id:space.into(),object_id:object.into()};
     op.validate()?;
-    if object_uri(space,object)!=uri {return Err("Invalid Anyblob object resource URI.".into());}
+    if object_uri(space,object)!=canonical {return Err("Invalid Anyblob object resource URI.".into());}
     Ok(op)
 }
 pub fn tools() -> Value {
@@ -196,9 +251,14 @@ pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
     if arguments.contains_key("operation") {
         return Err("Unknown argument.".into());
     }
+    let auth_parse_error=if name=="authenticate_project" {
+        Some(authenticate_project_argument_error(&Value::Object(arguments.clone())))
+    } else {
+        None
+    };
     arguments.insert("operation".into(), name.into());
     let op: Operation = serde_json::from_value(Value::Object(arguments))
-        .map_err(|_| "Unknown tool or invalid arguments.".to_string())?;
+        .map_err(|_| auth_parse_error.unwrap_or_else(||"Unknown tool or invalid arguments.".into()))?;
     op.validate()?;
     Ok(op)
 }
@@ -208,7 +268,21 @@ mod tests {
     #[test]
     fn resource_uris_are_canonical_and_never_carry_consent_or_identity() {
         assert!(matches!(resource_operation(&json!({"uri":object_uri("space-id","object_id"),"_meta":{"threadId":"host-chat"}})).unwrap(),Operation::ReadObject{..}));
+        let wrapped="mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fspace-id%2Fobject_id";
+        assert!(matches!(resource_operation(&json!({"uri":wrapped,"_meta":{"threadId":"host-chat"}})).unwrap(),Operation::ReadObject{space_id,object_id} if space_id=="space-id"&&object_id=="object_id"));
         for uri in ["anyblob://objects/a/b/c","anyblob://objects/a/..","anyblob://objects/a/%62","anyblob://objects/a/b?consent=true","anyblob://objects/a/b#x","anyblob://objects/a/","anyblob://other/a/b","ANYBLOB://objects/a/b","anyblob://objects/a\\b/c","anyblob://objects/a/猫"] {
+            assert!(resource_operation(&json!({"uri":uri})).is_err(),"{uri}");
+        }
+        for uri in [
+            "mcp-resource://other/anyblob%3A%2F%2Fobjects%2Fa%2Fb",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb/extra",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb?consent=true",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb#fragment",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb%3Fconsent%3Dtrue",
+            "mcp-resource://anyblob/anyblob%253A%252F%252Fobjects%252Fa%252Fb",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2F..",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb%ZZ",
+        ] {
             assert!(resource_operation(&json!({"uri":uri})).is_err(),"{uri}");
         }
         for key in ["threadId","consent","approval","space_id"] {
@@ -257,6 +331,9 @@ mod tests {
         assert!(matches!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":false})).unwrap(), Operation::AuthenticateProject { name, key, remote } if name == "Work" && key == "key" && !remote));
         assert!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":true})).is_ok());
         assert!(operation("authenticate_project",json!({"config":"name = 'Work'\nkey = 'key'\nremote = false"})).is_err());
+        let auth_error=operation("authenticate_project",json!({"name":"Work","key":"secret-value","remote":"false","unexpected":true})).unwrap_err();
+        assert!(auth_error.contains("Missing fields [none], wrong types [remote:string], unexpected field count 1"));
+        assert!(!auth_error.contains("secret-value"));
         assert!(operation("authenticate_project",json!({"name":"Work","key":"","remote":false})).is_err());
         assert!(operation("authenticate_project",json!({"name":"Work","key":"x".repeat(16 * 1024 + 1),"remote":false})).is_err());
         let tool_list=tools();

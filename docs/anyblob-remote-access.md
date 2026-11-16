@@ -12,7 +12,7 @@ The tunnel keeps the MCP server on the BlobUI computer and carries requests from
 - Create or select a Secure MCP Tunnel in OpenAI Platform. The runtime key needs Tunnels Read and Use. Creating or changing the tunnel also requires Tunnels Manage.
 - Keep BlobUI running while remote MCP requests need access to Anytype.
 
-The tunnel runtime sends outbound HTTPS requests to OpenAI and starts the local Anyblob MCP executable. It does not need an inbound firewall rule. Do not run a second `tunnel-client` process with the same tunnel ID while BlobUI is running.
+The tunnel runtime sends outbound HTTPS requests to OpenAI and starts the local Anyblob MCP executable. It does not need an inbound firewall rule. Run only one active `tunnel-client` process per tunnel ID when using stdio. Multiple processes for one tunnel are unsupported. They keep separate MCP child processes, and the tunnel does not guarantee that initialization and a later tool call reach the same child. A schema lookup can therefore succeed while a later call fails against another child. Do not run a second `tunnel-client` process with the same tunnel ID while BlobUI is running.
 
 ## Start the tunnel
 
@@ -61,4 +61,4 @@ Anyblob keeps the `search_mentions` tool and the saved Object Mentions filters. 
 
 The bundled Codex plugin is a local stdio server. A call that returns the Windows-host-required error reached that local server on a non-Windows computer before it contacted BlobUI. Starting Secure MCP Tunnel does not redirect calls made to the local plugin. Select the separate tunnel-backed Anyblob MCP server in the calling OpenAI app.
 
-Object mention search uses the selected MCP server too. An empty or failed search can mean the calling app selected the local stdio plugin instead of the tunnel-backed server. A tunnel status of Ready in BlobUI confirms the local tunnel client, not which MCP server the calling app selected.
+Object mention search uses the selected MCP server too. An empty or failed search can mean the calling app selected the local stdio plugin instead of the tunnel-backed server. A tunnel status of Ready in BlobUI confirms the local tunnel client, not which MCP server the calling app selected or whether its stdio MCP child completed discovery. If available in the installed runtime, check its local `/health/mcp` or admin UI MCP status after a remote request. Also make sure no separately started tunnel client uses the same tunnel ID. For an `authenticate_project` `-32602` error, compare `tools/list` and the failing `tools/call` on the same connection. The call must use `params.name = "authenticate_project"` and flat `params.arguments` containing only `name` as a string, `key` as a string, and `remote` as a boolean. Keep the project key redacted when collecting diagnostics.
