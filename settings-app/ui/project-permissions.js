@@ -172,6 +172,14 @@
       selectProject(project){if(locked)return;active={...project,key:projectKey(project)};publish({active,modal:true,sourceStatus:''});if(!sourcesScanned&&!sourceBusy)void reloadSources();},
       close(){publish({modal:false});},
       projectCatalog:catalogProjects,
+      deleteUnavailableProjects(){
+        if(locked||!api)return;
+        const unavailable=catalogProjects().filter(project=>project.unavailable).map(projectKey);
+        if(!unavailable.length)return;
+        const next=configuration();
+        for(const key of unavailable)delete next.projects[key];
+        api.onChange(next);publish({});
+      },
       sourceCatalog:catalogSources,selectedSources,
       toggleSource(source,checked){if(!active||locked)return;const key=identity(source),entries=selectedSources().filter(row=>identity(row)!==key);if(checked)entries.push({...source,permission:copy(configuration().spaces[source.spaceId]||fallback())});saveSources(entries);},
       setPermission(source,permission){if(!active||locked)return;const key=identity(source);saveSources(selectedSources().map(row=>identity(row)===key?{...row,permission}:row));},

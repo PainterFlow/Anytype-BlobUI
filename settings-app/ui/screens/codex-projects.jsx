@@ -11,7 +11,9 @@ const approvalOptions = [{value:"alwaysAsk",label:"Always Ask"},{value:"approveF
 
 function ReloadIcon(){return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" fill="none" /></svg>;}
 
-function CatalogToolbar({prefix,label,onReload,locked,busy,categories,selectedCategories,onCategoriesChange,query,setQuery}) {
+function TrashIcon(){return <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h12M7 5.5V4h6v1.5m-8 0 1 10h8l1-10M8 8v5m4-5v5" /></svg>;}
+
+function CatalogToolbar({prefix,label,onReload,onDeleteUnavailable,showDeleteUnavailable,locked,busy,categories,selectedCategories,onCategoriesChange,query,setQuery}) {
   return <div className="formula-toolbar">
     <ExpandableSearch id={`${prefix}-search`} label={label} placeholder={label} value={query} onChange={setQuery} disabled={locked} />
     {categories ? <SelectPicker id={`${prefix}-filter`} rootId={`${prefix}-filter-control`} menuId={`${prefix}-filter-options`}
@@ -19,6 +21,7 @@ function CatalogToolbar({prefix,label,onReload,locked,busy,categories,selectedCa
       pressed={selectedCategories.length !== categories.length} disabled={locked || busy}
       options={categories} value={selectedCategories} onChange={onCategoriesChange} /> : <div id={`${prefix}-filter-control`} hidden />}
     <button id={`${prefix}-reload`} type="button" className="neutral-icon-button" aria-label="Reload list" title="Reload list" disabled={locked||busy} aria-busy={String(busy)} onClick={onReload}><ReloadIcon /></button>
+    {showDeleteUnavailable&&<button id={`${prefix}-delete-unavailable`} type="button" className="neutral-icon-button projects-delete-unavailable" aria-label="Delete unavailable projects" title="Delete unavailable projects" disabled={locked||busy} onClick={onDeleteUnavailable}><TrashIcon /></button>}
   </div>;
 }
 
@@ -59,7 +62,7 @@ export function CodexProjects() {
   useEffect(()=>{if(state.modal)modal.current?.open();else if(modal.current?.isOpen())modal.current.close();},[state.modal]);
   useEffect(()=>{if(!state.modal||!content.current)return;const scrollbar=UI().Scrollbar.attach(content.current);return()=>scrollbar.destroy();},[state.modal]);
   return <>
-    <CatalogToolbar prefix="projects" label="Search projects and folders" locked={state.locked} busy={state.busy} query={query} setQuery={setQuery} onReload={()=>controller.reloadProjects()} />
+    <CatalogToolbar prefix="projects" label="Search projects and folders" locked={state.locked} busy={state.busy} query={query} setQuery={setQuery} onReload={()=>controller.reloadProjects()} showDeleteUnavailable={projects.some(project=>project.unavailable)} onDeleteUnavailable={()=>controller.deleteUnavailableProjects()} />
     <p className="input-hint" role="status">{state.projectStatus}</p>
     <div id="codex-project-list">{projects.map(project=>{
       const key=controller.projectKey(project);
@@ -69,7 +72,7 @@ export function CodexProjects() {
           <span className="formula-view-name">{project.name}</span>
           {project.unavailable&&<span className="formula-view-warning">Unavailable project. Saved selections are retained.</span>}
         </button>
-        {(project.kind==="cloud"||project.kind==="remote")&&<HelpTooltip label={`${project.kind==="remote"?"Remote":"Cloud"} project information for ${project.name}`} text={`${project.kind==="remote"?"Remote":"Cloud"} project permissions are saved separately for ${host} and project ${project.id}.`} icon={<GlobeIcon />} />}
+        {project.kind==="remote"?<span className="remote-project-globe" aria-hidden="true"><GlobeIcon /></span>:project.kind==="cloud"&&<HelpTooltip label={`Cloud project information for ${project.name}`} text={`Cloud project permissions are saved separately for ${host} and project ${project.id}.`} icon={<GlobeIcon />} />}
       </div>;
     })}{state.scanned&&!projects.some(projectMatches)&&<p className="input-hint">{query?"No matching results.":"No local or remote projects found."}</p>}</div>
     {createPortal(<div id="project-source-backdrop" className="confirm-backdrop" hidden ref={backdrop}>
