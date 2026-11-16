@@ -56,3 +56,9 @@ Existing project permission entries remain in the settings store after migration
 ## Object mentions
 
 Anyblob keeps the `search_mentions` tool and the saved Object Mentions filters. Mention results include object titles and space metadata. Selecting a mention does not grant read access. Object reads continue to use the saved global or project permissions.
+
+## Troubleshooting MCP routing
+
+The bundled Codex plugin is a local stdio server. A call that returns the Windows-host-required error reached that local server on a non-Windows computer before it contacted BlobUI. Starting Secure MCP Tunnel does not redirect calls made to the local plugin. Select the separate tunnel-backed Anyblob MCP server in the calling OpenAI app.
+
+Object mention search uses the selected MCP server too. An empty or failed search can mean the calling app selected the local stdio plugin instead of the tunnel-backed server. A tunnel status of Ready in BlobUI confirms the local tunnel client, not which MCP server the calling app selected.

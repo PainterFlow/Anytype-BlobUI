@@ -106,6 +106,8 @@ test('Anyblob setup has no approval listeners in a dark isolated fixture',async(
     assert.equal(await page.evaluate(() => window.localProjectsFolder), 'C:/Fixture Projects');
     await tunnelLabel.click();
     await tunnelDialog.waitFor();
+    const closeButton = tunnelDialog.getByRole('button', { name: 'Close Secure MCP Tunnel' });
+    assert.equal(await closeButton.evaluate(el => getComputedStyle(el).lineHeight), '24px');
     assert.equal(await tunnelToggle.isChecked(), false);
     const tunnelId = tunnelDialog.getByLabel('Tunnel ID', { exact: true });
     const key = tunnelDialog.getByLabel('Runtime API key', { exact: true });

@@ -16,13 +16,13 @@ Developers can build the plugin ZIP and bundled marketplace payload with scripts
 
 ## Remote access
 
-For remote Codex access, configure Secure MCP Tunnel in BlobUI and connect through the supported tunnel-backed MCP target for the OpenAI product surface. The tunnel client runs the local Anyblob MCP executable over stdio and makes outbound HTTPS requests to OpenAI. It does not create a public listener or server URL on the BlobUI computer. Follow the [Secure MCP Tunnel setup](../../docs/anyblob-remote-access.md) for tunnel and project configuration.
+For remote Codex access, configure Secure MCP Tunnel in BlobUI and select the separate tunnel-backed MCP target in the calling OpenAI product. The bundled Codex plugin remains a local stdio server. A running tunnel does not redirect calls made to that local plugin. The tunnel client runs the Anyblob MCP executable on the BlobUI computer and makes outbound HTTPS requests to OpenAI. It does not create a public listener or server URL on the BlobUI computer. Follow the [Secure MCP Tunnel setup](../../docs/anyblob-remote-access.md) for tunnel and project configuration.
 
 ## Updates
 
 BlobUI shows Install when Anyblob is absent, Update when the registered package or detected Codex copy differs from its bundled release, and Installed when the registered package is current and no stale Codex copy is detected. Click Update to register the bundled release, then refresh Anyblob in Codex’s Plugins Directory. If Codex retains the old copy, uninstall and reinstall Anyblob there and reopen Codex. BlobUI never overwrites Codex’s plugin cache or restarts either app. An Installed marketplace does not mean the plugin has been enabled in Codex.
 
-The current Anyblob release version is 0.3.9. Project folders contain an `anyblob.config.toml` file. A project chat calls `authenticate_project` once with that file's contents. BlobUI associates the MCP thread ID with the project key hash and applies saved source permissions on later requests. Projectless chats use global permissions. See [project and tunnel setup](../../docs/anyblob-remote-access.md).
+The current Anyblob release version is 0.3.10. Project folders contain an `anyblob.config.toml` file. A project chat calls `authenticate_project` once with that file's contents. BlobUI associates the MCP thread ID with the project key hash and applies saved source permissions on later requests. Projectless chats use global permissions. See [project and tunnel setup](../../docs/anyblob-remote-access.md).
 
 ## Reading and permissions
 

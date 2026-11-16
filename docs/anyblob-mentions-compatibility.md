@@ -30,6 +30,8 @@ Object URIs use `anyblob://objects/{space_id}/{object_id}`. Strict raw URI parsi
 
 `resources/read` maps directly to the existing `ReadObject` path with host-provided `_meta.threadId`. Global/project permissions, Always Ask, membership checks, revocation, project moves and cancellation retain their existing behavior. Missing identity still denies reads when saved project restrictions require it. Resource content is JSON text containing the existing authorized object document and Markdown. Denials return MCP errors without content. No approval exceptions or writes were added.
 
+If the host omits chat metadata when opening a resource link, Anyblob cannot infer project access from the resource URI. Call `read_object` as a tool in the current chat, or use an MCP host that forwards verified chat metadata.
+
 ## Validation and limits
 
 Focused fixtures cover Unicode, duplicate titles/types, empty queries and selections, dynamic All, type ID/key resolution, filtering before limiting, sorting, pagination, metadata projection, cancellation, concurrent queries, filter changes during HTTP and bridge failures. Existing permission fixtures cover differing projects, missing identity, Always Ask, revocation, source changes and project moves. The packaged executable-to-pipe fixture also covers mention searches, resource resolution with host identity, Always Ask and denied resource reads.
