@@ -112,7 +112,7 @@
 #calendar-filter-control, #calendar-override-filter-control { position: static; }
 #calendar-filter.is-filtered, #calendar-override-filter.is-filtered { color: var(--accent); }
 .calendar-rule-dialog button, .calendar-rule-dialog input { font-family: inherit; }
-.calendar-modal-close { font-size: 24px; }
+.calendar-modal-close { font-size: 24px; line-height: 1; }
 .calendar-view-results { min-width: 0; }
 #calendar-events-panel-1 button:focus-visible, .confirm-dialog:focus-visible, .confirm-dialog button:focus-visible { outline: none !important; box-shadow: none !important; }
 #calendar-events-panel-1:not([hidden]) { animation: formula-page-enter 180ms ease-out; }

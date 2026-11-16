@@ -38,6 +38,14 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(mentions["name"],"search_mentions");
     assert_eq!(mentions["_meta"]["ui"]["visibility"],json!(["app"]));
     assert_eq!(mentions["outputSchema"]["properties"]["items"]["maxItems"],20);
+    let read_object = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "read_object")
+        .unwrap();
+    assert_eq!(read_object["outputSchema"]["properties"]["etag"]["type"], "string");
+    assert!(read_object["outputSchema"]["required"].as_array().unwrap().contains(&json!("etag")));
     let initialized=call(json!({"jsonrpc":"2.0","id":30,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}));
     let icon = &initialized["result"]["serverInfo"]["icons"][0];
     assert_eq!(icon["src"], include_str!("../src/icon-data-uri.txt"));
@@ -45,6 +53,11 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(icon["sizes"], json!(["256x256"]));
     assert_eq!(initialized["result"]["capabilities"]["extensions"]["openai/mentions"]["searchTool"],"search_mentions");
     assert_eq!(call(json!({"jsonrpc":"2.0","id":31,"method":"resources/list"}))["result"]["resources"],json!([]));
+    let templates = call(json!({"jsonrpc":"2.0","id":36,"method":"resources/templates/list"}));
+    assert!(templates["result"]["resourceTemplates"][0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("call read_object as a tool"));
     assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);
     assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
     for tool in tools["result"]["tools"].as_array().unwrap() {
@@ -52,6 +65,7 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         if tool["name"]=="patch_object" {assert_eq!(tool["annotations"]["readOnlyHint"],false);assert!(tool["inputSchema"]["required"].as_array().unwrap().contains(&json!("etag")));}
     }
     assert_eq!(call(json!({"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"create_object","arguments":{"space_id":"s","body":{"type":"page","name":"fixture"}},"_meta":{"threadId":"host-chat"}}}))["result"]["isError"],true);
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"list_objects","arguments":{"space_id":"s","fields":"markdown"}}}))["error"]["code"],-32602);
     for (id, params) in [
         (4, json!({"name":"delete_object","arguments":{}})),
         (

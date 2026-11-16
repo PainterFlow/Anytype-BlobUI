@@ -595,7 +595,7 @@
         },
         "fields": {
           "type": "string",
-          "description": "Comma-separated property keys to include per row"
+          "description": "Comma-separated Anytype property keys to include per row. Markdown is object content, not a property. Use read_object to retrieve Markdown."
         },
         "offset": {
           "default": 0,
@@ -734,7 +734,7 @@
         },
         "fields": {
           "type": "string",
-          "description": "Comma-separated property keys to include per row"
+          "description": "Comma-separated Anytype property keys to include per row. Markdown is object content, not a property. Use read_object to retrieve Markdown."
         },
         "offset": {
           "default": 0,
@@ -756,7 +756,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List objects. In a project with restricted access, Anyblob returns only objects admitted by that project's saved sources and applies offset and limit after filtering.",
+    "description": "List objects. `fields` accepts Anytype property keys only; it does not accept `markdown`. Use read_object to retrieve an object's Markdown. In a project with restricted access, Anyblob returns only objects admitted by that project's saved sources and applies offset and limit after filtering.",
     "query": [
       "fields",
       "offset",
@@ -1392,7 +1392,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Update an object. Applies ops in order as one atomic edit. A failed op or invalid result leaves the object unchanged. Text locators must match exactly one block. New block and view IDs are returned by payload position in `created_blocks` and `created_views`, compact by default or full with `ids=full`. Required etag prevents overwriting concurrent changes. Includes block, property, view, and membership operations.",
+    "description": "Update an object. Applies ops in order as one atomic edit. A failed op or invalid result leaves the object unchanged. Text locators must match exactly one block. New block and view IDs are returned by payload position in `created_blocks` and `created_views`, compact by default or full with `ids=full`. Required etag prevents overwriting concurrent changes. If the server rejects a stale ETag, re-read the object and rebuild the patch from the current document. Never retry the same stale patch. Includes block, property, view, and membership operations.",
     "query": [
       "dry_run",
       "ids",
@@ -2805,7 +2805,7 @@
         },
         "fields": {
           "type": "string",
-          "description": "Comma-separated property keys to include per row"
+          "description": "Comma-separated Anytype property keys to include per row. Markdown is object content, not a property. Use read_object to retrieve Markdown."
         },
         "offset": {
           "default": 0,

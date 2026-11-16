@@ -162,7 +162,7 @@ fn main() {
             "resources/list" => reply(id, json!({"resources":[]})),
             "resources/templates/list" => reply(
                 id,
-                json!({"resourceTemplates":[{"uriTemplate":"anyblob://objects/{space_id}/{object_id}","name":"Anyblob object","mimeType":"application/json","description":"Read an object through saved permissions. Mention selection grants no access."}]}),
+                json!({"resourceTemplates":[{"uriTemplate":"anyblob://objects/{space_id}/{object_id}","name":"Anyblob object","mimeType":"application/json","description":"Read an object through saved permissions. Project-scoped reads require host-supplied chat identity. If this host omits that metadata for resource reads, call read_object as a tool instead. Mention selection grants no access."}]}),
             ),
             "tools/call" | "resources/read" => {
                 let params = &message["params"];

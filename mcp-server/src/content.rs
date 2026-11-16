@@ -90,6 +90,16 @@ impl ContentRequest {
             }
         }
         validate_schema(&spec["schema"], &self.arguments, "arguments")?;
+        if matches!(
+            self.tool.as_str(),
+            "list_objects" | "get_collection_objects" | "get_query_objects"
+        )
+            && self.arguments["fields"]
+                .as_str()
+                .is_some_and(|fields| fields.split(',').any(|field| field.trim() == "markdown"))
+        {
+            return Err("fields accepts Anytype property keys, not Markdown content. Use read_object to retrieve an object's Markdown.".into());
+        }
         if let Some(destination) = self.arguments.get("destination") {
             let id = destination["id"].as_str().ok_or("Missing destination ID.")?;
             if matches!(id, "." | "..") || !id.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)) {
@@ -331,6 +341,31 @@ mod tests {
         }
         let error = crate::operation("list_properties", json!({"space_id":"s", "offset":-1})).unwrap_err();
         assert!(error.contains("integer from 0 through 2147483647"), "{error}");
+    }
+    #[test]
+    fn list_objects_rejects_markdown_as_a_property_key_before_dispatch() {
+        for (tool, mut arguments) in [
+            ("list_objects", json!({"space_id":"s"})),
+            (
+                "get_collection_objects",
+                json!({"space_id":"s","collection_id":"collection"}),
+            ),
+            ("get_query_objects", json!({"space_id":"s","query_id":"query"})),
+        ] {
+            arguments["fields"] = json!("name, markdown");
+            let error = crate::operation(
+                tool,
+                arguments,
+            )
+            .unwrap_err();
+            assert!(error.contains("property keys, not Markdown content"), "{error}");
+            assert!(error.contains("read_object"), "{error}");
+        }
+        assert!(crate::operation(
+            "list_objects",
+            json!({"space_id":"s", "fields":"name,artist"}),
+        )
+        .is_ok());
     }
     #[test]
     fn creation_deletion_and_uploads_always_require_confirmation() {

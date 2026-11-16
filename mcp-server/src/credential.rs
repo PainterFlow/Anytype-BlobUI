@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 #[cfg(not(windows))]
 pub(crate) const WINDOWS_HOST_REQUIRED: &str =
-    "Anyblob runs with BlobUI on Windows. Use OpenAI Secure MCP Tunnel to connect to the Windows host remotely.";
+    "This Anyblob MCP process is running outside Windows and cannot reach BlobUI's local bridge. The bundled Codex plugin uses local stdio, and a running Secure MCP Tunnel does not redirect it. Select the separate tunnel-backed Anyblob MCP server in the calling OpenAI app.";
 
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
@@ -125,4 +125,15 @@ pub fn read_at(path: &std::path::Path) -> Result<String, String> {
         return Err("Invalid Anyblob credential.".into());
     }
     Ok(token)
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    #[test]
+    fn non_windows_error_explains_that_the_local_plugin_does_not_use_the_tunnel() {
+        let error = super::read().unwrap_err();
+        assert!(error.contains("running outside Windows"));
+        assert!(error.contains("does not redirect it"));
+        assert!(error.contains("tunnel-backed Anyblob MCP server"));
+    }
 }

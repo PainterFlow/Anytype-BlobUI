@@ -1,4 +1,5 @@
 data.json
+anyblob.config.toml
 /.blobui-formula-prototype.json
 /.blobui-kanban-formulas.json
 .blobui-install.json

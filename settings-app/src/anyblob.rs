@@ -15,6 +15,7 @@ use std::{
 };
 
 static PROMPT: Mutex<()> = Mutex::new(());
+const VERIFIED_CHAT_REQUIRED: &str = "Codex did not supply verified chat identity. Project-source access requires host-supplied chat metadata. Anyblob cannot infer a project from resource URIs or tool arguments.";
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static REVISION: AtomicU64 = AtomicU64::new(0);
 pub fn invalidate() {
@@ -653,9 +654,7 @@ fn dispatch_with_identity_policy(
         .values()
         .any(|project| !project.sources.is_empty());
     let membership = if restricted && !mentions {
-        Some(resolve()?.ok_or(
-            "Codex did not supply verified chat identity. Update Anyblob in Codex and retry.",
-        )?)
+        Some(resolve()?.ok_or(VERIFIED_CHAT_REQUIRED)?)
     } else {
         None
     };
@@ -1475,7 +1474,7 @@ mod tests {
             assert!(allowed(&selected, &op)
                 .unwrap_err()
                 .contains("verified chat identity"));
-            assert!(dispatch_with(
+            let error = dispatch_with(
                 request(op),
                 || true,
                 || Ok(enabled()),
@@ -1483,7 +1482,9 @@ mod tests {
                 || panic!("must deny before connecting"),
                 |_, _| panic!("must deny before approval")
             )
-            .is_err());
+            .unwrap_err();
+            assert!(error.contains("host-supplied chat metadata"), "{error}");
+            assert!(error.contains("cannot infer a project"), "{error}");
         }
         let empty = crate::codex::normalize(
             &json!({"spaces":{"space":{"access":"read"}},"projects":{"saved":{"sources":[]}}}),
