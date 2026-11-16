@@ -125,7 +125,10 @@ export function CodexIntegration() {
     (runtimeApiKey.trim() || (tunnel.keyConfigured && tunnelId.trim() === tunnel.tunnelId));
   let tunnelStatus = "";
   if (enabled && tunnel) {
-    if (tunnel.ready) tunnelStatus = "Tunnel is ready.";
+    if (tunnel.anotherRuntimeActive) tunnelStatus = "Another tunnel client is active. Stop it from the BlobUI instance that owns it before starting this one.";
+    else if (tunnel.ready && tunnel.mcp?.state === "failed") tunnelStatus = "Tunnel is connected, but MCP tool discovery failed. Check for duplicate tunnel clients, then restart the tunnel.";
+    else if (tunnel.ready && tunnel.mcp?.discovered) tunnelStatus = `Tunnel and MCP tools are ready${Number.isInteger(tunnel.mcp.toolCount) ? ` (${tunnel.mcp.toolCount} tools)` : ""}.`;
+    else if (tunnel.ready) tunnelStatus = "Tunnel is connected. MCP tool discovery has not been confirmed yet.";
     else if (tunnel.running) tunnelStatus = "Connecting to OpenAI…";
     else if (!tunnel.runtimeAvailable) tunnelStatus = "Install OpenAI tunnel-client to use the tunnel.";
     else if (!tunnelId.trim() || !(runtimeApiKey.trim() || tunnel.keyConfigured)) tunnelStatus = "Enter a tunnel ID and runtime API key to start.";
@@ -166,7 +169,7 @@ export function CodexIntegration() {
             placeholder: tunnel?.keyConfigured ? "Key saved" : "",
             onChange: event => setRuntimeApiKey(event.currentTarget.value) }} />
       </div>
-      <SettingsRow className="settings-row anyblob-tunnel-actions" description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : "Tunnel stopped"}
+      <SettingsRow className="settings-row anyblob-tunnel-actions" description={tunnelError || tunnelStatus} label={tunnel?.running ? "Tunnel running" : tunnel?.anotherRuntimeActive ? "Other tunnel active" : "Tunnel stopped"}
         descriptionAttributes={{ role: "status" }}>
         <div className="anyblob-tunnel-buttons">
           <Button className="banner-image-button" disabled={tunnelLocked || (!tunnel?.running && !canStart)}
