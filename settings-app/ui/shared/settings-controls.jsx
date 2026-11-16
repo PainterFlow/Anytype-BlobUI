@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { HelpTooltip } from "./help-tooltip.jsx";
 
 export function Button({ type = "button", children, ...attributes }) {
@@ -102,7 +102,7 @@ export function VisibilityTextField({ label, inputAttributes, buttonAttributes, 
   const fieldId = `${inputAttributes.id}-field`;
   return <div className={className}>
     <label htmlFor={inputAttributes.id}>{label}</label>
-    <div id={fieldId} className="visibility-field" data-filled="false">
+    <div id={fieldId} className="visibility-field" data-filled={Boolean(inputAttributes.value ?? inputAttributes.defaultValue)}>
       {readOnly ? <ReadOnlyTextInput inputAttributes={inputAttributes} /> : <input {...inputAttributes} />}
       <button type="button" {...buttonAttributes}>
         <svg className="visibility-icon" viewBox="0 0 20 20" aria-hidden="true">
@@ -113,4 +113,30 @@ export function VisibilityTextField({ label, inputAttributes, buttonAttributes, 
       </button>
     </div>
   </div>;
+}
+
+export function SecretTextField({ label, inputAttributes, className, resetKey, showLabel = `Show ${label}`, hideLabel = `Hide ${label}` }) {
+  const [revealed, setRevealed] = useState(false);
+  const [lastResetKey, setLastResetKey] = useState(resetKey);
+  const visible = revealed && !inputAttributes.disabled && Object.is(lastResetKey, resetKey);
+  const actionLabel = visible ? hideLabel : showLabel;
+
+  useEffect(() => {
+    setRevealed(false);
+  }, [inputAttributes.disabled, resetKey]);
+
+  return <VisibilityTextField label={label} className={className}
+    inputAttributes={{ ...inputAttributes, type: visible ? "text" : "password" }}
+    buttonAttributes={{
+      className: "visibility-toggle",
+      disabled: inputAttributes.disabled,
+      "aria-controls": inputAttributes.id,
+      "aria-pressed": visible,
+      "aria-label": actionLabel,
+      title: actionLabel,
+      onClick: () => {
+        setLastResetKey(resetKey);
+        setRevealed(!visible);
+      },
+    }} />;
 }

@@ -194,7 +194,7 @@ pub fn anyblob_status() -> Result<Value, String> {
         Err(error) => return Err(error),
     };
     let enabled = current["enabled"] == true;
-    Ok(json!({"enabled":enabled,"localProjectsFolder":current["localProjectsFolder"].as_str().unwrap_or("")}))
+    Ok(json!({"enabled":enabled,"localProjectsFolder":display_folder(current["localProjectsFolder"].as_str().unwrap_or(""))}))
 }
 #[tauri::command]
 pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
@@ -211,9 +211,6 @@ pub fn set_anyblob_projects_folder(folder: String) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
     let path = bridge_path()?;
     let current = state()?;
-    if current["enabled"] != true {
-        return Err("Enable Anyblob before choosing a local projects folder.".into());
-    }
     let folder = PathBuf::from(folder);
     if !folder.is_absolute() {
         return Err("Choose an absolute Local Projects Folder path.".into());
@@ -225,12 +222,20 @@ pub fn set_anyblob_projects_folder(folder: String) -> Result<Value, String> {
     let folder = folder
         .canonicalize()
         .map_err(|_| "Could not resolve the Local Projects Folder.")?;
+    let folder = display_folder(&folder.to_string_lossy());
     let mut next = current;
-    next["localProjectsFolder"] = json!(folder.to_string_lossy().to_string());
+    next["localProjectsFolder"] = json!(folder);
     let bytes = serde_json::to_vec(&next).map_err(|_| "Could not encode Anyblob settings.")?;
     crate::storage::write_atomic(&path, &bytes)?;
     invalidate();
-    Ok(json!({"localProjectsFolder":folder.to_string_lossy().to_string()}))
+    Ok(json!({"localProjectsFolder":folder}))
+}
+fn display_folder(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+    }
 }
 fn saved() -> Result<crate::codex::Configuration, String> {
     let data = crate::load_settings_data(&install()?)?;
@@ -1154,6 +1159,12 @@ pub fn start(_app: tauri::AppHandle) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_folder_display_preserves_drive_and_unc_paths() {
+        assert_eq!(super::display_folder(r"\\?\C:\Users\me\projects"), r"C:\Users\me\projects");
+        assert_eq!(super::display_folder(r"\\?\UNC\server\projects"), r"\\server\projects");
+        assert_eq!(super::display_folder(r"C:\projects"), r"C:\projects");
+    }
     use super::*;
     #[test]
     fn saved_state_notifications_only_follow_confirmed_blobui_publications() {

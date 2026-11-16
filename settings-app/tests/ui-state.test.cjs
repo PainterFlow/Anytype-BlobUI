@@ -109,6 +109,7 @@ let delayFileRead = false;
 let copiedLogs = '';
 let copyError = false;
 const context = {
+  Event,
   queueMicrotask,
   navigator: { clipboard: { async writeText(text) { if (copyError) throw new Error('Clipboard unavailable.'); copiedLogs = text; } } },
   document: {
@@ -151,6 +152,7 @@ const context = {
     },
     clearTimeout(id) { timers.delete(id); },
     addEventListener(name, handler) { this.handlers[name] = handler; },
+    dispatchEvent(event) { this.handlers[event.type]?.(event); return true; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: {
       event: { async listen(name, handler) {
@@ -300,6 +302,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visibility-field.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/modal.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/edit-session.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/anyblob-draft.js'), 'utf8')
+    .replace(/^export function /, 'function ') + '\nwindow.BlobUI.AnyblobDraft = createAnyblobDraft();', context);
   if (releaseNotesScenario) {
     context.window.BlobUI.Markdown = {
       parseImageManifest(value) {
@@ -985,6 +989,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     preventDefault() { altRPrevented = true; },
   });
   assert(altRPrevented, 'Alt+R must stay out of the focused input.');
+  await flush();
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeAltR + 1, 'The in-window shortcut must use the existing save/rebuild action.');
   const saveCallsBeforeGlobalEvent = calls.filter(name => name === 'save_settings').length;
   await Promise.all([rebuildListener(), rebuildListener()]);

@@ -276,6 +276,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     restore: restoreEditSnapshot,
     equals: editSnapshotsEqual,
   });
+  const hasUnsavedChanges = () => editSession.isDirty() || window.BlobUI.AnyblobDraft.isDirty();
   let savedRefreshEpoch = 0;
   let appStateLoadGeneration = 0;
   const refreshBlocked = () => saveBusy || blobFolderBusy || blobRestoreReloadFailed || bannerReadPending || isInstallingUpdate();
@@ -341,6 +342,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   window.BlobUI.discardChanges = function discardChanges() {
     if (saveBusy || isInstallingUpdate() || !draft) return;
+    window.BlobUI.AnyblobDraft.discard();
     editSession.discard();
   };
 
@@ -664,7 +666,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
     updateNowButton.hidden = !updateAvailable;
     sidebarActions.classList.toggle("has-update", updateAvailable);
-    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || editSession.isDirty();
+    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges();
     updateNowButton.title = simulated ? "Preview update only" : "Update now";
     updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
     renderBlobBackupControls();
@@ -675,7 +677,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function renderBlobBackupControls() {
-    const settingsDirty = !!draft && editSession.isDirty();
+    const settingsDirty = !!draft && hasUnsavedChanges();
     const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
       && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
     const disabled = !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
@@ -695,7 +697,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       pendingAutomaticUpdate = false;
       return;
     }
-    if (!updaterState || updaterState.updateAvailable !== true || updaterState.automaticUpdateBlocked === true || editSession.isDirty()) return;
+    if (!updaterState || updaterState.updateAvailable !== true || updaterState.automaticUpdateBlocked === true || hasUnsavedChanges()) return;
     pendingAutomaticUpdate = false;
     applyUpdate(true);
   }
@@ -979,7 +981,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         && state && state.updateAvailable === true && state.status !== "simulated") {
         if (state.automaticUpdateBlocked === true) {
           pendingAutomaticUpdate = false;
-        } else if (saveBusy || bannerReadPending || editSession.isDirty()) {
+        } else if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
           pendingAutomaticUpdate = true;
           mergeUpdaterState({ message: "An update is ready. Save or undo your pending settings to install it automatically." });
         } else {
@@ -1010,7 +1012,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
     if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
-    if (saveBusy || bannerReadPending || editSession.isDirty()) {
+    if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
       if (fromAutomaticCheck) pendingAutomaticUpdate = true;
       else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
       return;
@@ -1359,7 +1361,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   function updateSaveButton() {
     if (savedRefresh.queued && !savedRefresh.pending && !refreshBlocked()) queueMicrotask(requestSavedRefresh);
-    const dirty = editSession.isDirty();
+    const dirty = hasUnsavedChanges();
     const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
     const saveVisible = Boolean(draft && dirty && window.appReady);
@@ -1378,6 +1380,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
     window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.AnyblobDraft.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
@@ -1988,7 +1991,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !window.BlobUI.AnyblobDraft.isDirty() && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -2015,6 +2018,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     let updaterSettingsSaved = false;
     try {
       let result = null;
+      await window.BlobUI.AnyblobDraft.save();
       if (submittedConnection) {
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
@@ -2087,6 +2091,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       saveBusy = false;
       if (connectionSaved || updaterPathChanged) void refreshCalendarApiAvailability(true);
       updateSaveButton();
+      void window.BlobUI.ProjectPermissions?.reloadProjects();
+      window.dispatchEvent(new Event("blobui-codex-integration-refresh"));
     }
   }
 
@@ -2827,7 +2833,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!draft || isInstallingUpdate()) return;
     updateSaveButton();
     if (!saveBusy && window.appReady) {
-      setStatus(editSession.isDirty()
+      setStatus(hasUnsavedChanges()
         ? "Unsaved changes are ready to apply."
         : "No unsaved changes.", "info", false);
     }
@@ -2918,6 +2924,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     if (result.cssRebuilt === false) setStatus("Custom theme CSS could not be rebuilt. Check Logs.", "error", false);
   });
+  window.BlobUI.AnyblobDraft.init({ invoke, onChange: updateSaveButton });
   window.BlobUI.CodexPage.init({ invoke, listen: nativeService.listen, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
     onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error) });
