@@ -112,7 +112,7 @@ jobs:
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [IO.Compression.ZipFile]::OpenRead('dist/blobui-windows.zip')
           try {
-            foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+            foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
               if (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -ne 1) {
                 throw "The release package must contain $name at its root."
               }
@@ -121,7 +121,7 @@ jobs:
               throw 'The release package must contain the built Settings app.'
             }
           } finally { $archive.Dispose() }
-          Copy-Item -LiteralPath Changelogs.md -Destination dist/Changelogs.md -Force
+          Copy-Item -LiteralPath settings-app/markdowns/Changelogs.md -Destination dist/Changelogs.md -Force
 
       - name: Save validated release files
         uses: actions/upload-artifact@v4

@@ -50,7 +50,6 @@ if ((close_app)) && [[ ${BLOBUI_BUILD_ONLY:-0} != 1 ]]; then
     if ((closed > 0)); then printf 'Closed %s existing workspace BlobUI Settings instance(s).\n' "$closed"; fi
 fi
 
-"$script_dir/Build-Codex.sh"
 npm_cache="$workspaceRoot/.test-run/npm-cache"
 mkdir -p "$npm_cache"
 (
@@ -74,10 +73,11 @@ releaseExecutable="$CARGO_TARGET_DIR/$target/release/$executable_name"
 frontendOutputDirectory="$projectDirectory/frontend-dist"
 distributionDirectory="$projectDirectory/dist"
 distributionExecutable="$distributionDirectory/$executable_name"
+markdownDirectory="$projectDirectory/markdowns"
 assert_workspace_build_path "$distributionDirectory" >/dev/null
 assert_workspace_build_path "$distributionExecutable" >/dev/null
 mkdir -p "$distributionDirectory"
-[[ -f $workspaceRoot/dev-guide.md && -f $frontendOutputDirectory/dev-guide.md ]] || { printf '%s\n' 'The Settings frontend did not bundle dev-guide.md.' >&2; exit 1; }
+[[ -f $markdownDirectory/dev-guide.md && -f $frontendOutputDirectory/dev-guide.md ]] || { printf '%s\n' 'The Settings frontend did not bundle settings-app/markdowns/dev-guide.md.' >&2; exit 1; }
 
 docsPath="$distributionDirectory/docs"
 if [[ -e $docsPath || -L $docsPath ]]; then
@@ -86,8 +86,12 @@ if [[ -e $docsPath || -L $docsPath ]]; then
     rm -rf -- "$docsPath"
 fi
 cp -f -- "$frontendOutputDirectory/dev-guide.md" "$distributionDirectory/dev-guide.md"
+[[ -f $markdownDirectory/anyblob-guide.md && -f $frontendOutputDirectory/anyblob-guide.md ]] || { printf '%s\n' 'The Settings frontend did not bundle settings-app/markdowns/anyblob-guide.md.' >&2; exit 1; }
+assert_workspace_build_path "$frontendOutputDirectory/anyblob-guide.md" >/dev/null
+assert_workspace_build_path "$distributionDirectory/anyblob-guide.md" >/dev/null
+cp -f -- "$frontendOutputDirectory/anyblob-guide.md" "$distributionDirectory/anyblob-guide.md"
 for releaseNotesFile in Changelogs.md md-images.yaml; do
-    source_file="$workspaceRoot/$releaseNotesFile"
+    source_file="$markdownDirectory/$releaseNotesFile"
     [[ -f $source_file ]] || { printf 'The Settings app build is missing its release notes file: %s\n' "$source_file" >&2; exit 1; }
     assert_workspace_build_path "$frontendOutputDirectory/$releaseNotesFile" >/dev/null
     assert_workspace_build_path "$distributionDirectory/$releaseNotesFile" >/dev/null

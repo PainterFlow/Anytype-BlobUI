@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "blobui-mcp"
-version = "0.3.15"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -290,7 +290,10 @@ dependencies = [
  "base64 0.22.1",
  "blobui-mcp",
  "chrono",
+ "crc32fast",
+ "flate2",
  "getrandom 0.3.4",
+ "libc",
  "lightningcss",
  "regex",
  "semver",

@@ -46,6 +46,10 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
     let anytype_data_root = canonical_directory(anytype_data_root, "The configured Anytype folder")?;
     let backup = canonical_directory(backup, "The selected backup folder")?;
     crate::storage::reject_reparse_path(&backup)?;
+    let metadata = read_optional_backup_metadata(&backup.join("blob.meta.json"))?;
+    if metadata["headlessCli"].as_bool() == Some(true) {
+        return Err("This archive was created by BlobUI Headless. Import it with `blob-ui import <path.zip>`.".into());
+    }
     let current_settings = settings_root.join(SETTINGS_DIR);
     if backup.starts_with(&current_settings) || current_settings.starts_with(&backup) {
         return Err("Choose a backup folder outside the saved Settings folder.".into());
@@ -124,6 +128,18 @@ pub fn import_backup(settings_root: &Path, anytype_data_root: &Path, backup: &Pa
     })();
     let _ = fs::remove_dir_all(&stage_root);
     stage_result
+}
+
+fn read_optional_backup_metadata(path: &Path) -> Result<Value, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse_point(&metadata) && metadata.len() <= 64 * 1024 => {
+            let bytes = fs::read(path).map_err(|_| "Could not read backup metadata.".to_string())?;
+            serde_json::from_slice(&bytes).map_err(|_| "Backup metadata is invalid.".to_string())
+        }
+        Ok(_) => Err("Backup metadata is not a regular file.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+        Err(_) => Err("Could not inspect backup metadata.".into()),
+    }
 }
 
 fn preserve_current_credential_if_import_is_unreadable(
@@ -504,6 +520,27 @@ mod tests {
         assert!(import_backup(&app, &anytype, &invalid).is_err());
         assert_eq!(crate::settings_store::load(&app).unwrap(), original);
         assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), b"old stylesheet");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settings_app_rejects_a_headless_archive_without_changing_saved_state() {
+        let root = fixture_root("headless-import-refusal");
+        let app = root.join("app");
+        let anytype = root.join("Anytype");
+        let backup = root.join("headless backup");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(&anytype).unwrap();
+        fs::create_dir_all(&backup).unwrap();
+        let original = json!({"settings":{"fontFamily":"Inter"},"future":{"keep":true}});
+        crate::settings_store::save(&app, &original).unwrap();
+        fs::write(anytype.join("custom.css"), b"existing stylesheet").unwrap();
+        fs::write(backup.join(META_FILE), br#"{"formatVersion":1,"headlessCli":true}"#).unwrap();
+
+        let error = import_backup(&app, &anytype, &backup).unwrap_err();
+        assert!(error.contains("BlobUI Headless"));
+        assert_eq!(crate::settings_store::load(&app).unwrap(), original);
+        assert_eq!(fs::read(anytype.join("custom.css")).unwrap(), b"existing stylesheet");
         fs::remove_dir_all(root).unwrap();
     }
 

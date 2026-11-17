@@ -4,7 +4,7 @@ import "../help-tooltip.css";
 
 const popoverGap = 7;
 
-export function HelpTooltip({ label, text, size = "normal", icon = null }) {
+export function HelpTooltip({ label, text, size = "normal", icon = null, onClick, dialogId }) {
   const tooltipId = `help-tooltip-${useId()}`;
   const rootRef = useRef(null);
   const popoverRef = useRef(null);
@@ -80,6 +80,8 @@ export function HelpTooltip({ label, text, size = "normal", icon = null }) {
     <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}`} data-open={open}
       onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
       <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={tooltipId}
+        aria-haspopup={dialogId ? "dialog" : undefined} aria-controls={dialogId} onClick={onClick}
+        data-action={onClick ? "" : undefined}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
         {icon || <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="10" cy="10" r="8.25" />

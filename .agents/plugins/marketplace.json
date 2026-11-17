@@ -1,0 +1,12 @@
+{
+  "name": "blobui",
+  "interface": { "displayName": "BlobUI" },
+  "plugins": [
+    {
+      "name": "anyblob",
+      "source": { "source": "local", "path": "./codex-plugin/src" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

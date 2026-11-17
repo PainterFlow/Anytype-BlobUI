@@ -27,6 +27,7 @@ $releaseExecutable = Join-Path $projectDirectory 'target\release\blobui-settings
 $frontendOutputDirectory = Join-Path $projectDirectory 'frontend-dist'
 $distributionDirectory = Join-Path $projectDirectory 'dist'
 $distributionExecutable = Join-Path $distributionDirectory 'blobui-settings.exe'
+$markdownDirectory = Join-Path $projectDirectory 'markdowns'
 $buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the local Git commit.' }
 Write-Host "Building blobui-app Dev+$buildCommit"
@@ -60,7 +61,6 @@ if ($c -and $env:BLOBUI_BUILD_ONLY -ne '1') {
     }
 }
 
-& (Join-Path $PSScriptRoot 'Build-Codex.ps1')
 $nodeExecutable = Get-Command node -ErrorAction SilentlyContinue
 $npmExecutable = Get-Command npm -ErrorAction SilentlyContinue
 if ($null -eq $nodeExecutable -or $null -eq $npmExecutable) {
@@ -109,7 +109,7 @@ if ($null -ne $distributionItem -and
 }
 [System.IO.Directory]::CreateDirectory($distributionDirectory) | Out-Null
 
-$sourceDeveloperGuide = Join-Path $workspaceRoot 'dev-guide.md'
+$sourceDeveloperGuide = Join-Path $markdownDirectory 'dev-guide.md'
 $bundledDeveloperGuide = Join-Path $frontendOutputDirectory 'dev-guide.md'
 if (-not (Test-Path -LiteralPath $sourceDeveloperGuide -PathType Leaf) -or
     -not (Test-Path -LiteralPath $bundledDeveloperGuide -PathType Leaf)) {
@@ -142,8 +142,22 @@ if ($null -ne $existingDeveloperGuide -and
 }
 Copy-Item -LiteralPath $bundledDeveloperGuide -Destination $distributionDeveloperGuide -Force
 
+$headlessGuide = Join-Path $markdownDirectory 'anyblob-guide.md'
+$bundledHeadlessGuide = Join-Path $frontendOutputDirectory 'anyblob-guide.md'
+if (-not (Test-Path -LiteralPath $headlessGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledHeadlessGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle settings-app/markdowns/anyblob-guide.md.'
+}
+$distributionHeadlessGuide = Join-Path $distributionDirectory 'anyblob-guide.md'
+$existingHeadlessGuide = Get-Item -LiteralPath $distributionHeadlessGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingHeadlessGuide -and
+    (($existingHeadlessGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app Anyblob guide path is a reparse point: $distributionHeadlessGuide"
+}
+Copy-Item -LiteralPath $bundledHeadlessGuide -Destination $distributionHeadlessGuide -Force
+
 foreach ($releaseNotesFile in @('Changelogs.md', 'md-images.yaml')) {
-    $sourceReleaseNotes = Join-Path $workspaceRoot $releaseNotesFile
+    $sourceReleaseNotes = Join-Path $markdownDirectory $releaseNotesFile
     if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
         throw "The Settings app build is missing its release notes file: $sourceReleaseNotes"
     }

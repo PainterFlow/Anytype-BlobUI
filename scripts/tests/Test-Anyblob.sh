@@ -34,13 +34,16 @@ export ANYBLOB_CREDENTIAL_FILE="$fixture/bridge.credential"
 export CARGO_NET_OFFLINE=true
 mkdir -p "$HOME" "$APPDATA" "$LOCALAPPDATA" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$TMPDIR"
 
-"$script_dir/../Build-MCP.sh" --test
+(
+    cd "$workspaceRoot"
+    CARGO_TARGET_DIR="$workspaceRoot/mcp-server/target" cargo test --locked --release --manifest-path "$workspaceRoot/mcp-server/Cargo.toml"
+)
 (
     cd "$workspaceRoot"
     CARGO_TARGET_DIR="$workspaceRoot/mcp-server/target" cargo run --locked --release --quiet --manifest-path "$workspaceRoot/mcp-server/Cargo.toml" --example source-fixtures > "$navigationFixture/source-fixtures.json"
 )
-if ((!skip_build)); then "$script_dir/../Build-Codex.sh" --skip-mcp-build; fi
+if ((!skip_build)); then "$script_dir/../Build-Codex.sh"; fi
 (
     cd "$workspaceRoot"
-    CARGO_TARGET_DIR="$workspaceRoot/settings-app/target" cargo test --locked --release --manifest-path "$workspaceRoot/settings-app/Cargo.toml" -- --test-threads=1 anyblob:: anyblob_content:: anyblob_creation:: anyblob_scope:: marketplace:: codex:: codex_identity:: codex_projects::
+    CARGO_TARGET_DIR="$workspaceRoot/settings-app/target" cargo test --locked --release --manifest-path "$workspaceRoot/settings-app/Cargo.toml" --no-default-features --features headless-cli --lib --bin blob-ui -- --test-threads=1
 )

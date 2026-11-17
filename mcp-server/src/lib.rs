@@ -1,4 +1,6 @@
 //! Shared typed bridge contract. No Anytype credentials or HTTP client belong here.
+extern crate self as blobui_mcp;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub mod transport;
@@ -7,6 +9,7 @@ pub mod credential;
 pub mod content;
 pub mod sources;
 pub mod blobui;
+pub mod server;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]

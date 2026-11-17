@@ -13,6 +13,7 @@
   transition: color .14s ease, background-color .14s ease;
 }
 .help-tooltip-trigger svg { display: block; width: 18px; height: 18px; }
+.help-tooltip-trigger[data-action] { cursor: pointer; }
 .help-tooltip-large .help-tooltip-trigger svg { width: 20px; height: 20px; }
 .help-tooltip-trigger:hover, .help-tooltip-trigger:focus-visible { background: var(--active); color: var(--text); }
 .help-tooltip-trigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }

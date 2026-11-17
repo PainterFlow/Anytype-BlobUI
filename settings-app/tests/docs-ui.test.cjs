@@ -186,7 +186,7 @@ test('Dev Guide opens in a popup offline in dark mode', {
       } } };
     });
     await loadSettings(page);
-    const guideMarkdown = await fs.promises.readFile(path.join(workspace, 'dev-guide.md'), 'utf8');
+    const guideMarkdown = await fs.promises.readFile(path.join(workspace, 'settings-app/markdowns/dev-guide.md'), 'utf8');
     await page.route('http://blobui.test/dev-guide.md', route => route.fulfill({
       contentType: 'text/markdown; charset=utf-8',
       body: guideMarkdown,

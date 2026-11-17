@@ -32,11 +32,11 @@ export function SettingsSection({ className = "settings-group", children, ...att
   return <section className={className} {...attributes}>{children}</section>;
 }
 
-export function SettingsHeading({ id, title, description, help }) {
+export function SettingsHeading({ id, title, description, help, onHelpClick, helpDialogId }) {
   return <div className="section-heading">
     <div className="section-heading-title">
       <h2 id={id}>{title}</h2>
-      {help && <HelpTooltip label={`${title} help`} text={help} size="large" />}
+      {help && <HelpTooltip label={`${title} help`} text={help} size="large" onClick={onHelpClick} dialogId={helpDialogId} />}
     </div>
     {description != null && <p>{description}</p>}
   </div>;
@@ -66,19 +66,6 @@ export function Switch({ id, label, description, className = "native-accent-cont
     <span className="switch-track" aria-hidden="true" />
     {description && <span className="sr-only" id={description.id}>{description.text}</span>}
   </label>;
-}
-
-export function DialogSwitch({ id, label, help, dialogId, expanded = false, className = "native-accent-control settings-row", checked, disabled, labelDisabled = disabled, onChange, onOpen }) {
-  return <div className={`${className} dialog-switch`}>
-    <div className="dialog-switch-label-group">
-      <button type="button" className="dialog-switch-label" aria-haspopup="dialog" aria-controls={dialogId}
-        aria-expanded={expanded} disabled={labelDisabled} onClick={onOpen}>{label}</button>
-      {help && <HelpTooltip label={`${label} information`} text={help} />}
-    </div>
-    <input id={id} type="checkbox" role="switch" aria-label={label} checked={checked} disabled={disabled}
-      onChange={onChange && (event => onChange(event.currentTarget.checked, event))} />
-    <span className="switch-track" aria-hidden="true" />
-  </div>;
 }
 
 export function TextField({ label, inputAttributes }) {

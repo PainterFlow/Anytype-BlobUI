@@ -662,13 +662,15 @@ fn fetch_release_notes_for_tag(tag: &str, release: Option<&Value>) -> Result<Rel
     {
         return Err("The GitHub release tag is unsafe.".into());
     }
-    let markdown = fetch_raw_release_file(tag, "Changelogs.md", MAX_RELEASE_NOTES_BYTES as usize)
+    let markdown = fetch_raw_release_file(tag, "settings-app/markdowns/Changelogs.md", MAX_RELEASE_NOTES_BYTES as usize)
+        .or_else(|_| fetch_raw_release_file(tag, "Changelogs.md", MAX_RELEASE_NOTES_BYTES as usize))
         .or_else(|_| release.and_then(|item| item.get("body").and_then(Value::as_str).map(str::to_string))
             .ok_or_else(|| "The GitHub release notes could not be read.".to_string()))?;
     if markdown.trim().is_empty() {
         return Err("The GitHub release notes are empty.".into());
     }
-    let image_manifest = fetch_raw_release_file(tag, "md-images.yaml", MAX_RELEASE_NOTES_BYTES as usize)
+    let image_manifest = fetch_raw_release_file(tag, "settings-app/markdowns/md-images.yaml", MAX_RELEASE_NOTES_BYTES as usize)
+        .or_else(|_| fetch_raw_release_file(tag, "md-images.yaml", MAX_RELEASE_NOTES_BYTES as usize))
         .or_else(|_| fetch_raw_release_file(tag, "Changelogs.yaml", MAX_RELEASE_NOTES_BYTES as usize))
         .unwrap_or_else(|_| "images: []\n".into());
     Ok(ReleaseNotes { version: parse_version(tag).unwrap().to_string(), tag: tag.to_string(), markdown, image_manifest })
@@ -1383,13 +1385,13 @@ fn launch_update_installer(
     }
 }
 
-struct HttpResponse {
-    status: u32,
-    body: Vec<u8>,
+pub(crate) struct HttpResponse {
+    pub(crate) status: u32,
+    pub(crate) body: Vec<u8>,
 }
 
 #[cfg(windows)]
-fn http_get(
+pub(crate) fn http_get(
     host: &str,
     path: &str,
     accept: &str,
@@ -1515,8 +1517,37 @@ fn http_get(
 }
 
 #[cfg(not(windows))]
-fn http_get(_: &str, _: &str, _: &str, _: usize) -> Result<HttpResponse, String> {
-    Err("The BlobUI in-app updater is supported on Windows.".into())
+pub(crate) fn http_get(host: &str, path: &str, accept: &str, max_bytes: usize) -> Result<HttpResponse, String> {
+    if !matches!(host, "api.github.com" | "github.com" | "raw.githubusercontent.com")
+        || !path.starts_with('/') || path.chars().any(char::is_control)
+        || accept.chars().any(char::is_control) {
+        return Err("The update request target is invalid.".into());
+    }
+    let max_bytes = max_bytes.min(256 * 1024 * 1024);
+    let url = format!("https://{host}{path}");
+    let output = Command::new("curl")
+        .args([
+            "--silent", "--show-error", "--location", "--proto", "=https",
+            "--proto-redir", "=https", "--tlsv1.2", "--max-time", "60",
+            "--max-filesize", &max_bytes.to_string(), "--write-out", "\n%{http_code}",
+            "--header", &format!("Accept: {accept}"), "--header", "User-Agent: BlobUI-Headless",
+            "--url", &url,
+        ])
+        .output()
+        .map_err(|_| "Install curl to check for and download BlobUI Headless updates.".to_string())?;
+    if output.stdout.len() > max_bytes.saturating_add(16) {
+        return Err("The GitHub update response is larger than the supported limit.".into());
+    }
+    let marker = output.stdout.iter().rposition(|byte| *byte == b'\n')
+        .ok_or("GitHub returned an invalid update response.")?;
+    let status = std::str::from_utf8(&output.stdout[marker + 1..])
+        .ok().and_then(|text| text.trim().parse::<u32>().ok())
+        .ok_or("GitHub returned an invalid HTTP status for the update request.")?;
+    let body = output.stdout[..marker].to_vec();
+    if !output.status.success() && status == 0 {
+        return Err("Could not reach GitHub to check for BlobUI Headless updates.".into());
+    }
+    Ok(HttpResponse { status, body })
 }
 
 fn read_manifest(path: &Path) -> Result<PreviousManifest, String> {
