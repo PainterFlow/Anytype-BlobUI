@@ -54,7 +54,7 @@ jobs:
         run: |
           cargo test --locked --manifest-path mcp-server/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path settings-app/Cargo.toml --no-default-features --features headless-cli --lib --bin blob-ui
+          cargo test --locked --manifest-path settings-app/Cargo.toml --no-default-features --features headless-cli --lib --bin blob-ui -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the Windows headless release executable
         if: runner.os == 'Windows'

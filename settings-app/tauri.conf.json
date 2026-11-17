@@ -32,6 +32,6 @@
   "bundle": {
     "active": false,
     "targets": "all",
-    "icon": ["icons/icon.ico", "icons/blob logo 4k.png"]
+    "icon": ["icons/icon.ico", "icons/icon.png"]
   }
 }
