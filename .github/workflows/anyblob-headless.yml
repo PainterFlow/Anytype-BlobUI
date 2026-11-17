@@ -68,6 +68,7 @@ jobs:
           HEADLESS_EXECUTABLE: ${{ matrix.executable }}
           HEADLESS_ASSET: ${{ matrix.asset }}
         run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item -LiteralPath "settings-app/dist/headless-cli/$env:HEADLESS_EXECUTABLE" -Destination "dist/$env:HEADLESS_ASSET"
       - uses: actions/upload-artifact@v4
         with:
