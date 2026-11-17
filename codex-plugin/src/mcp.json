@@ -3,8 +3,8 @@
   "mcpServers": {
     "anyblob": {
       "type": "stdio",
-      "command": "./bin/blobui-mcp.exe",
-      "args": []
+      "command": "blob-ui",
+      "args": ["mcp"]
     }
   }
 }

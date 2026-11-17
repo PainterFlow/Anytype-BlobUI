@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 #[cfg(any(test, not(windows)))]
 pub(crate) const WINDOWS_HOST_REQUIRED: &str =
-    "This Anyblob MCP process is running outside the Windows computer that hosts BlobUI, so it cannot reach BlobUI's local bridge. The bundled plugin runs through local stdio; updating or restarting BlobUI does not reroute this process through Secure MCP Tunnel. Use a tunnel-backed MCP target if this Codex surface provides one, or run the chat on the Windows Codex host. Remote Control can connect to that host from another device.";
+    "The BlobUI Settings bridge is available on Windows. For direct Windows or Linux access, use the standalone `blob-ui mcp` command.";
 
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
@@ -92,21 +92,6 @@ fn crypt(_: &[u8], _: bool) -> Result<Vec<u8>, String> {
 pub fn encrypt(token: &str) -> Result<Vec<u8>, String> {
     crypt(token.as_bytes(), true)
 }
-pub fn encrypt_secret(secret: &str) -> Result<Vec<u8>, String> {
-    crypt(secret.as_bytes(), true)
-}
-pub fn read_secret_at(path: &std::path::Path) -> Result<String, String> {
-    reject_links(path)?;
-    let data = std::fs::read(path)
-        .map_err(|_| "The Secure MCP Tunnel runtime API key is not saved.")?;
-    let mut plaintext = crypt(&data, false)?;
-    let value = String::from_utf8(std::mem::take(&mut plaintext))
-        .map_err(|_| "The saved Secure MCP Tunnel key is invalid.")?;
-    plaintext.iter_mut().for_each(|byte| unsafe {
-        std::ptr::write_volatile(byte, 0)
-    });
-    Ok(value)
-}
 pub fn read() -> Result<String, String> {
     #[cfg(windows)]
     {
@@ -130,12 +115,10 @@ pub fn read_at(path: &std::path::Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn non_windows_error_explains_the_execution_host_and_remote_options() {
+    fn non_windows_error_points_to_the_headless_server() {
         let error = super::WINDOWS_HOST_REQUIRED;
-        assert!(error.contains("running outside the Windows computer"));
-        assert!(error.contains("does not reroute this process"));
-        assert!(error.contains("tunnel-backed MCP target"));
-        assert!(error.contains("Remote Control"));
+        assert!(error.contains("Windows or Linux"));
+        assert!(error.contains("blob-ui mcp"));
     }
 
     #[cfg(not(windows))]

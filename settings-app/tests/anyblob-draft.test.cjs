@@ -4,62 +4,53 @@ const assert = require('node:assert/strict');
 async function fixture() {
   const { createAnyblobDraft } = await import('../ui/anyblob-draft.js');
   const draft = createAnyblobDraft(), calls = [];
-  let failTunnel = false;
+  let failToggle = false;
   draft.init({ onChange() {}, async invoke(command, args) {
     calls.push({ command, args });
     if (command === 'anyblob_status') return { enabled: true, localProjectsFolder: 'C:\\projects' };
-    if (command === 'secure_mcp_tunnel_status') return { enabled: false, tunnelId: '' };
+    if (command === 'configure_anyblob' && failToggle) throw Error('Anyblob rejected');
+    if (command === 'configure_anyblob') return { enabled: args.enabled };
     if (command === 'set_anyblob_projects_folder') return { localProjectsFolder: args.folder };
-    if (command === 'configure_secure_mcp_tunnel' && failTunnel) throw Error('Tunnel rejected');
     return {};
   } });
   await draft.load(); draft.setLocked(false); calls.length = 0;
-  return { draft, calls, rejectTunnel() { failTunnel = true; } };
+  return { draft, calls, rejectToggle() { failToggle = true; } };
 }
 
 test('integration edits remain drafts across reload and Undo restores the saved values', async () => {
   const { draft, calls } = await fixture();
-  draft.change({ folder: 'C:\\new', tunnelEnabled: true, tunnelId: 'new-id', runtimeApiKey: 'secret' });
+  draft.change({ folder: 'C:\\new', enabled: false });
   assert.equal(calls.length, 0);
   await draft.load();
   assert.equal(draft.getSnapshot().folder, 'C:\\new');
-  assert.equal(draft.getSnapshot().runtimeApiKey, 'secret');
+  assert.equal(draft.getSnapshot().enabled, false);
   assert.equal(draft.isDirty(), true);
   draft.discard();
   assert.equal(draft.getSnapshot().folder, 'C:\\projects');
-  assert.equal(draft.getSnapshot().runtimeApiKey, '');
+  assert.equal(draft.getSnapshot().enabled, true);
   assert.equal(draft.isDirty(), false);
 });
 
-test('Save persists folder and tunnel configuration without starting a process', async () => {
+test('Save persists Anyblob enablement and the local projects folder', async () => {
   const { draft, calls } = await fixture();
-  draft.change({ folder: 'C:\\new', tunnelEnabled: true, tunnelId: ' tunnel ', runtimeApiKey: ' secret ' });
+  draft.change({ folder: 'C:\\new', enabled: false });
   await draft.save();
-  assert.deepEqual(calls.map(call => call.command), ['set_anyblob_projects_folder', 'configure_secure_mcp_tunnel']);
-  assert.deepEqual(calls[1].args, { enabled: true, tunnelId: 'tunnel', runtimeApiKey: 'secret', start: false });
+  assert.deepEqual(calls, [
+    { command: 'configure_anyblob', args: { enabled: false } },
+    { command: 'set_anyblob_projects_folder', args: { folder: 'C:\\new' } },
+  ]);
   assert.equal(draft.isDirty(), false);
-  assert.equal(draft.getSnapshot().runtimeApiKey, '');
 });
 
-test('failed tunnel save preserves its draft and Undo retains a successfully saved folder', async () => {
-  const { draft, rejectTunnel } = await fixture();
-  draft.change({ folder: 'C:\\new', tunnelEnabled: true, tunnelId: 'tunnel', runtimeApiKey: 'secret' });
-  rejectTunnel();
-  await assert.rejects(draft.save(), /Tunnel rejected/);
+test('failed Anyblob configuration preserves the draft for Undo', async () => {
+  const { draft, rejectToggle } = await fixture();
+  draft.change({ folder: 'C:\\new', enabled: false });
+  rejectToggle();
+  await assert.rejects(draft.save(), /Anyblob rejected/);
   assert.equal(draft.isDirty(), true);
-  assert.equal(draft.getSnapshot().runtimeApiKey, 'secret');
-  draft.discard();
   assert.equal(draft.getSnapshot().folder, 'C:\\new');
-  assert.equal(draft.getSnapshot().tunnelEnabled, false);
-});
-
-test('disabling Anyblob clears the pending secret without writing before Save', async () => {
-  const { draft, calls } = await fixture();
-  draft.change({ tunnelEnabled: true, runtimeApiKey: 'secret' });
-  draft.change({ enabled: false });
-  assert.equal(draft.getSnapshot().runtimeApiKey, '');
-  assert.equal(draft.getSnapshot().tunnelEnabled, false);
-  assert.equal(calls.length, 0);
+  assert.equal(draft.getSnapshot().enabled, false);
   draft.discard();
+  assert.equal(draft.getSnapshot().folder, 'C:\\projects');
   assert.equal(draft.getSnapshot().enabled, true);
 });

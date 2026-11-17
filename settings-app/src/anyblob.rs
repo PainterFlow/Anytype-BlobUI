@@ -51,6 +51,9 @@ fn authenticate(state: &Value, token: &str) -> Result<(), String> {
     if state["enabled"] != true {
         return Err("Anyblob is disabled. Enable it in BlobUI Integrations > Anyblob.".into());
     }
+    if crate::HEADLESS_MODE.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(());
+    }
     let expected = state["verifier"].as_str().unwrap_or("");
     let actual = digest(token);
     // Fixed-size digest comparison without an early mismatch exit.
@@ -148,7 +151,24 @@ fn configure_at(
 }
 fn migrate() -> Result<bool, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
-    migrate_at(&bridge_path()?, &blobui_mcp::credential::path()?)
+    let path = bridge_path()?;
+    let enabled = migrate_at(&path, &blobui_mcp::credential::path()?)?;
+    remove_legacy_tunnel_secret(&path)?;
+    Ok(enabled)
+}
+
+fn remove_legacy_tunnel_secret(settings_path: &std::path::Path) -> Result<(), String> {
+    let settings = settings_path.parent().and_then(std::path::Path::parent)
+        .ok_or("The Anyblob Settings folder is unavailable.")?;
+    let secret = settings.join("DO-NOT-SHARE/secure-mcp-tunnel.dpapi");
+    match std::fs::symlink_metadata(&secret) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() && !crate::is_windows_reparse_point(&metadata) => {
+            std::fs::remove_file(&secret).map_err(|_| "Could not remove the saved tunnel credential.".to_string())
+        }
+        Ok(_) => Err("The saved tunnel credential is not a regular file.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("Could not inspect the saved tunnel credential.".into()),
+    }
 }
 fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bool, String> {
     let mut value = if path.exists() {
@@ -169,7 +189,11 @@ fn migrate_at(path: &std::path::Path, credential: &std::path::Path) -> Result<bo
         value = crate::read_json_file(path)?;
     }
     if let Some(fields) = value.as_object_mut() {
-        if fields.remove("remoteAccess").is_some() {
+        let mut changed = fields.remove("remoteAccess").is_some();
+        for name in ["secureMcpTunnelId", "secureMcpTunnelEnabled"] {
+            changed |= fields.remove(name).is_some();
+        }
+        if changed {
             let bytes = serde_json::to_vec(&value)
                 .map_err(|_| "Could not encode Anyblob settings during migration.")?;
             crate::storage::write_atomic(path, &bytes)?;
@@ -201,9 +225,6 @@ pub fn anyblob_status() -> Result<Value, String> {
 pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
     let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
     configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
-    if !enabled {
-        crate::secure_mcp_tunnel::disable_for_anyblob();
-    }
     Ok(json!({"enabled":enabled}))
 }
 
@@ -297,7 +318,6 @@ fn authenticate_project_chat(thread_id: &str, name: &str, key: &str, remote: boo
         .find(|project| {
             project.id == config.id
                 && project.name == config.name
-                && (project.kind == "remote") == config.remote
         })
         .ok_or("This project config does not match a discovered Anyblob project.")?;
     synchronize_project_registry(&projects)?;
@@ -1019,6 +1039,48 @@ fn dispatch(
         },
         |op, check| pipe_prompt(pipe, &operation_id, op, check),
     )
+}
+
+#[cfg(feature = "headless-cli")]
+pub(crate) fn dispatch_headless(
+    request: Request,
+    cancel: &std::sync::atomic::AtomicBool,
+    approval: std::sync::Arc<blobui_mcp::server::Approval>,
+) -> Result<Response, String> {
+    let deadline = || Instant::now() + Duration::from_secs(120);
+    let result = dispatch_with(
+        request,
+        || !cancel.load(std::sync::atomic::Ordering::Acquire),
+        state,
+        saved,
+        crate::kanban_api::Client::connect,
+        move |operation, check| {
+            let end = deadline();
+            let _guard = acquire_prompt(check, end)?;
+            check()?;
+            let remaining = end.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Approval queue timed out. Retry the request.".into());
+            }
+            let accepted = approval(&blobui_mcp::approval::describe(operation), remaining)?;
+            check()?;
+            if accepted {
+                Ok(())
+            } else {
+                Err("The operation was not approved.".into())
+            }
+        },
+    );
+    Ok(match result {
+        Ok(value) => Response {
+            result: Some(value),
+            error: None,
+        },
+        Err(error) => Response {
+            result: None,
+            error: Some(error),
+        },
+    })
 }
 fn publication_event(operation: &Operation, result: &Result<Value, String>) -> Option<Value> {
     let Operation::Blobui { blobui } = operation else {
@@ -1764,57 +1826,6 @@ mod tests {
         }
     }
     #[test]
-    fn cloud_membership_selects_a_host_scoped_override() {
-        use crate::codex_identity::Membership;
-        let mut config = project_config(
-            json!({"kind":"space","id":"space","spaceId":"space","permission":{"access":"read","approval":"fullAccess"}}),
-        );
-        let project = config.projects.remove("project").unwrap();
-        config.projects.insert("cloud:host-a:same-id".into(), project);
-        let (client, server) = mock(
-            vec![
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full ".into(),
-                    json!({"id":"object","name":"Allowed","type":"page","properties":{}}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
-                    json!({"id":"object","markdown":"cloud project content"}),
-                ),
-            ],
-            None,
-        );
-        let result = dispatch_resolved_with(
-            request(Operation::ReadObject {
-                space_id: "space".into(),
-                object_id: "object".into(),
-            }),
-            || true,
-            || Ok(enabled()),
-            || Ok(config.clone()),
-            || Ok(client.clone_for_fixture()),
-            |_, _| panic!("full access does not prompt"),
-            || Ok(Some(Membership::Project("cloud:host-a:same-id".into()))),
-        )
-        .unwrap();
-        assert_eq!(result["markdown"], "cloud project content");
-        server.join().unwrap();
-
-        assert!(dispatch_resolved_with(
-            request(Operation::ReadObject {
-                space_id: "space".into(),
-                object_id: "object".into(),
-            }),
-            || true,
-            || Ok(enabled()),
-            || Ok(config.clone()),
-            || panic!("the other host must not use host-a's project override"),
-            |_, _| panic!("a missing host-scoped grant must not prompt"),
-            || Ok(Some(Membership::Project("cloud:host-b:same-id".into()))),
-        )
-        .is_err());
-    }
-    #[test]
     fn query_search_filters_membership_before_pagination_and_hides_global_totals() {
         use crate::codex_identity::Membership;
         let config = project_config(
@@ -1903,7 +1914,7 @@ mod tests {
         let (client, server) = mock(vec![page.clone(), page.clone(), page], None);
         for membership in [
             Membership::Project("unconfigured".into()),
-            Membership::Project("cloud:host:unconfigured".into()),
+            Membership::Project("other-unconfigured-project".into()),
             Membership::Projectless,
         ] {
             let result = dispatch_resolved_with(
@@ -2318,420 +2329,6 @@ mod tests {
             )
             .is_err());
         }
-    }
-    #[cfg(windows)]
-    #[test]
-    fn executable_to_pipe_to_blobui_to_mock_anytype() {
-        use blobui_mcp::transport::{Pipe, CALL_TIMEOUT};
-        use std::{
-            io::{BufRead, BufReader},
-            process::{Command, Stdio},
-        };
-        // Test-Anyblob supplies a unique instance. Never bind the real app's pipe.
-        assert!(std::env::var("ANYBLOB_BRIDGE_INSTANCE")
-            .unwrap_or_default()
-            .starts_with("fixture-"));
-        let package =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../codex-plugin/dist/anyblob");
-        let manifest: Value = serde_json::from_slice(
-            &std::fs::read(package.join("mcp.json")).expect("Build the plugin before this test."),
-        )
-        .unwrap();
-        let launch = &manifest["mcpServers"]["anyblob"];
-        assert_eq!(launch["type"], "stdio");
-        assert_eq!(launch["command"], "./bin/blobui-mcp.exe");
-        assert!(launch["cwd"].is_null());
-        let (client, api) = mock(
-            vec![
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "POST /v2/spaces/space/search?ids=full&limit=20&offset=7 ".into(),
-                    json!({"data":[{"id":"object","name":"Note","type":"page"}],"total":1,"has_more":false}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full ".into(),
-                    json!({"id":"object","type":"page","properties":{"name":"Note"},"blocks":[]}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
-                    json!({"id":"object","markdown":"fixture content"}),
-                ),
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "POST /v2/spaces/space/search?ids=full&limit=100&offset=0 ".into(),
-                    json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Note"}],"has_more":false}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full ".into(),
-                    json!({"id":"object","name":"Note","properties":{}}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full&format=md ".into(),
-                    json!({"id":"object","markdown":"resource content"}),
-                ),
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "POST /v2/spaces/space/objects?dry_run=true ".into(),
-                    json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true}),
-                ),
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "POST /v2/spaces/space/objects?dry_run=true ".into(),
-                    json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"dry_run":true}),
-                ),
-                (
-                    "POST /v2/spaces/space/objects ".into(),
-                    json!({"_fixture_request_body":{"type":"page","name":"fixture-created"},"id":"created-object","etag":"created-etag"}),
-                ),
-                (
-                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"space","name":"Work"}],"has_more":false}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?ids=full ".into(),
-                    json!({"id":"object","properties":{"name":"Project plan","private":"not display metadata"}}),
-                ),
-                (
-                    "GET /v2/spaces/space/objects/object?include=blocks&ids=full ".into(),
-                    json!({"id":"object","blocks":[]}),
-                ),
-            ],
-            None,
-        );
-        let saved_config = Arc::new(Mutex::new(config("read", "alwaysAsk")));
-        let saved = saved_config.clone();
-        let mut listener = Pipe::listen(true).unwrap();
-        let bridge = std::thread::spawn(move || {
-            let mut outcomes = Vec::new();
-            for index in 0..10 {
-                let deadline = Instant::now() + Duration::from_secs(15);
-                while !listener.accept().unwrap() {
-                    assert!(Instant::now() < deadline);
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                let pipe = std::mem::replace(&mut listener, Pipe::listen(false).unwrap());
-                let cancel = AtomicBool::new(false);
-                let request: Request = serde_json::from_value(
-                    serde_json::from_slice::<Value>(&pipe.receive(&cancel, deadline).unwrap())
-                        .unwrap()["request"]
-                        .clone(),
-                )
-                .unwrap();
-                if index < 3 || index == 4 {
-                    assert_eq!(request.thread_id.as_deref(), Some("fixture-chat"));
-                }
-                let operation_id = request.id.clone();
-                let prompted = std::cell::Cell::new(false);
-                let result = dispatch_with(
-                    request,
-                    || pipe.connected(),
-                    || Ok(enabled()),
-                    || Ok(saved.lock().unwrap().clone()),
-                    || Ok(client.clone_for_fixture()),
-                    |op, check| {
-                        prompted.set(true);
-                        assert_ne!(index, 3, "Metadata must not request read approval");
-                        if index == 7 {
-                            approve_with(check, Duration::from_secs(5), || None)
-                        } else {
-                            pipe_prompt(&pipe, &operation_id, op, check)
-                        }
-                    },
-                );
-                if index == 4 {
-                    assert!(prompted.get(), "Resource reads retain Always Ask");
-                }
-                outcomes.push(result.is_ok());
-                let response = match result {
-                    Ok(value) => Response {
-                        result: Some(value),
-                        error: None,
-                    },
-                    Err(error) => Response {
-                        result: None,
-                        error: Some(error),
-                    },
-                };
-                let _ = pipe.send(
-                    &serde_json::to_vec(&blobui_mcp::approval::Frame::Response {
-                        version: blobui_mcp::approval::VERSION,
-                        response,
-                    })
-                    .unwrap(),
-                    &cancel,
-                    Instant::now() + CALL_TIMEOUT,
-                );
-            }
-            outcomes
-        });
-        let command = package.join("bin/blobui-mcp.exe").canonicalize().unwrap();
-        let mut child = Command::new(command)
-            .args(
-                launch["args"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|a| a.as_str().unwrap()),
-            )
-            .current_dir(&package)
-            .env("ANYBLOB_CREDENTIAL_FILE", {
-                let path = package.join("../../../.test-run/anyblob-handoff/fixture.dpapi");
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(
-                    &path,
-                    blobui_mcp::credential::encrypt(&"a".repeat(64)).unwrap(),
-                )
-                .unwrap();
-                path.canonicalize().unwrap()
-            })
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut input = child.stdin.take().unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
-        fn send(input: &mut impl Write, id: u32, method: &str, params: Value) {
-            writeln!(
-                input,
-                "{}",
-                json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})
-            )
-            .unwrap();
-            input.flush().unwrap();
-        }
-        fn receive(output: &mut impl BufRead) -> Value {
-            let mut line = String::new();
-            output.read_line(&mut line).unwrap();
-            serde_json::from_str(&line).expect("protocol-only stdout")
-        }
-        send(
-            &mut input,
-            1,
-            "initialize",
-            json!({"protocolVersion":"2025-06-18","capabilities":{"elicitation":{"form":{}}}}),
-        );
-        assert_eq!(
-            receive(&mut output)["result"]["serverInfo"]["name"],
-            "anyblob"
-        );
-        for (id, name, args) in [
-            (2, "list_spaces", json!({})),
-            (
-                3,
-                "search_objects",
-                json!({"space_id":"space","query":"private fixture query","offset":7}),
-            ),
-            (
-                4,
-                "read_object",
-                json!({"space_id":"space","object_id":"object"}),
-            ),
-        ] {
-            send(
-                &mut input,
-                id,
-                "tools/call",
-                json!({"name":name,"arguments":args,"_meta":{"threadId":"fixture-chat"}}),
-            );
-            let mut response = receive(&mut output);
-            if response["method"] == "elicitation/create" {
-                assert_eq!(
-                    response["params"]["requestedSchema"]["properties"],
-                    json!({})
-                );
-                writeln!(input,"{}",json!({"jsonrpc":"2.0","id":response["id"],"result":{"action":"accept","content":{}}})).unwrap();
-                input.flush().unwrap();
-                response = receive(&mut output);
-            }
-            assert_eq!(response["result"]["isError"], false, "{response}");
-            assert!(response["result"]["structuredContent"].is_object());
-            let links: Vec<_> = response["result"]["content"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|item| item["type"] == "resource_link")
-                .collect();
-            if name == "read_object" {
-                assert_eq!(links.len(), 1);
-                assert_eq!(links[0]["uri"], "anyblob://objects/space/object");
-                assert_eq!(
-                    response["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],
-                    "https://object.any.coop/object?spaceId=space"
-                );
-                assert_eq!(
-                    response["result"]["_meta"]["openai/resourceActivities"]["resources"][0]
-                        ["title"],
-                    "Note · Work"
-                );
-            } else {
-                assert!(links.is_empty());
-                assert!(response["result"].get("_meta").is_none());
-            }
-        }
-        send(
-            &mut input,
-            7,
-            "tools/call",
-            json!({"name":"search_mentions","arguments":{"query":""}}),
-        );
-        let mentions = receive(&mut output);
-        assert_eq!(
-            mentions["result"]["structuredContent"]["items"][0]["uri"],
-            "anyblob://objects/space/object"
-        );
-        let wrapped_uri="mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fspace%2Fobject";
-        send(
-            &mut input,
-            8,
-            "resources/read",
-            json!({"uri":wrapped_uri,"_meta":{"threadId":"fixture-chat"}}),
-        );
-        let question = receive(&mut output);
-        assert_eq!(question["method"], "elicitation/create");
-        writeln!(
-            input,
-            "{}",
-            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})
-        )
-        .unwrap();
-        input.flush().unwrap();
-        let resource = receive(&mut output);
-        assert_eq!(
-            resource["result"]["contents"][0]["uri"],
-            wrapped_uri
-        );
-        let document: Value =
-            serde_json::from_str(resource["result"]["contents"][0]["text"].as_str().unwrap())
-                .unwrap();
-        assert_eq!(document["markdown"], "resource content");
-        *saved_config.lock().unwrap() = config("none", "alwaysAsk");
-        send(
-            &mut input,
-            5,
-            "tools/call",
-            json!({"name":"read_object","arguments":{"space_id":"space","object_id":"object"}}),
-        );
-        let denied = receive(&mut output);
-        assert_eq!(denied["result"]["isError"], true);
-        assert!(denied["result"].get("structuredContent").is_none());
-        assert!(denied["result"]["content"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|item| item["type"] != "resource_link"));
-        send(
-            &mut input,
-            9,
-            "resources/read",
-            json!({"uri":wrapped_uri,"_meta":{"threadId":"fixture-chat"}}),
-        );
-        let denied = receive(&mut output);
-        assert_eq!(denied["error"]["code"], -32000);
-        assert!(denied.get("result").is_none());
-        *saved_config.lock().unwrap() = config("read", "alwaysAsk");
-        send(
-            &mut input,
-            6,
-            "tools/call",
-            json!({"name":"search_objects","arguments":{"space_id":"space","query":"cancel me"}}),
-        );
-        std::thread::sleep(Duration::from_millis(100));
-        writeln!(
-            input,
-            "{}",
-            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":6}})
-        )
-        .unwrap();
-        input.flush().unwrap();
-        assert_eq!(receive(&mut output)["error"]["code"], -32800);
-        let writable = config("createDelete", "alwaysAsk");
-        *saved_config.lock().unwrap() = writable;
-        send(
-            &mut input,
-            10,
-            "tools/call",
-            json!({"name":"create_object","arguments":{"space_id":"space","body":{"type":"page","name":"fixture-created"}},"_meta":{"threadId":"fixture-chat"}}),
-        );
-        let question = receive(&mut output);
-        assert_eq!(question["method"], "elicitation/create");
-        assert!(question["params"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("fixture-created"));
-        writeln!(
-            input,
-            "{}",
-            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})
-        )
-        .unwrap();
-        input.flush().unwrap();
-        let created = receive(&mut output);
-        assert_eq!(created["result"]["isError"], false, "{created}");
-        assert_eq!(
-            created["result"]["structuredContent"]["outcome"],
-            "confirmed"
-        );
-        assert_eq!(
-            created["result"]["structuredContent"]["receipt"]["id"],
-            "created-object"
-        );
-        assert_eq!(
-            created["result"]["content"][1]["uri"],
-            "anyblob://objects/space/created-object"
-        );
-        assert_eq!(
-            created["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["url"],
-            "https://object.any.coop/created-object?spaceId=space"
-        );
-        assert_eq!(
-            created["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["title"],
-            "fixture-created · Work"
-        );
-        send(
-            &mut input,
-            11,
-            "tools/call",
-            json!({"name":"read_document","arguments":{"space_id":"space","object_id":"object","include":"blocks","ids":"full"},"_meta":{"threadId":"fixture-chat"}}),
-        );
-        let question = receive(&mut output);
-        assert_eq!(question["method"], "elicitation/create");
-        writeln!(
-            input,
-            "{}",
-            json!({"jsonrpc":"2.0","id":question["id"],"result":{"action":"accept","content":{}}})
-        )
-        .unwrap();
-        input.flush().unwrap();
-        let projected = receive(&mut output);
-        assert_eq!(
-            projected["result"]["_meta"]["openai/resourceActivities"]["resources"][0]["title"],
-            "Project plan · Work"
-        );
-        assert!(!projected.to_string().contains("not display metadata"));
-        drop(input);
-        assert!(child.wait().unwrap().success());
-        assert_eq!(
-            bridge.join().unwrap(),
-            vec![true, true, true, true, true, false, false, false, true, true]
-        );
-        api.join().unwrap();
     }
     #[test]
     fn permissions_and_tokens_fail_closed() {

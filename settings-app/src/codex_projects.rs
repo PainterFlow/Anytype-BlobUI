@@ -1,4 +1,4 @@
-//! Discovers Anyblob projects under the configured local and remote roots.
+//! Discovers Anyblob projects under the configured local root.
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -35,29 +35,6 @@ struct ProjectFile {
     name: String,
     key: String,
     remote: bool,
-}
-
-#[derive(Deserialize, Default)]
-struct CodexConfig {
-    #[serde(default)]
-    anyblob: AnyblobConfig,
-}
-
-#[derive(Deserialize, Default)]
-struct AnyblobConfig {
-    remote_projects_folder: Option<PathBuf>,
-}
-
-pub(crate) fn codex_home_path() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("CODEX_HOME") {
-        if !path.is_empty() {
-            return Ok(path.into());
-        }
-    }
-    let profile = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .ok_or("Codex home directory is unavailable.")?;
-    Ok(PathBuf::from(profile).join(".codex"))
 }
 
 pub(crate) fn parse_config(text: &str) -> Result<ProjectConfig, String> {
@@ -119,7 +96,10 @@ fn scan_root(root: &Path) -> Result<Vec<Project>, String> {
             id: config.id,
             name: config.name,
             root_paths: vec![directory.to_string_lossy().into_owned()],
-            kind: if config.remote { "remote" } else { "local" }.into(),
+            // Project files are discovered only under the explicitly selected local folder.
+            // The legacy remote flag remains in the authentication file contract, but it no
+            // longer routes discovery through a remote Codex folder.
+            kind: "local".into(),
             host_id: None,
             computer_name: None,
         });
@@ -127,21 +107,10 @@ fn scan_root(root: &Path) -> Result<Vec<Project>, String> {
     Ok(projects)
 }
 
-fn read_remote_root(codex_directory: &Path) -> Result<Option<PathBuf>, String> {
-    let content = match fs::read_to_string(codex_directory.join("config.toml")) {
-        Ok(content) => content,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("Could not read the Codex config: {error}")),
-    };
-    let config: CodexConfig =
-        toml::from_str(&content).map_err(|_| "Could not parse the Codex config.")?;
-    Ok(config.anyblob.remote_projects_folder)
-}
-
-fn discover_in(local: Option<&Path>, remote: Option<&Path>) -> Result<Vec<Project>, String> {
+fn discover_in(local: Option<&Path>) -> Result<Vec<Project>, String> {
     let mut projects = Vec::new();
     let mut ids = BTreeSet::new();
-    for root in [local, remote.filter(|path| Some(*path) != local)].into_iter().flatten() {
+    if let Some(root) = local {
         for project in scan_root(root)? {
             if !ids.insert(project.id.clone()) {
                 return Err("Anyblob projects must have unique keys.".into());
@@ -173,8 +142,7 @@ pub(crate) fn discover() -> Result<Vec<Project>, String> {
     } else {
         None
     };
-    let remote = read_remote_root(&codex_home_path()?)?;
-    discover_in(local.as_deref(), remote.as_deref())
+    discover_in(local.as_deref())
 }
 
 #[tauri::command]
@@ -235,34 +203,25 @@ mod tests {
     }
 
     #[test]
-    fn discovers_projects_in_both_folders_using_their_actual_paths() {
+    fn discovers_projects_only_in_the_configured_local_folder() {
         let fixture = Fixture::new("roots");
         fixture.write(
             "local/first/anyblob.config.toml",
             "name = 'Local'\nkey = 'local secret'\nremote = false",
         );
         fixture.write(
-            "remote/second/anyblob.config.toml",
-            "name = 'Remote'\nkey = 'remote secret'\nremote = true",
+            "unconfigured/second/anyblob.config.toml",
+            "name = 'Unconfigured'\nkey = 'unconfigured secret'\nremote = true",
         );
         fixture.write(
-            "remote/other/nested/anyblob.config.toml",
+            "unconfigured/other/nested/anyblob.config.toml",
             "name = 'Nested'\nkey = 'nested secret'\nremote = true",
         );
-        fixture.write(
-            "codex/config.toml",
-            &format!(
-                "[anyblob]\nremote_projects_folder = {}",
-                serde_json::to_string(&fixture.0.join("remote")).unwrap()
-            ),
-        );
         let local = fixture.0.join("local");
-        let remote = read_remote_root(&fixture.0.join("codex")).unwrap().unwrap();
-        let projects = discover_in(Some(&local), Some(&remote)).unwrap();
-        assert_eq!(projects.len(), 2);
+        let projects = discover_in(Some(&local)).unwrap();
+        assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].kind, "local");
-        assert_eq!(projects[1].kind, "remote");
-        assert_eq!(Path::new(&projects[1].root_paths[0]), remote.join("second"));
+        assert_eq!(Path::new(&projects[0].root_paths[0]), local.join("first"));
         let exported = serde_json::to_string(&projects).unwrap();
         assert!(!exported.contains("secret"));
     }
@@ -288,7 +247,7 @@ mod tests {
         let fixture = Fixture::new("duplicate");
         fixture.write("first/anyblob.config.toml", first);
         fixture.write("second/anyblob.config.toml", second);
-        assert!(discover_in(Some(&fixture.0), None).is_err());
+        assert!(discover_in(Some(&fixture.0)).is_err());
     }
 
     #[test]

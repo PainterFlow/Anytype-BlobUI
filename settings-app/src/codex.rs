@@ -49,6 +49,12 @@ pub fn normalize(value: &Value) -> Configuration {
     let mut projects = BTreeMap::new();
     if let Some(entries) = value.get("projects").and_then(Value::as_object) {
         for (id, entry) in entries {
+            if id.starts_with("cloud:") || matches!(entry["kind"].as_str(), Some("cloud" | "remote"))
+                || entry["hostId"].as_str().is_some_and(|host| !host.is_empty())
+                || entry["computerName"].as_str().is_some_and(|name| !name.is_empty())
+            {
+                continue;
+            }
             let mut sources = Vec::new();
             if let Some(rows) = entry["sources"].as_array() {
                 for row in rows {
@@ -123,7 +129,7 @@ pub(crate) fn source_types(client: &crate::kanban_api::Client, base: &str) -> Re
     }).collect()
 }
 
-fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
+pub(crate) fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
     let mut sources = Vec::new();
     let mut identities = std::collections::BTreeSet::new();
     for space in discover(client)? {
@@ -159,9 +165,10 @@ mod tests {
     use serde_json::json;
     #[test]
     fn project_overrides_round_trip_and_keep_unavailable_selections() {
-        let input = json!({"spaces":{"space":{"access":"none"}},"projects":{"stable-id":{"name":"Old name","rootPaths":["C:\\one","C:\\two"],"sources":[{"spaceId":"space","kind":"query","id":"query-id","name":"Tasks","space":"Work","permission":{"access":"readWrite","filesEnabled":true,"approval":"alwaysAsk"}}]}}});
+        let input = json!({"spaces":{"space":{"access":"none"}},"projects":{"stable-id":{"name":"Old name","rootPaths":["C:\\one","C:\\two"],"sources":[{"spaceId":"space","kind":"query","id":"query-id","name":"Tasks","space":"Work","permission":{"access":"readWrite","filesEnabled":true,"approval":"alwaysAsk"}}]},"cloud:old-host:stale":{"kind":"remote","hostId":"old-host","name":"Old remote","rootPaths":[],"sources":[{"spaceId":"space","kind":"space","id":"space","name":"Work","permission":{"access":"readWrite","filesEnabled":true,"approval":"alwaysAsk"}}]}}});
         let config=normalize(&input);
         assert_eq!(config.projects["stable-id"].sources[0].permission.access,"readWrite");
+        assert_eq!(config.projects.len(),1,"Legacy remote project permissions are discarded.");
         assert_eq!(config.spaces["space"].access,"none");
         assert_eq!(config,normalize(&serde_json::to_value(&config).unwrap()));
         let malformed=normalize(&json!({"projects":{"saved":{"sources":"invalid"}}}));

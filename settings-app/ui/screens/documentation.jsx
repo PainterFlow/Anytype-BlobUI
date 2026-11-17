@@ -59,6 +59,14 @@ async function mediaForMarkdown(markdown) {
   return { images, videos };
 }
 
+export async function loadMarkdownFile(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Markdown request failed (${response.status}).`);
+  const markdown = (await response.text()).trim();
+  if (!markdown) throw new Error("Markdown file is empty.");
+  return { markdown, ...await mediaForMarkdown(markdown) };
+}
+
 /** Render sanitized Markdown in React and attach the shared accessible media controllers. */
 export function MarkdownView({ markdown = "", images, videos, id, className = "markdown-content", ...regionProps }) {
   const containerRef = useRef(null);
@@ -92,15 +100,9 @@ export function DeveloperGuideReader({ visible = false }) {
   useEffect(() => {
     if (!visible || payload) return undefined;
     let active = true;
-    fetch("./dev-guide.md").then(response => {
-      if (!response.ok) throw new Error(`Dev Guide request failed (${response.status}).`);
-      return response.text();
-    }).then(async markdown => {
-      const text = String(markdown || "").trim();
-      if (!text) throw new Error("Dev Guide is empty.");
-      const media = await mediaForMarkdown(text);
+    loadMarkdownFile("./dev-guide.md").then(result => {
       if (!active) return;
-      setPayload({ markdown: text, ...media });
+      setPayload(result);
       setLoadError(false);
     }).catch(() => {
       if (active) setLoadError(true);

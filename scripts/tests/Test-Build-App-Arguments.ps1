@@ -48,11 +48,18 @@ function Start-Process {
 try {
     $env:BLOBUI_BUILD_ONLY = '0'
     [IO.Directory]::CreateDirectory($scriptDirectory) | Out-Null
-    [IO.Directory]::CreateDirectory($projectDirectory) | Out-Null
+    $markdownDirectory = Join-Path $projectDirectory 'markdowns'
+    $frontendDirectory = Join-Path $projectDirectory 'frontend-dist'
+    [IO.Directory]::CreateDirectory($markdownDirectory) | Out-Null
+    [IO.Directory]::CreateDirectory($frontendDirectory) | Out-Null
     [IO.File]::WriteAllText((Join-Path $projectDirectory 'Cargo.toml'), '[package]')
+    foreach ($name in @('dev-guide.md', 'anyblob-guide.md', 'Changelogs.md', 'md-images.yaml')) {
+        [IO.File]::WriteAllText((Join-Path $markdownDirectory $name), "fixture $name")
+    }
+    [IO.File]::WriteAllText((Join-Path $frontendDirectory 'dev-guide.md'), 'bundled dev guide')
+    [IO.File]::WriteAllText((Join-Path $frontendDirectory 'anyblob-guide.md'), 'bundled Anyblob guide')
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Build-App.ps1') -Destination $fixtureScriptPath
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Restore-ProcessEnvironment.ps1') -Destination (Join-Path $scriptDirectory 'Restore-ProcessEnvironment.ps1')
-    [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Build-Codex.ps1'), '')
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Rust-Toolchain.ps1'), '')
 
     $backgroundRequestPath = Join-Path $fixtureRoot 'settings-app/dist/.blobui-background-next'
@@ -60,6 +67,7 @@ try {
     $distributionExecutable = Join-Path $fixtureRoot 'settings-app/dist/blobui-settings.exe'
     & $fixtureScriptPath -b
     Assert (Test-Path -LiteralPath $distributionExecutable -PathType Leaf) '-b without -s must build the distribution executable.'
+    Assert ((Get-Content -LiteralPath (Join-Path $projectDirectory 'dist/anyblob-guide.md') -Raw) -ceq 'bundled Anyblob guide') 'The Anyblob guide must be copied beside the Settings executable.'
     Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '-b without -s must queue background mode beside the distribution executable.'
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-b without -s must not launch the Settings app.'
     Assert (-not (Test-Path -LiteralPath $onboardingRequestPath)) '-b alone must not queue onboarding.'

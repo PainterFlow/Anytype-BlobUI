@@ -3,9 +3,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CopyTextField } from "./copy-text-field.jsx";
 import { HelpTooltip } from "./help-tooltip.jsx";
-import { GlobeIcon } from "./catalog-icons.jsx";
 import { ExpandableSearch } from "./search.jsx";
-import { DialogSwitch, ReadOnlyTextInput } from "./settings-controls.jsx";
+import { ReadOnlyTextInput } from "./settings-controls.jsx";
 import { Tabs } from "./tabs.jsx";
 
 describe("Settings controls", () => {
@@ -90,21 +89,21 @@ describe("Settings controls", () => {
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("portals help popovers out of clipped settings groups", () => {
+  it("portals Anyblob help popovers out of clipped settings groups", () => {
     render(<div className="settings-list" style={{ overflow: "hidden" }}>
-      <DialogSwitch id="remote-toggle" dialogId="remote-dialog" label="Remote access" help="This text stays above the row." checked={false} onChange={() => {}} onOpen={() => {}} />
+      <HelpTooltip label="Anyblob help" text="This guide explains how to set up Anyblob." />
     </div>);
-    const trigger = screen.getByRole("button", { name: "Remote access information" });
+    const trigger = screen.getByRole("button", { name: "Anyblob help" });
     fireEvent.focus(trigger);
     const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
     expect(popover.parentElement).toBe(document.body);
     expect(popover.dataset.open).toBe("true");
-    expect(popover.textContent).toBe("This text stays above the row.");
+    expect(popover.textContent).toBe("This guide explains how to set up Anyblob.");
   });
 
-  it("keeps globe help on the shared focus and hover tooltip behavior", () => {
-    render(<HelpTooltip label="Cloud project information" text="Cloud access is scoped to its host." icon={<GlobeIcon />} />);
-    const trigger = screen.getByRole("button", { name: "Cloud project information" });
+  it("keeps question mark help on the shared focus and hover tooltip behavior", () => {
+    render(<HelpTooltip label="Project source help" text="Choose the sources this local project can access." />);
+    const trigger = screen.getByRole("button", { name: "Project source help" });
     expect(trigger.querySelector("svg circle")).not.toBeNull();
     expect(trigger.querySelector("svg path")).not.toBeNull();
     const popover = document.getElementById(trigger.getAttribute("aria-describedby"));

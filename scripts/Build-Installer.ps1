@@ -11,8 +11,9 @@ $manifestPath = Join-Path $workspaceRoot 'installer\Cargo.toml'
 $distributionDirectory = Join-Path $workspaceRoot 'dist'
 $settingsExecutable = Join-Path $workspaceRoot 'settings-app\dist\blobui-settings.exe'
 $versionSource = Join-Path $workspaceRoot 'blobui-release.json'
-$changelogSource = Join-Path $workspaceRoot 'Changelogs.md'
-$markdownImageManifest = Join-Path $workspaceRoot 'md-images.yaml'
+$markdownDirectory = Join-Path $workspaceRoot 'settings-app\markdowns'
+$changelogSource = Join-Path $markdownDirectory 'Changelogs.md'
+$markdownImageManifest = Join-Path $markdownDirectory 'md-images.yaml'
 $buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the local Git commit.' }
 Write-Host "Building installer for blobui-app Dev+$buildCommit"

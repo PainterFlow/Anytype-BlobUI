@@ -57,8 +57,8 @@ async function main() {
   const end = source.indexOf('async function cIn(', start);
   assert(end > start);
   // Feed the production executable's real discovery response into the installed selector.
-  const executable=process.argv[3]||path.resolve(__dirname,'../dist/anyblob/bin/blobui-mcp.exe');
-  const discovery=spawnSync(executable,[],{encoding:'utf8',windowsHide:true,env:{...process.env,ANYBLOB_BRIDGE_INSTANCE:'fixture-discovery'},
+  const executable=process.argv[3]||path.resolve(__dirname,'../../settings-app/dist/headless-cli/blob-ui.exe');
+  const discovery=spawnSync(executable,['mcp'],{encoding:'utf8',windowsHide:true,env:{...process.env,BLOBUI_HEADLESS_HOME:path.resolve(__dirname,'../../.test-run/mentions-compatibility')},
     input:[{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-11-25'}},{jsonrpc:'2.0',id:2,method:'tools/list'}].map(v=>JSON.stringify(v)+'\n').join('')});
   assert.equal(discovery.status,0,discovery.stderr||discovery.error?.message);
   const [initialized,listed]=discovery.stdout.trim().split(/\r?\n/).map(line=>JSON.parse(line).result);

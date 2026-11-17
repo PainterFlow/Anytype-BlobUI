@@ -6,17 +6,13 @@ workspaceRoot=$(cd -- "$script_dir/../.." && pwd -P)
 mkdir -p "$workspaceRoot/.test-run"
 fixture=$(mktemp -d "$workspaceRoot/.test-run/build-app-arguments.XXXXXX")
 trap 'rm -rf -- "$fixture"' EXIT
-mkdir -p "$fixture/scripts" "$fixture/settings-app" "$fixture/bin" "$fixture/.test-run"
+mkdir -p "$fixture/scripts" "$fixture/settings-app/markdowns" "$fixture/bin" "$fixture/.test-run"
 cp "$workspaceRoot/scripts/Build-App.sh" "$workspaceRoot/scripts/Restore-ProcessEnvironment.sh" "$workspaceRoot/scripts/Workspace-Build-Paths.sh" "$workspaceRoot/scripts/Rust-Toolchain.sh" "$fixture/scripts/"
-cat > "$fixture/scripts/Build-Codex.sh" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-chmod +x "$fixture/scripts/Build-Codex.sh"
 echo fixture > "$fixture/settings-app/Cargo.toml"
-echo guide > "$fixture/dev-guide.md"
-echo notes > "$fixture/Changelogs.md"
-echo 'images: []' > "$fixture/md-images.yaml"
+echo guide > "$fixture/settings-app/markdowns/dev-guide.md"
+echo headless guide > "$fixture/settings-app/markdowns/anyblob-guide.md"
+echo notes > "$fixture/settings-app/markdowns/Changelogs.md"
+echo 'images: []' > "$fixture/settings-app/markdowns/md-images.yaml"
 
 if command -v rustc >/dev/null 2>&1; then
     host_target=$(rustc -vV | sed -n 's/^host: //p')
@@ -39,7 +35,8 @@ cat > "$fixture/bin/npm" <<'SH'
 #!/usr/bin/env bash
 if [[ $1 == run && $2 == build ]]; then
     mkdir -p frontend-dist
-    cp "$BLOBUI_TEST_ROOT/dev-guide.md" frontend-dist/dev-guide.md
+    cp "$BLOBUI_TEST_ROOT/settings-app/markdowns/dev-guide.md" frontend-dist/dev-guide.md
+    cp "$BLOBUI_TEST_ROOT/settings-app/markdowns/anyblob-guide.md" frontend-dist/anyblob-guide.md
 fi
 SH
 cat > "$fixture/bin/cargo" <<'SH'

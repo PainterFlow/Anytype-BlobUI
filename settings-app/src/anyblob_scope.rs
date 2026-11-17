@@ -180,10 +180,16 @@ impl Scope {
                 object_id: source.id.clone(),
             }
             .validate()?;
+            if !matches!(source.kind.as_str(), "space" | "query" | "collection" | "type" | "object") {
+                return Err("Invalid saved project source. Refresh project sources.".into());
+            }
             let base = format!("/v2/spaces/{}", encoded(&source.space_id));
             let space = scope.spaces.entry(source.space_id.clone()).or_default();
-            // API schemas contain no source members. Keep grants for empty sources too.
-            space.schema_grants.push(source.permission.clone());
+            // Individual objects grant access to their exact IDs, not to the space schema.
+            if source.kind != "object" {
+                // API schemas contain no source members. Keep grants for empty sources too.
+                space.schema_grants.push(source.permission.clone());
+            }
             if source.kind == "space" {
                 space.all_grants.push(source.permission.clone());
                 if source.id != source.space_id {
@@ -241,6 +247,19 @@ impl Scope {
                         &format!("{base}/search?ids=full"),
                         Some(&json!({"type":key})),
                     )?
+                }
+                "object" => {
+                    check()?;
+                    let path = format!("{base}/objects/{}?ids=full", encoded(&source.id));
+                    let document = client.content_request("GET", &path, None, None, None, None)?;
+                    if document.get("_http_error").is_some()
+                        || document["id"].as_str() != Some(source.id.as_str())
+                        || document["space_id"].as_str().is_some_and(|id| id != source.space_id)
+                        || document["spaceId"].as_str().is_some_and(|id| id != source.space_id)
+                    {
+                        return Err("A selected project object is unavailable in its saved space. Refresh project sources.".into());
+                    }
+                    vec![document]
                 }
                 _ => return Err("Invalid saved project source. Refresh project sources.".into()),
             };
@@ -516,6 +535,64 @@ mod tests {
         server.join().unwrap();
         let request = String::from_utf8_lossy(&requests.lock().unwrap()[0]).to_string();
         assert!(request.starts_with("GET /v2/spaces/s/objects?ids=full&fields=status%2Cdue&limit=100&offset=0 "));
+    }
+
+    #[test]
+    fn explicit_object_source_grants_only_the_exact_object_and_no_schema_access() {
+        let permission = p("readWrite", "alwaysAsk");
+        let project = ProjectConfiguration {
+            sources: vec![crate::codex::SourcePermission {
+                space_id: "s".into(),
+                kind: "object".into(),
+                id: "selected-object".into(),
+                name: "Selected object".into(),
+                space: "Work".into(),
+                permission: permission.clone(),
+            }],
+            ..Default::default()
+        };
+        let (client, requests, server) = crate::anyblob_content::tests::fixture(vec![json!({
+            "id":"selected-object",
+            "space_id":"s",
+            "properties":{"status":"Open"}
+        })]);
+
+        let scope = Scope::load(&client, &project, &|| Ok(())).unwrap();
+        server.join().unwrap();
+
+        assert!(scope.readable("s", "selected-object"));
+        assert!(!scope.readable("s", "neighbor-object"));
+        assert_eq!(scope.permission("s", "selected-object"), Some(&permission));
+        assert_eq!(scope.permission("s", "neighbor-object"), None);
+        assert!(scope
+            .content_permission(&req("list_properties", json!({"space_id":"s"})), false)
+            .is_none());
+        assert!(requests.lock().unwrap()[0].starts_with(
+            b"GET /v2/spaces/s/objects/selected-object?ids=full "
+        ));
+    }
+
+    #[test]
+    fn explicit_object_source_rejects_wrong_identity_and_space() {
+        for response in [
+            json!({"id":"neighbor-object","space_id":"s"}),
+            json!({"id":"selected-object","space_id":"other"}),
+        ] {
+            let project = ProjectConfiguration {
+                sources: vec![crate::codex::SourcePermission {
+                    space_id: "s".into(),
+                    kind: "object".into(),
+                    id: "selected-object".into(),
+                    name: "Selected object".into(),
+                    space: "Work".into(),
+                    permission: p("read", "fullAccess"),
+                }],
+                ..Default::default()
+            };
+            let (client, _, server) = crate::anyblob_content::tests::fixture(vec![response]);
+            assert!(Scope::load(&client, &project, &|| Ok(())).is_err());
+            server.join().unwrap();
+        }
     }
     #[test]
     fn whole_space_listing_keeps_explicit_project_object_denials() {

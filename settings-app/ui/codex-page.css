@@ -24,8 +24,6 @@
 #projects-delete-unavailable svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .projects-delete-unavailable { color: #e06872; }
 .projects-delete-unavailable:hover:not(:disabled), .projects-delete-unavailable:focus-visible { color: #ff8088; background: rgba(220, 72, 84, .18); }
-.remote-project-globe { display: flex; flex: 0 0 auto; align-items: center; color: #91cfff; pointer-events: none; cursor: default; }
-.remote-project-globe svg { width: 20px; height: 20px; }
 #project-sources-filter-control { position: static; }
 #project-sources-filter-options { left: auto; right: 0; max-width: 100%; }
 #project-sources-filter[aria-pressed="true"] { color: var(--accent); }

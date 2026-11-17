@@ -20,8 +20,9 @@ done
 
 manifestPath="$workspaceRoot/installer/Cargo.toml"
 versionSource="$workspaceRoot/blobui-release.json"
-changelogSource="$workspaceRoot/Changelogs.md"
-imageManifest="$workspaceRoot/md-images.yaml"
+markdownDirectory="$workspaceRoot/settings-app/markdowns"
+changelogSource="$markdownDirectory/Changelogs.md"
+imageManifest="$markdownDirectory/md-images.yaml"
 [[ -f $manifestPath ]] || { printf 'Installer Cargo manifest was not found: %s\n' "$manifestPath" >&2; exit 1; }
 [[ -f $versionSource ]] || { printf 'Release version source was not found: %s\n' "$versionSource" >&2; exit 1; }
 if ((package_release)); then

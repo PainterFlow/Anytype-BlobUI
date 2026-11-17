@@ -14,7 +14,7 @@ Made by @PainterFlow11.
 
 ## Developer guide
 
-The in-app [Dev Guide](dev-guide.md) covers local setup, build commands, release notes, and the GitHub workflow.
+The in-app [Dev Guide](settings-app/markdowns/dev-guide.md) covers local setup, build commands, release notes, and the GitHub workflow.
 
 ## Build from source
 
@@ -25,7 +25,7 @@ On Windows with Rust and the Windows C++ build tools installed, run these comman
 .\scripts\Build-Installer.ps1
 ```
 
-See the [Dev Guide](dev-guide.md) for local setup, build commands, and the GitHub workflow.
+See the [Dev Guide](settings-app/markdowns/dev-guide.md) for local setup, build commands, and the GitHub workflow.
 
 ## License
 
@@ -44,7 +44,7 @@ in their contributions and must have permission to submit them.
 
 ## Anyblob integration
 
-Anyblob connects Codex to Anytype through the running BlobUI Settings app. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the [plugin reference](codex-plugin/src/README.md) for the complete tool list.
+Anyblob connects Codex to Anytype through the `blob-ui mcp` headless CLI. This repository supplies the Codex plugin marketplace. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the [setup guide](settings-app/markdowns/anyblob-guide.md) and [plugin reference](codex-plugin/src/README.md) for setup steps and the complete tool list.
 
 ## Background development launches
 

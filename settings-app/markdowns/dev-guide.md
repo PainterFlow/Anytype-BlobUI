@@ -27,10 +27,11 @@ scripts/Build-App.ps1
 
 You can use the arguments: `-s` for autostarting the app, `-b` for launching it in the background next time the app launches, `-n` to make onboarding appear next time the app launches and `-c` to close all previously running instances.
 
-The `Build-App` script will also build the MCP server for Anyblob and Anyblob itself.
-You can also use: `scripts/Build-Codex` to build Anyblob and `scripts/Build-MCP` to build the MCP server.
+The `Build-App` script builds the Settings frontend and Rust app. It does not package the Anyblob plugin or build the headless CLI.
 
-The script builds the frontend, packages the local Anyblob plugin, and compiles the Rust Settings app. To build only the frontend while working on its UI, run these commands from `settings-app`:
+Run `scripts/Build-Codex.ps1` to validate and package the Anyblob plugin from `codex-plugin/src`. Run `scripts/Build-BlobUI-Headless.ps1` to compile the no-UI `blob-ui` CLI. Add `-s` to install it in the per-user programs folder and add it to PATH. Add `-c` to stop a running copy built from this workspace before compiling.
+
+The script builds the frontend and compiles the Rust Settings app. To build only the frontend while working on its UI, run these commands from `settings-app`:
 
 ```powershell
 npm ci

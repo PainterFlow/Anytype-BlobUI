@@ -16,10 +16,14 @@ pub enum CredentialChange<'a> {
 }
 
 pub fn blob_metadata_bytes() -> Result<Vec<u8>, String> {
-    let mut bytes = serde_json::to_vec_pretty(&json!({
+    let mut metadata = json!({
         "formatVersion": 1,
         "blobuiVersion": env!("BLOBUI_BUILD_VERSION"),
-    }))
+    });
+    if crate::HEADLESS_MODE.load(std::sync::atomic::Ordering::Acquire) {
+        metadata["headlessCli"] = json!(true);
+    }
+    let mut bytes = serde_json::to_vec_pretty(&metadata)
     .map_err(|_| "Could not prepare BlobUI folder metadata.".to_string())?;
     bytes.push(b'\n');
     Ok(bytes)
@@ -139,6 +143,24 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "headless-cli")]
+pub fn write_atomic_private(path: &Path, contents: &[u8]) -> Result<(), String> {
+    reject_reparse_path(path)?;
+    let before = snapshot(path, true)?;
+    preflight(path)?;
+    let candidate = prepare_temp(path, contents, before.permissions.as_ref(), true)?;
+    let result = replace_credential(&candidate, path)
+        .map_err(|error| format!("Could not save private file {}: {error}", path.display()));
+    remove_if_exists(&candidate);
+    if let Err(error) = result {
+        return match restore(&before) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!("{error} {rollback}")),
+        };
+    }
+    Ok(())
+}
+
 pub(crate) fn snapshot(path: &Path, private: bool) -> Result<Snapshot, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -180,15 +202,24 @@ pub(crate) fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs
     fs::create_dir_all(parent).map_err(|error| format!("Could not prepare {}: {error}", parent.display()))?;
     let temp = unique_sibling(path, "tmp");
     let result = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp)
             .map_err(|error| format!("Could not create a temporary file for {}: {error}", path.display()))?;
+        if private { restrict_credential_acl(&temp)?; }
         file.write_all(contents).map_err(|error| format!("Could not write a temporary file for {}: {error}", path.display()))?;
         file.sync_all().map_err(|error| format!("Could not flush a temporary file for {}: {error}", path.display()))?;
         drop(file);
-        if private { restrict_credential_acl(&temp)?; }
-        else if let Some(permissions) = permissions {
-            fs::set_permissions(&temp, permissions.clone())
-                .map_err(|error| format!("Could not preserve permissions for {}: {error}", path.display()))?;
+        if !private {
+            if let Some(permissions) = permissions {
+                fs::set_permissions(&temp, permissions.clone())
+                    .map_err(|error| format!("Could not preserve permissions for {}: {error}", path.display()))?;
+            }
         }
         Ok(())
     })();
@@ -372,6 +403,20 @@ mod tests {
         assert_eq!(fs::read(&data_path).unwrap(), b"old data");
         assert!(!blob.join("blob.meta.json").exists());
         assert_eq!(fs::read(&credential_path).unwrap(), b"old protected key");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(unix, feature = "headless-cli"))]
+    #[test]
+    fn private_atomic_writes_create_owner_only_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = workspace.join(".test-run").join(format!("private-write-{}-{nonce}", std::process::id()));
+        let path = root.join("DO-NOT-SHARE/anytype-api-key.dpapi");
+        write_atomic_private(&path, b"fixture secret").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"fixture secret");
         fs::remove_dir_all(root).unwrap();
     }
 

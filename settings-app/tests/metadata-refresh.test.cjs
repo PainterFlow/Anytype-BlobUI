@@ -113,7 +113,7 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
       assert.equal(calls.find(c=>c.name===name).args.forceRefresh,true);
     }
     assert(!calls.some(c=>c.name==='discover_codex_projects'),'Local project discovery stays separate');
-    for(const name of ['anyblob_status','anyblob_installation_status','check_for_updates']) {
+    for(const name of ['anyblob_status','check_for_updates']) {
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' refreshes once across coalesced shortcuts');
     }
     assert(!calls.some(c=>c.name==='apply_update'),'Reload only checks for updates');

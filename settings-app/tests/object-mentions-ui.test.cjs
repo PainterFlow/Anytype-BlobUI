@@ -16,7 +16,6 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
         if(name==='anyblob_status')return{enabled:false};
-        if(name==='anyblob_installation_status')return{installed:false};
         if(name==='discover_codex_spaces'){
           if(window.discoveryPending)await new Promise(resolve=>window.releaseSpaces=resolve);
           if(window.spaceError)throw Error('Fixture space discovery failed');return window.fixtureSpaces;

@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const workspace = path.resolve(__dirname, '../..');
 const uiRoot = path.join(workspace, 'settings-app/ui');
-const manifestText = fs.readFileSync(path.join(workspace, 'md-images.yaml'), 'utf8');
+const manifestText = fs.readFileSync(path.join(workspace, 'settings-app/markdowns/md-images.yaml'), 'utf8');
 const context = {
   fetch: async () => ({
     ok: true,

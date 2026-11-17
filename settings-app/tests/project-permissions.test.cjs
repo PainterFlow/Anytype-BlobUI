@@ -35,7 +35,7 @@ test('deleting unavailable projects updates the draft and restoring the saved ba
   const controller=window.BlobUI.ProjectPermissions.createController();
   const saved={projects:{
     available:{id:'available',kind:'local',name:'Available',rootPaths:['C:\\\\work'],sources:[]},
-    'cloud:remote-host:stale-id':{id:'stale-id',kind:'remote',hostId:'remote-host',name:'Stale remote',rootPaths:[],sources:[]},
+    'stale-id':{id:'stale-id',kind:'local',name:'Stale local',rootPaths:['C:\\removed'],sources:[]},
   }};
   let draft=JSON.parse(JSON.stringify(saved));
   controller.init({
@@ -191,127 +191,33 @@ test('project catalogs and source drafts survive search, refresh, modal dismissa
   } finally {await browser.close();}
 });
 
-test('file based and legacy remote projects keep separate permission keys', async()=>{
-  const fixture=path.join(workspace,'.test-run/remote-project-permissions');fs.mkdirSync(fixture,{recursive:true});process.env.TEMP=process.env.TMP=fixture;
-  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
-  try {
-    const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];
-    page.on('pageerror',error=>errors.push(error.message));
-    await page.addInitScript(()=>{
-      const source=(access,approval='alwaysAsk')=>({spaceId:'work',kind:'query',id:'shared-query',name:'Tasks',space:'Work',permission:{access,filesEnabled:false,approval}});
-      window.calls=[];window.projectError='Local Codex catalog is offline';window.projects=[];window.projectListeners=[];
-      window.sources=[{spaceId:'work',space:'Work',kind:'query',id:'shared-query',name:'Tasks'}];
-      window.__TAURI__={event:{listen:async(name)=>{window.projectListeners.push(name);return()=>{};}},core:{invoke:async(name,args)=>{
-        calls.push(name);
-        if(name==='get_app_state')return {ready:true,onboardingComplete:true,theme:'dark',hasSavedApiKey:true,settings:{codexIntegration:{spaces:{work:{access:'read',approval:'alwaysAsk',filesEnabled:false}},projects:{
-          'duplicate-id':{name:'Same',rootPaths:['C:/local'],sources:[source('read')]},
-          'cloud:codex-host:device_01:duplicate-id':{kind:'remote',hostId:'codex-host:device_01',name:'Remote one',rootPaths:[],sources:[source('readWrite')]},
-          'cloud:codex-host:device_02:duplicate-id':{kind:'remote',hostId:'codex-host:device_02',name:'Remote two',rootPaths:[],sources:[]},
-          'cloud:host-old:removed-id':{name:'Old cloud',rootPaths:[],sources:[source('createDelete','fullAccess')]},
-        }}}};
-        if(name==='get_updater_state')return {automaticChecksEnabled:false};
-        if(name==='get_calendar_api_availability')return 'available';
-        if(name==='discover_codex_projects'){if(window.projectError)throw Error(window.projectError);return projects;}
-        if(name==='discover_codex_sources'){if(window.sourceError)throw Error(window.sourceError);return sources;}
-        if(name==='discover_codex_spaces')return [{id:'work',name:'Work'}];
-        if(name==='save_settings'){if(window.saveError)throw Error('Fixture save failed');window.saved=JSON.parse(JSON.stringify(args.settings));return {};}
-        return null;
-      }}};
-    });
-    await loadSettings(page);await page.waitForFunction(()=>window.appReady);
-    await page.locator('#codex-nav').click();await page.locator('#codex-tab-2').click();
-    const rows=page.locator('#codex-project-list .formula-view-row');
-    await page.getByRole('status').filter({hasText:'Local Codex catalog is offline'}).waitFor();
-    assert.equal(await rows.count(),4,'saved project scopes remain visible before the first successful local scan');
-    assert.equal(await page.locator('#codex-project-list .formula-view-warning').count(),0,'an offline first scan does not mark saved entries unavailable');
-    assert.equal(await page.evaluate(()=>projectListeners.includes('anyblob-cloud-projects-changed')),false);
+test('remote project records are ignored by local project permissions', async()=>{
+  const source=fs.readFileSync(path.join(workspace,'settings-app/ui/project-permissions.js'),'utf8');
+  const window={BlobUI:{}};window.window=window;vm.runInNewContext(source,{window});
+  const controller=window.BlobUI.ProjectPermissions.createController();
+  const normalized=controller.normalize({
+    'local-id':{id:'local-id',kind:'local',name:'Local',rootPaths:['C:/work'],sources:[]},
+    'cloud:remote-host:remote-id':{id:'remote-id',kind:'remote',hostId:'remote-host',name:'Old remote',rootPaths:[],sources:[]},
+    'legacy-id':{id:'legacy-id',kind:'cloud',computerName:'Old host',name:'Legacy remote',rootPaths:[],sources:[]},
+  });
+  assert.deepEqual(Object.keys(normalized),['local-id']);
+  assert.equal(normalized['local-id'].kind,'local');
 
-    const remoteOne=page.locator('#codex-project-list .project-catalog-entry').filter({hasText:'Remote one'});
-    const remoteGlobe=remoteOne.locator('.remote-project-globe');await remoteGlobe.waitFor();
-    assert.equal(await remoteGlobe.getAttribute('aria-hidden'),'true');
-    assert.equal(await remoteGlobe.getAttribute('title'),null);
-    assert.equal(await remoteOne.locator('.help-tooltip').count(),0);
-    assert.deepEqual(await remoteGlobe.evaluate(node=>({color:getComputedStyle(node).color,pointerEvents:getComputedStyle(node).pointerEvents})),{color:'rgb(145, 207, 255)',pointerEvents:'none'});
+  let catalog=[{id:'local-id',name:'Local',rootPaths:['C:/work'],kind:'local'}];
+  const draft={projects:{}};
+  controller.init({
+    invoke:async()=>catalog,
+    normalize:value=>({projects:controller.normalize(value.projects),spaces:value.spaces||{}}),
+    read:()=>draft,
+    readSaved:()=>draft,
+    onChange:()=>{},
+  });
+  controller.setLocked(false);
+  await controller.reloadProjects();
+  assert.deepEqual(controller.projectCatalog().map(project=>project.id),['local-id']);
 
-    await page.evaluate(()=>{window.projectError='';window.projects=[
-      {id:'duplicate-id',name:'Same',rootPaths:['C:/local'],kind:'local'},
-      {id:'duplicate-id',name:'Remote project with a longer label',rootPaths:[],kind:'remote',hostId:'codex-host:device_01'},
-      {id:'duplicate-id',name:'Remote two',rootPaths:[],kind:'remote',hostId:'codex-host:device_02'},
-      {id:'a'.repeat(64),name:'File based remote project',rootPaths:['C:/remote'],kind:'remote'},
-    ];});
-    await page.locator('#projects-reload').click();
-    await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
-    assert.equal(await rows.count(),5,'the scan lists file based and legacy remote projects and retains old saved scopes');
-    const localEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="duplicate-id"]')});
-    const remoteEntry=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:codex-host:device_01:duplicate-id"]')});
-    const localEntryBox=await localEntry.boundingBox(),remoteEntryBox=await remoteEntry.boundingBox();
-    assert.equal(Math.round(remoteEntryBox.width),Math.round(localEntryBox.width));assert.equal(Math.round(remoteEntryBox.height),Math.round(localEntryBox.height));
-    const remoteNameBox=await remoteEntry.locator('.formula-view-name').boundingBox(),remoteGlobeBox=await remoteEntry.locator('.remote-project-globe').boundingBox();
-    assert.ok(remoteGlobeBox.x>=remoteNameBox.x+remoteNameBox.width);assert.ok(remoteGlobeBox.x-remoteNameBox.x-remoteNameBox.width<32);
-    const keys=await rows.evaluateAll(nodes=>nodes.map(node=>node.dataset.projectKey));
-    assert.deepEqual(keys.sort(),[
-      'cloud:codex-host:device_01:duplicate-id','cloud:codex-host:device_02:duplicate-id',
-      'cloud:host-old:removed-id','duplicate-id','a'.repeat(64),
-    ].sort());
-    const stale=page.locator('#codex-project-list .project-catalog-entry').filter({has:page.locator('[data-project-key="cloud:host-old:removed-id"]')});
-    await stale.getByText('Unavailable project. Saved selections are retained.').waitFor();
-
-    const queryRow=page.locator('#project-source-list .codex-space').filter({has:page.locator('input[aria-label="Select Tasks · Queries · Work"]')});
-    const access=()=>queryRow.locator('.codex-space-bottom button[aria-label^="Access"]');
-    await page.locator('#codex-project-list [data-project-key="duplicate-id"]').click();
-    await queryRow.waitFor();assert.equal(await access().innerText(),'Read Only');
-    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:device_01:duplicate-id"]').click();
-    await queryRow.waitFor();assert.equal(await access().innerText(),'Read-Write');
-    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#codex-project-list [data-project-key="cloud:codex-host:device_02:duplicate-id"]').click();
-    await queryRow.waitFor();assert.equal(await queryRow.locator('input[type=checkbox][aria-label^="Select"]').isChecked(),false);
-    await queryRow.locator('.formula-view-name').click();
-    await access().click();await page.locator('#project-source-dialog').getByRole('option',{name:'Create-Delete',exact:true}).click();
-    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator(`#codex-project-list [data-project-key="${'a'.repeat(64)}"]`).click();
-    await queryRow.locator('.formula-view-name').click();
-    await page.locator('button[aria-label="Close project sources"]').click();await page.locator('#project-source-backdrop').waitFor({state:'hidden'});
-    await page.locator('#save-button').click();
-    await page.waitForFunction(()=>window.saved?.codexIntegration.projects['cloud:codex-host:device_02:duplicate-id']?.sources[0]?.permission.access==='createDelete');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id'].sources[0].permission.access),'readWrite');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['duplicate-id'].sources[0].permission.access),'read');
-    assert.equal(await page.evaluate(()=>saved.codexIntegration.projects['cloud:codex-host:device_01:duplicate-id']?.hostId),'codex-host:device_01');
-    assert.deepEqual(await page.evaluate(()=>{
-      const {kind,hostId,sources}=saved.codexIntegration.projects['a'.repeat(64)];
-      return {kind,hostId,access:sources[0].permission.access};
-    }),{kind:'remote',hostId:'',access:'read'});
-
-    await page.evaluate(()=>{window.projectError='Offline refresh';});await page.locator('#projects-reload').click();
-    await page.getByRole('status').filter({hasText:'Offline refresh'}).waitFor();
-    assert.equal(await rows.count(),5,'failed reload keeps the last local catalog and saved overrides');
-    await page.evaluate(()=>{window.projectError='';window.projects=window.projects.filter(project=>project.kind==='local'||project.hostId==='codex-host:device_02');});
-    await page.locator('#projects-reload').click();
-    await page.waitForFunction(()=>document.querySelector('#projects-reload')?.getAttribute('aria-busy')==='false');
-    const unavailableRemote=page.locator('#codex-project-list .project-catalog-entry')
-      .filter({has:page.locator('[data-project-key="cloud:codex-host:device_01:duplicate-id"]')});
-    await unavailableRemote.getByText('Unavailable project. Saved selections are retained.').waitFor();
-    const deleteUnavailable=page.locator('#projects-delete-unavailable');
-    await deleteUnavailable.waitFor();
-    assert.equal(await deleteUnavailable.evaluate(node=>getComputedStyle(node).color),'rgb(224, 104, 114)');
-    await deleteUnavailable.hover();
-    assert.deepEqual(await deleteUnavailable.evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor})),{color:'rgb(255, 128, 136)',background:'rgba(220, 72, 84, 0.18)'});
-    await page.screenshot({path:path.join(fixture,'unavailable-projects-dark.png'),fullPage:true});
-    await deleteUnavailable.click();
-    await deleteUnavailable.waitFor({state:'detached'});
-    assert.equal(await rows.count(),2,'only the available local and remote projects remain in the draft');
-    await page.locator('#discard-button').click();
-    await page.locator('#discard-confirmation-undo').click();
-    await page.locator('#save-button').waitFor({state:'hidden'});
-    await page.locator('#projects-delete-unavailable').waitFor();
-    assert.equal(await rows.count(),5,'Undo restores unavailable projects and the delete action');
-    await page.locator('#projects-delete-unavailable').click();
-    await page.locator('#save-button').click();
-    await page.waitForFunction(()=>Object.keys(window.saved?.codexIntegration?.projects||{}).length===2);
-    assert.deepEqual(await page.evaluate(()=>Object.keys(window.saved.codexIntegration.projects).sort()),['cloud:codex-host:device_02:duplicate-id','duplicate-id']);
-    await page.emulateMedia({reducedMotion:'reduce'});await page.setViewportSize({width:620,height:850});
-    assert.equal(await page.evaluate(()=>document.querySelector('.page-content').scrollWidth<=document.querySelector('.page-content').clientWidth),true);
-    await page.screenshot({path:path.join(fixture,'remote-projects-narrow-dark.png'),fullPage:true});
-    assert.deepEqual(errors,[]);
-  } finally {await browser.close();}
+  catalog=[{id:'remote-id',name:'Remote',rootPaths:[],kind:'remote',hostId:'host-id'}];
+  await controller.reloadProjects();
+  assert.match(controller.getSnapshot().projectStatus,/Unsupported local Anyblob project metadata/);
+  assert.deepEqual(controller.projectCatalog().map(project=>project.id),['local-id']);
 });

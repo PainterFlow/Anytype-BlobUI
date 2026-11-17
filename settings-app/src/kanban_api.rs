@@ -54,17 +54,22 @@ impl Client {
                 "Add an Anytype API key in Advanced Settings to use Kanban formulas.".into(),
             );
         }
+        let ip = crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
+        let port = data
+            .pointer("/apiConnection/port")
+            .and_then(Value::as_u64)
+            .and_then(|port| u16::try_from(port).ok())
+            .filter(|port| *port > 0)
+            .unwrap_or(31012);
+        if ip != "127.0.0.1" || port != 31012 {
+            return Err("BlobUI Headless only connects to Anytype Headless at 127.0.0.1:31012. Run `blob-ui api login` to reset the endpoint.".into());
+        }
         Ok(Self {
             metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
             info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new(crate::read_saved_api_key_at(&install)?),
-            ip: crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?,
-            port: data
-                .pointer("/apiConnection/port")
-                .and_then(Value::as_u64)
-                .and_then(|p| u16::try_from(p).ok())
-                .filter(|p| *p > 0)
-                .unwrap_or(31009),
+            ip,
+            port,
         })
     }
     pub(crate) fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {

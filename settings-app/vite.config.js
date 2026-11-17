@@ -5,6 +5,20 @@ import { defineConfig } from 'vitest/config';
 
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const uiDirectory = path.join(projectDirectory, 'ui');
+const markdownDirectory = path.join(projectDirectory, 'markdowns');
+const markdownAssets = ['Changelogs.md', 'dev-guide.md', 'anyblob-guide.md', 'md-images.yaml'];
+
+async function readMarkdownAsset(name) {
+  const source = path.join(markdownDirectory, name);
+  try {
+    return await readFile(source);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`Required Settings Markdown asset is missing: ${source}`);
+    }
+    throw error;
+  }
+}
 
 export default defineConfig({
   root: uiDirectory,
@@ -29,10 +43,22 @@ export default defineConfig({
   plugins: [
     {
       name: 'copy-settings-static-assets',
+      async buildStart() {
+        for (const name of markdownAssets) await readMarkdownAsset(name);
+      },
       configureServer(server) {
         server.middlewares.use('/dev-guide.md', async (_request, response, next) => {
           try {
-            const guide = await readFile(path.resolve(projectDirectory, '..', 'dev-guide.md'));
+            const guide = await readMarkdownAsset('dev-guide.md');
+            response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+            response.end(guide);
+          } catch (error) {
+            next(error);
+          }
+        });
+        server.middlewares.use('/anyblob-guide.md', async (_request, response, next) => {
+          try {
+            const guide = await readMarkdownAsset('anyblob-guide.md');
             response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
             response.end(guide);
           } catch (error) {
@@ -41,7 +67,7 @@ export default defineConfig({
         });
         server.middlewares.use('/md-images.yaml', async (_request, response, next) => {
           try {
-            const manifest = await readFile(path.resolve(projectDirectory, '..', 'md-images.yaml'));
+            const manifest = await readMarkdownAsset('md-images.yaml');
             response.setHeader('Content-Type', 'text/yaml; charset=utf-8');
             response.end(manifest);
           } catch (error) {
@@ -58,8 +84,9 @@ export default defineConfig({
             force: true
           });
         }
-        await cp(path.resolve(projectDirectory, '..', 'dev-guide.md'), path.join(outputDirectory, 'dev-guide.md'));
-        await cp(path.resolve(projectDirectory, '..', 'md-images.yaml'), path.join(outputDirectory, 'md-images.yaml'));
+        for (const name of markdownAssets) {
+          await cp(path.join(markdownDirectory, name), path.join(outputDirectory, name));
+        }
         await cp(path.join(uiDirectory, 'vendor', 'MARKED-LICENSE.txt'), path.join(outputDirectory, 'MARKED-LICENSE.txt'));
       }
     }

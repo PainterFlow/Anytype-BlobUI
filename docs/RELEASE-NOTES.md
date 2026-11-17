@@ -1,18 +1,18 @@
 # Release notes authoring
 
-The Windows release package carries `Changelogs.md`, `md-images.yaml`, and release note image files. `md-images.yaml` also lists the image aliases used by the Dev Guide. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
+The Windows release package carries `Changelogs.md`, `md-images.yaml`, and release note image files. Their source files live in `settings-app/markdowns/`. `md-images.yaml` also lists the image aliases used by the Dev Guide. After an update finishes and Settings reopens, the app reads the installed package, renders the notes in a scrollable dialog, and records the version as seen when the dialog closes. An initial install does not open the dialog.
 
 The dialog shows the changelog's version and marks entries that match the running app's current version or the latest available changelog. These markers follow the selected entry when browsing release history.
 
 ## Markdown source
 
-Write release notes in the repository-root `Changelogs.md`. The renderer uses Marked with GitHub Flavored Markdown, including headings, paragraphs, emphasis, strikethrough, blockquotes, nested ordered and unordered lists, task lists, fenced code blocks, tables, and inline code.
+Write release notes in `settings-app/markdowns/Changelogs.md`. The renderer uses Marked with GitHub Flavored Markdown, including headings, paragraphs, emphasis, strikethrough, blockquotes, nested ordered and unordered lists, task lists, fenced code blocks, tables, and inline code.
 
 Raw HTML can be used for semantic formatting such as `<details>`, `<summary>`, `<strong>`, and `<table>`. The renderer sanitizes the result. It keeps a small formatting allowlist, strips scripts, forms, embedded documents, SVG, event handlers, CSS, and unsafe attributes, and only allows `http` and `https` links. Activating a link opens it through the user's default browser.
 
 ## Local images
 
-Put release note image files in `assets/changelogs/`. Declare them in `md-images.yaml` using this list shape:
+Put release note image files in `assets/changelogs/`. Declare them in `settings-app/markdowns/md-images.yaml` using this list shape:
 
 ```yaml
 images:
@@ -42,7 +42,7 @@ An alias can also be used in a raw HTML image tag:
 
 Mentions are resolved only in normal Markdown text and raw HTML image sources. A mention inside inline or fenced code remains literal text. Release note images support PNG, JPEG, GIF, and WebP; SVG release note images are rejected. Dev Guide paths may point to one image directly under `./cdn/`. At runtime the app checks image types and embeds local image bytes, so it makes no network image requests. Release note image paths must stay inside `assets/changelogs/`; absolute paths, parent-directory segments, and other folders are rejected.
 
-Keep each of `Changelogs.md` and `md-images.yaml` at or below 512 KiB. Each image can be at most 8 MiB. The package validator enforces these limits before it creates the release ZIP.
+Keep each of `settings-app/markdowns/Changelogs.md` and `settings-app/markdowns/md-images.yaml` at or below 512 KiB. Each image can be at most 8 MiB. The package validator enforces these limits before it creates the release ZIP.
 
 The manifest accepts one `images:` section with list entries containing `id`, `src`, and optional `alt` fields. A `videos:` section can follow it. Use two spaces before each list item and four spaces before its fields. IDs contain letters and numbers and may include hyphens or underscores. When no alt text is given, the id becomes the accessible image description.
 
