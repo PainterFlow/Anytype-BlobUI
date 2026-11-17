@@ -962,12 +962,12 @@ fn normalize_newlines(value: &str) -> String {
 }
 
 fn reject_reparse_point(metadata: &fs::Metadata, path: &Path) -> Result<(), String> {
-    let mut blocked = metadata.file_type().is_symlink();
+    let blocked = metadata.file_type().is_symlink();
     #[cfg(windows)]
-    {
+    let blocked = {
         use std::os::windows::fs::MetadataExt;
-        blocked |= metadata.file_attributes() & 0x400 != 0;
-    }
+        blocked | (metadata.file_attributes() & 0x400 != 0)
+    };
     if blocked {
         return Err(format!(
             "Custom themes cannot use a link or reparse point: {}",

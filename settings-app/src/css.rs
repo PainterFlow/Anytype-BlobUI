@@ -55,6 +55,7 @@ pub fn default_banner_preview(runtime_root: &Path) -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
+#[cfg(not(feature = "installer"))]
 pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> Result<String, String> {
     let settings_root = crate::settings_root_for_install(install_directory)?;
     compile_with_settings_directory(runtime_root, install_directory, &settings_root.join("Settings"), data)
@@ -229,6 +230,7 @@ fn same_install_directory(saved: &Path, selected: &Path) -> bool {
     }
 }
 
+#[cfg(windows)]
 fn comparable_windows_path(path: &Path) -> String {
     const VERBATIM_PREFIX: &str = "\\\\?\\";
     const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
@@ -480,7 +482,7 @@ fn newline() -> &'static str { "\r\n" }
 #[cfg(not(windows))]
 fn newline() -> &'static str { "\n" }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "installer")))]
 mod tests {
     use super::*;
     use serde_json::json;

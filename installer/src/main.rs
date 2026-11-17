@@ -4,6 +4,9 @@ mod archive;
 #[path = "../../settings-app/src/css.rs"]
 mod css;
 #[allow(dead_code)]
+#[path = "../../settings-app/src/themes.rs"]
+mod themes;
+#[allow(dead_code)]
 #[path = "../../settings-app/src/calculator.rs"]
 mod calculator;
 #[allow(dead_code)]
@@ -755,11 +758,12 @@ fn read_release_version(root: &Path) -> Result<String, String> {
         .get("version")
         .and_then(serde_json::Value::as_str)
         .ok_or("The package release version is missing")?;
+    let version_body = version.strip_prefix("dev-").unwrap_or(version);
     if version.len() > 64
         || !version
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'+'))
-        || !version.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        || !version_body.as_bytes().first().is_some_and(u8::is_ascii_digit)
     {
         return Err("The package release version is invalid.".into());
     }

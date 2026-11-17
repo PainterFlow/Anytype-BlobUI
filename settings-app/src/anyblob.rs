@@ -1,21 +1,23 @@
 //! Anyblob's trust boundary. Only saved settings authorize reads.
-use blobui_mcp::{
-    transport::Bridge,
-    Operation, Request, Response,
-};
+use blobui_mcp::{Operation, Request, Response};
+#[cfg(windows)]
+use blobui_mcp::transport::Bridge;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Mutex,
     },
     time::{Duration, Instant},
 };
+#[cfg(any(windows, test))]
+use std::sync::atomic::AtomicBool;
 
 static PROMPT: Mutex<()> = Mutex::new(());
 const VERIFIED_CHAT_REQUIRED: &str = "Codex did not supply verified chat identity. Project-source access requires host-supplied chat metadata. Anyblob cannot infer a project from resource URIs or tool arguments.";
+#[cfg(windows)]
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static REVISION: AtomicU64 = AtomicU64::new(0);
 pub fn invalidate() {
@@ -1082,6 +1084,7 @@ pub(crate) fn dispatch_headless(
         },
     })
 }
+#[cfg(any(windows, test))]
 fn publication_event(operation: &Operation, result: &Result<Value, String>) -> Option<Value> {
     let Operation::Blobui { blobui } = operation else {
         return None;

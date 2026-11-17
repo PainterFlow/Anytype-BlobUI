@@ -1,9 +1,11 @@
 //! Windows transport is separate from stdio MCP and the typed operations.
 use std::{
     io,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
+#[cfg(windows)]
+use std::sync::atomic::Ordering;
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -13,6 +15,7 @@ pub trait Bridge {
     fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>>;
 }
 
+#[cfg(windows)]
 fn stopped(cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
     if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
         Err(io::Error::new(
@@ -403,6 +406,7 @@ pub fn call_with_approval(
     }
 }
 
+#[cfg(windows)]
 fn call_on_bridge(
     bridge: &impl Bridge,
     request: &crate::Request,

@@ -18,7 +18,7 @@ const advancedTabs = [
   { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
 
-export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
+export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, releaseChannel = "release", releaseChannelDisabled = true, onReleaseChannelChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
@@ -105,6 +105,11 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
         <SettingsGroup>
           <Switch id="automatic-updates-enabled" label="Install updates automatically" className="native-accent-control settings-row accessibility-row" />
           <Switch id="automatic-checks-enabled" label="Check for updates automatically" className="native-accent-control settings-row accessibility-row" />
+          <SettingsRow className="native-accent-control settings-row accessibility-row" label="Release Channel">
+            <SelectPicker id="release-channel" label="Release Channel" value={releaseChannel} disabled={releaseChannelDisabled}
+              options={[{ value: "release", label: "Release" }, { value: "dev", label: "Dev Builds" }]}
+              onChange={onReleaseChannelChange} />
+          </SettingsRow>
         </SettingsGroup>
         <div className="update-check-row">
           <div>

@@ -49,7 +49,7 @@ pub fn uninstall(app: &Path, anytype: &Path) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
         fill_compile_defaults(&mut data, &anytype);
-        let installed = compile_package_css(&app, &anytype, &data)?.into_bytes();
+        let installed = compile_package_css(&app, &anytype, &app, &data)?.into_bytes();
         if current != installed {
             return Err("custom.css has changed since installation. Nothing was removed. Save a copy and restore the installed stylesheet before uninstalling.".into());
         }
@@ -160,7 +160,7 @@ pub fn install(
     // Compilation may need current defaults, but do not serialize this value
     // back to disk: this preserves unknown and newer settings byte-for-byte.
     fill_compile_defaults(&mut data, &anytype);
-    let css = compile_package_css(&package, &anytype, &data)?;
+    let css = compile_package_css(&package, &anytype, &app, &data)?;
 
     let app_preexisted = app.exists();
     let mut app_created = false;
@@ -284,7 +284,7 @@ pub fn install_update(
     }
     fill_compile_defaults(&mut data, &anytype);
 
-    let css = compile_package_css(&package, &anytype, &data)?;
+    let css = compile_package_css(&package, &anytype, &app, &data)?;
     let mut changes = make_update_app_changes(&package, &app, version, retained_installer)?;
     changes.extend(make_install_changes(
         &package,
@@ -364,7 +364,7 @@ fn validate_existing_app(app: &Path, anytype: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_package_css(package: &Path, anytype: &Path, data: &Value) -> Result<String, String> {
+fn compile_package_css(package: &Path, anytype: &Path, app: &Path, data: &Value) -> Result<String, String> {
     let manifest = read_previous_manifest(&anytype.join("blob/.blobui-managed-files.json"))?;
     let stage_parent = anytype.join("blob/staging");
     reject_links(&stage_parent)?;
@@ -395,7 +395,12 @@ fn compile_package_css(package: &Path, anytype: &Path, data: &Value) -> Result<S
         &compile_root.join("Dev"),
         &manifest.managed_files,
     )?;
-    let css = crate::css::compile(&compile_root, anytype, data)?;
+    let css = crate::css::compile_with_settings_directory(
+        &compile_root,
+        anytype,
+        &app.join("Settings"),
+        data,
+    )?;
     drop(guard);
     Ok(css)
 }
@@ -780,9 +785,10 @@ pub fn validate_release_package(package: &Path) -> Result<(), String> {
     }
     let version = metadata.get("version").and_then(Value::as_str)
         .ok_or("The package release version is missing.")?;
+    let version_body = version.strip_prefix("dev-").unwrap_or(version);
     if version.len() > 64
         || !version.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
-        || !version.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        || !version_body.as_bytes().first().is_some_and(u8::is_ascii_digit)
     {
         return Err("The package release version is invalid.".into());
     }
@@ -1784,6 +1790,14 @@ mod tests {
         .unwrap();
         assert!(validate_package(&package, "1.2.0").unwrap_err().contains("PNG, JPEG, GIF, and WebP"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_release_package_accepts_dev_prefixed_version_labels() {
+        let root = fixture_root("dev-release-package");
+        let package = write_package(&root, "dev-1.2.1", b"settings executable");
+        validate_release_package(&package).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 

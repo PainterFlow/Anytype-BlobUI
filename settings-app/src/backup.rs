@@ -234,6 +234,9 @@ fn validate_updater_preferences(data: &Value) -> Result<(), String> {
         || ["autoplayVideos", "automaticUpdatesEnabled", "automaticChecksEnabled"]
             .iter()
             .any(|key| preferences.get(*key).is_some_and(|value| !value.is_boolean()))
+        || preferences.get("releaseChannel").is_some_and(|value| {
+            value.as_str().and_then(crate::updater::ReleaseChannel::from_settings_value).is_none()
+        })
     {
         return Err("The selected Settings backup contains malformed updater preferences.".into());
     }

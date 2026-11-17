@@ -609,7 +609,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       && left.startupMode === right.startupMode
       && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
-      && left.automaticChecksEnabled === right.automaticChecksEnabled;
+      && left.automaticChecksEnabled === right.automaticChecksEnabled
+      && left.releaseChannel === right.releaseChannel;
   }
 
   function copyUpdaterSettings(settings) {
@@ -623,6 +624,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
+      releaseChannel: ["release", "dev"].includes(settings?.releaseChannel) ? settings.releaseChannel : "release",
     };
   }
 
@@ -630,7 +632,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
-    view.update({ startupMode: updaterDraft.startupMode });
+    view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
     applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -720,6 +722,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
           startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
+          releaseChannel: "release",
         });
       }
       renderUpdaterState();
@@ -1297,9 +1300,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
     if (snapshot.updaterSettings) {
-      updaterDraft = { ...snapshot.updaterSettings };
+      updaterDraft = copyUpdaterSettings(snapshot.updaterSettings);
       installDirectory.value = updaterDraft.installDirectory;
-      view.update({ startupMode: updaterDraft.startupMode });
+      view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
       applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -1370,6 +1373,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy,
       customThemeDisabled: settingsLocked || !draft || !window.appReady,
       startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      releaseChannelDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
       kanbanStyleDisabled: settingsLocked || !draft });
     const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
@@ -2282,6 +2286,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   }
 
+  function changeReleaseChannel(value) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate() || !["release", "dev"].includes(value)) return;
+    updaterDraft.releaseChannel = value;
+    view.update({ releaseChannel: value });
+    markDirty();
+  }
+
   function changeBackgroundExperiment(value) {
     if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
     draft.backgroundExperiment = value;
@@ -2946,6 +2957,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, save, beginShortcutCapture,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }
