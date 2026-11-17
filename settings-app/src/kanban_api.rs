@@ -17,6 +17,25 @@ use std::sync::{
 
 const DISCOVERY_CONCURRENCY: usize = 4;
 
+fn configured_endpoint(data: &Value, headless: bool) -> Result<(String, u16), String> {
+    let ip = crate::normalize_api_ip(
+        data.pointer("/apiConnection/ip").and_then(Value::as_str),
+    )?;
+    let default_port = if headless { 31012 } else { 31009 };
+    let port = data
+        .pointer("/apiConnection/port")
+        .and_then(Value::as_u64)
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(default_port);
+    if headless && (ip != "127.0.0.1" || port != 31012) {
+        return Err(
+            "BlobUI Headless only connects to Anytype Headless at 127.0.0.1:31012. Run `blob-ui api login` to reset the endpoint.".into(),
+        );
+    }
+    Ok((ip, port))
+}
+
 
 pub struct Client {
     metadata_revision: String,
@@ -54,16 +73,8 @@ impl Client {
                 "Add an Anytype API key in Advanced Settings to use Kanban formulas.".into(),
             );
         }
-        let ip = crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
-        let port = data
-            .pointer("/apiConnection/port")
-            .and_then(Value::as_u64)
-            .and_then(|port| u16::try_from(port).ok())
-            .filter(|port| *port > 0)
-            .unwrap_or(31012);
-        if ip != "127.0.0.1" || port != 31012 {
-            return Err("BlobUI Headless only connects to Anytype Headless at 127.0.0.1:31012. Run `blob-ui api login` to reset the endpoint.".into());
-        }
+        let (ip, port) =
+            configured_endpoint(&data, crate::HEADLESS_MODE.load(Ordering::Acquire))?;
         Ok(Self {
             metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
             info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
@@ -1182,6 +1193,35 @@ impl Grouping {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_defaults_and_headless_restrictions_match_the_running_app() {
+        assert_eq!(
+            configured_endpoint(&json!({}), false).unwrap(),
+            ("127.0.0.1".into(), 31009),
+        );
+        assert_eq!(
+            configured_endpoint(
+                &json!({"apiConnection":{"ip":"192.168.1.12","port":31010}}),
+                false,
+            )
+            .unwrap(),
+            ("192.168.1.12".into(), 31010),
+        );
+        assert_eq!(
+            configured_endpoint(&json!({}), true).unwrap(),
+            ("127.0.0.1".into(), 31012),
+        );
+        assert!(
+            configured_endpoint(
+                &json!({"apiConnection":{"ip":"192.168.1.12","port":31010}}),
+                true,
+            )
+            .unwrap_err()
+            .contains("127.0.0.1:31012")
+        );
+    }
+
     #[test]
     fn exact_id_representations_and_conflicts() {
         use std::{io::{Read, Write}, net::TcpListener};
@@ -1198,6 +1238,7 @@ mod tests {
             let server = std::thread::spawn(move || {
                 while !stopped.load(Ordering::SeqCst) {
                     let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(std::time::Duration::from_millis(2)); continue; };
+                    stream.set_nonblocking(false).unwrap();
                     let mut bytes = [0; 8192];
                     let n = stream.read(&mut bytes).unwrap();
                     let request = String::from_utf8_lossy(&bytes[..n]);

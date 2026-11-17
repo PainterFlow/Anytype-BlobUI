@@ -1728,7 +1728,7 @@ fn import_archive(source: &Path) -> Result<(), String> {
                 #[cfg(windows)]
                 crate::connection::decrypt_saved_key(text.trim())?;
                 #[cfg(unix)]
-                validate_api_key(text.trim().to_string())?;
+                crate::validate_api_key(text.trim().to_string())?;
             }
         }
         let data = crate::settings_store::load(&stage_root)?;
