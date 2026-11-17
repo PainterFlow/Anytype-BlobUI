@@ -460,6 +460,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn startup_state_matches_both_installed_executable_aliases() {
         let root_executable = Path::new(r"C:\Program Files\BlobUI\blobui-settings.exe");
@@ -492,6 +493,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn startup_detection_accepts_verbatim_paths_in_either_direction() {
         for (ordinary, verbatim) in [
