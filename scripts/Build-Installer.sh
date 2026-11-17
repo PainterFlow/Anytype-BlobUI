@@ -8,11 +8,18 @@ source "$script_dir/Workspace-Build-Paths.sh"
 
 development=0
 package_release=0
+build_channel=main
 while (($#)); do
     case "$1" in
         -d|--dev|--development) development=1 ;;
         -PackageRelease|--package-release) package_release=1 ;;
-        -h|--help) printf 'Usage: %s [-d|--development] [--package-release]\n' "$0"; exit 0 ;;
+        --build-channel)
+            shift
+            (($#)) || { printf '%s\n' 'Missing value for --build-channel.' >&2; exit 2; }
+            build_channel=$1
+            [[ $build_channel == main || $build_channel == dev ]] || { printf '%s\n' 'Build channel must be main or dev.' >&2; exit 2; }
+            ;;
+        -h|--help) printf 'Usage: %s [-d|--development] [--package-release] [--build-channel main|dev]\n' "$0"; exit 0 ;;
         *) printf 'Unknown Build-Installer argument: %s\n' "$1" >&2; exit 2 ;;
     esac
     shift
@@ -35,14 +42,16 @@ command -v cargo >/dev/null 2>&1 || { printf '%s\n' 'Cargo is required to build 
 command -v rustc >/dev/null 2>&1 || { printf '%s\n' 'rustc is required to build the installer.' >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { printf '%s\n' 'Python 3 is required to validate release metadata.' >&2; exit 1; }
 
-releaseVersion=$(python3 - "$versionSource" <<'PY'
+releaseVersion=$(python3 - "$versionSource" "$build_channel" <<'PY'
 import json
 import re
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-version = data.get("version", "")
-if data.get("formatVersion") != 1 or not re.fullmatch(r"[0-9][0-9A-Za-z.+-]{0,63}", version):
+channel = sys.argv[2]
+version = data.get("devVersion" if channel == "dev" else "version", "")
+pattern = r"dev-[0-9]+\.[0-9]+\.[0-9]+" if channel == "dev" else r"[0-9]+\.[0-9]+\.[0-9]+"
+if data.get("formatVersion") != 1 or not re.fullmatch(pattern, version):
     raise SystemExit("Invalid release metadata in blobui-release.json.")
 print(version)
 PY
@@ -55,7 +64,7 @@ command -v "$mingw_compiler" >/dev/null 2>&1 || command -v x86_64-w64-mingw32-gc
     printf '%s\n' 'A MinGW-w64 cross-compiler is required. Install the compiler for the selected Windows GNU target.' >&2
     exit 1
 }
-printf 'Building installer for blobui-app Dev+%s (%s)\n' "$buildCommit" "$target"
+printf 'Building installer for BlobUI %s channel at Dev+%s (%s)\n' "$build_channel" "$buildCommit" "$target"
 
 blobui_save_environment BUILD_INSTALLER_ENV PATH CARGO_HOME RUSTUP_HOME TMPDIR CARGO_TARGET_DIR RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 trap 'blobui_restore_environment BUILD_INSTALLER_ENV PATH CARGO_HOME RUSTUP_HOME TMPDIR CARGO_TARGET_DIR RUSTFLAGS CARGO_ENCODED_RUSTFLAGS' EXIT
@@ -69,7 +78,7 @@ cargo "${cargo_args[@]}"
 
 distributionDirectory="$workspaceRoot/dist"
 targetName=blobui-installer.exe
-if ((development)); then targetName=blobui-installer-dev.exe; fi
+if ((development)) || [[ $build_channel == dev ]]; then targetName=blobui-installer-dev.exe; fi
 sourceExecutable="$CARGO_TARGET_DIR/$target/release/blobui-installer.exe"
 destinationExecutable="$distributionDirectory/$targetName"
 assert_workspace_build_path "$destinationExecutable" >/dev/null

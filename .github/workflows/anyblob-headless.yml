@@ -5,7 +5,7 @@ on:
     branches: [dev, main]
   push:
     branches: [dev]
-    tags: ['anyblob-v*', 'headless-v*']
+    tags: ['anyblob-v*', 'headless-v*', 'headless-dev-*']
   workflow_dispatch:
 
 permissions:
@@ -58,9 +58,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the Windows headless release executable
         if: runner.os == 'Windows'
+        env:
+          BLOBUI_BUILD_CHANNEL: ${{ startsWith(github.ref_name, 'headless-dev-') && 'dev' || 'main' }}
         run: ./scripts/Build-BlobUI-Headless.ps1
       - name: Build the Linux headless release executable
         if: runner.os == 'Linux'
+        env:
+          BLOBUI_BUILD_CHANNEL: ${{ startsWith(github.ref_name, 'headless-dev-') && 'dev' || 'main' }}
         shell: bash
         run: bash scripts/Build-BlobUI-Headless.sh
       - name: Stage the headless release executable
@@ -127,7 +131,7 @@ jobs:
           npm --prefix settings-app test
 
   publish:
-    if: github.event_name == 'push' && github.ref_type == 'tag' && (startsWith(github.ref_name, 'anyblob-v') || startsWith(github.ref_name, 'headless-v'))
+    if: github.event_name == 'push' && github.ref_type == 'tag' && (startsWith(github.ref_name, 'anyblob-v') || startsWith(github.ref_name, 'headless-v') || startsWith(github.ref_name, 'headless-dev-'))
     needs: [headless, anyblob, settings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -150,19 +154,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git merge-base --is-ancestor HEAD origin/main
           case "$RELEASE_TAG" in
             anyblob-v*)
               version=$(node -p 'require("./codex-plugin/src/plugin.json").version')
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
               test "$RELEASE_TAG" = "anyblob-v$version"
+              git merge-base --is-ancestor HEAD origin/main
+              channel=stable
               assets=(dist/anyblob.zip)
               title="Anyblob $version"
               ;;
-            headless-v*)
-              version=$(jq -er '.version' blobui-release.json)
-              test "$RELEASE_TAG" = "headless-v$version"
+            headless-v*|headless-dev-*)
+              metadata_version=$(jq -er 'select(.formatVersion == 1) | .version | select(type == "string")' blobui-headless-release.json)
+              dev_version=$(jq -er 'select(.formatVersion == 1) | .devVersion | select(type == "string")' blobui-headless-release.json)
+              [[ "$metadata_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              [[ "$dev_version" =~ ^dev-[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              if [[ "$RELEASE_TAG" == headless-v* ]]; then
+                version="${RELEASE_TAG#headless-v}"
+                test "$RELEASE_TAG" = "headless-v$metadata_version"
+                git merge-base --is-ancestor HEAD origin/main
+                channel=stable
+              else
+                version="${RELEASE_TAG#headless-dev-}"
+                test "$RELEASE_TAG" = "headless-$dev_version"
+                git merge-base --is-ancestor HEAD origin/dev
+                channel=dev
+              fi
               assets=(dist/blob-ui-linux-x86_64 dist/blob-ui-windows-x86_64.exe)
-              title="BlobUI Headless $version"
+              if [[ "$channel" == dev ]]; then
+                title="BlobUI Headless Dev $version"
+              else
+                title="BlobUI Headless $version"
+              fi
               ;;
             *) exit 1 ;;
           esac
@@ -171,4 +194,6 @@ jobs:
           done
           checksum_assets=()
           for asset in "${assets[@]}"; do checksum_assets+=("$asset.sha256"); done
-          gh release create "$RELEASE_TAG" --verify-tag --latest=false --title "$title" --generate-notes "${assets[@]}" "${checksum_assets[@]}"
+          release_args=(--verify-tag --latest=false --title "$title" --generate-notes)
+          if [[ "${channel:-stable}" == dev ]]; then release_args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "${release_args[@]}" "${assets[@]}" "${checksum_assets[@]}"

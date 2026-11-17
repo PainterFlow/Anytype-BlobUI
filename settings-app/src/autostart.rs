@@ -1,4 +1,6 @@
+#[cfg(windows)]
 const RUN_VALUE_NAME: &str = "BlobUI Settings";
+#[cfg(windows)]
 const RUN_KEY_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -13,6 +15,7 @@ pub enum AutostartMode {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct RegistrySnapshot(Option<(u32, Vec<u8>)>);
 
 pub fn snapshot() -> Result<RegistrySnapshot, String> {
@@ -90,12 +93,14 @@ pub fn set_enabled(enabled: bool) -> Result<bool, String> {
     }
 }
 
+#[cfg(any(windows, test))]
 fn startup_command(executable: &str) -> String {
     format!("\"{}\"", shell_path(executable))
 }
 
 // Explorer's Run commands use shell paths, while an installer launch can leave
 // current_exe() with the verbatim prefix used by Windows canonicalize().
+#[cfg(any(windows, test))]
 fn shell_path(path: &str) -> String {
     if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{path}")
@@ -104,6 +109,7 @@ fn shell_path(path: &str) -> String {
     }
 }
 
+#[cfg(any(windows, test))]
 fn startup_entry_mode(value: &str, executable: &std::path::Path) -> Option<AutostartMode> {
     let quoted = value.strip_prefix('"')?;
     let end = quoted.find('"')?;
@@ -125,6 +131,7 @@ fn startup_entry_matches_executable(value: &str, executable: &std::path::Path) -
     startup_entry_mode(value, executable).is_some()
 }
 
+#[cfg(any(windows, test))]
 fn startup_executable_aliases(executable: &std::path::Path) -> Vec<std::path::PathBuf> {
     use std::path::Path;
 

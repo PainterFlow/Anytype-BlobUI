@@ -1,4 +1,5 @@
 {
   "formatVersion": 1,
-  "version": "1.4.1"
+  "version": "1.4.1",
+  "devVersion": "dev-1.4.2"
 }

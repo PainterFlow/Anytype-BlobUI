@@ -32,6 +32,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
         return Ok(());
     }
     match args[0].as_str() {
+        "--build-channel" => {
+            if args.len() != 2 {
+                return Err("Usage: blob-ui --build-channel <main|dev>".into());
+            }
+            set_headless_build_channel(&args[1])
+        }
         "-v" | "--version" => {
             println!("BlobUI Headless {}", env!("BLOBUI_BUILD_VERSION"));
             Ok(())
@@ -40,8 +46,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if args.len() != 1 {
                 return Err("Usage: blob-ui info".into());
             }
-            info();
-            Ok(())
+            info()
         }
         "update" => {
             if args.len() > 2 || (args.len() == 2 && !matches!(args[1].as_str(), "-f" | "--force"))
@@ -96,6 +101,7 @@ fn print_help() {
          \n\
          Commands:\n\
            help | ?                         Show this help\n\
+           --build-channel <main|dev>         Select the update channel (default: main)\n\
            info                              Show version and update status\n\
            update [-f]                      Check for and install an update\n\
            api status|login [-f]|logout      Manage the local Anytype API v2 key\n\
@@ -138,16 +144,14 @@ fn save_data(root: &Path, data: &Value) -> Result<(), String> {
     crate::settings_store::save(root, data)
 }
 
-fn info() {
+fn info() -> Result<(), String> {
     println!("BlobUI Headless {}", env!("BLOBUI_BUILD_VERSION"));
-    match latest_headless_release() {
+    let channel = selected_headless_build_channel()?;
+    println!("Build channel: {}", channel.as_headless_value());
+    match latest_headless_release(channel) {
         Ok(Some(release)) => {
-            let current = semver::Version::parse(env!("BLOBUI_BUILD_VERSION")).ok();
-            println!("Latest version: {}", release.version);
-            if current
-                .as_ref()
-                .is_some_and(|version| &release.version > version)
-            {
+            println!("Latest version: {}", release.version_label);
+            if headless_release_is_newer(&release.version_label, env!("BLOBUI_BUILD_VERSION")) {
                 println!("An update is available. Run `blob-ui update`.");
             } else {
                 println!("BlobUI Headless is up to date.");
@@ -155,6 +159,28 @@ fn info() {
         }
         Ok(None) => println!("No BlobUI Headless release is available yet."),
         Err(error) => println!("Update check failed: {error}"),
+    }
+    Ok(())
+}
+
+fn set_headless_build_channel(value: &str) -> Result<(), String> {
+    if !matches!(value, "main" | "dev") {
+        return Err("Build channel must be `main` or `dev`.".into());
+    }
+    let (root, mut data) = load_data()?;
+    let object = data.as_object_mut().ok_or("Headless settings must be a JSON object.")?;
+    object.insert("headlessBuildChannel".into(), Value::String(value.into()));
+    save_data(&root, &data)?;
+    println!("BlobUI Headless build channel set to {value}.");
+    Ok(())
+}
+
+fn selected_headless_build_channel() -> Result<crate::updater::ReleaseChannel, String> {
+    let (_, data) = load_data()?;
+    match data.get("headlessBuildChannel").and_then(Value::as_str) {
+        None | Some("main") => Ok(crate::updater::ReleaseChannel::Release),
+        Some("dev") => Ok(crate::updater::ReleaseChannel::Dev),
+        Some(_) => Err("The saved BlobUI Headless build channel is invalid. Run `blob-ui --build-channel main` to reset it.".into()),
     }
 }
 
@@ -298,7 +324,7 @@ impl UnixTerminalEchoGuard {
         ACTIVE_TERMINAL_FD.store(fd, std::sync::atomic::Ordering::Release);
 
         let mut action = unsafe { MaybeUninit::<libc::sigaction>::zeroed().assume_init() };
-        action.sa_sigaction = restore_terminal_on_signal as usize;
+        action.sa_sigaction = restore_terminal_on_signal as *const () as usize;
         unsafe {
             libc::sigemptyset(&mut action.sa_mask);
         }
@@ -1290,11 +1316,12 @@ fn search_source_members(
 
 struct HeadlessRelease {
     version: semver::Version,
+    version_label: String,
     asset_url: String,
     checksum_url: String,
 }
 
-fn latest_headless_release() -> Result<Option<HeadlessRelease>, String> {
+fn latest_headless_release(channel: crate::updater::ReleaseChannel) -> Result<Option<HeadlessRelease>, String> {
     let response = crate::updater::http_get(
         "api.github.com",
         "/repos/PainterFlow/Anytype-BlobUI/releases?per_page=100",
@@ -1324,12 +1351,17 @@ fn latest_headless_release() -> Result<Option<HeadlessRelease>, String> {
         let Some(tag) = release["tag_name"].as_str() else {
             continue;
         };
-        let Some(version_text) = tag.strip_prefix("headless-v") else {
+        let Some((version_text, version_label)) = headless_tag_version(tag, channel) else {
             continue;
         };
         let Ok(version) = semver::Version::parse(version_text) else {
             continue;
         };
+        if release.get("prerelease").and_then(Value::as_bool)
+            .is_some_and(|prerelease| prerelease != (channel == crate::updater::ReleaseChannel::Dev))
+        {
+            continue;
+        }
         let Some(assets) = release["assets"].as_array() else {
             continue;
         };
@@ -1351,13 +1383,43 @@ fn latest_headless_release() -> Result<Option<HeadlessRelease>, String> {
         validate_release_asset_url(asset_url, tag, current_asset)?;
         validate_release_asset_url(checksum_url, tag, &format!("{current_asset}.sha256"))?;
         candidates.push(HeadlessRelease {
-            version,
+            version_label,
             asset_url: asset_url.into(),
             checksum_url: checksum_url.into(),
+            version,
         });
     }
     candidates.sort_by(|a, b| b.version.cmp(&a.version));
     Ok(candidates.into_iter().next())
+}
+
+fn headless_tag_version(
+    tag: &str,
+    channel: crate::updater::ReleaseChannel,
+) -> Option<(&str, String)> {
+    match channel {
+        crate::updater::ReleaseChannel::Release => {
+            let version = tag.strip_prefix("headless-v")?;
+            Some((version, version.to_string()))
+        }
+        crate::updater::ReleaseChannel::Dev => {
+            let version = tag.strip_prefix("headless-dev-")?;
+            Some((version, format!("dev-{version}")))
+        }
+    }
+}
+
+fn headless_release_is_newer(candidate: &str, current: &str) -> bool {
+    let candidate_base = candidate.strip_prefix("dev-").unwrap_or(candidate);
+    let current_base = current.strip_prefix("dev-").unwrap_or(current);
+    let (Ok(candidate_version), Ok(current_version)) = (
+        semver::Version::parse(candidate_base),
+        semver::Version::parse(current_base),
+    ) else {
+        return false;
+    };
+    candidate_version > current_version
+        || (candidate_version == current_version && candidate != current)
 }
 
 fn validate_release_asset_url(value: &str, tag: &str, name: &str) -> Result<(), String> {
@@ -1402,18 +1464,17 @@ fn download_url(value: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
 }
 
 fn update(force: bool) -> Result<(), String> {
-    let Some(release) = latest_headless_release()? else {
+    let channel = selected_headless_build_channel()?;
+    let Some(release) = latest_headless_release(channel)? else {
         println!("No BlobUI Headless release is available for this platform yet.");
         return Ok(());
     };
-    let current = semver::Version::parse(env!("BLOBUI_BUILD_VERSION"))
-        .map_err(|_| "The installed BlobUI Headless version is invalid.")?;
-    if release.version <= current {
-        println!("BlobUI Headless is up to date at {current}.");
+    if !headless_release_is_newer(&release.version_label, env!("BLOBUI_BUILD_VERSION")) {
+        println!("BlobUI Headless is up to date at {}.", env!("BLOBUI_BUILD_VERSION"));
         return Ok(());
     }
     if !force {
-        eprint!("Install BlobUI Headless {} now? [y/N] ", release.version);
+        eprint!("Install BlobUI Headless {} now? [y/N] ", release.version_label);
         std::io::stderr()
             .flush()
             .map_err(|_| "Could not write the update prompt.")?;
@@ -1426,7 +1487,7 @@ fn update(force: bool) -> Result<(), String> {
             return Ok(());
         }
     }
-    println!("Downloading BlobUI Headless {}…", release.version);
+    println!("Downloading BlobUI Headless {}…", release.version_label);
     let bytes = download_url(&release.asset_url, MAX_ARCHIVE_BYTES)?;
     let sidecar = download_url(&release.checksum_url, 4096)?;
     let expected = std::str::from_utf8(&sidecar)
@@ -1442,7 +1503,7 @@ fn update(force: bool) -> Result<(), String> {
     replace_current_executable(&bytes)?;
     println!(
         "Updated BlobUI Headless to {}. Restart the command to use the new version.",
-        release.version
+        release.version_label
     );
     Ok(())
 }
@@ -2147,6 +2208,24 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headless_release_channels_parse_tags_and_compare_labels() {
+        use crate::updater::ReleaseChannel;
+        assert_eq!(headless_tag_version("headless-v1.0.0", ReleaseChannel::Release), Some(("1.0.0", "1.0.0".into())));
+        assert_eq!(headless_tag_version("headless-dev-1.0.1", ReleaseChannel::Dev), Some(("1.0.1", "dev-1.0.1".into())));
+        assert_eq!(headless_tag_version("headless-dev-1.0.1", ReleaseChannel::Release), None);
+        assert!(headless_release_is_newer("dev-1.0.1", "1.0.0"));
+        assert!(headless_release_is_newer("dev-1.0.0", "1.0.0"));
+        assert!(headless_release_is_newer("1.0.0", "dev-1.0.0"));
+        assert!(!headless_release_is_newer("dev-1.0.1", "dev-1.0.1"));
+    }
+
+    #[test]
+    fn build_channel_command_requires_main_or_dev() {
+        assert!(run(vec!["--build-channel".into()]).unwrap_err().contains("Usage"));
+        assert!(run(vec!["--build-channel".into(), "beta".into()]).unwrap_err().contains("main"));
+    }
 
     #[test]
     fn search_filters_accept_only_supported_source_ids() {

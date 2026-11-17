@@ -8,8 +8,10 @@ edition = "2021"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 headless-cli = []
+installer = []
 
 [build-dependencies]
+serde_json = "1"
 tauri-build = "2"
 
 [dependencies]

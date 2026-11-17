@@ -574,11 +574,12 @@ async fn get_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
 async fn get_latest_release_notes() -> Result<Option<updater::ReleaseNotes>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let app_data = app_data_directory();
+        let preferences = updater::load_preferences(&updater::preferences_path(&app_data))?;
         // The current changelog ships with the Settings app, so viewing it does not
         // depend on a valid Anytype install path or a populated runtime folder.
         let install = resolve_install_directory(&app_data).ok();
         let runtime = resolve_runtime_directory_for_install_optional(install.as_deref())?;
-        updater::get_latest_release_notes(install.as_deref(), runtime.as_deref())
+        updater::get_latest_release_notes(install.as_deref(), runtime.as_deref(), preferences.release_channel)
     })
     .await
     .map_err(|_| "The latest release notes task stopped unexpectedly.".to_string())?
@@ -590,7 +591,9 @@ async fn get_adjacent_release_notes(
     older: bool,
 ) -> Result<Option<updater::ReleaseNotes>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        updater::get_adjacent_release_notes(&version, older)
+        let app_data = app_data_directory();
+        let preferences = updater::load_preferences(&updater::preferences_path(&app_data))?;
+        updater::get_adjacent_release_notes(&version, older, preferences.release_channel)
     })
     .await
     .map_err(|_| "The release history task stopped unexpectedly.".to_string())?
@@ -1361,11 +1364,11 @@ fn open_author_profile() -> Result<(), String> {
     open_github_link("https://github.com/PainterFlow/Anytype-BlobUI")
 }
 
-fn open_github_link(link: &str) -> Result<(), String> {
+fn open_github_link(_link: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         let operation: Vec<u16> = "open\0".encode_utf16().collect();
-        let url: Vec<u16> = format!("{link}\0").encode_utf16().collect();
+        let url: Vec<u16> = format!("{_link}\0").encode_utf16().collect();
         let result = unsafe {
             windows_sys::Win32::UI::Shell::ShellExecuteW(
                 std::ptr::null_mut(),
@@ -1747,6 +1750,7 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
                     "autoplayVideos": preferences.autoplay_videos,
                     "automaticUpdatesEnabled": preferences.automatic_updates_enabled,
                     "automaticChecksEnabled": preferences.automatic_checks_enabled,
+                    "releaseChannel": preferences.release_channel.as_settings_value(),
                 });
                 settings_store::save_updater_preferences(
                     &root,

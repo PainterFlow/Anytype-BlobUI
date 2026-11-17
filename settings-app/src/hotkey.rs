@@ -155,11 +155,13 @@ fn valid_code(code: &str) -> bool {
         || (code.strip_prefix('F').is_some_and(|rest| rest.parse::<u8>().is_ok_and(|number| (1..=12).contains(&number)) && code == format!("F{}", rest.parse::<u8>().unwrap_or_default())))
 }
 
+#[cfg(any(windows, test))]
 #[derive(Default)]
 struct KeyGate {
     captured: bool,
 }
 
+#[cfg(any(windows, test))]
 impl KeyGate {
     fn handle(&mut self, down: bool, in_scope: bool, modifiers_match: bool) -> (bool, bool) {
         if self.captured {

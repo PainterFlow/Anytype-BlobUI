@@ -1237,11 +1237,35 @@ mod tests {
             let stopped = stop.clone();
             let server = std::thread::spawn(move || {
                 while !stopped.load(Ordering::SeqCst) {
-                    let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(std::time::Duration::from_millis(2)); continue; };
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(accepted) => accepted,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                            continue;
+                        }
+                        Err(error) => panic!("fixture accept failed: {error}"),
+                    };
                     stream.set_nonblocking(false).unwrap();
-                    let mut bytes = [0; 8192];
-                    let n = stream.read(&mut bytes).unwrap();
-                    let request = String::from_utf8_lossy(&bytes[..n]);
+                    stream.set_read_timeout(Some(std::time::Duration::from_millis(100))).unwrap();
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 8192];
+                    loop {
+                        match stream.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(count) => {
+                                bytes.extend_from_slice(&buffer[..count]);
+                                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && std::time::Instant::now() < deadline => {
+                                std::thread::sleep(std::time::Duration::from_millis(2));
+                            }
+                            Err(error) => panic!("fixture request read failed: {error}"),
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&bytes);
                     let value = if request.contains("/options?") {
                         json!({"data":[if direct {json!({"id":"option-a","name":"A"})} else {json!({"name":"A"})}],"has_more":false})
                     } else {

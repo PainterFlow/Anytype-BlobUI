@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'dev-*'
   workflow_dispatch:
     inputs:
       tag:
@@ -22,6 +23,11 @@ jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 60
+    outputs:
+      release_tag: ${{ steps.validate_release.outputs.release_tag }}
+      channel: ${{ steps.validate_release.outputs.channel }}
+      version: ${{ steps.validate_release.outputs.version }}
+      installer_asset: ${{ steps.validate_release.outputs.installer_asset }}
     defaults:
       run:
         shell: pwsh
@@ -33,19 +39,40 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate release version and main ancestry
+      - name: Validate release tag, channel, and branch ancestry
+        id: validate_release
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           $metadata = Get-Content blobui-release.json -Raw | ConvertFrom-Json
-          if ($metadata.formatVersion -ne 1 -or $env:RELEASE_TAG -cne "v$($metadata.version)") {
-            throw 'The release tag must match the version in blobui-release.json, prefixed with v.'
+          if ($metadata.formatVersion -ne 1 -or $metadata.version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw 'blobui-release.json must contain formatVersion 1 and a stable X.Y.Z version.'
           }
-          git merge-base --is-ancestor HEAD origin/main
+          if ($env:RELEASE_TAG -cmatch '^v(?<tagVersion>[0-9]+\.[0-9]+\.[0-9]+)$') {
+            $channel = 'main'
+            $tagVersion = $Matches.tagVersion
+            $installerAsset = 'blobui-installer.exe'
+            if ($tagVersion -cne $metadata.version) {
+              throw 'Stable app tags must match blobui-release.json version as vX.Y.Z.'
+            }
+            $targetBranch = 'origin/main'
+          } elseif ($env:RELEASE_TAG -cmatch '^dev-(?<tagVersion>[0-9]+\.[0-9]+\.[0-9]+)$') {
+            $channel = 'dev'
+            $tagVersion = $Matches.tagVersion
+            $installerAsset = 'blobui-installer-dev.exe'
+            if ($metadata.devVersion -cnotmatch '^dev-[0-9]+\.[0-9]+\.[0-9]+$' -or "dev-$tagVersion" -cne $metadata.devVersion) {
+              throw 'Dev app tags must match blobui-release.json devVersion as dev-X.Y.Z.'
+            }
+            $targetBranch = 'origin/dev'
+          } else {
+            throw 'App release tags must use vX.Y.Z or dev-X.Y.Z.'
+          }
+          git merge-base --is-ancestor HEAD $targetBranch
           if ($LASTEXITCODE -ne 0) {
-            throw 'Release tags must point to a commit on main. Merge dev into main before releasing.'
+            throw "Release tags must point to a commit on $targetBranch."
           }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "release_tag=$env:RELEASE_TAG`nchannel=$channel`nversion=$tagVersion`ninstaller_asset=$installerAsset`n")
 
       - name: Select the Node.js toolchain
         uses: actions/setup-node@v7
@@ -99,11 +126,18 @@ jobs:
           npm test
           if ($LASTEXITCODE -ne 0) { throw 'Settings frontend behavior tests failed.' }
 
-      - name: Build and validate the production installer and release package
+      - name: Build installer and validate the release package without installing
+        env:
+          RELEASE_CHANNEL: ${{ steps.validate_release.outputs.channel }}
+          INSTALLER_ASSET: ${{ steps.validate_release.outputs.installer_asset }}
         run: |
           $ErrorActionPreference = 'Stop'
-          ./scripts/Build-Installer.ps1 -PackageRelease
-          foreach ($path in @('dist/blobui-installer.exe', 'dist/blobui-windows.zip')) {
+          if ($env:RELEASE_CHANNEL -eq 'dev') {
+            ./scripts/Build-Installer.ps1 -PackageRelease -BuildChannel dev
+          } else {
+            ./scripts/Build-Installer.ps1 -PackageRelease
+          }
+          foreach ($path in @("dist/$env:INSTALLER_ASSET", 'dist/blobui-windows.zip')) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
               throw "Release build did not create $path."
             }
@@ -131,10 +165,11 @@ jobs:
           retention-days: 7
           path: |
             dist/Changelogs.md
-            dist/blobui-installer.exe
+            dist/${{ steps.validate_release.outputs.installer_asset }}
             dist/blobui-windows.zip
 
   publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dev-'))
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -151,16 +186,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+          RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          INSTALLER_ASSET: ${{ needs.build.outputs.installer_asset }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$RELEASE_CHANNEL" == dev ]]; then
+            title="BlobUI Dev $RELEASE_VERSION"
+            prerelease_args=(--prerelease --latest=false)
+          else
+            title="BlobUI $RELEASE_VERSION"
+            prerelease_args=()
+          fi
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file dist/Changelogs.md
+            gh release create "$RELEASE_TAG" --verify-tag --draft "${prerelease_args[@]}" --title "$title" --notes-file dist/Changelogs.md
           else
             gh release edit "$RELEASE_TAG" --notes-file dist/Changelogs.md
           fi
-          gh release upload "$RELEASE_TAG" dist/blobui-installer.exe dist/blobui-windows.zip --clobber
+          gh release upload "$RELEASE_TAG" "dist/$INSTALLER_ASSET" dist/blobui-windows.zip --clobber
           if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "true" ]; then
-            gh release edit "$RELEASE_TAG" --draft=false
+            gh release edit "$RELEASE_TAG" --draft=false "${prerelease_args[@]}"
+          elif [[ "$RELEASE_CHANNEL" == dev ]]; then
+            gh release edit "$RELEASE_TAG" --prerelease --latest=false
           fi

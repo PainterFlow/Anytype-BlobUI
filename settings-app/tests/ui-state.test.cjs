@@ -359,7 +359,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/log-store.js'), 'utf8'), context);
   context.createNativeService = require('../ui/native-service.js').createNativeService;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
-  let viewState = { page: 'preferences', calendarTab: 0, kanbanTab: 0 };
+  let viewState = { page: 'preferences', calendarTab: 0, kanbanTab: 0, releaseChannel: 'release', releaseChannelDisabled: true };
   context.view = {
     updateSettingsFields(values) {
       for (const [id, value] of Object.entries(values)) element(id)[typeof value === 'boolean' ? 'checked' : 'value'] = value;
@@ -560,6 +560,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('startup-mode').value, 'off', 'Startup is opt-in by default.');
   assert.equal(element('automatic-updates-enabled').checked, false);
   assert.equal(element('automatic-checks-enabled').checked, false);
+  assert.equal(viewState.releaseChannel, 'release', 'Missing release channel settings default to Release.');
+  context.testApp.changeReleaseChannel('invalid');
+  assert.equal(viewState.releaseChannel, 'release', 'Unknown release channels are ignored.');
   assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
   const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
   assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
@@ -621,11 +624,13 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
+  context.testApp.changeReleaseChannel('dev');
+  assert.equal(viewState.releaseChannel, 'dev', 'Selecting Dev Builds updates the updater draft.');
   assert.equal(element('save-button').hidden, false, 'App Settings edits use the shared Save action.');
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -648,6 +653,10 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
   assert.equal(element('startup-mode').value, 'background', 'Undo restores the startup preference.');
+  context.testApp.changeReleaseChannel('release');
+  assert.equal(viewState.releaseChannel, 'release', 'Changing Release Channel edits the updater draft.');
+  context.window.BlobUI.discardChanges();
+  assert.equal(viewState.releaseChannel, 'dev', 'Undo restores the saved Release Channel.');
 
   element('help-button').handlers.click();
   assert.equal(element('help-popup').hidden, false, 'The Help button opens its mini-menu.');

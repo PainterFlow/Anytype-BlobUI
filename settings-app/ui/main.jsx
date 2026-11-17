@@ -43,7 +43,7 @@ let app;
 
 function SettingsScreens() {
   const { page, preferenceTab, calendarTab, kanbanTab, advancedTab, settingsFields, customThemes, themeDirectory, customThemeDisabled, saveVisible, saveDisabled, discardDisabled, saveBusy,
-    documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, backgroundExperiment, backgroundExperimentDisabled } =
+    documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, releaseChannel = "release", releaseChannelDisabled = true, backgroundExperiment, backgroundExperimentDisabled } =
     useSyncExternalStore(view.subscribe, view.getSnapshot);
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
   return <>
@@ -72,7 +72,7 @@ function SettingsScreens() {
                 kanbanStyle={kanbanStyle} kanbanStyleDisabled={kanbanStyleDisabled || page !== "kanban-views" || kanbanTab !== 0}
                 onKanbanStyleChange={value => app?.changeKanbanStyle(value)} formulaController={window.BlobUI.FormulaPage} />
             </div>
-            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced startupMode={startupMode} startupModeDisabled={startupModeDisabled} onStartupModeChange={value => app?.changeStartupMode(value)} backgroundExperiment={backgroundExperiment} backgroundExperimentDisabled={backgroundExperimentDisabled} onBackgroundExperimentChange={value => app?.changeBackgroundExperiment(value)} selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
+            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced startupMode={startupMode} startupModeDisabled={startupModeDisabled} onStartupModeChange={value => app?.changeStartupMode(value)} releaseChannel={releaseChannel} releaseChannelDisabled={releaseChannelDisabled} onReleaseChannelChange={value => app?.changeReleaseChannel(value)} backgroundExperiment={backgroundExperiment} backgroundExperimentDisabled={backgroundExperimentDisabled} onBackgroundExperimentChange={value => app?.changeBackgroundExperiment(value)} selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
             <div id="codex-page" className="settings-page" hidden={page !== "codex"}><CodexPage /></div>
           </div>
         </section>

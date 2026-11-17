@@ -16,10 +16,13 @@ pub enum CredentialChange<'a> {
 }
 
 pub fn blob_metadata_bytes() -> Result<Vec<u8>, String> {
-    let mut metadata = json!({
+    let metadata = json!({
         "formatVersion": 1,
         "blobuiVersion": env!("BLOBUI_BUILD_VERSION"),
     });
+    #[cfg(feature = "headless-cli")]
+    let mut metadata = metadata;
+    #[cfg(feature = "headless-cli")]
     if crate::HEADLESS_MODE.load(std::sync::atomic::Ordering::Acquire) {
         metadata["headlessCli"] = json!(true);
     }

@@ -362,7 +362,15 @@ mod tests {
         let server = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(30);
             while !done.load(Ordering::Relaxed) && Instant::now() < deadline {
-                let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(Duration::from_millis(1)); continue; };
+                let (mut stream, _) = match listener.accept() {
+                    Ok(accepted) => accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(error) => panic!("fixture accept failed: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                 let mut bytes = Vec::new(); let mut buffer = [0;4096];
                 loop {
