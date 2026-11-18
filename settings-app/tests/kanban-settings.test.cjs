@@ -22,7 +22,7 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
       window.__TAURI__ = { core: { invoke: async (name, args) => {
         if (name === 'get_app_state') return { ready: true, theme: document.documentElement.dataset.theme || 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: { fontFamily: 'Segoe UI', codeFontFamily: 'Consolas', accentColor: 'Default', accentMode: 'native', kanbanViewStyle: 'default', collapsedCategories: false } };
         if (name === 'save_settings') { window.__saves.push(args.settings); return { calendarStatus: 'cached' }; }
-        if (name === 'get_theme') return 'dark';
+        if (name === 'get_anytype_theme') return 'dark';
         return null;
       } } };
     });
