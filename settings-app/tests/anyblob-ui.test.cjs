@@ -51,7 +51,10 @@ test('Anyblob uses local project settings and opens the shared setup guide in a 
     assert.equal(await page.evaluate(()=>window.enabled),true);
     assert.equal(await page.evaluate(()=>window.localProjectsFolder),'C:/Fixture Projects');
 
-    await panel.getByRole('button',{name:'Anyblob help'}).click();
+    const helpButton=panel.getByRole('button',{name:'Anyblob help'});
+    assert.equal(await helpButton.getAttribute('aria-describedby'),null);
+    assert.equal(await helpButton.getAttribute('aria-haspopup'),'dialog');
+    await helpButton.click();
     const guide=page.getByRole('dialog',{name:'Anyblob setup guide'});
     await guide.waitFor();
     await guide.getByRole('heading',{name:'1. Start Anytype Headless'}).waitFor();

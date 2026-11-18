@@ -76,7 +76,7 @@ export function CodexIntegration() {
 
   if (!api) return null;
   return <>
-    <SettingsHeading title="Anyblob" help="Open the Anyblob setup guide" helpDialogId="anyblob-guide-dialog"
+    <SettingsHeading title="Anyblob" helpDialogId="anyblob-guide-dialog"
       onHelpClick={() => { setGuideError(false); setGuideOpen(true); }} />
     <div className="settings-list anyblob-integration-settings">
       <Switch id="enable-anyblob" label="Enable Anyblob" className="native-accent-control settings-row"

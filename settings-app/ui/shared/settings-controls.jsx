@@ -36,7 +36,7 @@ export function SettingsHeading({ id, title, description, help, onHelpClick, hel
   return <div className="section-heading">
     <div className="section-heading-title">
       <h2 id={id}>{title}</h2>
-      {help && <HelpTooltip label={`${title} help`} text={help} size="large" onClick={onHelpClick} dialogId={helpDialogId} />}
+      {(help || onHelpClick) && <HelpTooltip label={`${title} help`} text={help} size="large" onClick={onHelpClick} dialogId={helpDialogId} />}
     </div>
     {description != null && <p>{description}</p>}
   </div>;

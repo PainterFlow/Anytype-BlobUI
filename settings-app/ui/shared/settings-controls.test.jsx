@@ -118,4 +118,28 @@ describe("Settings controls", () => {
     fireEvent.pointerLeave(trigger.parentElement);
     expect(popover.dataset.open).toBe("false");
   });
+
+  it("closes a tooltip when its question mark is clicked", () => {
+    render(<HelpTooltip label="Project source help" text="Choose the sources this local project can access." />);
+    const trigger = screen.getByRole("button", { name: "Project source help" });
+    const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
+
+    fireEvent.pointerEnter(trigger.parentElement);
+    fireEvent.focus(trigger);
+    expect(popover.dataset.open).toBe("true");
+    fireEvent.click(trigger);
+    expect(popover.dataset.open).toBe("false");
+  });
+
+  it("keeps action help buttons without tooltip text", () => {
+    const onClick = vi.fn();
+    render(<HelpTooltip label="Anyblob help" onClick={onClick} dialogId="anyblob-guide-dialog" />);
+    const trigger = screen.getByRole("button", { name: "Anyblob help" });
+
+    expect(trigger.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    fireEvent.click(trigger);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
 });

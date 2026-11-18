@@ -10,7 +10,8 @@ export function HelpTooltip({ label, text, size = "normal", icon = null, onClick
   const popoverRef = useRef(null);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const open = hovered || focused;
+  const hasTooltip = typeof text === "string" && text.length > 0;
+  const open = hasTooltip && (hovered || focused);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -79,8 +80,13 @@ export function HelpTooltip({ label, text, size = "normal", icon = null, onClick
   return <>
     <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}`} data-open={open}
       onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
-      <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={tooltipId}
-        aria-haspopup={dialogId ? "dialog" : undefined} aria-controls={dialogId} onClick={onClick}
+      <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={hasTooltip ? tooltipId : undefined}
+        aria-haspopup={dialogId ? "dialog" : undefined} aria-controls={dialogId}
+        onClick={event => {
+          setHovered(false);
+          setFocused(false);
+          onClick?.(event);
+        }}
         data-action={onClick ? "" : undefined}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
         {icon || <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
@@ -90,6 +96,6 @@ export function HelpTooltip({ label, text, size = "normal", icon = null, onClick
         </svg>}
       </button>
     </span>
-    {createPortal(<span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip" data-open={open}>{text}</span>, document.body)}
+    {hasTooltip && createPortal(<span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip" data-open={open}>{text}</span>, document.body)}
   </>;
 }

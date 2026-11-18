@@ -108,7 +108,7 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
           <SettingsRow className="native-accent-control settings-row accessibility-row" label="Release Channel">
             <SelectPicker id="release-channel" label="Release Channel" value={releaseChannel} disabled={releaseChannelDisabled}
               options={[{ value: "release", label: "Release" }, { value: "dev", label: "Dev Builds" }]}
-              onChange={onReleaseChannelChange} />
+              onChange={onReleaseChannelChange} fixed />
           </SettingsRow>
         </SettingsGroup>
         <div className="update-check-row">
