@@ -86,6 +86,25 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.equal(await page.locator('#startup-mode, #experiment-run-background').count(), 0);
     assert.equal(await page.locator('.app-backup-box #import-blob-backup-button').count(), 1);
     assert.equal(await page.locator('.app-backup-box #create-blob-backup-button').count(), 1);
+    const releaseChannel = page.locator('#release-channel');
+    await releaseChannel.waitFor({ state: 'visible' });
+    await releaseChannel.click();
+    const devOption = page.getByRole('option', { name: 'Dev Builds', exact: true });
+    await devOption.waitFor({ state: 'visible' });
+    const devOptionLayout = await devOption.evaluate(option => {
+      const rect = option.getBoundingClientRect();
+      const menu = option.closest('[role="listbox"]');
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return { visibleInViewport: rect.top >= 0 && rect.bottom <= window.innerHeight,
+        reachable: Boolean(hit && option.contains(hit)) };
+    });
+    assert.equal(devOptionLayout.visibleInViewport, true);
+    assert.equal(devOptionLayout.reachable, true, 'Release Channel options must remain clickable outside the Updates group.');
+    await devOption.click();
+    assert.equal(await releaseChannel.locator('.kanban-trigger-value').innerText(), 'Dev Builds');
+    await releaseChannel.click();
+    await page.getByRole('option', { name: 'Release', exact: true }).click();
+    assert.equal(await releaseChannel.locator('.kanban-trigger-value').innerText(), 'Release');
     await page.locator('#advanced-api-tab').click();
     await page.locator('#advanced-section-links').getByRole('button', { name: 'Experiments', exact: true }).click();
     assert.equal(await page.locator('#advanced-experiments-tab').getAttribute('aria-selected'), 'true');
