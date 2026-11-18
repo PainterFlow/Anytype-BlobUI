@@ -88,12 +88,12 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
         <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
           label="Based Theme" value={values["based-theme"] || "auto"} options={basedThemeOptions} disabled={themeControlsDisabled}
-          onChange={value => onChange?.("based-theme", value)} />
+          onChange={value => onChange?.("based-theme", value)} fixed />
       </SettingsRow>
       <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Preset Themes">
         <SelectPicker id="custom-theme" rootId="custom-theme-select" menuId="custom-theme-options"
           label="Preset Themes" value={selectedTheme} options={options} disabled={themeControlsDisabled}
-          emptyMessage="No theme files were found." onChange={value => onChange?.("custom-theme", value)} />
+          emptyMessage="No theme files were found." onChange={value => onChange?.("custom-theme", value)} fixed />
       </SettingsRow>
       <div className="custom-theme-color-row" aria-disabled={themeControlsDisabled}>
         <div className="kanban-setting-copy"><span className="kanban-setting-title">Main color</span></div>

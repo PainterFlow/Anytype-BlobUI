@@ -135,7 +135,14 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     await page.locator('#custom-theme-options').waitFor({ state: 'visible' });
     assert.equal(await page.locator('#custom-theme-options .kanban-select-option-description').count(), 0);
     await page.locator('.custom-themes-group').screenshot({ path: path.join(screenshotDirectory, 'preset-theme-options.png') });
-    await page.locator('#custom-theme-options [data-value="oled.css"]').click();
+    const oledOption = page.locator('#custom-theme-options [data-value="oled.css"]');
+    const oledOptionReachable = await oledOption.evaluate(option => {
+      const rect = option.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return Boolean(hit && option.contains(hit));
+    });
+    assert.equal(oledOptionReachable, true, 'Preset Theme options must remain reachable above the main color controls.');
+    await oledOption.click();
     await page.locator('#custom-theme-options').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => document.getElementById('theme-color-value').value === '#000000');
     assert.equal(await page.locator('#theme-color-swatch').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(0, 0, 0)');
