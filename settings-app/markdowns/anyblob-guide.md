@@ -43,10 +43,12 @@ Use `blob-ui object-mention spaces ls` to list every available space and its ID.
 Add the Anytype BlobUI repository as a Codex plugin marketplace, then install Anyblob from the Plugins Directory:
 
 ```sh
-codex plugin marketplace add PainterFlow/Anytype-BlobUI
+codex plugin marketplace add PainterFlow/Anytype-BlobUI@feat/remote-support
 ```
 
-The repository supplies the Anyblob plugin. Codex starts `blob-ui mcp` from `PATH` when it starts the plugin. The CLI's management commands are separate from the MCP process. Agents can use the Anyblob tools, but the plugin does not expose commands that change CLI settings or permissions.
+The bare repository shorthand checks GitHub's default branch. Use the ref above while the marketplace manifest is only on `feat/remote-support`. After the manifest reaches the default branch, you can omit `@feat/remote-support`.
+
+The repository supplies the Anyblob plugin. Codex starts `blob-ui mcp` from `PATH` when it starts the plugin. Check that `blob-ui help` works in the same environment where Codex starts the MCP process. If Anyblob tools or object mentions are missing, install and enable Anyblob from the Plugins Directory, then start a new chat. Subagents can use the MCP tools connected to their parent chat. The CLI's management commands are separate from the MCP process, and the plugin does not expose commands that change CLI settings or permissions.
 
 Start a new chat after installing the plugin. For a project chat, keep that project's `anyblob.config.toml` in its local project folder so Anyblob can authenticate the chat to the matching project.
 

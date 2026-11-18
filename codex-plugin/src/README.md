@@ -7,7 +7,7 @@ Anyblob 1.0.0 gives Codex access to permitted Anytype content through BlobUI Hea
 1. Install the Windows or Linux BlobUI Headless release from [GitHub Releases](https://github.com/PainterFlow/Anytype-BlobUI/releases). Make sure `blob-ui help` works in a terminal on the Codex host.
 2. Start [Anytype Headless](https://github.com/anyproto/anytype-cli), give its bot account access to the desired spaces, and create an API v2 key. Run `blob-ui api login` and follow the prompts.
 3. Run `blob-ui object-mention spaces ls` to list available space IDs. Grant global read access with `blob-ui perms <space-id> --approval always --permission read --file-uploads false`. You can then search a permitted space with `blob-ui search "<search text>" --filter space:<space-id>`. Enable the integration with `blob-ui --toggle-anyblob true`.
-4. Add the repository marketplace with `codex plugin marketplace add PainterFlow/Anytype-BlobUI`. In the Plugins Directory, select BlobUI and install Anyblob. Open a new chat and ask Anyblob to list spaces.
+4. Add the repository marketplace with `codex plugin marketplace add PainterFlow/Anytype-BlobUI@feat/remote-support`. The bare repository shorthand checks GitHub's default branch, which does not yet contain `.agents/plugins/marketplace.json`. In the Plugins Directory, select BlobUI and install Anyblob. Start a new chat and ask Anyblob to list spaces. Once the marketplace manifest reaches the default branch, you can omit `@feat/remote-support`.
 
 ## Updates
 
@@ -23,7 +23,7 @@ Use `blob-ui object-mention ls` to review mention filters. Add or remove object 
 
 ## Troubleshooting
 
-Run `blob-ui api status` to check the Anytype API connection and `blob-ui perms ls` to see saved global space access. If Codex cannot launch the MCP process, confirm that its environment includes `blob-ui` on PATH. Check the project's permissions separately when the chat has authenticated to a project. Retry timed-out reads after fixing the cause. Inspect the saved outcome of a write before attempting it again.
+Run `blob-ui api status` to check the Anytype API connection and `blob-ui perms ls` to see saved global space access. If Codex has no Anyblob tools or object mentions, confirm that Anyblob is installed and enabled in the Plugins Directory, then check that `blob-ui help` works in the same environment where Codex starts the MCP process. Codex runs `blob-ui mcp` from PATH. Start a new chat after changing the plugin or its executable. Subagents can use the MCP tools connected to their parent chat. Check the project's permissions separately when the chat has authenticated to a project. Retry timed-out reads after fixing the cause. Inspect the saved outcome of a write before attempting it again.
 
 ## Content tools
 
