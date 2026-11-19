@@ -35,6 +35,7 @@ try {
         foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
             Assert (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -eq 1) "The release package must contain $name at its root."
         }
+        Assert (@($archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }).Count -eq 1) 'The release package must include the Anyblob MCP launcher.'
     } finally { $archive.Dispose() }
     # A development install must ignore the normal profile locations completely.
     $env:APPDATA = Join-Path $root 'protected-roaming'
@@ -50,7 +51,7 @@ try {
     Assert (Test-Path -LiteralPath $dataPath) 'Development EXE did not create isolated settings.'
     Assert (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/settings-app.exe')) 'Native installation omitted the Settings runtime.'
     foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
-        $source = Join-Path $repo $name
+        $source = Join-Path $repo ("settings-app/markdowns/$name")
         $installed = Join-Path $testRoot ("Anytype/blob/runtime/" + $name)
         Assert (Test-Path -LiteralPath $installed -PathType Leaf) "Native installation omitted runtime/$name."
         Assert ((Get-FileHash -LiteralPath $source).Hash -eq (Get-FileHash -LiteralPath $installed).Hash) "Installed runtime/$name does not match the release source."
@@ -58,6 +59,7 @@ try {
     $apps = Get-TestApps
     Assert ($apps.Count -eq 1) 'First development installation did not create one app folder.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'blobui-settings.exe')) 'Native installation omitted the app executable.'
+    Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'bin/blob-ui.exe')) 'Native installation omitted the Anyblob MCP launcher.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName '.blobui-install.json')) 'Native installation omitted the install pointer.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'scripts'))) 'Native installation included legacy scripts.'
     $releaseMetadata = Get-Content -LiteralPath (Join-Path $repo 'blobui-release.json') -Raw | ConvertFrom-Json
