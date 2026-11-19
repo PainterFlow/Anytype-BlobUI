@@ -1,1 +1,5 @@
 images: []
+videos:
+  - id: anyblob-installation
+    src: ./cdn/anyblob-instilation.mp4
+    alt: Anyblob installation
