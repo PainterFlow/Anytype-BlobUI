@@ -44,7 +44,7 @@ in their contributions and must have permission to submit them.
 
 ## Anyblob integration
 
-Anyblob connects Codex to Anytype through the `blob-ui mcp` command. On Windows, the helper uses the running BlobUI Settings app. On Linux, BlobUI Headless connects to Anytype CLI and starts `anytype serve` in the background when its API is unavailable. This repository supplies the Codex plugin marketplace. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the [setup guide](settings-app/markdowns/anyblob-guide.md) and [plugin reference](codex-plugin/src/README.md) for setup steps and the complete tool list.
+Anyblob connects Codex to Anytype through the `blob-ui mcp` command. On Windows, the regular Settings app executable provides this entrypoint and uses its running app bridge. Linux uses the separate BlobUI Headless executable, which connects to Anytype CLI and starts `anytype serve` in the background when the API is unavailable. This repository supplies the Codex plugin marketplace. Its access and approval rules are configured per space and can be overridden for selected Codex project sources. Read the [setup guide](settings-app/markdowns/anyblob-guide.md) and [plugin reference](codex-plugin/src/README.md) for setup steps and the complete tool list.
 
 ## Background development launches
 

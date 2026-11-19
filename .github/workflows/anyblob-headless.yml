@@ -126,6 +126,8 @@ jobs:
         run: |
           cargo test --locked --release --manifest-path settings-app/Cargo.toml -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/tests/Test-Desktop-Mcp.cjs settings-app/dist/blobui-settings.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm --prefix settings-app run test:ui
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm --prefix settings-app test

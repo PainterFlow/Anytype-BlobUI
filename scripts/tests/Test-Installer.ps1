@@ -36,6 +36,21 @@ try {
             Assert (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -eq 1) "The release package must contain $name at its root."
         }
         Assert (@($archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }).Count -eq 1) 'The release package must include the Anyblob MCP launcher.'
+        $settingsEntry = $archive.Entries | Where-Object { $_.FullName -ceq 'settings-app/dist/blobui-settings.exe' }
+        $mcpEntry = $archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }
+        Assert ($null -ne $settingsEntry) 'The release package must include the compiled Settings app.'
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $settingsStream = $settingsEntry.Open()
+        $mcpStream = $mcpEntry.Open()
+        try {
+            $settingsHash = [Convert]::ToHexString($sha.ComputeHash($settingsStream))
+            $mcpHash = [Convert]::ToHexString($sha.ComputeHash($mcpStream))
+            Assert ($settingsHash -eq $mcpHash) 'The Windows MCP launcher must be the compiled Settings app.'
+        } finally {
+            $settingsStream.Dispose()
+            $mcpStream.Dispose()
+            $sha.Dispose()
+        }
     } finally { $archive.Dispose() }
     # A development install must ignore the normal profile locations completely.
     $env:APPDATA = Join-Path $root 'protected-roaming'
@@ -60,6 +75,8 @@ try {
     Assert ($apps.Count -eq 1) 'First development installation did not create one app folder.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'blobui-settings.exe')) 'Native installation omitted the app executable.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'bin/blob-ui.exe')) 'Native installation omitted the Anyblob MCP launcher.'
+    & node (Join-Path $PSScriptRoot 'Test-Desktop-Mcp.cjs') (Join-Path $apps[0].FullName 'bin/blob-ui.exe')
+    Assert ($LASTEXITCODE -eq 0) 'The installed Settings executable did not provide the MCP stdio entrypoint.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName '.blobui-install.json')) 'Native installation omitted the install pointer.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'scripts'))) 'Native installation included legacy scripts.'
     $releaseMetadata = Get-Content -LiteralPath (Join-Path $repo 'blobui-release.json') -Raw | ConvertFrom-Json

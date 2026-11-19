@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 #[cfg(any(test, not(windows)))]
 pub(crate) const WINDOWS_HOST_REQUIRED: &str =
-    "The BlobUI Settings bridge is available on Windows. For direct Windows or Linux access, use the standalone `blob-ui mcp` command.";
+    "The BlobUI Settings bridge is available on Windows. On Linux, use the `blob-ui mcp` entrypoint provided by BlobUI Headless.";
 
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
@@ -115,9 +115,9 @@ pub fn read_at(path: &std::path::Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn non_windows_error_points_to_the_headless_server() {
+    fn non_windows_error_points_to_the_headless_entrypoint() {
         let error = super::WINDOWS_HOST_REQUIRED;
-        assert!(error.contains("Windows or Linux"));
+        assert!(error.contains("BlobUI Headless"));
         assert!(error.contains("blob-ui mcp"));
     }
 
