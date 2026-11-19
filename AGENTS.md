@@ -9,6 +9,7 @@
 - Never add the workspace's `anyblob.config.toml` to Git or make it publicly accessible. Keep it ignored.
 - Never modify `Changelogs.md` unless I explicitly request it in my prompt.
 - Never modify `dev-guide.md` unless I explicitly request it in my prompt.
+- For each modification to Anyblob, always bump the version on the commit, if I dont specify an exact version, then just bump the last version by 1.
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.
