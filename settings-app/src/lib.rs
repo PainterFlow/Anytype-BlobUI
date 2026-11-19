@@ -46,6 +46,7 @@ static ONBOARDING_READY: AtomicBool = AtomicBool::new(false);
 static SETTINGS_VISIBLE: AtomicBool = AtomicBool::new(false);
 static BACKGROUND_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static HEADLESS_MODE: AtomicBool = AtomicBool::new(false);
+static HEADLESS_PROFILE_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 struct SaveGuard;
 impl Drop for SaveGuard {
@@ -1630,7 +1631,7 @@ fn save_paths(install: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), St
 
 pub(crate) fn settings_root_for_install(install: &Path) -> Result<PathBuf, String> {
     if HEADLESS_MODE.load(Ordering::Acquire) {
-        return headless_home_directory();
+        return prepare_headless_home_directory();
     }
     #[cfg(test)]
     {
@@ -2186,23 +2187,38 @@ fn validate_api_key(value: String) -> Result<String, String> {
 }
 
 pub(crate) fn headless_home_directory() -> Result<PathBuf, String> {
+    headless_home_paths().map(|(preferred, _, _)| preferred)
+}
+
+fn prepare_headless_home_directory() -> Result<PathBuf, String> {
+    if let Some(path) = HEADLESS_PROFILE_ROOT.get() {
+        return Ok(path.clone());
+    }
+    let (preferred, fallbacks, explicit) = headless_home_paths()?;
+    let selected = prepare_headless_profile_candidates(&preferred, &fallbacks, explicit)?;
+    let _ = HEADLESS_PROFILE_ROOT.set(selected.clone());
+    Ok(HEADLESS_PROFILE_ROOT.get().cloned().unwrap_or(selected))
+}
+
+fn headless_home_paths() -> Result<(PathBuf, Vec<PathBuf>, bool), String> {
     if let Some(path) = non_empty_path(env::var_os("BLOBUI_HEADLESS_HOME")) {
-        return validate_headless_profile_path(path, "BLOBUI_HEADLESS_HOME");
+        return Ok((validate_headless_profile_path(path, "BLOBUI_HEADLESS_HOME")?, Vec::new(), true));
     }
     #[cfg(windows)]
     {
         if let Some(path) = non_empty_path(env::var_os("LOCALAPPDATA")) {
-            return validate_headless_profile_path(path.join("BlobUI-Headless"), "LOCALAPPDATA");
+            return Ok((validate_headless_profile_path(path.join("BlobUI-Headless"), "LOCALAPPDATA")?, Vec::new(), false));
         }
         if let Some(path) = non_empty_path(env::var_os("USERPROFILE")) {
-            return validate_headless_profile_path(path.join("AppData").join("Local").join("BlobUI-Headless"), "USERPROFILE");
+            return Ok((validate_headless_profile_path(path.join("AppData").join("Local").join("BlobUI-Headless"), "USERPROFILE")?, Vec::new(), false));
         }
     }
     #[cfg(not(windows))]
     {
         if let Some(path) = non_empty_path(env::var_os("XDG_CONFIG_HOME")) {
             if path.is_absolute() {
-                return validate_headless_profile_path(path.join("blobui-headless"), "XDG_CONFIG_HOME");
+                let preferred = validate_headless_profile_path(path.join("blobui-headless"), "XDG_CONFIG_HOME")?;
+                return Ok((preferred, headless_profile_fallbacks()?, false));
             }
         }
     }
@@ -2213,7 +2229,65 @@ pub(crate) fn headless_home_directory() -> Result<PathBuf, String> {
     let path = home.join("AppData").join("Local").join("BlobUI-Headless");
     #[cfg(not(windows))]
     let path = home.join(".config").join("blobui-headless");
-    validate_headless_profile_path(path, "user profile")
+    #[cfg(windows)]
+    let fallbacks = Vec::new();
+    #[cfg(not(windows))]
+    let fallbacks = headless_profile_fallbacks()?;
+    Ok((validate_headless_profile_path(path, "user profile")?, fallbacks, false))
+}
+
+#[cfg(not(windows))]
+fn headless_profile_fallbacks() -> Result<Vec<PathBuf>, String> {
+    let mut fallbacks = Vec::new();
+    if let Some(data_home) = non_empty_path(env::var_os("XDG_DATA_HOME"))
+        .filter(|path| path.is_absolute() && !path.components().any(|part| matches!(part, Component::ParentDir)))
+    {
+        fallbacks.push(validate_headless_profile_path(data_home.join("blobui-headless"), "XDG_DATA_HOME")?);
+    }
+    if let Some(home) = non_empty_path(env::var_os("HOME")).filter(|path| path.is_absolute()) {
+        let local_data = validate_headless_profile_path(home.join(".local").join("share").join("blobui-headless"), "user profile data")?;
+        if !fallbacks.contains(&local_data) {
+            fallbacks.push(local_data);
+        }
+    }
+    Ok(fallbacks)
+}
+
+fn prepare_headless_profile_candidates(preferred: &Path, fallbacks: &[PathBuf], explicit: bool) -> Result<PathBuf, String> {
+    match prepare_headless_profile_path(preferred) {
+        Ok(()) => Ok(preferred.to_path_buf()),
+        Err(error) if explicit => Err(error),
+        Err(preferred_error) => {
+            if fallbacks.is_empty() {
+                return Err(format!("{preferred_error}. Set BLOBUI_HEADLESS_HOME to an absolute writable directory."));
+            }
+            let mut errors = vec![preferred_error];
+            for fallback in fallbacks {
+                match prepare_headless_profile_path(fallback) {
+                    Ok(()) => return Ok(fallback.to_path_buf()),
+                    Err(error) => errors.push(error),
+                }
+            }
+            Err(format!("{}. Set BLOBUI_HEADLESS_HOME to an absolute writable directory.", errors.join(". ")))
+        }
+    }
+}
+
+fn prepare_headless_profile_path(root: &Path) -> Result<(), String> {
+    let settings = root.join("Settings");
+    reject_reparse_component(&settings)?;
+    fs::create_dir_all(&settings).map_err(|error| format!("Could not prepare the headless Settings folder at {}: {error}", settings.display()))?;
+    reject_reparse_component(&settings)?;
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let probe = settings.join(format!(".blobui-write-check-{}-{nonce}", std::process::id()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&probe)
+        .map_err(|error| format!("Could not write to the headless Settings folder at {}: {error}", settings.display()))?;
+    let write_result = std::io::Write::write_all(&mut file, b"BlobUI profile check");
+    drop(file);
+    let remove_result = fs::remove_file(&probe);
+    write_result.map_err(|error| format!("Could not verify write access to the headless Settings folder at {}: {error}", settings.display()))?;
+    remove_result.map_err(|error| format!("Could not remove the temporary profile check from {}: {error}", settings.display()))?;
+    Ok(())
 }
 
 fn validate_headless_profile_path(path: PathBuf, source: &str) -> Result<PathBuf, String> {
@@ -2584,11 +2658,7 @@ fn non_empty_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 
 fn resolve_install_directory(app_data: &Path) -> Result<PathBuf, String> {
     if HEADLESS_MODE.load(Ordering::Acquire) {
-        let home = headless_home_directory()?;
-        fs::create_dir_all(&home)
-            .map_err(|_| "Could not prepare the BlobUI Headless folder.".to_string())?;
-        reject_reparse_component(&home)?;
-        return Ok(home);
+        return prepare_headless_home_directory();
     }
     #[cfg(test)]
     assert_fixture_path(app_data.parent().unwrap_or(app_data))?;
@@ -3097,6 +3167,36 @@ mod tests {
         assert!(error.contains(&settings_path.display().to_string()));
         assert!(error.contains(&expected_io_error));
         assert!(error.contains("BLOBUI_HEADLESS_HOME"));
+
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn headless_profile_falls_back_when_the_default_cannot_be_prepared() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = workspace.join(".test-run").join(format!(
+            "headless-profile-fallback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&fixture).unwrap();
+
+        let preferred = fixture.join("config-is-a-file");
+        fs::write(&preferred, "not a directory").unwrap();
+        let fallback = fixture.join("local/share/blobui-headless");
+        let fallbacks = vec![fallback.clone()];
+        let selected = prepare_headless_profile_candidates(&preferred, &fallbacks, false).unwrap();
+        assert_eq!(selected, fallback);
+        assert!(selected.join("Settings").is_dir());
+        assert_eq!(fs::read_dir(selected.join("Settings")).unwrap().count(), 0);
+
+        let explicit = fixture.join("explicit-is-a-file");
+        fs::write(&explicit, "not a directory").unwrap();
+        let error = prepare_headless_profile_candidates(&explicit, &fallbacks, true).unwrap_err();
+        assert!(error.contains("explicit-is-a-file"));
 
         fs::remove_dir_all(fixture).unwrap();
     }
