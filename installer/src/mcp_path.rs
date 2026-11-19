@@ -146,19 +146,30 @@ fn update_launcher_directory(_: &Path, _: bool) -> Result<bool, String> {
 
 fn path_with_entry(current: &str, candidate: &str, add: bool) -> Option<String> {
     if add {
-        if current
-            .split(';')
-            .any(|entry| same_path_entry(entry, candidate))
-        {
-            return None;
-        }
-        return Some(if current.is_empty() {
-            candidate.to_string()
-        } else if current.ends_with(';') {
-            format!("{current}{candidate}")
+        let mut entries = if current.is_empty() {
+            Vec::new()
         } else {
-            format!("{current};{candidate}")
-        });
+            current.split(';').collect::<Vec<_>>()
+        };
+        let first_matches = entries
+            .first()
+            .is_some_and(|entry| same_path_entry(entry, candidate));
+        let first = if first_matches {
+            entries.remove(0)
+        } else {
+            candidate
+        };
+        let remaining = entries
+            .iter()
+            .copied()
+            .filter(|entry| !same_path_entry(entry, candidate))
+            .collect::<Vec<_>>();
+        let updated = if remaining.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first};{}", remaining.join(";"))
+        };
+        return (updated != current).then_some(updated);
     }
 
     let entries = current.split(';').collect::<Vec<_>>();
@@ -208,15 +219,23 @@ mod tests {
     use super::path_with_entry;
 
     #[test]
-    fn adding_the_launcher_directory_is_idempotent() {
-        let existing = r"C:\Windows\System32;C:\Users\Ada\Programs\BlobUI\bin";
+    fn launcher_directory_is_first_and_idempotent() {
+        let existing = r"C:\Windows\System32;C:\Users\Ada\Programs\BlobUI-Headless\bin;C:\Users\Ada\Programs\BlobUI\bin";
         assert_eq!(
             path_with_entry(existing, r"c:\users\ada\Programs\BlobUI\BIN\", true),
+            Some(r"c:\users\ada\Programs\BlobUI\BIN\;C:\Windows\System32;C:\Users\Ada\Programs\BlobUI-Headless\bin".into())
+        );
+        assert_eq!(
+            path_with_entry(
+                r"C:\Users\Ada\Programs\BlobUI\bin;C:\Windows\System32",
+                r"c:\users\ada\Programs\BlobUI\BIN\",
+                true
+            ),
             None
         );
         assert_eq!(
             path_with_entry(r"C:\Windows\System32", r"C:\BlobUI\bin", true),
-            Some(r"C:\Windows\System32;C:\BlobUI\bin".into())
+            Some(r"C:\BlobUI\bin;C:\Windows\System32".into())
         );
     }
 
