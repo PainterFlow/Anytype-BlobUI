@@ -43,7 +43,7 @@ npm run build
 ## Version Formatting
 
 - For the app: `full-recode.update.hotfix`
-- For Anyblob: `massive-new-feat.new-feat.fix`
+- For Anyblob: `full-recode.update.hotfix`
 
 ## Markdown formatting
 
@@ -87,7 +87,7 @@ You can use `ctrl+r` to reload available custom preset themes.
 
 ## GitHub Guidelines
 
-- When making changes, always target your PRs to `dev` unless it's for a hotfix.
+- When making changes, always target your PRs to `dev` unless it's a hotfix for the current version.
 - Never attempt to release versions.
 - Do not bump the version.
 - Make sure your changes actually work.
@@ -100,3 +100,4 @@ You can use `ctrl+r` to reload available custom preset themes.
     - `fix/{issue-id(s)}` - bug fixes, use `fix/mass-fix` for multiple issues - always mention all fixed issues in the description.
     - `feat/{feature-name}` - new feature requests.
     - `migrate/{migration to ...}` - migration to, for example, native rust or something like that.
+    - `chore/{chore}` - chores.
