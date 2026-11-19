@@ -1719,10 +1719,7 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
     {
         let root = settings_root_for_install(install)?;
         if HEADLESS_MODE.load(Ordering::Acquire) {
-            let settings = root.join("Settings");
-            fs::create_dir_all(&settings)
-                .map_err(|_| "Could not prepare the headless Settings folder.".to_string())?;
-            reject_reparse_component(&settings)?;
+            let settings = prepare_headless_settings_directory(&root)?;
             let path = settings.join("data.json");
             if !path.exists() {
                 let defaults = serde_json::to_value(SettingsDraft::default())
@@ -1776,6 +1773,19 @@ pub(crate) fn settings_data_path(install: &Path) -> Result<PathBuf, String> {
         }
         Ok(settings_directory.join("data.json"))
     }
+}
+
+fn prepare_headless_settings_directory(root: &Path) -> Result<PathBuf, String> {
+    let settings = root.join("Settings");
+    reject_reparse_component(&settings)?;
+    fs::create_dir_all(&settings).map_err(|error| {
+        format!(
+            "Could not prepare the headless Settings folder at {}: {error}. Set BLOBUI_HEADLESS_HOME to a writable absolute directory and retry.",
+            settings.display()
+        )
+    })?;
+    reject_reparse_component(&settings)?;
+    Ok(settings)
 }
 
 fn ensure_settings_store_on_launch(root: &Path, legacy_blob: &Path) -> Result<bool, String> {
@@ -3060,6 +3070,37 @@ mod tests {
         assert!(validate_headless_profile_path(env::temp_dir().join("..").join("profile"), "test").is_err());
         let absolute = env::temp_dir().join("blobui-headless-profile");
         assert_eq!(validate_headless_profile_path(absolute.clone(), "test").unwrap(), absolute);
+    }
+
+    #[test]
+    fn headless_settings_directory_reports_filesystem_errors_and_profile_hint() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = workspace.join(".test-run").join(format!(
+            "headless-settings-directory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&fixture).unwrap();
+
+        let working_root = fixture.join("writable-profile");
+        let settings = prepare_headless_settings_directory(&working_root).unwrap();
+        assert!(settings.is_dir());
+
+        let blocked_root = fixture.join("profile-file");
+        fs::write(&blocked_root, "not a directory").unwrap();
+        let settings_path = blocked_root.join("Settings");
+        let expected_io_error = fs::create_dir_all(&settings_path)
+            .unwrap_err()
+            .to_string();
+        let error = prepare_headless_settings_directory(&blocked_root).unwrap_err();
+        assert!(error.contains(&settings_path.display().to_string()));
+        assert!(error.contains(&expected_io_error));
+        assert!(error.contains("BLOBUI_HEADLESS_HOME"));
+
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]
