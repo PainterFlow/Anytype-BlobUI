@@ -57,7 +57,7 @@ test('Anyblob uses local project settings and opens the shared setup guide in a 
     await helpButton.click();
     const guide=page.getByRole('dialog',{name:'Anyblob setup guide'});
     await guide.waitFor();
-    await guide.getByRole('heading',{name:'1. Start Anytype Headless'}).waitFor();
+    await guide.getByRole('heading',{name:'1. Connect Anytype on Windows'}).waitFor();
     assert.match(await guide.innerText(),/blob-ui api login/);
     assert.match(await guide.innerText(),/codex plugin marketplace add PainterFlow\/Anytype-BlobUI/);
     await page.screenshot({path:path.join(fixture,'anyblob-guide-dark.png'),animations:'disabled'});
