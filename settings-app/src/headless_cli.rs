@@ -1571,6 +1571,10 @@ impl Drop for TemporaryFileCleanup {
 }
 
 fn run_mcp() {
+    #[cfg(windows)]
+    blobui_mcp::serve_bridge_stdio();
+
+    #[cfg(not(windows))]
     blobui_mcp::server::serve_stdio(
         || Ok(MCP_TOKEN.to_string()),
         |request, cancel, approval| crate::anyblob::dispatch_headless(request, cancel, approval),
