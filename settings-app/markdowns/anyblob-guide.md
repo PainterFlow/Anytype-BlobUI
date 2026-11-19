@@ -1,6 +1,6 @@
 # Anyblob setup guide
 
-Codex starts the repository's Anyblob plugin through the local `blob-ui mcp` process. On Windows, that process uses the running BlobUI Settings app's local bridge and saved Anytype connection. On Linux, it connects directly to Anytype Headless and keeps a separate profile.
+Codex starts the repository's Anyblob plugin through the local `blob-ui mcp` process. On Windows, the installed Settings app executable provides that MCP entrypoint and uses the running app's local bridge and saved Anytype connection. No separate Headless CLI install is needed. On Linux, the separate BlobUI Headless executable connects directly to Anytype CLI and keeps its own profile.
 
 ## 1. Connect Anytype on Windows
 
@@ -10,9 +10,9 @@ In BlobUI Settings, configure the Anytype API v2 connection and enable Anyblob. 
 
 Install the official Anytype CLI and configure its bot account using the [Anytype CLI documentation](https://developers.anytype.io/docs/anytype-cli). Create an API key and grant the account access to the desired spaces. BlobUI starts `anytype serve` in the background when the API at `127.0.0.1:31012` is unavailable.
 
-## 3. Install the BlobUI MCP executable
+## 3. Install BlobUI MCP access
 
-On Windows, install or update the regular BlobUI Settings app from [BlobUI Releases](https://github.com/PainterFlow/Anytype-BlobUI/releases). The installer includes the `blob-ui` MCP helper and adds its `bin` folder to the current user's `PATH`. Restart Codex, then check that `blob-ui help` prints the command list. On Linux, download the executable from the BlobUI Headless releases, place it on `PATH`, and check the same command.
+On Windows, install or update the regular BlobUI Settings app from [BlobUI Releases](https://github.com/PainterFlow/Anytype-BlobUI/releases). The installer includes the compiled Settings app as the `blob-ui mcp` entrypoint and adds its `bin` folder to the current user's `PATH`. Restart Codex after installation or update. On Linux, download the separate executable from BlobUI Headless releases and place it on `PATH`.
 
 On Linux, use `blob-ui api login` to enter the Anytype API v2 key. BlobUI checks the key against the local API before it saves it. Use `blob-ui api status` to check the saved connection and `blob-ui api logout` to remove the saved key. Linux settings default to `$XDG_CONFIG_HOME/blobui-headless` or `$HOME/.config/blobui-headless`. If the default is not writable, BlobUI uses `$XDG_DATA_HOME/blobui-headless` or `$HOME/.local/share/blobui-headless`. Set `BLOBUI_HEADLESS_HOME` to choose an explicit profile directory.
 
@@ -52,7 +52,7 @@ codex plugin marketplace add PainterFlow/Anytype-BlobUI@feat/remote-support
 
 The bare repository shorthand checks GitHub's default branch. Use the ref above while the marketplace manifest is only on `feat/remote-support`. After the manifest reaches the default branch, you can omit `@feat/remote-support`.
 
-The repository supplies the Anyblob plugin. Codex starts `blob-ui mcp` from `PATH` when it starts the plugin. On Windows, install or update the regular Settings app and restart Codex so it sees the helper installed by the app installer. The MCP process uses the Settings bridge, so keep the app running with Anyblob enabled. On Linux, install the separate headless executable and configure its profile. If Anyblob tools or object mentions are missing, check `blob-ui help`, install and enable Anyblob from the Plugins Directory, then start a new chat. Subagents can use the MCP tools connected to their parent chat. The management commands configure the Windows app or Linux headless profile. The plugin does not expose commands that change those settings or permissions.
+The repository supplies the Anyblob plugin. Codex starts `blob-ui mcp` from `PATH` when it starts the plugin. On Windows, the installed Settings app provides this entrypoint and the MCP process uses its bridge. Keep Settings running with Anyblob enabled. On Linux, install the separate Headless executable and configure its profile. If Anyblob tools or object mentions are missing, confirm the app is installed and running on Windows, or check `blob-ui api status` on Linux. Also install and enable Anyblob from the Plugins Directory, then start a new chat. Subagents can use the MCP tools connected to their parent chat. The management commands configure the Windows app or Linux Headless profile. The plugin does not expose commands that change those settings or permissions.
 
 Start a new chat after installing the plugin. For a project chat, keep that project's `anyblob.config.toml` in its local project folder so Anyblob can authenticate the chat to the matching project.
 
