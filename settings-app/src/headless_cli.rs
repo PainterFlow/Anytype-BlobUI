@@ -11,12 +11,30 @@ use std::{
     io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
+#[cfg(any(test, not(windows)))]
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
+#[cfg(not(windows))]
+use std::{
+    net::TcpStream,
+    process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
+    sync::Mutex,
+};
 
 const ANYTYPE_API_PORT: u16 = 31012;
+#[cfg(not(windows))]
+const ANYTYPE_API_START_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_ARCHIVE_FILE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 10_000;
 const MCP_TOKEN: &str = "blobui-headless-stdio-session";
+#[cfg(not(windows))]
+static ANYTYPE_SERVE_ATTEMPTED: AtomicBool = AtomicBool::new(false);
+#[cfg(not(windows))]
+static ANYTYPE_SERVE_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn entry() {
     let result = run(env::args().skip(1).collect());
@@ -129,7 +147,7 @@ fn print_help() {
 }
 
 fn ensure_settings() -> Result<PathBuf, String> {
-    let root = crate::headless_home_directory()?;
+    let root = crate::prepare_headless_home_directory()?;
     let _ = crate::settings_data_path(&root)?;
     Ok(root)
 }
@@ -187,9 +205,8 @@ fn selected_headless_build_channel() -> Result<crate::updater::ReleaseChannel, S
 fn api_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("status") if args.len() == 1 => {
-            let (_, data) = load_data()?;
-            let key_status = match crate::read_saved_api_key_at(&crate::headless_home_directory()?)
-            {
+            let (root, data) = load_data()?;
+            let key_status = match crate::read_saved_api_key_at(&root) {
                 Ok(key) => {
                     drop(crate::SecretString::new(key));
                     true
@@ -259,6 +276,8 @@ fn api_login(force: bool) -> Result<(), String> {
         );
     }
     let key = crate::validate_api_key(prompt_secret("Anytype API v2 key: ")?)?;
+    #[cfg(not(windows))]
+    ensure_anytype_serve("127.0.0.1", ANYTYPE_API_PORT)?;
     crate::api::verify_connection_quick(&key, "127.0.0.1", ANYTYPE_API_PORT)
         .map_err(|error| format!("Could not connect to the Anytype Headless API at 127.0.0.1:{ANYTYPE_API_PORT}: {error}"))?;
     let previous_key = read_api_key_snapshot(&credential)?;
@@ -1581,6 +1600,82 @@ fn run_mcp() {
     );
 }
 
+#[cfg(not(windows))]
+pub(crate) fn ensure_anytype_serve(ip: &str, port: u16) -> Result<(), String> {
+    let endpoint = format!("{ip}:{port}")
+        .parse::<SocketAddr>()
+        .map_err(|_| "The Anytype Headless API endpoint is invalid.".to_string())?;
+    if anytype_api_reachable(endpoint) {
+        return Ok(());
+    }
+
+    let _guard = ANYTYPE_SERVE_LOCK
+        .lock()
+        .map_err(|_| "Could not check the Anytype Headless service state.".to_string())?;
+    if anytype_api_reachable(endpoint) {
+        return Ok(());
+    }
+    if ANYTYPE_SERVE_ATTEMPTED.load(Ordering::Acquire) {
+        return Err(format!(
+            "BlobUI started `anytype serve` in the background, but the Anytype API at {endpoint} is not ready yet. Check the Anytype CLI account and retry."
+        ));
+    }
+
+    let mut spawned = false;
+    let result = ensure_anytype_api_with(
+        endpoint,
+        ANYTYPE_API_START_TIMEOUT,
+        |_| anytype_api_reachable(endpoint),
+        || {
+            Command::new("anytype")
+                .arg("serve")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| {
+                    format!(
+                        "The Anytype API is unavailable at {endpoint}. BlobUI could not start `anytype serve`: {error}. Install and configure the Anytype CLI, then retry."
+                    )
+                })?;
+            spawned = true;
+            Ok(())
+        },
+    );
+    if spawned {
+        ANYTYPE_SERVE_ATTEMPTED.store(true, Ordering::Release);
+    }
+    result
+}
+
+#[cfg(any(test, not(windows)))]
+fn ensure_anytype_api_with(
+    endpoint: SocketAddr,
+    timeout: Duration,
+    mut reachable: impl FnMut(SocketAddr) -> bool,
+    start: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if reachable(endpoint) {
+        return Ok(());
+    }
+    start()?;
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if reachable(endpoint) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Err(format!(
+        "BlobUI started `anytype serve` in the background, but the Anytype API at {endpoint} did not become available. Check the Anytype CLI account and retry."
+    ))
+}
+
+#[cfg(not(windows))]
+fn anytype_api_reachable(endpoint: SocketAddr) -> bool {
+    TcpStream::connect_timeout(&endpoint, Duration::from_millis(200)).is_ok()
+}
+
 fn export_archive(destination: &Path) -> Result<(), String> {
     ensure_zip_extension(destination)?;
     let root = ensure_settings()?;
@@ -2212,6 +2307,52 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headless_mcp_starts_anytype_when_the_api_is_unavailable() {
+        use std::cell::Cell;
+
+        let endpoint = "127.0.0.1:31012".parse().unwrap();
+        let reachable = Cell::new(false);
+        let starts = Cell::new(0);
+        ensure_anytype_api_with(
+            endpoint,
+            Duration::from_secs(1),
+            |_| reachable.get(),
+            || {
+                starts.set(starts.get() + 1);
+                reachable.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(starts.get(), 1);
+    }
+
+    #[test]
+    fn headless_mcp_skips_anytype_start_when_the_api_is_already_available() {
+        let endpoint = "127.0.0.1:31012".parse().unwrap();
+        ensure_anytype_api_with(
+            endpoint,
+            Duration::from_secs(1),
+            |_| true,
+            || Err("Anytype should not start when the API is available.".into()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn headless_mcp_reports_when_anytype_cannot_be_started() {
+        let endpoint = "127.0.0.1:31012".parse().unwrap();
+        let error = ensure_anytype_api_with(
+            endpoint,
+            Duration::from_secs(1),
+            |_| false,
+            || Err("Anytype CLI is missing.".into()),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Anytype CLI is missing.");
+    }
 
     #[test]
     fn headless_release_channels_parse_tags_and_compare_labels() {

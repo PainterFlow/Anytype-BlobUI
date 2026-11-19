@@ -6,15 +6,15 @@ Codex starts the repository's Anyblob plugin through the local `blob-ui mcp` pro
 
 In BlobUI Settings, configure the Anytype API v2 connection and enable Anyblob. Keep BlobUI Settings running while Codex uses Anyblob. The local bridge reads the saved Settings connection and permissions.
 
-## 2. Start Anytype Headless on Linux
+## 2. Connect Anytype on Linux
 
-Install the official Anytype CLI and configure its headless service using the [Anytype CLI documentation](https://developers.anytype.io/docs/anytype-cli). Create an API key for the service and keep the service running on the same computer as BlobUI Headless. The default local API endpoint is `127.0.0.1:31012`.
+Install the official Anytype CLI and configure its bot account using the [Anytype CLI documentation](https://developers.anytype.io/docs/anytype-cli). Create an API key and grant the account access to the desired spaces. BlobUI starts `anytype serve` in the background when the API at `127.0.0.1:31012` is unavailable.
 
 ## 3. Install the BlobUI MCP executable
 
 On Windows, install or update the regular BlobUI Settings app from [BlobUI Releases](https://github.com/PainterFlow/Anytype-BlobUI/releases). The installer includes the `blob-ui` MCP helper and adds its `bin` folder to the current user's `PATH`. Restart Codex, then check that `blob-ui help` prints the command list. On Linux, download the executable from the BlobUI Headless releases, place it on `PATH`, and check the same command.
 
-On Linux, use `blob-ui api login` to enter the Anytype API v2 key. BlobUI checks the key against the local API before it saves it. Use `blob-ui api status` to check the saved connection and `blob-ui api logout` to remove the saved key. Linux settings default to `$XDG_CONFIG_HOME/blobui-headless` or `$HOME/.config/blobui-headless`. If that directory is not writable, set `BLOBUI_HEADLESS_HOME` to a writable absolute path.
+On Linux, use `blob-ui api login` to enter the Anytype API v2 key. BlobUI checks the key against the local API before it saves it. Use `blob-ui api status` to check the saved connection and `blob-ui api logout` to remove the saved key. Linux settings default to `$XDG_CONFIG_HOME/blobui-headless` or `$HOME/.config/blobui-headless`. If the default is not writable, BlobUI uses `$XDG_DATA_HOME/blobui-headless` or `$HOME/.local/share/blobui-headless`. Set `BLOBUI_HEADLESS_HOME` to choose an explicit profile directory.
 
 ## 4. Configure Anyblob
 

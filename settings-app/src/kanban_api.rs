@@ -75,6 +75,10 @@ impl Client {
         }
         let (ip, port) =
             configured_endpoint(&data, crate::HEADLESS_MODE.load(Ordering::Acquire))?;
+        #[cfg(all(feature = "headless-cli", not(windows)))]
+        if crate::HEADLESS_MODE.load(Ordering::Acquire) {
+            crate::headless_cli::ensure_anytype_serve(&ip, port)?;
+        }
         Ok(Self {
             metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
             info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
