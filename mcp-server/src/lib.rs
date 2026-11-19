@@ -28,7 +28,7 @@ pub enum Operation {
     AuthenticateProject {
         name: String,
         key: String,
-        remote: bool,
+        remote: Option<bool>,
     },
     ListSpaces {},
     SearchObjects {
@@ -194,13 +194,16 @@ fn json_value_kind(value: &Value) -> &'static str {
 }
 fn authenticate_project_argument_error(arguments: &Value) -> String {
     let Some(fields)=arguments.as_object() else {
-        return format!("Invalid authenticate_project arguments. Expected only name:string, key:string, and remote:boolean in an object. Received {}. Keep chat identity in MCP metadata.",json_value_kind(arguments));
+        return format!("Invalid authenticate_project arguments. Expected name:string, key:string, and optional remote:boolean in an object. Received {}. Keep chat identity in MCP metadata.",json_value_kind(arguments));
     };
-    let expected=[("name","string"),("key","string"),("remote","boolean")];
+    let expected=[("name","string"),("key","string")];
     let missing=expected.iter().filter(|(key,_)|!fields.contains_key(*key)).map(|(key,_)|*key).collect::<Vec<_>>();
-    let wrong=expected.iter().filter_map(|(key,kind)|fields.get(*key).filter(|value|json_value_kind(value)!=*kind).map(|value|format!("{key}:{}",json_value_kind(value)))).collect::<Vec<_>>();
-    let unexpected=fields.keys().filter(|key|!expected.iter().any(|(known,_)|*known==key.as_str())).count();
-    format!("Invalid authenticate_project arguments. Expected only name:string, key:string, and remote:boolean. Missing fields [{}], wrong types [{}], unexpected field count {}. Keep chat identity in MCP metadata.",if missing.is_empty(){"none".into()}else{missing.join(", ")},if wrong.is_empty(){"none".into()}else{wrong.join(", ")},unexpected)
+    let mut wrong=expected.iter().filter_map(|(key,kind)|fields.get(*key).filter(|value|json_value_kind(value)!=*kind).map(|value|format!("{key}:{}",json_value_kind(value)))).collect::<Vec<_>>();
+    if let Some(value)=fields.get("remote").filter(|value|!value.is_boolean()) {
+        wrong.push(format!("remote:{}",json_value_kind(value)));
+    }
+    let unexpected=fields.keys().filter(|key|!expected.iter().any(|(known,_)|*known==key.as_str()) && key.as_str()!="remote").count();
+    format!("Invalid authenticate_project arguments. Expected name:string, key:string, and optional remote:boolean. Missing fields [{}], wrong types [{}], unexpected field count {}. Keep chat identity in MCP metadata.",if missing.is_empty(){"none".into()}else{missing.join(", ")},if wrong.is_empty(){"none".into()}else{wrong.join(", ")},unexpected)
 }
 /// Parse canonical URIs, or the exact single-segment Codex wrapper around one.
 pub fn resource_operation(params: &Value) -> Result<Operation, String> {
@@ -235,7 +238,7 @@ pub fn tools() -> Value {
     let annotations = json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false});
     let mut tools = json!([
         {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
-        {"name":"authenticate_project","description":"At the start of each project chat, call once with name, key and remote from anyblob.config.toml as separate arguments. Never send the whole file or edit it.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":512},"key":{"type":"string","minLength":1,"maxLength":16384},"remote":{"type":"boolean"}},"required":["name","key","remote"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}},
+        {"name":"authenticate_project","description":"Call once per project chat with only name and key from anyblob.config.toml. Omit legacy remote. If sent, authentication succeeds with a removal notice. Never send the whole file.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":512},"key":{"type":"string","minLength":1,"maxLength":16384},"remote":{"type":"boolean"}},"required":["name","key"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
         {"name":"read_object","description":"Read an explicit object as properties, Markdown, and its ETag. Attachments remain references. Use the exact returned ETag with patch_object. If patch_object reports a stale ETag, re-read the object and rebuild the patch from the current document.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"etag":{"type":"string","minLength":1}},"required":["etag"],"additionalProperties":true},"annotations":annotations}
@@ -339,17 +342,20 @@ mod tests {
     #[test]
     fn strict_arguments() {
         assert!(operation("search_mentions",json!({"query":"猫"})).is_ok());
-        assert!(matches!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":false})).unwrap(), Operation::AuthenticateProject { name, key, remote } if name == "Work" && key == "key" && !remote));
-        assert!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":true})).is_ok());
+        assert!(matches!(operation("authenticate_project",json!({"name":"Work","key":"key"})).unwrap(), Operation::AuthenticateProject { name, key, remote: None } if name == "Work" && key == "key"));
+        assert!(matches!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":false})).unwrap(), Operation::AuthenticateProject { remote: Some(false), .. }));
+        assert!(matches!(operation("authenticate_project",json!({"name":"Work","key":"key","remote":true})).unwrap(), Operation::AuthenticateProject { remote: Some(true), .. }));
         assert!(operation("authenticate_project",json!({"config":"name = 'Work'\nkey = 'key'\nremote = false"})).is_err());
         let auth_error=operation("authenticate_project",json!({"name":"Work","key":"secret-value","remote":"false","unexpected":true})).unwrap_err();
         assert!(auth_error.contains("Missing fields [none], wrong types [remote:string], unexpected field count 1"));
         assert!(!auth_error.contains("secret-value"));
-        assert!(operation("authenticate_project",json!({"name":"Work","key":"","remote":false})).is_err());
-        assert!(operation("authenticate_project",json!({"name":"Work","key":"x".repeat(16 * 1024 + 1),"remote":false})).is_err());
+        assert!(operation("authenticate_project",json!({"name":"Work","key":""})).is_err());
+        assert!(operation("authenticate_project",json!({"name":"Work","key":"x".repeat(16 * 1024 + 1)})).is_err());
         let tool_list=tools();
         let auth=tool_list.as_array().unwrap().iter().find(|tool|tool["name"]=="authenticate_project").unwrap();
-        assert_eq!(auth["inputSchema"]["required"],json!(["name","key","remote"]));
+        assert_eq!(auth["inputSchema"]["required"],json!(["name","key"]));
+        assert_eq!(auth["inputSchema"]["properties"]["remote"]["type"],"boolean");
+        assert!(auth["description"].as_str().unwrap().contains("Omit legacy remote"));
         assert!(auth["inputSchema"]["properties"].get("config").is_none());
         assert!(operation("search_mentions",json!({"query":""})).is_ok());
         assert!(operation("search_mentions",json!({"query":"x".repeat(4097)})).is_err());

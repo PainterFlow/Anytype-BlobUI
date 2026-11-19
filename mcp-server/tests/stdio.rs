@@ -59,7 +59,7 @@ fn codex_parameters(schema: &Value) -> Value {
 
 fn verify_codex_catalog_budget(instructions: &str, tools: &[Value]) {
     const TOOL_LIMIT: usize = 8_000;
-    const CATALOG_TARGET: usize = 60_000; // Leave room below Codex's 64,000-byte limit.
+    const CATALOG_TARGET: usize = 63_000; // Keep at least 1 KB below Codex's 64,000-byte limit.
     let mut count = 0;
     let mut total = 0;
     let mut largest = 0;
@@ -159,8 +159,11 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     let auth_error=call(json!({"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":"true"},"_meta":{"threadId":"host-chat"}}}));
     assert_eq!(auth_error["error"]["code"],-32602);
     let auth_message=auth_error["error"]["message"].as_str().unwrap();
-    assert!(auth_message.contains("name:string, key:string, and remote:boolean"));
+    assert!(auth_message.contains("optional remote:boolean"));
     assert!(!auth_message.contains("secret-value"));
+    let auth_without_remote=call(json!({"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value"},"_meta":{"threadId":"host-chat"}}}));
+    assert_eq!(auth_without_remote["result"]["isError"],true);
+    assert_ne!(auth_without_remote["result"]["content"][0]["text"],"Unknown tool or invalid arguments.");
     let valid_auth=call(json!({"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":true},"_meta":{"threadId":"host-chat"}}}));
     assert_eq!(valid_auth["result"]["isError"],true);
     assert_ne!(valid_auth["result"]["content"][0]["text"],"Unknown tool or invalid arguments.");

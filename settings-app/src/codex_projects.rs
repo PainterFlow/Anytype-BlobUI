@@ -27,14 +27,14 @@ pub struct Project {
 pub(crate) struct ProjectConfig {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) remote: bool,
 }
 
 #[derive(Deserialize)]
 struct ProjectFile {
     name: String,
     key: String,
-    remote: bool,
+    #[serde(default, rename = "remote")]
+    _remote: Option<bool>,
 }
 
 pub(crate) fn parse_config(text: &str) -> Result<ProjectConfig, String> {
@@ -42,11 +42,11 @@ pub(crate) fn parse_config(text: &str) -> Result<ProjectConfig, String> {
         return Err("Anyblob project config exceeds 16 KiB.".into());
     }
     let file: ProjectFile = toml::from_str(text)
-        .map_err(|_| "Anyblob project config must specify a name, key, and remote flag.")?;
-    identify_fields(&file.name, &file.key, file.remote)
+        .map_err(|_| "Anyblob project config must specify a name and key, with a boolean remote field when present.")?;
+    identify_fields(&file.name, &file.key)
 }
 
-pub(crate) fn identify_fields(name: &str, key: &str, remote: bool) -> Result<ProjectConfig, String> {
+pub(crate) fn identify_fields(name: &str, key: &str) -> Result<ProjectConfig, String> {
     let name = name.trim();
     if name.is_empty()
         || name.len() > 512
@@ -60,7 +60,6 @@ pub(crate) fn identify_fields(name: &str, key: &str, remote: bool) -> Result<Pro
     Ok(ProjectConfig {
         id: format!("{:x}", Sha256::digest(key.as_bytes())),
         name: name.into(),
-        remote,
     })
 }
 
@@ -97,8 +96,6 @@ fn scan_root(root: &Path) -> Result<Vec<Project>, String> {
             name: config.name,
             root_paths: vec![directory.to_string_lossy().into_owned()],
             // Project files are discovered only under the explicitly selected local folder.
-            // The legacy remote flag remains in the authentication file contract, but it no
-            // longer routes discovery through a remote Codex folder.
             kind: "local".into(),
             host_id: None,
             computer_name: None,
@@ -239,7 +236,7 @@ mod tests {
 
     #[test]
     fn project_identity_survives_a_rename_and_rejects_shared_keys() {
-        let first = "name = 'First'\nkey = 'same key'\nremote = false";
+        let first = "name = 'First'\nkey = 'same key'";
         let second = "name = 'Second'\nkey = 'same key'\nremote = true";
         let id = parse_config(first).unwrap().id;
         assert_eq!(id.len(), 64);
@@ -251,13 +248,15 @@ mod tests {
     }
 
     #[test]
-    fn separate_authentication_fields_match_the_project_file_identity() {
-        let from_file = parse_config("name = ' Work '\nkey = 'same key'\nremote = true").unwrap();
-        let from_fields = identify_fields(" Work ", "same key", true).unwrap();
-        assert_eq!(from_fields.id, from_file.id);
-        assert_eq!(from_fields.name, from_file.name);
-        assert_eq!(from_fields.remote, from_file.remote);
-        assert_eq!(from_fields.name, "Work");
-        assert!(identify_fields("Work", "secret\nkey", true).is_err());
+    fn config_accepts_missing_or_legacy_remote_and_auth_identity_uses_name_and_key() {
+        let without_remote = parse_config("name = ' Work '\nkey = 'same key'").unwrap();
+        let with_remote = parse_config("name = ' Work '\nkey = 'same key'\nremote = true").unwrap();
+        let from_fields = identify_fields(" Work ", "same key").unwrap();
+        assert_eq!(without_remote.id, with_remote.id);
+        assert_eq!(without_remote.id, from_fields.id);
+        assert_eq!(without_remote.name, "Work");
+        assert_eq!(with_remote.name, "Work");
+        assert!(parse_config("name = 'Work'\nkey = 'same key'\nremote = 'yes'").is_err());
+        assert!(identify_fields("Work", "secret\nkey").is_err());
     }
 }
