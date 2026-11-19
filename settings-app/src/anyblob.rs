@@ -1043,7 +1043,7 @@ fn dispatch(
     )
 }
 
-#[cfg(feature = "headless-cli")]
+#[cfg(all(feature = "headless-cli", not(windows)))]
 pub(crate) fn dispatch_headless(
     request: Request,
     cancel: &std::sync::atomic::AtomicBool,

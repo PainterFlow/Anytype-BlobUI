@@ -11,6 +11,14 @@ pub mod sources;
 pub mod blobui;
 pub mod server;
 
+pub fn serve_bridge_stdio() {
+    server::serve_stdio(credential::read, |request, cancel, approve| {
+        transport::call_with_approval(&request, cancel, &|message, remaining| {
+            approve(message, remaining)
+        })
+    });
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
