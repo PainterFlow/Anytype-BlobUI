@@ -3092,9 +3092,7 @@ mod tests {
         let blocked_root = fixture.join("profile-file");
         fs::write(&blocked_root, "not a directory").unwrap();
         let settings_path = blocked_root.join("Settings");
-        let expected_io_error = fs::create_dir_all(&settings_path)
-            .unwrap_err()
-            .to_string();
+        let expected_io_error = fs::create_dir_all(&settings_path).unwrap_err().to_string();
         let error = prepare_headless_settings_directory(&blocked_root).unwrap_err();
         assert!(error.contains(&settings_path.display().to_string()));
         assert!(error.contains(&expected_io_error));
