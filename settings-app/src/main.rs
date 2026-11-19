@@ -11,7 +11,9 @@ fn main() {
     }
 
     #[cfg(windows)]
-    let _ = mcp_launcher::ensure_installed_launcher_is_on_path();
+    if let Err(error) = mcp_launcher::ensure_launcher_is_on_path() {
+        eprintln!("Could not register the BlobUI MCP launcher: {error}");
+    }
 
     blobui_settings::app_main();
 }

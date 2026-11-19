@@ -4,33 +4,36 @@ use std::path::{Path, PathBuf};
 #[allow(dead_code)]
 mod mcp_path;
 
-pub fn ensure_installed_launcher_is_on_path() -> Result<bool, String> {
+pub fn ensure_launcher_is_on_path() -> Result<bool, String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Could not locate BlobUI Settings: {error}"))?;
-    let Some(app_root) = installed_app_root(&executable) else {
+    let Some(app_root) = launcher_app_root(&executable) else {
         return Ok(false);
     };
     mcp_path::add_launcher_directory(&app_root)
 }
 
-fn installed_app_root(executable: &Path) -> Option<PathBuf> {
+fn launcher_app_root(executable: &Path) -> Option<PathBuf> {
+    let directory = executable.parent()?;
     executable
         .ancestors()
-        .take(6)
+        .skip(1)
+        .take(5)
         .find(|candidate| {
-            candidate.join(".blobui-app-managed-files.json").is_file()
-                && candidate.join("bin/blob-ui.exe").is_file()
+            candidate.join("bin/blob-ui.exe").is_file()
+                && (candidate.join(".blobui-app-managed-files.json").is_file()
+                    || (*candidate == directory && candidate.join(".blobui-dev-build").is_file()))
         })
         .map(Path::to_path_buf)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::installed_app_root;
+    use super::launcher_app_root;
     use std::path::{Path, PathBuf};
 
     #[test]
-    fn finds_only_a_managed_app_with_its_mcp_launcher() {
+    fn finds_launchers_for_installed_and_developer_builds() {
         let root = fixture();
         let root_executable = root.join("blobui-settings.exe");
         let nested_executable = root.join("settings-app/dist/blobui-settings.exe");
@@ -40,17 +43,21 @@ mod tests {
         std::fs::write(root.join(".blobui-app-managed-files.json"), b"{}").unwrap();
         std::fs::write(root.join("bin/blob-ui.exe"), b"fixture").unwrap();
 
-        assert_eq!(installed_app_root(&root_executable), Some(root.clone()));
-        assert_eq!(installed_app_root(&nested_executable), Some(root.clone()));
+        assert_eq!(launcher_app_root(&root_executable), Some(root.clone()));
+        assert_eq!(launcher_app_root(&nested_executable), Some(root.clone()));
 
         std::fs::remove_file(root.join("bin/blob-ui.exe")).unwrap();
-        assert_eq!(installed_app_root(&root_executable), None);
-        assert_eq!(installed_app_root(&nested_executable), None);
+        assert_eq!(launcher_app_root(&root_executable), None);
+        assert_eq!(launcher_app_root(&nested_executable), None);
 
         std::fs::write(root.join("bin/blob-ui.exe"), b"fixture").unwrap();
         std::fs::remove_file(root.join(".blobui-app-managed-files.json")).unwrap();
-        assert_eq!(installed_app_root(&root_executable), None);
-        assert_eq!(installed_app_root(&nested_executable), None);
+        assert_eq!(launcher_app_root(&root_executable), None);
+        assert_eq!(launcher_app_root(&nested_executable), None);
+
+        std::fs::write(root.join(".blobui-dev-build"), b"").unwrap();
+        assert_eq!(launcher_app_root(&root_executable), Some(root.clone()));
+        assert_eq!(launcher_app_root(&nested_executable), None);
 
         std::fs::remove_dir_all(root).unwrap();
     }

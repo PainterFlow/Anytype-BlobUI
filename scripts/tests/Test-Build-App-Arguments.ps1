@@ -67,6 +67,9 @@ try {
     $distributionExecutable = Join-Path $fixtureRoot 'settings-app/dist/blobui-settings.exe'
     & $fixtureScriptPath -b
     Assert (Test-Path -LiteralPath $distributionExecutable -PathType Leaf) '-b without -s must build the distribution executable.'
+    $launcherExecutable = Join-Path $projectDirectory 'dist/bin/blob-ui.exe'
+    Assert ((Get-FileHash -LiteralPath $launcherExecutable).Hash -ceq (Get-FileHash -LiteralPath $distributionExecutable).Hash) 'The MCP launcher must be a copy of the Settings executable.'
+    Assert (Test-Path -LiteralPath (Join-Path $projectDirectory 'dist/.blobui-dev-build') -PathType Leaf) 'The developer build must identify its MCP launcher to Settings.'
     Assert ((Get-Content -LiteralPath (Join-Path $projectDirectory 'dist/anyblob-guide.md') -Raw) -ceq 'bundled Anyblob guide') 'The Anyblob guide must be copied beside the Settings executable.'
     Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '-b without -s must queue background mode beside the distribution executable.'
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-b without -s must not launch the Settings app.'

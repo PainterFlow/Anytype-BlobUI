@@ -192,6 +192,27 @@ catch [System.IO.IOException] {
     throw "The app compiled, but its distribution executable could not be replaced. Fully quit BlobUI Settings with Ctrl+Q and rerun this script. Built executable: $releaseExecutable. $($_.Exception.Message)"
 }
 Write-Host "BlobUI Settings was built at $distributionExecutable"
+
+$launcherDirectory = Join-Path $distributionDirectory 'bin'
+$launcherExecutable = Join-Path $launcherDirectory 'blob-ui.exe'
+$developerMarker = Join-Path $distributionDirectory '.blobui-dev-build'
+foreach ($path in @($launcherDirectory, $launcherExecutable, $developerMarker)) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The Settings MCP launcher path is a reparse point: $path"
+    }
+}
+[IO.Directory]::CreateDirectory($launcherDirectory) | Out-Null
+try {
+    [IO.File]::Copy($distributionExecutable, $launcherExecutable, $true)
+}
+catch [System.IO.IOException] {
+    $failure = $_.Exception.GetBaseException()
+    if (($failure.HResult -band 0xffff) -notin @(32, 1224)) { throw }
+    Write-Warning "Could not replace the existing MCP launcher at $launcherExecutable. Close the Codex sessions using it and rebuild to update it. $($_.Exception.Message)"
+}
+[IO.File]::WriteAllText($developerMarker, '')
+
 Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
 
 if ($b -and -not $s) {
