@@ -15,6 +15,7 @@ mod kanban_snapshot;
 #[path = "../../settings-app/src/kanban_css.rs"]
 mod kanban_css;
 mod install;
+mod mcp_path;
 mod transaction;
 mod network;
 #[allow(dead_code)]
@@ -204,6 +205,9 @@ fn run(options: Options) -> Result<(), String> {
             }
         }
         install::uninstall(&app, &anytype)?;
+        if let Err(error) = mcp_path::remove_launcher_directory(&app) {
+            eprintln!("BlobUI was removed, but its MCP launcher PATH entry could not be cleared: {error}");
+        }
         if let Err(error) = remove_startup_registration(&app) {
             eprintln!(
                 "BlobUI was removed, but its per-user startup entry could not be cleared: {error}"
@@ -310,6 +314,9 @@ fn run(options: Options) -> Result<(), String> {
         validate_destinations(&anytype, &app, &stage, cfg!(feature = "development"))?;
         let installer = env::current_exe().map_err(|e| format!("Could not locate the installer: {e}"))?;
         install::install(&stage, &anytype, &app, &version, shortcut, &installer)?;
+        if !cfg!(feature = "development") {
+            report_mcp_launcher_path(mcp_path::add_launcher_directory(&app));
+        }
         Ok(version)
     })();
     let _ = fs::remove_dir_all(&stage);
@@ -370,6 +377,7 @@ fn run_update_mode(options: Options) -> Result<(), String> {
 
     match operation {
         Ok(version) => {
+            report_mcp_launcher_path(mcp_path::add_launcher_directory(&app));
             let message = format!("BlobUI Settings was updated to version {version}.");
             let _ = write_update_status(Some(&version), "updated", &message);
             match launch_settings(&app, &anytype) {
@@ -403,6 +411,14 @@ fn run_update_mode(options: Options) -> Result<(), String> {
             let _ = write_update_status(Some(version), "error", &message);
             Err(message)
         }
+    }
+}
+
+fn report_mcp_launcher_path(result: Result<bool, String>) {
+    match result {
+        Ok(true) => println!("Added the Anyblob MCP launcher to the current user's PATH. Restart Codex to use it."),
+        Ok(false) => {}
+        Err(error) => eprintln!("BlobUI was installed, but the Anyblob MCP launcher could not be added to PATH: {error}. Add the installed app's bin folder to PATH, then restart Codex."),
     }
 }
 
@@ -957,6 +973,8 @@ mod tests {
             b"new settings executable",
         )
         .unwrap();
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join("bin/blob-ui.exe"), b"mcp executable").unwrap();
         fs::write(
             package.join("blobui-release.json"),
             br#"{"formatVersion":1,"version":"1.2.0"}"#,

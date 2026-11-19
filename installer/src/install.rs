@@ -160,9 +160,9 @@ pub fn install(
     // Compilation may need current defaults, but do not serialize this value
     // back to disk: this preserves unknown and newer settings byte-for-byte.
     fill_compile_defaults(&mut data, &anytype);
+    let app_preexisted = app.exists();
     let css = compile_package_css(&package, &anytype, &app, &data)?;
 
-    let app_preexisted = app.exists();
     let mut app_created = false;
     let mut shortcut_created = false;
     let mut previous_shortcut = None;
@@ -185,6 +185,10 @@ pub fn install(
             .map_err(|e| format!("Could not prepare app executable folder: {e}"))?;
         copy_file(&executable, &app_dist.join("blobui-settings.exe"))?;
         copy_file(&executable, &app.join("blobui-settings.exe"))?;
+        let mcp_bin = app.join("bin");
+        fs::create_dir_all(&mcp_bin)
+            .map_err(|e| format!("Could not prepare the Anyblob MCP launcher folder: {e}"))?;
+        copy_file(&package.join("bin/blob-ui.exe"), &mcp_bin.join("blob-ui.exe"))?;
         copy_file(retained_installer, &app.join("blobui-installer.exe"))
             .map_err(|error| format!("Could not retain the installer: {error}"))?;
         fs::write(
@@ -515,6 +519,7 @@ fn packaged_app_files(package: &Path) -> Result<BTreeMap<String, PathBuf>, Strin
         "settings-app/dist/blobui-settings.exe".into(),
         package.join("settings-app/dist/blobui-settings.exe"),
     );
+    files.insert("bin/blob-ui.exe".into(), package.join("bin/blob-ui.exe"));
     files.insert(
         "blobui-settings.exe".into(),
         package.join("settings-app/dist/blobui-settings.exe"),
@@ -598,6 +603,7 @@ fn validate_app_key(key: &str) -> Result<(), String> {
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")
         || !(key == "blobui-settings.exe"
+            || key == "bin/blob-ui.exe"
             || key == "blobui-installer.exe"
             || key == "blobui-release.json"
             || key == "Changelogs.md"
@@ -749,6 +755,7 @@ fn validate_package(package: &Path, version: &str) -> Result<(), String> {
     for path in [
         "Dev",
         "assets",
+        "bin/blob-ui.exe",
         "settings-app/dist/blobui-settings.exe",
         "blobui-release.json",
         "Changelogs.md",
@@ -1734,6 +1741,8 @@ mod tests {
             executable,
         )
         .unwrap();
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join("bin/blob-ui.exe"), b"mcp executable").unwrap();
         fs::write(
             package.join("blobui-release.json"),
             serde_json::to_vec(&json!({"formatVersion": 1, "version": version})).unwrap(),
@@ -1982,6 +1991,10 @@ mod tests {
             fs::read(app.join("settings-app/dist/blobui-settings.exe")).unwrap(),
             b"new-settings-executable"
         );
+        assert_eq!(
+            fs::read(app.join("bin/blob-ui.exe")).unwrap(),
+            b"mcp executable"
+        );
         assert_eq!(fs::read(app.join("notes.txt")).unwrap(), b"user app file");
         assert!(!app.join("Changelogs.yaml").exists());
         assert!(app.join("md-images.yaml").is_file());
@@ -2115,6 +2128,7 @@ mod tests {
         }
         assert!(validate_managed_key("runtime/Dev/theme.css").is_ok());
         assert!(validate_managed_key("assets/spacebanner/banner.png").is_ok());
+        assert!(validate_app_key("bin/blob-ui.exe").is_ok());
     }
 
     #[test]
@@ -2141,6 +2155,7 @@ mod tests {
         assert!(!app.join(".blobui-install.json").exists());
         assert!(!app.join(".blobui-app-managed-files.json").exists());
         assert!(!app.join("blobui-settings.exe").exists());
+        assert!(!app.join("bin/blob-ui.exe").exists());
         assert!(!app.join("settings-app/dist/blobui-settings.exe").exists());
         assert!(!app.join("Dev/theme.css").exists());
         assert!(!blob.join("runtime/settings-app.exe").exists());

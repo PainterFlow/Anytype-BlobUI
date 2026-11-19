@@ -12,6 +12,7 @@ $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $manifestPath = Join-Path $workspaceRoot 'installer\Cargo.toml'
 $distributionDirectory = Join-Path $workspaceRoot 'dist'
 $settingsExecutable = Join-Path $workspaceRoot 'settings-app\dist\blobui-settings.exe'
+$headlessExecutable = Join-Path $workspaceRoot 'settings-app\dist\headless-cli\blob-ui.exe'
 $versionSource = Join-Path $workspaceRoot 'blobui-release.json'
 $markdownDirectory = Join-Path $workspaceRoot 'settings-app\markdowns'
 $changelogSource = Join-Path $markdownDirectory 'Changelogs.md'
@@ -108,18 +109,28 @@ Copy-Item -LiteralPath $sourceExecutable -Destination $destinationExecutable -Fo
 Write-Host "Native installer built: $destinationExecutable"
 
 if ($PackageRelease) {
+    $previousBuildChannel = $env:BLOBUI_BUILD_CHANNEL
+    try {
+        $env:BLOBUI_BUILD_CHANNEL = $BuildChannel
+        & (Join-Path $PSScriptRoot 'Build-BlobUI-Headless.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'The Windows Anyblob MCP launcher build failed.' }
+    }
+    finally { $env:BLOBUI_BUILD_CHANNEL = $previousBuildChannel }
+    if (-not (Test-Path -LiteralPath $headlessExecutable -PathType Leaf)) { throw "Build the Anyblob MCP launcher before packaging: $headlessExecutable" }
+
     $packageRoot = Join-Path $distributionDirectory ('.blobui-package-' + [Guid]::NewGuid().ToString('N'))
     $packagePath = Join-Path $distributionDirectory 'blobui-windows.zip'
     $tempArchive = Join-Path $distributionDirectory ('.blobui-windows-' + [Guid]::NewGuid().ToString('N') + '.zip')
     $null = Assert-WorkspacePath $packageRoot; $null = Assert-WorkspacePath $packagePath; $null = Assert-WorkspacePath $tempArchive
     try {
         [IO.Directory]::CreateDirectory($packageRoot) | Out-Null
-        foreach ($name in @('Dev', 'assets', 'settings-app\dist')) { [IO.Directory]::CreateDirectory((Join-Path $packageRoot $name)) | Out-Null }
+        foreach ($name in @('Dev', 'assets', 'bin', 'settings-app\dist')) { [IO.Directory]::CreateDirectory((Join-Path $packageRoot $name)) | Out-Null }
         Copy-PackageTree (Join-Path $workspaceRoot 'Dev') (Join-Path $packageRoot 'Dev')
         Copy-PackageTree (Join-Path $workspaceRoot 'assets') (Join-Path $packageRoot 'assets')
         Copy-Item -LiteralPath $changelogSource -Destination (Join-Path $packageRoot 'Changelogs.md')
         Copy-Item -LiteralPath $markdownImageManifest -Destination (Join-Path $packageRoot 'md-images.yaml')
         Copy-Item -LiteralPath $settingsExecutable -Destination (Join-Path $packageRoot 'settings-app\dist\blobui-settings.exe')
+        Copy-Item -LiteralPath $headlessExecutable -Destination (Join-Path $packageRoot 'bin\blob-ui.exe')
         $packageManifest = @{ formatVersion = 1; version = $releaseVersion } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $packageRoot 'blobui-release.json'), $packageManifest + "`n", [Text.UTF8Encoding]::new($false))
         & $destinationExecutable --no-pause --validate-package $packageRoot

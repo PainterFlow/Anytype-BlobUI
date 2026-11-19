@@ -154,6 +154,9 @@ jobs:
             if (@($archive.Entries | Where-Object { $_.FullName -ceq 'settings-app/dist/blobui-settings.exe' }).Count -ne 1) {
               throw 'The release package must contain the built Settings app.'
             }
+            if (@($archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }).Count -ne 1) {
+              throw 'The release package must contain the Anyblob MCP launcher.'
+            }
           } finally { $archive.Dispose() }
           Copy-Item -LiteralPath settings-app/markdowns/Changelogs.md -Destination dist/Changelogs.md -Force
 
