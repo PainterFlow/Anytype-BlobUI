@@ -32,14 +32,20 @@
 
 *Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
 
-## Anyblob (0.2.25 -> 0.4.0)
+## Anyblob (0.2.25 -> 1.0.6)
 
 - Added Linux support. (User#pxlarified)
-- Added remote support using tailscale. (User#pxlarified & User#PainterFlow)
 - The agent is now able to use the `list_objects` tool even when it doesn't have access space-wide access, the tool will just return all objects the agent has access to.
 - The agent is now able to use the `list_types` tool even when it doesn't have space-wide access, the tool will just return all object types the agent has access to.
 - I hope I fixed a few stale mcp servers that could spawn when re-compiling the app.
 - You should no longer experience a variety of cases where an agent would ask you twice for approval.
+
+## Introducing the all new BlobUI CLI Headless (v1.0.0) :O
+
+- Allows you to use a variety of commands to manage Anyblob remotely.
+- Supports Linux & Windows.
+
+*Developers Note: We put guides in the app, so don't worry about documentation.*
 
 ## Bugfixes
 
