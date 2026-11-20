@@ -21,7 +21,7 @@ const Markdown = context.BlobUI.Markdown;
 const MarkdownMedia = context.BlobUI.MarkdownMedia;
 const imageManifest = Markdown.parseMediaManifest(manifestText).images;
 
-test('Markdown keeps local image loading and video aliases available with no registered image aliases', async () => {
+test('Markdown loads configured video aliases and keeps local image loading safe', async () => {
   assert.deepEqual(Object.keys(imageManifest), [], 'The current Markdown has no registered image aliases.');
   assert.equal(imageManifest.__proto__, undefined);
   assert.throws(() => Markdown.parseImageManifest('images:\n  - id: escape\n    src: ./cdn/../secret.png\n'));
@@ -29,10 +29,8 @@ test('Markdown keeps local image loading and video aliases available with no reg
   assert.equal((await MarkdownMedia.loadImage('../secret.png')), null);
   const loaded = await MarkdownMedia.loadImage('./cdn/test-fixture.png');
   assert.equal(loaded.src, 'data:image/png;base64,AQIDBA==');
-  assert.equal(MarkdownMedia.videoAliases['kanban-compact-collapsing'], './cdn/kanban-compact-collapsing.mp4');
-  assert.equal(MarkdownMedia.videoAliases.__proto__, undefined);
-  for (const source of Object.values(MarkdownMedia.videoAliases)) {
-    assert.match(source, /^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/);
-    assert.equal(fs.existsSync(path.join(uiRoot, source)), true, `${source} exists`);
-  }
+  const manifestVideos = Markdown.parseMediaManifest(manifestText).videos;
+  assert.equal(manifestVideos['anyblob-installation'].src, './cdn/anyblob-instillation.mp4');
+  assert.match(manifestVideos['anyblob-installation'].src, /^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/);
+  assert.equal(fs.existsSync(path.join(uiRoot, manifestVideos['anyblob-installation'].src)), true, 'The configured video asset exists.');
 });

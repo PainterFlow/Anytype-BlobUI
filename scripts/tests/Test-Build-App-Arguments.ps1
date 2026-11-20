@@ -11,6 +11,8 @@ $global:BlobUIBuildAppTestLaunches = @()
 $global:BlobUIBuildAppTestGitCalls = 0
 $global:BlobUIBuildAppTestNpmCalls = 0
 $env:BLOBUI_BUILD_APP_TEST_FIXTURE = $fixtureRoot
+$global:BlobUIBuildAppTestProcesses = @()
+$global:BlobUIBuildAppTestClosedProcessIds = @()
 
 function Assert([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -27,6 +29,18 @@ function node { }
 function npm {
     $global:BlobUIBuildAppTestNpmCalls++
     $global:LASTEXITCODE = 0
+}
+
+function Get-Process {
+    [CmdletBinding()]
+    param([string[]]$Name)
+    return @($global:BlobUIBuildAppTestProcesses)
+}
+
+function Stop-Process {
+    [CmdletBinding()]
+    param([int]$Id, [switch]$Force)
+    $global:BlobUIBuildAppTestClosedProcessIds += $Id
 }
 
 function cargo {
@@ -129,13 +143,34 @@ try {
     Assert ($global:BlobUIBuildAppTestLaunches[0].ArgumentList.Count -eq 1 -and $global:BlobUIBuildAppTestLaunches[0].ArgumentList[0] -ceq '--onboarding') 'Legacy -s -n must pass only --onboarding.'
     Assert ($global:BlobUIBuildAppTestLaunches[0].WindowStyle -ceq 'Normal') 'Non-silent launches must keep a normal window.'
 
-    Write-Host 'Build-App silent and onboarding argument checks passed.'
+    $workspaceProcess = [pscustomobject]@{ Id = 101; Path = Join-Path $fixtureRoot 'settings-app/dist/blobui-settings.exe'; Exited = $false }
+    $workspaceProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { $this.Exited = $true }
+    $externalProcess = [pscustomobject]@{ Id = 202; Path = 'C:/Program Files/BlobUI Settings/blobui-settings.exe'; Exited = $false }
+    $externalProcess | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { $this.Exited = $true }
+    $global:BlobUIBuildAppTestProcesses = @($workspaceProcess, $externalProcess)
+    $global:BlobUIBuildAppTestClosedProcessIds = @()
+    $global:BlobUIBuildAppTestLaunches = @()
+    $env:BLOBUI_BUILD_ONLY = '0'
+    & $fixtureScriptPath -s -c
+    Assert ($global:BlobUIBuildAppTestClosedProcessIds.Count -eq 1 -and $global:BlobUIBuildAppTestClosedProcessIds[0] -eq 101) '-c must close the running Settings process from this workspace.'
+    Assert ($workspaceProcess.Exited) '-c must wait for the workspace Settings process to exit.'
+    Assert (-not $externalProcess.Exited) '-c must not close a Settings process outside this workspace.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 1) '-s -c must launch the newly built Settings app after closing the old workspace instance.'
+
+    $global:BlobUIBuildAppTestClosedProcessIds = @()
+    $global:BlobUIBuildAppTestLaunches = @()
+    $env:BLOBUI_BUILD_ONLY = '1'
+    & $fixtureScriptPath -s -close
+    Assert ($global:BlobUIBuildAppTestClosedProcessIds.Count -eq 0) 'Build-only mode must not close a running Settings process.'
+    Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) 'Build-only mode must not launch the Settings app.'
+
+    Write-Host 'Build-App close, silent, and onboarding argument checks passed.'
 }
 finally {
     $env:BLOBUI_BUILD_ONLY = $oldBuildOnly
     $env:BLOBUI_BUILD_APP_TEST_FIXTURE = $oldTestFixture
     $global:LASTEXITCODE = $oldLastExitCode
-    Remove-Variable -Name BlobUIBuildAppTestLaunches, BlobUIBuildAppTestGitCalls, BlobUIBuildAppTestNpmCalls -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name BlobUIBuildAppTestLaunches, BlobUIBuildAppTestGitCalls, BlobUIBuildAppTestNpmCalls, BlobUIBuildAppTestProcesses, BlobUIBuildAppTestClosedProcessIds -Scope Global -ErrorAction SilentlyContinue
     $expectedPrefix = [IO.Path]::GetFullPath((Join-Path $workspaceRoot '.test-run')) + [IO.Path]::DirectorySeparatorChar
     $resolvedFixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
     if (-not $resolvedFixtureRoot.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {

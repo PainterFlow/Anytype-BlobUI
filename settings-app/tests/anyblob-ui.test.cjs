@@ -57,9 +57,11 @@ test('Anyblob uses local project settings and opens the shared setup guide in a 
     await helpButton.click();
     const guide=page.getByRole('dialog',{name:'Anyblob setup guide'});
     await guide.waitFor();
-    await guide.getByRole('heading',{name:'1. Connect Anytype on Windows'}).waitFor();
+    await guide.getByRole('heading',{name:/Part 1: Installing Anytype/}).waitFor();
+    await guide.locator('.markdown-video video').waitFor();
+    assert.match(await guide.locator('.markdown-video video').getAttribute('src'),/^blob:/,'The configured guide video must load from the media manifest.');
     assert.match(await guide.innerText(),/blob-ui api login/);
-    assert.match(await guide.innerText(),/codex plugin marketplace add PainterFlow\/Anytype-BlobUI/);
+    assert.match(await guide.innerText(),/codex plugin marketplace add https:\/\/github\.com\/PainterFlow\/Anytype-BlobUI/);
     await page.screenshot({path:path.join(fixture,'anyblob-guide-dark.png'),animations:'disabled'});
     await page.keyboard.press('Escape');
     await guide.waitFor({state:'hidden'});

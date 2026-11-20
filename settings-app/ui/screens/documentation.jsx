@@ -3,26 +3,26 @@ import { createPortal } from "react-dom";
 const aliasPattern = /@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/g;
 const imageCache = new Map();
 const videoCache = new Map();
-let imageManifestPromise;
+let mediaManifestPromise;
 
-function loadImageManifest() {
-  if (!imageManifestPromise) {
-    imageManifestPromise = fetch("./md-images.yaml").then(response => {
-      if (!response.ok) throw new Error(`Markdown image manifest request failed (${response.status}).`);
+function loadMediaManifest() {
+  if (!mediaManifestPromise) {
+    mediaManifestPromise = fetch("./md-images.yaml").then(response => {
+      if (!response.ok) throw new Error(`Markdown media manifest request failed (${response.status}).`);
       return response.text();
-    }).then(yaml => window.BlobUI.Markdown.parseMediaManifest(yaml).images)
+    }).then(yaml => window.BlobUI.Markdown.parseMediaManifest(yaml))
       .catch(error => {
-        imageManifestPromise = null;
+        mediaManifestPromise = null;
         throw error;
       });
   }
-  return imageManifestPromise;
+  return mediaManifestPromise;
 }
 
-async function imageAsset(alias) {
+async function imageAsset(alias, images) {
   if (!imageCache.has(alias)) {
     const promise = (async () => {
-      const image = (await loadImageManifest())[alias];
+      const image = images[alias];
       if (!image) return null;
       const loaded = await window.BlobUI.MarkdownMedia.loadImage(image.src);
       return loaded ? { ...loaded, alt: image.alt } : null;
@@ -32,29 +32,38 @@ async function imageAsset(alias) {
   return imageCache.get(alias);
 }
 
+async function videoAsset(source) {
+  if (!/^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/i.test(source)) return null;
+  if (!videoCache.has(source)) {
+    videoCache.set(source, (async () => {
+      try {
+        const response = await fetch(source);
+        const length = Number(response.headers.get("content-length"));
+        if (!response.ok || (Number.isFinite(length) && length > 64 * 1024 * 1024)) return null;
+        const blob = await response.blob();
+        return blob.size > 0 && blob.size <= 64 * 1024 * 1024
+          ? { blob: new Blob([blob], { type: "video/mp4" }) }
+          : null;
+      } catch { return null; }
+    })());
+  }
+  return videoCache.get(source);
+}
+
 async function mediaForMarkdown(markdown) {
   const source = String(markdown || "");
   const aliases = new Set([...source.matchAll(aliasPattern)].map(match => match[1]));
   const altByAlias = new Map([...source.matchAll(/!\[([^\]]*)\]\(@([A-Za-z0-9][A-Za-z0-9_-]{0,63})\)/g)].map(match => [match[2], match[1].trim()]));
+  const manifest = await loadMediaManifest();
   const images = Object.create(null);
   const videos = Object.create(null);
   await Promise.all([...aliases].map(async alias => {
-    const image = await imageAsset(alias);
+    const image = await imageAsset(alias, manifest.images);
     if (image) images[alias] = { ...image, alt: altByAlias.get(alias) || image.alt };
-    const videoSource = window.BlobUI.MarkdownMedia.videoAliases?.[alias];
-    if (!videoSource) return;
-    if (!videoCache.has(alias)) {
-      videoCache.set(alias, (async () => {
-        try {
-          const response = await fetch(videoSource);
-          if (!response.ok || Number(response.headers.get("content-length")) > 64 * 1024 * 1024) return null;
-          const blob = await response.blob();
-          return blob.size > 0 && blob.size <= 64 * 1024 * 1024 ? { blob: new Blob([blob], { type: "video/mp4" }), alt: alias.replace(/-/g, " ") } : null;
-        } catch { return null; }
-      })());
-    }
-    const video = await videoCache.get(alias);
-    if (video) videos[alias] = video;
+    const video = manifest.videos[alias];
+    if (!video) return;
+    const loaded = await videoAsset(video.src);
+    if (loaded) videos[alias] = { ...loaded, alt: altByAlias.get(alias) || video.alt };
   }));
   return { images, videos };
 }
