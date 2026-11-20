@@ -121,7 +121,8 @@ fn print_help() {
            --build-channel <main|dev>         Select the update channel (default: main)\n\
            info                              Show version and update status\n\
            update [-f]                      Check for and install an update\n\
-           api status|login [-f]|logout      Manage the local Anytype API v2 key\n\
+           api status|login [-f]|logout      Manage the Anytype API v2 key\n\
+           api --host-ip <IP> [--host-port <PORT>]  Set the Anytype API endpoint\n\
            perms <space-id> ...             Manage global space permissions\n\
            perms ls                         List global permissions\n\
            spaces ls                       List Anytype spaces and their IDs\n\
@@ -197,9 +198,16 @@ fn selected_headless_build_channel() -> Result<crate::updater::ReleaseChannel, S
 }
 
 fn api_command(args: &[String]) -> Result<(), String> {
+    if args
+        .first()
+        .is_some_and(|arg| matches!(arg.as_str(), "--host-ip" | "--host-port"))
+    {
+        return configure_api_endpoint(args);
+    }
     match args.first().map(String::as_str) {
         Some("status") if args.len() == 1 => {
             let (root, data) = load_data()?;
+            let (ip, port) = configured_api_endpoint(&data)?;
             let key_status = match crate::read_saved_api_key_at(&root) {
                 Ok(key) => {
                     drop(crate::SecretString::new(key));
@@ -208,7 +216,7 @@ fn api_command(args: &[String]) -> Result<(), String> {
                 Err(_) => false,
             };
             println!(
-                "Anytype API v2: {}\nEndpoint: {}:{}",
+                "Anytype API v2: {}\nEndpoint: {}",
                 if data
                     .pointer("/apiConnection/enabled")
                     .and_then(Value::as_bool)
@@ -219,23 +227,19 @@ fn api_command(args: &[String]) -> Result<(), String> {
                 } else {
                     "not configured"
                 },
-                data.pointer("/apiConnection/ip")
-                    .and_then(Value::as_str)
-                    .unwrap_or("127.0.0.1"),
-                data.pointer("/apiConnection/port")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(ANYTYPE_API_PORT as u64)
+                format_api_endpoint(&ip, port)
             );
         }
         Some("logout") if args.len() == 1 => {
             let (root, mut data) = load_data()?;
+            let (ip, port) = configured_api_endpoint(&data)?;
             let credential = crate::api_credential_path(&root)?;
             let previous_key = read_api_key_snapshot(&credential)?;
             if previous_key.is_some() {
                 fs::remove_file(&credential)
                     .map_err(|_| "Could not remove the saved Anytype API v2 key.".to_string())?;
             }
-            data["apiConnection"] = local_api_connection(&data, false);
+            data["apiConnection"] = api_connection(&data, false, &ip, port);
             if let Err(error) = save_data(&root, &data) {
                 rollback_api_key(&credential, previous_key.as_deref()).map_err(|rollback| {
                     format!("{error} API credential rollback failed: {rollback}")
@@ -255,13 +259,19 @@ fn api_command(args: &[String]) -> Result<(), String> {
                     .is_some_and(|arg| arg == "-f" || arg == "--force"),
             )?
         }
-        _ => return Err("Usage: blob-ui api status|login [-f]|logout".into()),
+        _ => {
+            return Err(
+                "Usage: blob-ui api status|login [-f]|logout | --host-ip <IP> [--host-port <PORT>]"
+                    .into(),
+            )
+        }
     }
     Ok(())
 }
 
 fn api_login(force: bool) -> Result<(), String> {
     let (root, mut data) = load_data()?;
+    let (ip, port) = configured_api_endpoint(&data)?;
     let credential = crate::api_credential_path(&root)?;
     if credential.is_file() && !force {
         return Err(
@@ -271,19 +281,97 @@ fn api_login(force: bool) -> Result<(), String> {
     }
     let key = crate::validate_api_key(prompt_secret("Anytype API v2 key: ")?)?;
     #[cfg(not(windows))]
-    ensure_anytype_serve("127.0.0.1", ANYTYPE_API_PORT)?;
-    crate::api::verify_connection_quick(&key, "127.0.0.1", ANYTYPE_API_PORT)
-        .map_err(|error| format!("Could not connect to the Anytype Headless API at 127.0.0.1:{ANYTYPE_API_PORT}: {error}"))?;
+    ensure_anytype_serve(&ip, port)?;
+    crate::api::verify_connection_quick(&key, &ip, port).map_err(|error| {
+        format!(
+            "Could not connect to the Anytype Headless API at {}: {error}",
+            format_api_endpoint(&ip, port)
+        )
+    })?;
     let previous_key = read_api_key_snapshot(&credential)?;
     store_api_key(&credential, &key)?;
-    data["apiConnection"] = local_api_connection(&data, true);
+    data["apiConnection"] = api_connection(&data, true, &ip, port);
     if let Err(error) = save_data(&root, &data) {
         rollback_api_key(&credential, previous_key.as_deref())
             .map_err(|rollback| format!("{error} API credential rollback failed: {rollback}"))?;
         return Err(error);
     }
-    println!("Anytype API v2 key saved for 127.0.0.1:{ANYTYPE_API_PORT}.");
+    println!("Anytype API v2 key saved for {}.", format_api_endpoint(&ip, port));
     Ok(())
+}
+
+fn configure_api_endpoint(args: &[String]) -> Result<(), String> {
+    let (root, mut data) = load_data()?;
+    let (current_ip, current_port) = configured_api_endpoint(&data)?;
+    let (ip, port) = parse_api_endpoint_options(args, &current_ip, current_port)?;
+    let enabled = data
+        .pointer("/apiConnection/enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    data["apiConnection"] = api_connection(&data, enabled, &ip, port);
+    save_data(&root, &data)?;
+    println!("Anytype API endpoint set to {}.", format_api_endpoint(&ip, port));
+    Ok(())
+}
+
+fn parse_api_endpoint_options(
+    args: &[String],
+    default_ip: &str,
+    default_port: u16,
+) -> Result<(String, u16), String> {
+    let mut ip = default_ip.to_string();
+    let mut port = default_port;
+    let mut host_ip_seen = false;
+    let mut host_port_seen = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--host-ip" if !host_ip_seen => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or("Usage: blob-ui api --host-ip <IP> [--host-port <PORT>]")?;
+                ip = crate::normalize_api_ip(Some(value))?;
+                host_ip_seen = true;
+                index += 2;
+            }
+            "--host-port" if !host_port_seen => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or("Usage: blob-ui api --host-ip <IP> [--host-port <PORT>]")?;
+                port = value
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|port| *port > 0)
+                    .ok_or("API host port must be a number from 1 to 65535.")?;
+                host_port_seen = true;
+                index += 2;
+            }
+            _ => {
+                return Err("Usage: blob-ui api --host-ip <IP> [--host-port <PORT>]".into())
+            }
+        }
+    }
+    if !host_ip_seen && !host_port_seen {
+        return Err("Usage: blob-ui api --host-ip <IP> [--host-port <PORT>]".into());
+    }
+    Ok((ip, port))
+}
+
+fn configured_api_endpoint(data: &Value) -> Result<(String, u16), String> {
+    let ip = crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?;
+    let port = data
+        .pointer("/apiConnection/port")
+        .and_then(Value::as_u64)
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(ANYTYPE_API_PORT);
+    Ok((ip, port))
+}
+
+fn format_api_endpoint(ip: &str, port: u16) -> String {
+    ip.parse::<std::net::IpAddr>()
+        .map(|ip| std::net::SocketAddr::new(ip, port).to_string())
+        .unwrap_or_else(|_| format!("{ip}:{port}"))
 }
 
 fn prompt_secret(prompt: &str) -> Result<String, String> {
@@ -435,15 +523,15 @@ fn store_api_key(path: &Path, key: &str) -> Result<(), String> {
         .map_err(|_| "Could not save the Anytype API v2 key.".to_string())
 }
 
-fn local_api_connection(data: &Value, enabled: bool) -> Value {
+fn api_connection(data: &Value, enabled: bool, ip: &str, port: u16) -> Value {
     let mut connection = data
         .get("apiConnection")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
     connection.insert("enabled".into(), json!(enabled));
-    connection.insert("ip".into(), json!("127.0.0.1"));
-    connection.insert("port".into(), json!(ANYTYPE_API_PORT));
+    connection.insert("ip".into(), json!(ip));
+    connection.insert("port".into(), json!(port));
     Value::Object(connection)
 }
 
@@ -1103,9 +1191,13 @@ fn run_mcp() {
 
 #[cfg(not(windows))]
 pub(crate) fn ensure_anytype_serve(ip: &str, port: u16) -> Result<(), String> {
-    let endpoint = format!("{ip}:{port}")
-        .parse::<SocketAddr>()
+    let address = ip
+        .parse::<std::net::IpAddr>()
         .map_err(|_| "The Anytype Headless API endpoint is invalid.".to_string())?;
+    if !should_start_anytype_serve(ip) {
+        return Ok(());
+    }
+    let endpoint = SocketAddr::new(address, port);
     if anytype_api_reachable(endpoint) {
         return Ok(());
     }
@@ -1147,6 +1239,12 @@ pub(crate) fn ensure_anytype_serve(ip: &str, port: u16) -> Result<(), String> {
         ANYTYPE_SERVE_ATTEMPTED.store(true, Ordering::Release);
     }
     result
+}
+
+#[cfg(any(test, not(windows)))]
+fn should_start_anytype_serve(ip: &str) -> bool {
+    ip.parse::<std::net::IpAddr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 #[cfg(any(test, not(windows)))]
@@ -1839,6 +1937,76 @@ mod tests {
             || Err("Anytype should not start when the API is available.".into()),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn remote_anytype_endpoints_do_not_start_anytype_serve() {
+        assert!(should_start_anytype_serve("127.0.0.1"));
+        assert!(should_start_anytype_serve("::1"));
+        assert!(!should_start_anytype_serve("192.168.1.20"));
+    }
+
+    #[test]
+    fn api_endpoint_options_accept_ipv4_ipv6_and_validate_ports() {
+        let ipv4_args = [
+            "--host-ip".into(),
+            "192.168.1.20".into(),
+            "--host-port".into(),
+            "31013".into(),
+        ];
+        assert_eq!(
+            parse_api_endpoint_options(&ipv4_args, "127.0.0.1", ANYTYPE_API_PORT).unwrap(),
+            ("192.168.1.20".into(), 31013),
+        );
+        assert_eq!(
+            parse_api_endpoint_options(
+                &["--host-ip".into(), "::1".into()],
+                "127.0.0.1",
+                ANYTYPE_API_PORT,
+            ).unwrap(),
+            ("::1".into(), ANYTYPE_API_PORT),
+        );
+        assert_eq!(
+            parse_api_endpoint_options(
+                &["--host-port".into(), "31013".into()],
+                "127.0.0.1",
+                ANYTYPE_API_PORT,
+            ).unwrap(),
+            ("127.0.0.1".into(), 31013),
+        );
+        for args in [
+            vec!["--host-ip".into()],
+            vec!["--host-ip".into(), "api.example.com".into()],
+            vec!["--host-port".into(), "0".into()],
+            vec!["--host-port".into(), "65536".into()],
+            vec!["--host-port".into(), "31012".into(), "--host-port".into(), "31013".into()],
+        ] {
+            assert!(
+                parse_api_endpoint_options(&args, "127.0.0.1", ANYTYPE_API_PORT).is_err(),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn api_endpoint_updates_preserve_other_connection_settings() {
+        let data = json!({
+            "apiConnection": {
+                "enabled": true,
+                "metadataRevision": "rev-7",
+                "futureSetting": 42
+            }
+        });
+        assert_eq!(
+            api_connection(&data, true, "192.168.1.20", 31012),
+            json!({
+                "enabled": true,
+                "ip": "192.168.1.20",
+                "port": 31012,
+                "metadataRevision": "rev-7",
+                "futureSetting": 42
+            }),
+        );
     }
 
     #[test]

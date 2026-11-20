@@ -28,11 +28,6 @@ fn configured_endpoint(data: &Value, headless: bool) -> Result<(String, u16), St
         .and_then(|port| u16::try_from(port).ok())
         .filter(|port| *port > 0)
         .unwrap_or(default_port);
-    if headless && (ip != "127.0.0.1" || port != 31012) {
-        return Err(
-            "BlobUI Headless only connects to Anytype Headless at 127.0.0.1:31012. Run `blob-ui api login` to reset the endpoint.".into(),
-        );
-    }
     Ok((ip, port))
 }
 
@@ -1199,7 +1194,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn endpoint_defaults_and_headless_restrictions_match_the_running_app() {
+    fn endpoint_defaults_and_custom_hosts_match_the_running_app() {
         assert_eq!(
             configured_endpoint(&json!({}), false).unwrap(),
             ("127.0.0.1".into(), 31009),
@@ -1216,13 +1211,13 @@ mod tests {
             configured_endpoint(&json!({}), true).unwrap(),
             ("127.0.0.1".into(), 31012),
         );
-        assert!(
+        assert_eq!(
             configured_endpoint(
                 &json!({"apiConnection":{"ip":"192.168.1.12","port":31010}}),
                 true,
             )
-            .unwrap_err()
-            .contains("127.0.0.1:31012")
+            .unwrap(),
+            ("192.168.1.12".into(), 31010),
         );
     }
 

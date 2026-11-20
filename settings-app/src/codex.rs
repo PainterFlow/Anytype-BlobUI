@@ -70,6 +70,34 @@ pub async fn discover_anyblob_types(space_ids: Vec<String>, force_refresh: Optio
     }).await.map_err(|_|"Object type discovery stopped. Press Ctrl+R to retry.".to_string())?
 }
 
+#[cfg(any(test, feature = "headless-cli"))]
+pub(crate) fn discover_sources(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
+    let spaces = discover(client)?;
+    let mut sources = Vec::new();
+    for space in spaces {
+        let space_id = space["id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or("Space discovery returned a missing ID.")?;
+        let space_name = space["name"].as_str().unwrap_or("Unnamed space");
+        let base = format!("/v2/spaces/{}", crate::api::encode_segment(space_id));
+        for source in source_types(client, &base)? {
+            let id = source["id"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .ok_or("Type discovery returned a missing full ID.")?;
+            sources.push(serde_json::json!({
+                "kind": "type",
+                "spaceId": space_id,
+                "space": space_name,
+                "id": id,
+                "name": source["name"].as_str().unwrap_or("Unnamed type"),
+            }));
+        }
+    }
+    Ok(sources)
+}
+
 // Type lists can contain API keys without object IDs, even with ids=full.
 // Resolve those entries through the v2 type document before saving permissions.
 pub(crate) fn source_types(client: &crate::kanban_api::Client, base: &str) -> Result<Vec<Value>, String> {
@@ -134,5 +162,49 @@ mod tests {
         let client=crate::kanban_api::Client::with_connection("fake-codex-key","127.0.0.1",port);
         let spaces=discover(&client).unwrap();assert_eq!(spaces.len(),2);assert_eq!(spaces[1]["id"],"second-full-id");
         assert!(discover(&client).is_err()); server.join().unwrap();
+    }
+
+    #[test]
+    fn headless_source_discovery_includes_space_and_type_names() {
+        use std::{io::{Read, Write}, net::TcpListener};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for (expected_path, body) in [
+                (
+                    "/v2/spaces?ids=full&limit=100&offset=0",
+                    r#"{"data":[{"id":"space-1","name":"Work"}],"has_more":false}"#,
+                ),
+                (
+                    "/v2/spaces/space-1/types?ids=full&limit=100&offset=0",
+                    r#"{"data":[{"id":"type-1","name":"Task"}],"has_more":false}"#,
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0; 8192];
+                let length = stream.read(&mut buffer).unwrap();
+                let request = String::from_utf8_lossy(&buffer[..length]);
+                assert!(request.starts_with(&format!("GET {expected_path} HTTP/1.1")));
+                let body = body.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+        let client = crate::kanban_api::Client::with_connection("fake-codex-key", "127.0.0.1", port);
+        assert_eq!(
+            discover_sources(&client).unwrap(),
+            vec![serde_json::json!({
+                "kind":"type",
+                "spaceId":"space-1",
+                "space":"Work",
+                "id":"type-1",
+                "name":"Task"
+            })]
+        );
+        server.join().unwrap();
     }
 }
