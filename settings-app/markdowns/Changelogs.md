@@ -1,6 +1,6 @@
 # BlobUI v1.5.0 - What's new?
 
-*Insert new text.*
+This update is a massive technical one, internal files are getting a remake, Anyblob got recoded to now support remote support, BlobUI now has a headless CLI version which supports linux for remote development and so much more. But don't worry, it's not just backend stuff. Documentation is getting removed in favor of in-app tooltips & help buttons and BlobUI now allows you to create your own custom themes.
 
 ## General
 
@@ -22,23 +22,15 @@
     - You can also toggle the based theme(*controls text color, etc.*).
     - There are also 2 built-in themes: "OLED" and "Dark Mode+".
 
-## Chat Themes
-
-- You can now choose how chats should look in a new settings tab called: "Chat Themes".
-- Available options are:
-    - "Anytype" - Anytypes default look.
-    - "Discord" - Chats now look like they are in discord.
-    - "IRC" - IRC theme.
-
-*Developers Note: IRC colors are generated on compilation depending on the User who sent the message.*
-
-## Anyblob (0.2.25 -> 1.0.6)
+## Anyblob (0.2.25 -> 1.1.1)
 
 - Added Linux support. (User#pxlarified)
-- The agent is now able to use the `list_objects` tool even when it doesn't have access space-wide access, the tool will just return all objects the agent has access to.
-- The agent is now able to use the `list_types` tool even when it doesn't have space-wide access, the tool will just return all object types the agent has access to.
+- The `read_object` tool now returns e-tags.
 - I hope I fixed a few stale mcp servers that could spawn when re-compiling the app.
 - You should no longer experience a variety of cases where an agent would ask you twice for approval.
+- Removed project specific settings.
+
+*Developers Note: I'm really sorry to remove this, but I had to, it was too janky to set up in the CLI and I've been working on remote support for like 1 week straight with like 3 recodes of Anyblob.*
 
 ## Introducing the all new BlobUI CLI Headless (v1.0.0) :O
 

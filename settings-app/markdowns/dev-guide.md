@@ -44,6 +44,7 @@ npm run build
 
 - For the app: `full-recode.update.hotfix`
 - For Anyblob: `full-recode.update.hotfix`
+- For the Headless CLI: `full-recode.update.hotfix`
 
 ## Markdown formatting
 
@@ -53,10 +54,22 @@ But there are a few additional features, you can use `[ ]` and `[x]` to make che
 You can also mention images that are included in `md-images.yaml` by `@`-mentioning them.
 Another feature the BlobUI markdown reader supports is `Issue#ID`, `PR#ID` and `User#username` to quickly mention issues, prs and users.
 
+## BlobUI Headless CLI
+
+For a full list of all commands use `blob-ui help`.
+There is an additional article on how to setup BlobUI in the Anyblob settings.
+Some useful ones are: 
+
+- `blob-ui spaces ls` - lists all spaces BlobUI has access to with the API key.
+- `blob-ui api status` - API status.
+- `blob-ui api --host-ip <IP> --host-port <PORT>` - change the IP & Port, also makes BlobUI not run `anytype serve` in the background for qol.
+- `blob-ui api login` - add an API key.
+- `blob-ui --toggle-anyblob <bool>` - toggle anyblob.
+
 ## Custom Themes
 
 You can create custom built in themes using css.
-To create a theme, create a new css file in `app-installation-folder/Settings/themes/built-in-themes/`.
+To create a theme, create a new css file in `<app-installation-folder>/Settings/themes/built-in-themes/`.
 
 Once you created a file paste this at the top of the file:
 *Developers Note: The header always has to be at the top of the css file, the order of fields does not matter.*

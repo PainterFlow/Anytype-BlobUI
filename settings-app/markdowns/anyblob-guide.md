@@ -32,6 +32,7 @@ If you already have an API v2 key, continue to Part 2. Otherwise, install [Anyty
 2. If Anytype API runs on another host, set its address with `blob-ui api --host-ip 192.168.1.20 --host-port 31012`. The default endpoint is `127.0.0.1:31012`. Then run `blob-ui api login` and enter the API key. If a key is already saved, use `blob-ui api login -f` to replace it. The terminal does not display the key while you type. BlobUI starts `anytype serve` only for a loopback address.
 3. Run `blob-ui spaces ls` to list spaces and their IDs.
 4. Run `blob-ui perms ls` to inspect saved global permissions. Set one for a space with `blob-ui perms <space-id> --permission read --approval always --file-uploads false`. Permission values are `read`, `read-write`, and `create-delete`. Approval values are `always`, `auto`, and `never`.
+5. Run `blob-ui --toggle-anyblob true` to enable Anyblob.
 
 ### Part 3: Installing Anyblob in Codex CLI
 
