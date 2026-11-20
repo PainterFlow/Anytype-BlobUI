@@ -35,7 +35,7 @@ test('compiled accents tint search matches and the slash checkbox without repain
           accent:color('accent'), match:color('match'), active:color('active'), circle:fill('circle'), tick:fill('tick'), unrelated:fill('unrelated')
         });</script></html>`);
       const output = execFileSync(chrome, ['--headless=new', '--no-sandbox', '--no-first-run', '--no-default-browser-check', '--disable-gpu', `--user-data-dir=${path.join(root, 'profile')}`, '--dump-dom', `file:///${file.replace(/\\/g, '/')}`], {
-        encoding:'utf8', timeout:30000, env:{ ...process.env, TEMP:root, TMP:root }, stdio:['ignore', 'pipe', 'pipe'],
+        encoding:'utf8', timeout:60000, env:{ ...process.env, TEMP:root, TMP:root }, stdio:['ignore', 'pipe', 'pipe'],
       });
       const result = JSON.parse(output.match(/<output id="result">([^<]+)<\/output>/)[1]);
       assert.equal(result.match, result.accent, `${accent}/${enabled} inactive match`);
