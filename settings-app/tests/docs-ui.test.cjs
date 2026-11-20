@@ -33,7 +33,7 @@ test('React release notes render sanitized Markdown and stop video media when th
     const page = await browser.newPage();
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.stack || error.message));
-    const media = fs.readFileSync(path.join(workspace, 'settings-app/ui/cdn/kanban-compact-collapsing.mp4')).toString('base64');
+    const media = fs.readFileSync(path.join(workspace, 'settings-app/ui/cdn/anyblob-instillation.mp4')).toString('base64');
     await page.addInitScript((video) => {
       window.__videoFixture = video;
       window.__TAURI__ = { core: { invoke: async (command) => {

@@ -42,7 +42,7 @@ test('shared videos play, reveal controls, seek, respect autoplay, and clean up'
     await page.setContent('<!doctype html><html><body style="margin:20px;overflow:auto;height:auto"><main id="docs" class="markdown-content" style="width:640px"></main><div style="height:1500px"></div><main id="notes" class="markdown-content" style="width:640px"></main></body></html>');
     for (const file of ['styles.css']) await page.addStyleTag({ path: path.join(ui, file) });
     for (const file of ['vendor/marked.umd.js', 'video-player.js', 'markdown.js']) await page.addScriptTag({ path: path.join(ui, file) });
-    const source = 'data:video/mp4;base64,' + fs.readFileSync(path.join(ui, 'cdn/kanban-compact-collapsing.mp4')).toString('base64');
+    const source = 'data:video/mp4;base64,' + fs.readFileSync(path.join(ui, 'cdn/anyblob-instillation.mp4')).toString('base64');
     const outcome = await page.evaluate(src => {
       window.testMedia = { demo: { src, alt: 'Kanban demonstration' } };
       window.BlobUI.Markdown.mount(document.querySelector('#docs'), '@demo\n\n`@demo`\n\n```\n@demo\n```\n\n![Second video](@demo)\n\n<video src="https://bad/video.mp4" autoplay></video>', { videos: window.testMedia });

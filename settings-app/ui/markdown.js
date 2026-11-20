@@ -38,9 +38,10 @@
   function validateImageSource(source, video = false) {
     const releaseSource = releaseSourcePattern.test(source);
     const cdnImageSource = !video && cdnImageSourcePattern.test(source);
-    if (!(releaseSource || cdnImageSource) || source.includes("\\")
+    const cdnVideoSource = video && /^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/i.test(source);
+    if (!(releaseSource || cdnImageSource || cdnVideoSource) || source.includes("\\")
       || (releaseSource && source.split("/").some((part) => !part || part === "." || part === ".."))) {
-      throw new TypeError("md-images.yaml paths must stay inside assets/changelogs/ or use a local ./cdn image.");
+      throw new TypeError("md-images.yaml paths must stay inside assets/changelogs/ or use a local ./cdn media file.");
     }
     if (!(video ? /\.mp4$/i : (cdnImageSource ? /\.(svg|png|jpe?g|gif|webp)$/i : /\.(png|jpe?g|gif|webp)$/i)).test(source)) {
       throw new TypeError("md-images.yaml supports local PNG, JPEG, GIF, and WebP images, release note images, and MP4 videos.");

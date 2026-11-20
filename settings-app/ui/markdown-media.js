@@ -2,10 +2,6 @@
   "use strict";
 
   const BlobUI = root.BlobUI = root.BlobUI || {};
-  const videoPaths = Object.freeze(Object.assign(Object.create(null), {
-    "kanban-compact-collapsing": "./cdn/kanban-compact-collapsing.mp4",
-    "text-effects-and-hover-settings": "./cdn/text-effects-and-hover-settings.mp4",
-  }));
   const cdnImageSource = /^\.\/cdn\/[A-Za-z0-9_-]+\.(?:png|jpe?g|gif|webp)$/i;
   const imageMimeTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
   const imageCache = new Map();
@@ -33,6 +29,5 @@
 
   BlobUI.MarkdownMedia = Object.freeze({
     loadImage,
-    videoAliases: videoPaths,
   });
 })(typeof window !== "undefined" ? window : globalThis);
