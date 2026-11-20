@@ -20,7 +20,7 @@
       types:selection(filters?.types,['spaceId','id','name','space'])
     };
     objectMentions.filterIncompleteTasks=filters?.filterIncompleteTasks===true;
-    return {spaces, projects: UI.ProjectPermissions.normalize(value?.projects), objectMentions};
+    return {spaces, objectMentions};
   }
   let api, page, loaded = false, busy = false, locked = true, records = [], attached = false, apiSnapshot=null, selectedTab=0;
   const listeners=new Set();
@@ -49,7 +49,6 @@
     if (!api || !page || attached) return;
     attached = true;
     UI.ObjectMentions.init(api,normalize);
-    UI.ProjectPermissions.init({...api, normalize});
     publishPermissions({spaces:records,locked,busy,message:permissionSnapshot.message});
   }
   function init(options) {
@@ -58,5 +57,5 @@
     initialize();
     UI.AppReload?.register(() => reload(true));
   }
-  UI.CodexPage={normalize,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},getSnapshot(){return apiSnapshot;},subscribeTabs(listener){tabListeners.add(listener);return()=>tabListeners.delete(listener);},getTabSnapshot(){return selectedTab;},subscribePermissions(listener){permissionListeners.add(listener);return()=>permissionListeners.delete(listener);},getPermissionsSnapshot(){return permissionSnapshot;},getSpaces(){return records.slice();},reloadSpaces(){return reload(true);},changePermission(id,permission){if(locked)return;const next=normalize(api.read());next.spaces[id]=permission;api.onChange(next);render();},attach({root:host}){page=host;initialize();},init,render(){render();UI.ProjectPermissions.render();},show(value){if(!page)return;if(value){root.dispatchEvent(new Event('blobui-codex-integration-refresh'));UI.ObjectMentions.show();if(selectedTab===2)UI.ProjectPermissions.open();if(selectedTab===1&&!loaded&&!busy)void reload();}},select(index){if(!Number.isInteger(index)||index<0||index>2)return;if(selectedTab!==index){selectedTab=index;tabListeners.forEach(listener=>listener());}if(index===2)UI.ProjectPermissions.open();if(index===1&&!loaded&&!busy)void reload();},setLocked(value){if(locked===value)return;locked=value;render();UI.ProjectPermissions.setLocked(value);},destroy(){UI.ProjectPermissions.destroy?.();UI.ObjectMentions.destroy?.();attached=false;page=null;}};
+  UI.CodexPage={normalize,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},getSnapshot(){return apiSnapshot;},subscribeTabs(listener){tabListeners.add(listener);return()=>tabListeners.delete(listener);},getTabSnapshot(){return selectedTab;},subscribePermissions(listener){permissionListeners.add(listener);return()=>permissionListeners.delete(listener);},getPermissionsSnapshot(){return permissionSnapshot;},getSpaces(){return records.slice();},reloadSpaces(){return reload(true);},changePermission(id,permission){if(locked)return;const next=normalize(api.read());next.spaces[id]=permission;api.onChange(next);render();},attach({root:host}){page=host;initialize();},init,render(){render();},show(value){if(!page)return;if(value){root.dispatchEvent(new Event('blobui-codex-integration-refresh'));UI.ObjectMentions.show();if(selectedTab===1&&!loaded&&!busy)void reload();}},select(index){if(!Number.isInteger(index)||index<0||index>1)return;if(selectedTab!==index){selectedTab=index;tabListeners.forEach(listener=>listener());}if(index===1&&!loaded&&!busy)void reload();},setLocked(value){if(locked===value)return;locked=value;render();},destroy(){UI.ObjectMentions.destroy?.();attached=false;page=null;}};
 })(window);

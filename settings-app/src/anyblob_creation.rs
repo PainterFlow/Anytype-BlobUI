@@ -1,7 +1,7 @@
-//! Explicit source creation. These grants never enter ordinary object authorization.
+//! Create objects in query and collection destinations through saved space permissions.
 use crate::{
     anyblob_content,
-    codex::{Configuration, ProjectConfiguration, SourcePermission},
+    codex::{Configuration, Permission},
     kanban_api::Client,
 };
 use blobui_mcp::{content::ContentRequest, Operation};
@@ -18,14 +18,12 @@ mod query;
 #[cfg(test)]
 mod query_tests;
 
-pub(crate) fn query_type_candidates(
-    client: &Client,
-    source: &SourcePermission,
-    definition: &Value,
-    types: &mut Vec<Value>,
-    check: &impl Fn() -> Result<(), String>,
-) -> Result<std::collections::BTreeSet<String>, String> {
-    query::type_candidates(client, source, definition, types, check)
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Destination {
+    space_id: String,
+    kind: String,
+    id: String,
+    name: String,
 }
 
 static OPERATIONS: Mutex<()> = Mutex::new(());
@@ -53,67 +51,46 @@ fn get(
 fn base(space: &str) -> String {
     format!("/v2/spaces/{}", encode(space))
 }
-fn creation_prompt(req: &ContentRequest, source: &SourcePermission) -> Operation {
+fn creation_prompt(req: &ContentRequest, destination: &Destination) -> Operation {
     let mut content = req.clone();
     content.arguments["_approval_context"] = json!({
-        "space": if source.space.trim().is_empty() { &source.space_id } else { &source.space },
-        "destination": if source.name.trim().is_empty() { &source.id } else { &source.name },
-        "destination_kind": source.kind,
+        "space": destination.space_id,
+        "destination": if destination.name.trim().is_empty() { &destination.id } else { &destination.name },
+        "destination_kind": destination.kind,
     });
     Operation::Content { content }
 }
-fn source_path(source: &SourcePermission) -> String {
+fn destination_path(destination: &Destination) -> String {
     format!(
         "{}/{}/{}",
-        base(&source.space_id),
-        if source.kind == "query" {
+        base(&destination.space_id),
+        if destination.kind == "query" {
             "queries"
         } else {
             "collections"
         },
-        encode(&source.id)
+        encode(&destination.id)
     )
-}
-fn selected<'a>(
-    project: &'a ProjectConfiguration,
-    req: &ContentRequest,
-) -> Result<&'a SourcePermission, String> {
-    project
-        .sources
-        .iter()
-        .find(|s| {
-            s.space_id == req.arguments["space_id"]
-                && s.kind == req.arguments["destination"]["kind"]
-                && s.id == req.arguments["destination"]["id"]
-        })
-        .filter(|s| {
-            matches!(s.kind.as_str(), "query" | "collection")
-                && s.permission.permits("createDelete")
-        })
-        .ok_or_else(|| {
-            "Destination is not a saved Create-Delete source in this verified project and space."
-                .into()
-        })
 }
 fn definition(
     client: &Client,
-    source: &SourcePermission,
+    destination: &Destination,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
-    let path = source_path(source);
+    let path = destination_path(destination);
     let doc = get(
         client,
         &format!(
             "{}/objects/{}?ids=full",
-            base(&source.space_id),
-            encode(&source.id)
+            base(&destination.space_id),
+            encode(&destination.id)
         ),
         check,
     )?;
-    if doc["id"] != source.id {
-        return Err("Destination ID did not match the selected source.".into());
+    if doc["id"] != destination.id {
+        return Err("Destination ID did not match the requested destination.".into());
     }
-    if source.kind == "collection" {
+    if destination.kind == "collection" {
         if doc["type"] != "collection" {
             return Err("Selected destination is not a collection.".into());
         }
@@ -254,13 +231,13 @@ fn prove_with_types(
 }
 fn metadata(
     client: &Client,
-    source: &SourcePermission,
+    destination: &Destination,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<(Vec<Value>, Value), String> {
     check()?;
     let properties = client.pages(
         "GET",
-        &format!("{}/properties?ids=full", base(&source.space_id)),
+        &format!("{}/properties?ids=full", base(&destination.space_id)),
         None,
     )?;
     let mut options = json!({});
@@ -272,7 +249,7 @@ fn metadata(
                 "GET",
                 &format!(
                     "{}/properties/{}/options?ids=full",
-                    base(&source.space_id),
+                    base(&destination.space_id),
                     encode(key)
                 ),
                 None
@@ -283,12 +260,20 @@ fn metadata(
 }
 fn query_proof(
     client: &Client,
-    source: &SourcePermission,
+    destination: &Destination,
     def: &Value,
     req: &ContentRequest,
+    files_enabled: bool,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<String, String> {
-    let (response, canonical_type) = query::assess_with_type(client, source, def, req, check)?;
+    let (response, canonical_type) = query::assess_with_type(
+        client,
+        destination,
+        def,
+        req,
+        files_enabled,
+        check,
+    )?;
     match response {
         None => Ok(canonical_type),
         Some(response) => Err(response["message"]
@@ -300,13 +285,13 @@ fn query_proof(
 
 fn member(
     client: &Client,
-    source: &SourcePermission,
+    destination: &Destination,
     id: &str,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<bool, String> {
-    let path = source_path(source);
-    let urls = if source.kind == "query" {
-        let def = definition(client, source, check)?;
+    let path = destination_path(destination);
+    let urls = if destination.kind == "query" {
+        let def = definition(client, destination, check)?;
         def["views"]
             .as_array()
             .unwrap()
@@ -334,9 +319,8 @@ fn member(
     Ok(false)
 }
 
-fn record_path(project: &str, req: &ContentRequest) -> Result<PathBuf, String> {
+fn record_path(req: &ContentRequest) -> Result<PathBuf, String> {
     let identity = json!([
-        project,
         req.arguments["space_id"],
         req.arguments["destination"],
         req.arguments["idempotency_key"]
@@ -394,23 +378,24 @@ mod tests {
     pub(super) fn page(rows: Value) -> Value {
         json!({"data":rows,"has_more":false})
     }
-    pub(super) fn source(kind: &str, access: &str) -> SourcePermission {
-        SourcePermission {
+    pub(super) fn source(kind: &str, _access: &str) -> Destination {
+        Destination {
             space_id: "s".into(),
             kind: kind.into(),
             id: "dest".into(),
             name: "Destination".into(),
-            space: "Work".into(),
-            permission: crate::codex::Permission {
-                access: access.into(),
-                approval: "fullAccess".into(),
-                files_enabled: false,
-            },
         }
     }
-    pub(super) fn project(source: SourcePermission) -> ProjectConfiguration {
-        ProjectConfiguration {
-            sources: vec![source],
+    pub(super) fn configuration(access: &str) -> Configuration {
+        Configuration {
+            spaces: std::collections::BTreeMap::from([(
+                "s".into(),
+                Permission {
+                    access: access.into(),
+                    approval: "fullAccess".into(),
+                    files_enabled: false,
+                },
+            )]),
             ..Default::default()
         }
     }
@@ -462,29 +447,44 @@ mod tests {
     }
     pub(super) fn normal_read_and_edit(
         client: &Client,
-        scope: &crate::anyblob_scope::Scope,
+        config: &Configuration,
         id: &str,
     ) {
-        let config = scope.configuration();
         let read = ContentRequest {
             tool: "read_document".into(),
             arguments: json!({"space_id":"s","object_id":id}),
         };
-        let mut read =
-            anyblob_content::prepare(client, &read, &config, Some(scope), &|| Ok(())).unwrap();
+        let mut read = anyblob_content::prepare(client, &read, config, &|| Ok(())).unwrap();
+        let validation = anyblob_content::preflight(client, &mut read, config, &|| Ok(())).unwrap();
+        assert!(validation.is_none());
         assert_eq!(
-            anyblob_content::execute(client, &mut read, &|| Ok(())).unwrap()["id"],
+            anyblob_content::execute_validated(
+                client,
+                &mut read,
+                &|| Ok(()),
+                &|| Ok(()),
+                config,
+            )
+            .unwrap()["id"],
             id
         );
         let edit = ContentRequest {
             tool: "patch_object".into(),
             arguments: json!({"space_id":"s","object_id":id,"etag":"object-etag","body":{"ops":[{"op":"set_properties","set":{"name":"Edited"}}]}}),
         };
-        let mut edit =
-            anyblob_content::prepare(client, &edit, &config, Some(scope), &|| Ok(())).unwrap();
-        anyblob_content::inspect(client, &mut edit, &config, Some(scope), &|| Ok(())).unwrap();
+        let mut edit = anyblob_content::prepare(client, &edit, config, &|| Ok(())).unwrap();
+        anyblob_content::inspect(client, &mut edit, config, &|| Ok(())).unwrap();
+        let validation = anyblob_content::preflight(client, &mut edit, config, &|| Ok(())).unwrap();
+        assert!(validation.is_none());
         assert_eq!(
-            anyblob_content::execute(client, &mut edit, &|| Ok(())).unwrap()["outcome"],
+            anyblob_content::execute_validated(
+                client,
+                &mut edit,
+                &|| Ok(()),
+                &|| Ok(()),
+                config,
+            )
+            .unwrap()["outcome"],
             "confirmed"
         );
     }
@@ -554,58 +554,7 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn destination_grants_are_explicit_and_never_cross_projects_or_spaces() {
-        let request = req("collection");
-        for access in ["none", "read", "readWrite"] {
-            assert!(selected(&project(source("collection", access)), &request).is_err());
-        }
-        assert!(selected(&project(source("collection", "createDelete")), &request).is_ok());
-        assert!(selected(&ProjectConfiguration::default(), &request).is_err());
-        let mut foreign = source("collection", "createDelete");
-        foreign.space_id = "other".into();
-        assert!(selected(&project(foreign), &request).is_err());
-        let mut missing = request.clone();
-        missing
-            .arguments
-            .as_object_mut()
-            .unwrap()
-            .remove("destination");
-        assert!(selected(&project(source("collection", "createDelete")), &missing).is_err());
-        let config = Configuration::default();
-        assert!(anyblob_content::permission(&config, None, &request, false).is_err());
-    }
-    #[test]
-    fn empty_saved_sources_are_discoverable_only_with_create_delete() {
-        let p = ProjectConfiguration {
-            sources: vec![
-                source("query", "createDelete"),
-                source("collection", "readWrite"),
-            ],
-            ..Default::default()
-        };
-        let (client, capture, server) = fixture(vec![
-            doc("query"),
-            page(json!([{"id":"all"}])),
-            page(json!([])),
-        ]);
-        let request = ContentRequest {
-            tool: "list_creation_targets".into(),
-            arguments: json!({"space_id":"s"}),
-        };
-        let result = dispatch(&client, "project", &p, &request, &|| Ok(()), &|_, _| {
-            panic!("full access read")
-        })
-        .unwrap();
-        assert_eq!(result["targets"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            result["targets"][0]["requirements"]["query_source"]["types"][0],
-            "page"
-        );
-        server.join().unwrap();
-        assert_eq!(capture.lock().unwrap().len(), 3);
-    }
-    #[test]
-    fn query_creation_uses_union_and_subsequent_membership_permissions() {
+    fn query_creation_matches_view_membership_before_global_access_applies() {
         let mut responses = query_reads();
         responses.extend(query_reads()); // dry run authorization
         responses.push(json!({"valid":true}));
@@ -616,17 +565,10 @@ mod tests {
             page(json!([{"id":"later"}])),
             page(json!([{"id":"new-object"}])),
         ]);
-        responses.extend(vec![
-            page(json!([{"id":"later"}])),
-            page(json!([{"id":"new-object"}])),
-        ]);
         responses.extend(normal_access_responses("new-object"));
         let (client, capture, server) = fixture(responses);
-        let p = project(source("query", "createDelete"));
-        let result = dispatch(
-            &client,
-            "project",
-            &p,
+        let p = configuration("createDelete");
+        let result = dispatch_global(&client, &p,
             &req("query"),
             &|| Ok(()),
             &|_, _| panic!("full access"),
@@ -634,15 +576,17 @@ mod tests {
         .unwrap();
         assert_eq!(result["creation"]["outcome"], "confirmed");
         assert_eq!(result["placement"]["outcome"], "confirmed");
-        let scope = crate::anyblob_scope::Scope::load(&client, &p, &|| Ok(())).unwrap();
-        assert!(scope.readable("s", "new-object"));
         let edit = ContentRequest {
             tool: "patch_object".into(),
             arguments: json!({"space_id":"s","object_id":"new-object"}),
         };
-        assert!(scope.content_permission(&edit, false).is_some());
-        assert!(!scope.readable("s", "unrelated"));
-        normal_read_and_edit(&client, &scope, "new-object");
+        assert!(anyblob_content::permission(&p, &edit, false).is_ok());
+        let unrelated = ContentRequest {
+            tool: "read_document".into(),
+            arguments: json!({"space_id":"s","object_id":"unrelated"}),
+        };
+        assert!(anyblob_content::permission(&p, &unrelated, false).is_ok());
+        normal_read_and_edit(&client, &p, "new-object");
         server.join().unwrap();
         let capture = capture.lock().unwrap();
         assert_eq!(
@@ -678,10 +622,7 @@ mod tests {
                 responses.push(page(json!([{"key":"title","format":"text"}])));
             }
             let (client, capture, server) = fixture(responses);
-            let response = dispatch(
-                &client,
-                "project",
-                &project(source("query", "createDelete")),
+            let response = dispatch_global(&client, &configuration("createDelete"),
                 &request,
                 &|| Ok(()),
                 &|_, _| panic!("no approval before proof"),
@@ -719,15 +660,11 @@ mod tests {
             json!({"valid":true}),
             json!({"applied":true}),
             page(json!([{"id":"created"}])),
-            page(json!([{"id":"created"}])),
         ];
         responses.extend(normal_access_responses("created"));
         let (client, capture, server) = fixture(responses);
-        let p = project(source("collection", "createDelete"));
-        let result = dispatch(
-            &client,
-            "project",
-            &p,
+        let p = configuration("createDelete");
+        let result = dispatch_global(&client, &p,
             &req("collection"),
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -735,27 +672,25 @@ mod tests {
         .unwrap();
         assert_eq!(result["object_id"], "created");
         assert_eq!(result["placement"]["outcome"], "confirmed");
-        let scope = crate::anyblob_scope::Scope::load(&client, &p, &|| Ok(())).unwrap();
-        assert!(scope.readable("s", "created"));
-        assert!(scope
-            .content_permission(
-                &ContentRequest {
-                    tool: "patch_object".into(),
-                    arguments: json!({"space_id":"s","object_id":"created"})
-                },
-                false
-            )
-            .is_some());
-        assert!(scope
-            .content_permission(
-                &ContentRequest {
-                    tool: "create_property".into(),
-                    arguments: json!({"space_id":"s"})
-                },
-                false
-            )
-            .is_none());
-        normal_read_and_edit(&client, &scope, "created");
+        assert!(anyblob_content::permission(
+            &p,
+            &ContentRequest {
+                tool: "patch_object".into(),
+                arguments: json!({"space_id":"s","object_id":"created"})
+            },
+            false
+        )
+        .is_ok());
+        assert!(anyblob_content::permission(
+            &p,
+            &ContentRequest {
+                tool: "create_property".into(),
+                arguments: json!({"space_id":"s"})
+            },
+            false
+        )
+        .is_ok());
+        normal_read_and_edit(&client, &p, "created");
         server.join().unwrap();
         let capture = capture.lock().unwrap();
         let patches = capture
@@ -779,10 +714,7 @@ mod tests {
             json!({"valid":true}),
             changed,
         ]);
-        let error = dispatch(
-            &client,
-            "collection-change",
-            &project(source("collection", "createDelete")),
+        let error = dispatch_global(&client, &configuration("createDelete"),
             &request,
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -796,12 +728,12 @@ mod tests {
         assert!(String::from_utf8_lossy(&requests[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));
         assert!(String::from_utf8_lossy(&requests[2]).starts_with("GET /v2/spaces/s/objects/dest?ids=full "));
         assert!(requests.iter().all(|r| !String::from_utf8_lossy(r).starts_with("POST /v2/spaces/s/objects ")));
-        assert!(!record_path("collection-change", &request).unwrap().exists());
+        assert!(!record_path(&request).unwrap().exists());
     }
     #[test]
     fn collection_conflict_recovers_without_creating_twice_and_binds_payload() {
         let request = req("collection");
-        let p = project(source("collection", "createDelete"));
+        let p = configuration("createDelete");
         let (client, capture, server) = fixture(vec![
             doc("collection"),
             json!({"valid":true}),
@@ -813,10 +745,7 @@ mod tests {
             json!({"valid":true}),
             json!({"fixture_status":409,"message":"ETag conflict"}),
         ]);
-        let result = dispatch(
-            &client,
-            "restart-project",
-            &p,
+        let result = dispatch_global(&client, &p,
             &request,
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -845,10 +774,7 @@ mod tests {
             json!({"applied":true}),
             page(json!([{"id":"kept"}])),
         ]);
-        let result = dispatch(
-            &client,
-            "restart-project",
-            &p,
+        let result = dispatch_global(&client, &p,
             &request,
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -864,10 +790,7 @@ mod tests {
         let mut changed = request.clone();
         changed.arguments["body"]["name"] = json!("Different");
         let (client, _, server) = fixture(vec![doc("collection"), json!({"valid":true})]);
-        assert!(dispatch(
-            &client,
-            "restart-project",
-            &p,
+        assert!(dispatch_global(&client, &p,
             &changed,
             &|| Ok(()),
             &|_, _| Ok(())
@@ -875,13 +798,21 @@ mod tests {
         .unwrap_err()
         .contains("different payload"));
         server.join().unwrap();
-        assert!(selected(&project(source("collection", "read")), &request).is_err());
+        assert!(dispatch_global(
+            &client,
+            &configuration("read"),
+            &request,
+            &|| Ok(()),
+            &|_, _| panic!("read access must be denied")
+        )
+        .unwrap_err()
+        .contains("Create-Delete"));
     }
     #[test]
     fn uncertain_collection_write_is_not_retried_after_restart() {
         for uncertain_create in [true, false] {
             let request = req("collection");
-            let p = project(source("collection", "createDelete"));
+            let p = configuration("createDelete");
             let mut responses = vec![doc("collection"), json!({"valid":true}), doc("collection")];
             if uncertain_create {
                 responses.push(json!("disconnect"));
@@ -896,10 +827,7 @@ mod tests {
                 ]);
             }
             let (client, _, server) = fixture(responses);
-            let result = dispatch(
-                &client,
-                "unknown-project",
-                &p,
+            let result = dispatch_global(&client, &p,
                 &request,
                 &|| Ok(()),
                 &|_, _| Ok(()),
@@ -908,10 +836,7 @@ mod tests {
             assert!(result["outcome"] == "unknown" || result["placement"]["outcome"] == "unknown");
             server.join().unwrap();
             let (client, capture, server) = fixture(vec![doc("collection"), json!({"valid":true})]);
-            let result = dispatch(
-                &client,
-                "unknown-project",
-                &p,
+            let result = dispatch_global(&client, &p,
                 &request,
                 &|| Ok(()),
                 &|_, _| Ok(()),
@@ -923,10 +848,10 @@ mod tests {
         }
     }
     #[test]
-    fn creation_approval_uses_saved_destination_and_space_names() {
+    fn global_permission_approval_names_the_destination_and_space() {
         for kind in ["query", "collection"] {
-            let mut p = project(source(kind, "createDelete"));
-            p.sources[0].permission.approval = "alwaysAsk".into();
+            let mut p = configuration("createDelete");
+            p.spaces.get_mut("s").unwrap().approval = "alwaysAsk".into();
             let responses = if kind == "query" {
                 let mut responses = query_reads();
                 responses.extend(query_reads());
@@ -936,9 +861,9 @@ mod tests {
                 vec![doc(kind),json!({"valid":true})]
             };
             let (client, capture, server) = fixture(responses);
-            let error = dispatch(&client, "project", &p, &req(kind), &|| Ok(()), &|op, _| {
+            let error = dispatch_global(&client, &p, &req(kind), &|| Ok(()), &|op, _| {
                 assert_eq!(blobui_mcp::approval::describe(op), format!(
-                    "An agent wants to create object 'Created' in {kind} 'Destination' in Work."));
+                    "An agent wants to create object 'Created' in {kind} 'dest' in s."));
                 if kind=="collection" {assert!(String::from_utf8_lossy(&capture.lock().unwrap()[1]).starts_with("POST /v2/spaces/s/objects?dry_run=true "));}
                 Err("denied".into())
             }).unwrap_err();
@@ -1008,11 +933,11 @@ mod tests {
     #[test]
     fn approval_denial_cancellation_files_and_schema_payloads_do_not_write() {
         let request = req("collection");
-        let mut p = project(source("collection", "createDelete"));
-        p.sources[0].permission.approval = "approveForMe".into();
+        let mut p = configuration("createDelete");
+        p.spaces.get_mut("s").unwrap().approval = "approveForMe".into();
         let (client, capture, server) = fixture(vec![doc("collection"),json!({"valid":true})]);
         assert!(
-            dispatch(&client, "project", &p, &request, &|| Ok(()), &|_, _| Err(
+            dispatch_global(&client, &p, &request, &|| Ok(()), &|_, _| Err(
                 "denied".into()
             ))
             .unwrap_err()
@@ -1021,10 +946,7 @@ mod tests {
         server.join().unwrap();
         assert_eq!(capture.lock().unwrap().len(), 2);
         let client = Client::with_connection("fixture", "127.0.0.1", 1);
-        assert!(dispatch(
-            &client,
-            "project",
-            &p,
+        assert!(dispatch_global(&client, &p,
             &request,
             &|| Err("cancelled".into()),
             &|_, _| Ok(())
@@ -1034,7 +956,7 @@ mod tests {
         let mut files = request.clone();
         files.arguments["body"]["markdown"] = json!("![image](x)");
         assert!(
-            dispatch(&client, "project", &p, &files, &|| Ok(()), &|_, _| Ok(()))
+            dispatch_global(&client, &p, &files, &|| Ok(()), &|_, _| Ok(()))
                 .unwrap_err()
                 .contains("permissions")
         );
@@ -1042,21 +964,21 @@ mod tests {
             let mut schema = request.clone();
             schema.arguments["body"]["kind"] = json!(kind);
             assert!(
-                dispatch(&client, "project", &p, &schema, &|| Ok(()), &|_, _| Ok(()))
+                dispatch_global(&client, &p, &schema, &|| Ok(()), &|_, _| Ok(()))
                     .unwrap_err()
                     .contains("schemas")
             );
         }
     }
     #[test]
-    fn invalid_scoped_create_fails_before_approval_or_creation() {
-        let mut p=project(source("collection","createDelete"));
-        p.sources[0].permission.approval="alwaysAsk".into();
+    fn invalid_destination_create_fails_before_approval_or_creation() {
+        let mut p=configuration("createDelete");
+        p.spaces.get_mut("s").unwrap().approval="alwaysAsk".into();
         let (client,capture,server)=fixture(vec![
             doc("collection"),
             json!({"fixture_status":400,"code":"validation_failed","message":"Request validation failed","issues":[]}),
         ]);
-        let error=dispatch(&client,"project",&p,&req("collection"),&||Ok(()),&|_,_|panic!("Invalid scoped creates must fail before approval")).unwrap_err();
+        let error=dispatch_global(&client, &p,&req("collection"),&||Ok(()),&|_,_|panic!("Invalid destination creates must fail before approval")).unwrap_err();
         assert!(error.contains("Cannot create the object"),"{error}");
         assert!(error.contains("validation_failed"),"{error}");
         server.join().unwrap();
@@ -1067,11 +989,11 @@ mod tests {
         assert!(requests.iter().all(|r| !String::from_utf8_lossy(r).starts_with("POST /v2/spaces/s/objects ")));
     }
     #[test]
-    fn scoped_missing_option_error_names_the_value_without_recommending_a_rejected_flag() {
+    fn destination_missing_option_error_names_the_value_without_recommending_a_rejected_flag() {
         let mut request = req("collection");
         request.arguments["body"]["properties"] = json!({"status":"Todo"});
-        let mut p = project(source("collection", "createDelete"));
-        p.sources[0].permission.approval = "alwaysAsk".into();
+        let mut p = configuration("createDelete");
+        p.spaces.get_mut("s").unwrap().approval = "alwaysAsk".into();
         let (client, capture, server) = fixture(vec![
             doc("collection"),
             page(json!([{"key":"status","name":"Status","format":"select"}])),
@@ -1082,17 +1004,14 @@ mod tests {
                 "issues":[{"path":"body.properties.status","message":"Invalid option"}]
             }),
         ]);
-        let error = dispatch(
-            &client,
-            "scoped-option",
-            &p,
+        let error = dispatch_global(&client, &p,
             &request,
             &|| Ok(()),
-            &|_, _| panic!("Invalid scoped options must fail before approval"),
+            &|_, _| panic!("Invalid destination options must fail before approval"),
         )
         .unwrap_err();
         assert!(error.contains("status") && error.contains("\"Todo\""), "{error}");
-        assert!(error.contains("Scoped creation cannot create select options"), "{error}");
+        assert!(error.contains("Select options cannot be created as destination objects."), "{error}");
         assert!(!error.contains("create_missing_options=true"), "{error}");
         server.join().unwrap();
         let requests = capture.lock().unwrap();
@@ -1112,10 +1031,7 @@ mod tests {
         responses.extend(vec![doc("query"), page(json!([{"id":"changed"}]))]);
         let (client, capture, server) = fixture(responses);
         let request = req("query");
-        assert!(dispatch(
-            &client,
-            "query-change",
-            &project(source("query", "createDelete")),
+        assert!(dispatch_global(&client, &configuration("createDelete"),
             &request,
             &|| Ok(()),
             &|_, _| Ok(())
@@ -1128,7 +1044,7 @@ mod tests {
             .unwrap()
             .iter()
             .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
-        assert!(!record_path("query-change", &request).unwrap().exists());
+        assert!(!record_path(&request).unwrap().exists());
 
         let mut responses = query_reads();
         responses.extend(query_reads());
@@ -1141,10 +1057,7 @@ mod tests {
             page(json!([])),
         ]);
         let (client, capture, server) = fixture(responses);
-        let result = dispatch(
-            &client,
-            "query-change",
-            &project(source("query", "createDelete")),
+        let result = dispatch_global(&client, &configuration("createDelete"),
             &req("query"),
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -1162,24 +1075,24 @@ mod tests {
     }
     #[test]
     fn collection_dry_run_never_places_or_resumes_and_custom_files_are_checked() {
-        let p = project(source("collection", "createDelete"));
+        let p = configuration("createDelete");
         let mut request = req("collection");
         request.arguments["dry_run"] = json!(true);
         let (client, capture, server) = fixture(vec![doc("collection"), json!({"valid":true})]);
         assert_eq!(
-            dispatch(&client, "dry", &p, &request, &|| Ok(()), &|_, _| Ok(())).unwrap()["outcome"],
+            dispatch_global(&client, &p, &request, &|| Ok(()), &|_, _| Ok(())).unwrap()["outcome"],
             "validated"
         );
         server.join().unwrap();
         assert_eq!(capture.lock().unwrap().len(), 2);
-        assert!(!record_path("dry", &request).unwrap().exists());
-        let path = record_path("dry", &request).unwrap();
+        assert!(!record_path(&request).unwrap().exists());
+        let path = record_path(&request).unwrap();
         let mut payload = request.arguments.clone();
         payload.as_object_mut().unwrap().remove("dry_run");
         save(&path,&json!({"fingerprint":format!("{:x}",Sha256::digest(payload.to_string().as_bytes())),"state":"created","object_id":"earlier","creation":{"outcome":"confirmed"}})).unwrap();
         let (client, capture, server) = fixture(vec![doc("collection")]);
         assert_eq!(
-            dispatch(&client, "dry", &p, &request, &|| Ok(()), &|_, _| Ok(())).unwrap()
+            dispatch_global(&client, &p, &request, &|| Ok(()), &|_, _| Ok(())).unwrap()
                 ["placement"]["outcome"],
             "not_dispatched"
         );
@@ -1192,7 +1105,7 @@ mod tests {
             page(json!([{"key":"custom","format":"files"}])),
         ]);
         assert!(
-            dispatch(&client, "files", &p, &files, &|| Ok(()), &|_, _| Ok(()))
+            dispatch_global(&client, &p, &files, &|| Ok(()), &|_, _| Ok(()))
                 .unwrap_err()
                 .contains("permissions")
         );
@@ -1202,7 +1115,7 @@ mod tests {
     #[test]
     fn completed_duplicate_and_revoked_recovery_never_create_another_object() {
         let request = req("collection");
-        let p = project(source("collection", "createDelete"));
+        let p = configuration("createDelete");
         let (client, _, server) = fixture(vec![
             doc("collection"),
             json!({"valid":true}),
@@ -1215,7 +1128,7 @@ mod tests {
             json!({"applied":true}),
             page(json!([{"id":"created"}])),
         ]);
-        dispatch(&client, "duplicate", &p, &request, &|| Ok(()), &|_, _| {
+        dispatch_global(&client, &p, &request, &|| Ok(()), &|_, _| {
             Ok(())
         })
         .unwrap();
@@ -1223,7 +1136,7 @@ mod tests {
         let (client, capture, server) =
             fixture(vec![doc("collection"), json!({"valid":true}), page(json!([{"id":"created"}]))]);
         assert_eq!(
-            dispatch(&client, "duplicate", &p, &request, &|| Ok(()), &|_, _| Ok(
+            dispatch_global(&client, &p, &request, &|| Ok(()), &|_, _| Ok(
                 ()
             ))
             .unwrap()["placement"]["outcome"],
@@ -1233,10 +1146,9 @@ mod tests {
         assert_eq!(capture.lock().unwrap().len(), 3);
         let client = Client::with_connection("fixture", "127.0.0.1", 1);
         for access in ["none", "read", "readWrite"] {
-            assert!(dispatch(
+            assert!(dispatch_global(
                 &client,
-                "duplicate",
-                &project(source("collection", access)),
+                &configuration(access),
                 &request,
                 &|| Ok(()),
                 &|_, _| panic!("revoked")
@@ -1248,52 +1160,29 @@ mod tests {
     #[test]
     fn torn_journal_tail_blocks_recovery() {
         let request = req("collection");
-        let path = record_path("torn", &request).unwrap();
+        let path = record_path(&request).unwrap();
         fs::write(&path, "{\"state\":\"placing\"").unwrap();
         assert!(load(&path).unwrap_err().contains("incomplete"));
     }
 }
 
-pub fn dispatch(
+fn create_at_destination(
     client: &Client,
-    project_id: &str,
-    project: &ProjectConfiguration,
+    config: &Configuration,
+    destination: &Destination,
+    permission: &Permission,
     req: &ContentRequest,
     check: &impl Fn() -> Result<(), String>,
     approve: &impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
     req.validate()?;
     check()?;
-    if req.tool == "list_creation_targets" {
-        let mut targets = Vec::new();
-        for s in &project.sources {
-            if s.space_id != req.arguments["space_id"]
-                || !matches!(s.kind.as_str(), "query" | "collection")
-                || !s.permission.permits("createDelete")
-            {
-                continue;
-            }
-            if s.permission.approval == "alwaysAsk" {
-                approve(
-                    &Operation::Content {
-                        content: req.clone(),
-                    },
-                    check,
-                )?;
-            }
-            let def = definition(client, s, check)?;
-            let requirements = if s.kind == "query" {
-                query::discovery(client, s, &def, check)?
-            } else {
-                Value::Null
-            };
-            targets
-                .push(json!({"kind":s.kind,"id":s.id,"name":s.name,"requirements":requirements}));
-        }
-        check()?;
-        return Ok(json!({"targets":targets}));
+    if req.arguments["space_id"].as_str() != Some(destination.space_id.as_str())
+        || req.arguments["destination"]["kind"].as_str() != Some(destination.kind.as_str())
+        || req.arguments["destination"]["id"].as_str() != Some(destination.id.as_str())
+    {
+        return Err("Creation destination does not match the request.".into());
     }
-    let source = selected(project, req)?;
     let body = &req.arguments["body"];
     if body["kind"].as_str().is_some_and(|kind| kind != "object")
         || [
@@ -1320,23 +1209,19 @@ pub fn dispatch(
             )
         )
     {
-        return Err("Scoped creation cannot create schemas, source definitions or collection membership payloads.".into());
+        return Err("Destination creation cannot create schemas, source definitions or collection membership payloads.".into());
     }
-    let mut config = Configuration::default();
-    config
-        .spaces
-        .insert(source.space_id.clone(), source.permission.clone());
-    let mut prepared = anyblob_content::prepare(client, req, &config, None, check)?;
-    let destination_definition = definition(client, source, check)?;
-    if source.kind == "query" {
+    let mut prepared = anyblob_content::prepare(client, req, config, check)?;
+    let destination_definition = definition(client, destination, check)?;
+    if destination.kind == "query" {
         let (response, canonical_type) =
-            query::assess_with_type(client, source, &destination_definition, req, check)?;
+            query::assess_with_type(client, destination, &destination_definition, req, permission.files_enabled, check)?;
         prepared.request.arguments["body"]["type"] = json!(canonical_type);
         prepared.files |= anyblob_content::needs_files(&prepared.request.arguments["body"]);
-        anyblob_content::permission(&config, None, &prepared.request, prepared.files)?;
+        anyblob_content::permission(config, &prepared.request, prepared.files)?;
         if let Some(response) = response {
             // A follow-up can reuse a key only if no earlier creation bound it.
-            let path = record_path(project_id, req)?;
+            let path = record_path(req)?;
             if let Some(record) = load(&path)? {
                 let mut payload = req.arguments.clone();
                 payload.as_object_mut().unwrap().remove("dry_run");
@@ -1346,9 +1231,9 @@ pub fn dispatch(
                 }
                 return Ok(result(&record, "unknown", Some("An earlier creation attempt exists. Requirements cannot authorize a new payload or an automatic retry.".into())));
             }
-            if source.permission.approval == "alwaysAsk" && req.arguments["dry_run"] != true {
+            if permission.approval == "alwaysAsk" && req.arguments["dry_run"] != true {
                 approve(
-                    &creation_prompt(req, source),
+                    &creation_prompt(req, destination),
                     check,
                 )?;
             }
@@ -1356,9 +1241,9 @@ pub fn dispatch(
             return Ok(response);
         }
     }
-    anyblob_content::inspect(client, &mut prepared, &config, None, check)?;
+    anyblob_content::inspect(client, &mut prepared, config, check)?;
     if req.arguments["dry_run"] == true {
-        let path = record_path(project_id, req)?;
+        let path = record_path(req)?;
         let mut payload = req.arguments.clone();
         payload.as_object_mut().unwrap().remove("dry_run");
         let fingerprint = format!("{:x}", Sha256::digest(payload.to_string().as_bytes()));
@@ -1373,39 +1258,39 @@ pub fn dispatch(
             return Ok(json!({"outcome":"not_dispatched","dry_run":true,"creation":record["creation"],"placement":{"outcome":"not_dispatched"},"idempotency_key":req.arguments["idempotency_key"]}));
         }
     }
-    let needs_confirmation = req.requires_confirmation(&source.permission.approval);
+    let needs_confirmation = req.requires_confirmation(&permission.approval);
     let dispatch_type = prepared.request.arguments["body"]["type"].clone();
     let fresh_state_check = || -> Result<(), String> {
         check()?;
-        let current = definition(client, source, check)?;
+        let current = definition(client, destination, check)?;
         if current != destination_definition {
             return Err("Creation destination changed before creation. Retry with current requirements.".into());
         }
-        if source.kind == "query"
-            && query_proof(client, source, &current, req, check)? != dispatch_type
+        if destination.kind == "query"
+            && query_proof(client, destination, &current, req, permission.files_enabled, check)? != dispatch_type
         {
             return Err("Type identity changed before creation. Retry with current metadata.".into());
         }
         Ok(())
     };
-    let validation = if source.kind == "query" {
-        anyblob_content::preflight(client, &mut prepared, &config, None, &fresh_state_check)?
+    let validation = if destination.kind == "query" {
+        anyblob_content::preflight(client, &mut prepared, config, &fresh_state_check)?
     } else {
-        anyblob_content::preflight(client, &mut prepared, &config, None, check)?
+        anyblob_content::preflight(client, &mut prepared, config, check)?
     };
     if needs_confirmation {
         approve(
-            &creation_prompt(req, source),
+            &creation_prompt(req, destination),
             check,
         )?;
         check()?;
-        let current = definition(client, source, check)?;
+        let current = definition(client, destination, check)?;
         if current != destination_definition {
             return Err("Creation destination changed before creation. Retry with current requirements.".into());
         }
-        if source.kind == "query" {
+        if destination.kind == "query" {
             let (response, canonical_type) =
-                query::assess_with_type(client, source, &current, req, check)?;
+                query::assess_with_type(client, destination, &current, req, permission.files_enabled, check)?;
             if let Some(response) = response {
                 return Ok(response);
             }
@@ -1413,9 +1298,9 @@ pub fn dispatch(
                 return Err("Type identity changed before creation. Retry with current metadata.".into());
             }
         }
-        anyblob_content::inspect(client, &mut prepared, &config, None, check)?;
+        anyblob_content::inspect(client, &mut prepared, config, check)?;
         if req.arguments["dry_run"] != true {
-            anyblob_content::preflight(client, &mut prepared, &config, None, &fresh_state_check)?;
+            anyblob_content::preflight(client, &mut prepared, config, &fresh_state_check)?;
         }
     }
     if let Some(result) = validation {
@@ -1427,7 +1312,7 @@ pub fn dispatch(
         .lock()
         .map_err(|_| "Creation operation lock unavailable.")?;
     check()?;
-    let path = record_path(project_id, req)?;
+    let path = record_path(req)?;
     let mut payload = req.arguments.clone();
     payload.as_object_mut().unwrap().remove("dry_run");
     let fingerprint = format!("{:x}", Sha256::digest(payload.to_string().as_bytes()));
@@ -1470,8 +1355,7 @@ pub fn dispatch(
             &mut prepared,
             check,
             &before_commit,
-            &config,
-            None,
+            config,
         );
         let creation = match creation {
             Ok(c) => c,
@@ -1520,13 +1404,13 @@ pub fn dispatch(
     };
     let placement = (|| -> Result<(), String> {
         check()?;
-        if member(client, source, &id, check)? {
+        if member(client, destination, &id, check)? {
             return Ok(());
         }
-        if source.kind == "query" {
-            return Err("Created object does not belong to a current query view. It was retained; no continuing access was granted.".into());
+        if destination.kind == "query" {
+            return Err("Created object does not belong to a current query view. It was retained; creation did not grant additional permissions.".into());
         }
-        let current = self::definition(client, source, check)?;
+        let current = self::definition(client, destination, check)?;
         let etag = current["document"]["etag"]
             .as_str()
             .ok_or("Collection omitted its current ETag.")?;
@@ -1537,7 +1421,7 @@ pub fn dispatch(
         }
         blobui_mcp::content::validate_schema(&schema["schema"], &op, "add_items")?;
         let body = json!({"ops":[op]});
-        let api_path = format!("{}/objects/{}", base(&source.space_id), encode(&source.id));
+        let api_path = format!("{}/objects/{}", base(&destination.space_id), encode(&destination.id));
         check()?;
         let dry = client.content_request(
             "PATCH",
@@ -1556,7 +1440,7 @@ pub fn dispatch(
         check()?;
         let key = format!(
             "{:x}",
-            Sha256::digest(format!("placement:{project_id}:{}:{etag}", req.arguments).as_bytes())
+            Sha256::digest(format!("placement:{}:{}:{etag}", destination.space_id, req.arguments).as_bytes())
         );
         let placed = client.content_request(
             "PATCH",
@@ -1574,7 +1458,7 @@ pub fn dispatch(
             Ok(_) => record["state"] = json!("created"),
             Err(e) => return Err(e),
         }
-        if !member(client, source, &id, check)? {
+        if !member(client, destination, &id, check)? {
             return Err(
                 "Collection write was confirmed but membership could not be verified.".into(),
             );
@@ -1610,6 +1494,9 @@ pub fn dispatch_global(
     approve: &impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<Value, String> {
     req.validate()?;
+    if !matches!(req.tool.as_str(), "create_object" | "list_creation_targets") {
+        return Err("Global creation destinations only support create_object and list_creation_targets.".into());
+    }
     let space_id = req.arguments["space_id"].as_str().ok_or("Missing space ID.")?;
     let permission = config.spaces.get(space_id)
         .filter(|permission| permission.permits("createDelete"))
@@ -1620,7 +1507,7 @@ pub fn dispatch_global(
     if req.tool == "list_creation_targets" {
         let rows = client.pages("POST", &format!("{}/search?ids=full", base(space_id)), Some(&json!({})))?;
         let mut seen = std::collections::BTreeSet::new();
-        let mut sources = Vec::new();
+        let mut targets = Vec::new();
         for row in rows {
             check()?;
             let kind = match row["type"].as_str() {
@@ -1631,21 +1518,27 @@ pub fn dispatch_global(
             let id = row["id"].as_str().filter(|id| !id.is_empty())
                 .ok_or("Anytype returned a creation destination without an ID.")?;
             if !seen.insert((kind.to_string(), id.to_string())) { continue; }
-            sources.push(SourcePermission {
+            let destination = Destination {
                 space_id: space_id.into(),
                 kind: kind.into(),
                 id: id.into(),
                 name: row["name"].as_str().unwrap_or("").into(),
-                space: space_id.into(),
-                permission: permission.clone(),
-            });
+            };
+            if permission.approval == "alwaysAsk" {
+                approve(&Operation::Content { content: req.clone() }, check)?;
+            }
+            let def = definition(client, &destination, check)?;
+            let requirements = if destination.kind == "query" {
+                query::discovery(client, &destination, &def, check)?
+            } else {
+                Value::Null
+            };
+            targets.push(json!({"kind":destination.kind,"id":destination.id,"name":destination.name,"requirements":requirements}));
         }
-        return dispatch(client, "global", &ProjectConfiguration { sources, ..Default::default() }, req, check, approve);
+        check()?;
+        return Ok(json!({"targets":targets}));
     }
 
-    if req.tool != "create_object" {
-        return Err("Global creation destinations only support create_object and list_creation_targets.".into());
-    }
     let kind = req.arguments.pointer("/destination/kind").and_then(Value::as_str)
         .ok_or("Missing destination kind.")?;
     let id = req.arguments.pointer("/destination/id").and_then(Value::as_str)
@@ -1653,13 +1546,11 @@ pub fn dispatch_global(
     if !matches!(kind, "query" | "collection") {
         return Err("Creation destination must be a query or collection.".into());
     }
-    let source = SourcePermission {
+    let destination = Destination {
         space_id: space_id.into(),
         kind: kind.into(),
         id: id.into(),
         name: id.into(),
-        space: space_id.into(),
-        permission,
     };
-    dispatch(client, "global", &ProjectConfiguration { sources: vec![source], ..Default::default() }, req, check, approve)
+    create_at_destination(client, config, &destination, &permission, req, check, approve)
 }

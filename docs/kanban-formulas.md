@@ -68,7 +68,7 @@ The version 2 configuration is `.blobui-kanban-formulas.json` at the source work
 
 Implementation and automated validation use workspace-local fixtures. A read-only live probe verifies discovery and calculation without publishing to the user's installed files.
 
-Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Scoped Anyblob grants can use option mappings already supplied by permitted property metadata without requiring separate object access to those options.
+Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Global per-space Anyblob grants can use option mappings already supplied by readable property metadata without requiring separate object access to those options.
 
 Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
 

@@ -2095,7 +2095,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       saveBusy = false;
       if (connectionSaved || updaterPathChanged) void refreshCalendarApiAvailability(true);
       updateSaveButton();
-      void window.BlobUI.ProjectPermissions?.reloadProjects();
       window.dispatchEvent(new Event("blobui-codex-integration-refresh"));
     }
   }

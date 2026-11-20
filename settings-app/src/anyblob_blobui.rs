@@ -1,7 +1,6 @@
 //! Targeted configuration publication. This module never writes Anytype content.
 use crate::{
-    anyblob_scope::Scope,
-    codex::{Configuration as Permissions, Permission, ProjectConfiguration},
+    codex::{Configuration as Permissions, Permission},
     kanban_api::Client,
     kanban_snapshot::Target,
 };
@@ -26,110 +25,28 @@ pub(crate) fn kanban_configuration(install: &Path) -> Result<crate::kanban::Conf
 pub(crate) fn calendar_revision(data: &Value) -> Result<String, String> {
     Ok(revision(&json!(crate::calendar::configuration(data)?)))
 }
-fn content_request(
-    space: &str,
-    object: Option<&str>,
-    write: bool,
-) -> blobui_mcp::content::ContentRequest {
-    blobui_mcp::content::ContentRequest {
-        tool: if object.is_some() {
-            if write {
-                "patch_object"
-            } else {
-                "read_document"
-            }
-        } else {
-            if write {
-                "update_property"
-            } else {
-                "get_schema"
-            }
-        }
-        .into(),
-        arguments: json!({"space_id":space,"object_id":object}),
-    }
-}
 fn permission(
     config: &Permissions,
-    scope: Option<&Scope>,
-    project: Option<&ProjectConfiguration>,
     space: &str,
-    object: Option<&str>,
     write: bool,
 ) -> Result<Permission, String> {
     let capability = if write { "write" } else { "read" };
-    let mut grants = Vec::new();
-    if let Some(scope) = scope {
-        if let Some(p) = if object.is_none() {
-            scope.whole_space_permission(space, write)
-        } else {
-            scope.content_permission(&content_request(space, object, write), false)
-        } {
-            grants.push(p);
-        }
-        // Source objects are configuration targets even when they are not members of themselves.
-        if let (Some(project), Some(object)) = (project, object) {
-            grants.extend(
-                project
-                    .sources
-                    .iter()
-                    .filter(|s| {
-                        s.space_id == space
-                            && s.id == object
-                            && matches!(s.kind.as_str(), "query" | "collection" | "type")
-                    })
-                    .map(|s| s.permission.clone()),
-            );
-        }
-    } else if let Some(p) = config.spaces.get(space) {
-        grants.push(p.clone());
-    }
-    grants.retain(|p| p.permits(capability));
-    let mut p = grants
-        .first()
-        .cloned()
-        .ok_or("Access denied by saved BlobUI permissions for this target.")?;
-    if grants.iter().any(|p| p.approval == "alwaysAsk") {
-        p.approval = "alwaysAsk".into();
-    }
-    Ok(p)
+    config.spaces.get(space).cloned()
+        .filter(|permission| permission.permits(capability))
+        .ok_or_else(|| "Access denied by saved BlobUI permissions for this target.".into())
 }
 fn objects(
     client: &Client,
     config: &Permissions,
-    scope: Option<&Scope>,
-    project: Option<&ProjectConfiguration>,
     space: &str,
     selected: Option<&str>,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Vec<String>, String> {
     if let Some(id) = selected {
-        permission(config, scope, project, space, Some(id), false)?;
+        permission(config, space, false)?;
         return Ok(vec![id.into()]);
     }
-    if let Some(scope) = scope {
-        let mut ids = scope.object_ids(space);
-        if let Some(project) = project {
-            ids.extend(
-                project
-                    .sources
-                    .iter()
-                    .filter(|s| {
-                        s.space_id == space && s.kind != "space" && s.permission.permits("read")
-                    })
-                    .map(|s| s.id.clone()),
-            );
-        }
-        // A whole-space source has no enumerated object list.
-        if permission(config, Some(scope), project, space, None, true).is_err()
-            && !scope.has_whole_space(space)
-        {
-            ids.sort();
-            ids.dedup();
-            return Ok(ids);
-        }
-    }
-    permission(config, scope, project, space, None, false)?;
+    permission(config, space, false)?;
     check()?;
     let rows = client.pages(
         "POST",
@@ -374,8 +291,6 @@ pub(crate) fn execute_at(
     install: &Path,
     client: &Client,
     config: &Permissions,
-    scope: Option<&Scope>,
-    project: Option<&ProjectConfiguration>,
     request: &BlobuiRequest,
     check: &impl Fn() -> Result<(), String>,
     approve: &impl Fn(&Operation, &dyn Fn() -> Result<(), String>) -> Result<(), String>,
@@ -394,34 +309,15 @@ pub(crate) fn execute_at(
         request.calendar() && !request.tool.starts_with("list_") && selected.is_none();
     let p = permission(
         config,
-        scope,
-        project,
         space,
-        if wide_calendar { None } else { object },
         request.mutates() || (wide_calendar && !request.tool.starts_with("get_")),
-    )
-    .or_else(|error| {
-        if request.tool.starts_with("list_") && object.is_none() {
-            scope
-                .and_then(|s| s.content_permission(&content_request(space, None, false), false))
-                .ok_or(error)
-        } else {
-            Err(error)
-        }
-    })?;
+    )?;
     let authorize = |id: &str| {
         check()?;
-        permission(config, scope, project, space, Some(id), false).map(|_| ())
+        let _ = id;
+        permission(config, space, false).map(|_| ())
     };
-    // Conservatively honor approvals on every source contributing data.
-    let ask = p.approval == "alwaysAsk"
-        || project.is_some_and(|p| {
-            p.sources.iter().any(|s| {
-                s.space_id == space
-                    && s.permission.permits("read")
-                    && s.permission.approval == "alwaysAsk"
-            })
-        });
+    let ask = p.approval == "alwaysAsk";
     if ask {
         approve(
             &Operation::Blobui {
@@ -432,7 +328,7 @@ pub(crate) fn execute_at(
     }
     check()?;
     if request.tool.starts_with("list_") {
-        let ids = objects(client, config, scope, project, space, object, check)?;
+        let ids = objects(client, config, space, object, check)?;
         let result = if request.calendar() {
             let mut views = Vec::new();
             for id in &ids {
@@ -455,7 +351,7 @@ pub(crate) fn execute_at(
                 let key = required(&row, "key")?;
                 let (doc, properties) = calendar_type(client, space, &key)?;
                 if let Some(id) = doc["id"].as_str() {
-                    if permission(config, scope, project, space, Some(id), false).is_ok()
+                    if permission(config, space, false).is_ok()
                         && object.is_none_or(|selected| selected == id)
                     {
                         views.extend(crate::calendar::calendar_views(space, space, &doc));
@@ -466,7 +362,7 @@ pub(crate) fn execute_at(
             json!({"types":targets,"views":views,"warnings":client.take_info()})
         } else {
             let mut views = client.discover_targeted(space, &ids, &authorize)?;
-            if object.is_none() && permission(config, scope, project, space, None, false).is_ok() {
+            if object.is_none() && permission(config, space, false).is_ok() {
                 views.extend(client.discover_type_views_in_space(space, &authorize)?);
             }
             let mut seen = BTreeSet::new();
@@ -1002,8 +898,6 @@ mod tests {
                 &self.root,
                 &self.client,
                 &config,
-                None,
-                None,
                 &BlobuiRequest {
                     tool: name.into(),
                     arguments: args,
@@ -1217,64 +1111,6 @@ mod tests {
         assert_eq!(f.files(), before);
     }
     #[test]
-    fn project_sources_cannot_publish_defaults_or_partial_aggregates() {
-        let f = Fixture::new();
-        let project:ProjectConfiguration=serde_json::from_value(json!({"name":"Test","rootPaths":[],"sources":[{"spaceId":"space","kind":"query","id":"query","name":"Tasks","space":"Space","permission":{"access":"readWrite","filesEnabled":false,"approval":"fullAccess"}}]})).unwrap();
-        let scope = Scope::load(&f.client, &project, &|| Ok(())).unwrap();
-        let config = scope.configuration();
-        let before = f.files();
-        assert!(execute_at(
-            &f.root,
-            &f.client,
-            &config,
-            Some(&scope),
-            Some(&project),
-            &BlobuiRequest {
-                tool: "set_calendar_color_rule".into(),
-                arguments: f.calendar_args()
-            },
-            &|| Ok(()),
-            &|_, _| Ok(())
-        )
-        .is_err());
-        assert_eq!(f.files(), before);
-        let result = execute_at(
-            &f.root,
-            &f.client,
-            &config,
-            Some(&scope),
-            Some(&project),
-            &BlobuiRequest {
-                tool: "set_kanban_calculation".into(),
-                arguments: f.kanban_args(),
-            },
-            &|| Ok(()),
-            &|_, _| Ok(()),
-        )
-        .unwrap();
-        assert_eq!(result["outcome"], "confirmed");
-        let before = f.files();
-        // A grant containing only the board host must not yield aggregates from a subset.
-        let project:ProjectConfiguration=serde_json::from_value(json!({"name":"Test","rootPaths":[],"sources":[{"spaceId":"space","kind":"collection","id":"query","name":"Only host","space":"Space","permission":{"access":"readWrite","filesEnabled":false,"approval":"fullAccess"}}]})).unwrap();
-        let empty_scope = Scope::default();
-        assert!(execute_at(
-            &f.root,
-            &f.client,
-            &config,
-            Some(&empty_scope),
-            Some(&project),
-            &BlobuiRequest {
-                tool: "set_kanban_calculation".into(),
-                arguments: f.kanban_args()
-            },
-            &|| Ok(()),
-            &|_, _| Ok(())
-        )
-        .unwrap_err()
-        .contains("Access denied"));
-        assert_eq!(f.files(), before);
-    }
-    #[test]
     fn legacy_reads_do_not_persist_migrations() {
         let f = Fixture::new();
         let path = f.root.join("blob/.blobui-kanban-formulas.json");
@@ -1420,8 +1256,6 @@ mod tests {
             &f.root,
             &f.client,
             &config,
-            None,
-            None,
             &BlobuiRequest {
                 tool: "set_kanban_calculation".into(),
                 arguments: f.kanban_args()

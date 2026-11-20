@@ -17,7 +17,6 @@ const icons = {
   "App Settings": <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" /></>,
   Settings: <><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="2" /><circle cx="13" cy="10" r="2" /></>,
   Permissions: <><path d="m10 2 7 3v5c0 4-7 8-7 8s-7-4-7-8V5l7-3Z" /><path d="m6 10 3 3 5-6" /></>,
-  Projects: <path d="M2 5h6l2 2h8v10H2Z" />,
 };
 
 function NavigationGroup({ id, label, sections, active, expanded, onNavigate, onSection, children, hidden }) {
@@ -76,7 +75,7 @@ export function SettingsNavigation({ page, onNavigate, onSection }) {
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="7" cy="5" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="13" cy="10" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /><circle cx="8" cy="15" r="2" fill="var(--sidebar)" stroke="currentColor" strokeWidth="1.5" /></svg>
     </NavigationGroup>
     <span className="nav-group-label">Integrations</span>
-    <NavigationGroup {...group("codex")} label="Anyblob" sections={["Settings", "Permissions", "Projects"]}>
+    <NavigationGroup {...group("codex")} label="Anyblob" sections={["Settings", "Permissions"]}>
       <span className="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         {Array.from({ length: 6 }, (_, index) => <path key={index} transform={`rotate(${index * 60} 12 12)`} d="M8.5 13V6l5-2.9a5.3 5.3 0 0 1 7.2 1.9" />)}
       </svg></span>

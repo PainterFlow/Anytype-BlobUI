@@ -77,9 +77,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             )
         }
         "api" => api_command(&args[1..]),
-        "project" => project_command(&args[1..]),
         "perms" => global_perms_command(&args[1..]),
-        "search" => search_command(&args[1..]),
+        "spaces" => spaces_command(&args[1..]),
         "object-mention" => object_mention_command(&args[1..]),
         "--toggle-anyblob" => {
             if args.len() != 2 {
@@ -123,14 +122,9 @@ fn print_help() {
            info                              Show version and update status\n\
            update [-f]                      Check for and install an update\n\
            api status|login [-f]|logout      Manage the local Anytype API v2 key\n\
-           project ls                       List local Anyblob projects\n\
-           project config --folder <path>   Select the local project folder\n\
-           project remove-unavailable       Remove stale project registrations\n\
-           project <name> info [--full]     Show a project and its auth details\n\
-           project <name> perms ...         Manage project source permissions\n\
            perms <space-id> ...             Manage global space permissions\n\
-           perms ls [--filter space]        List global permissions\n\
-           search <text> [--filter space|object_type|query|collection] Search permitted content\n\
+           perms ls                         List global permissions\n\
+           spaces ls                       List Anytype spaces and their IDs\n\
            object-mention ls|add|remove ... Manage object type filters\n\
            object-mention spaces ls|add|remove ... Manage mention spaces\n\
            object-mention --filter-done <bool> Filter completed task mentions\n\
@@ -511,300 +505,41 @@ fn encrypt_api_key(key: &str) -> Result<String, String> {
     }
 }
 
-fn project_command(args: &[String]) -> Result<(), String> {
-    match args.first().map(String::as_str) {
-        Some("ls") => {
-            let projects = crate::codex_projects::discover()?;
-            crate::anyblob::synchronize_project_registry(&projects)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&projects).unwrap_or_default()
-            );
-        }
-        Some("config") => {
-            if args.get(1).map(String::as_str) != Some("--folder") {
-                return Err("Usage: blob-ui project config --folder <absolute-path>".into());
-            }
-            if args.len() != 3 {
-                return Err("Usage: blob-ui project config --folder <absolute-path>".into());
-            }
-            let folder = args
-                .get(2)
-                .ok_or("Choose an existing local projects folder.")?;
-            let result = crate::anyblob::set_anyblob_projects_folder(folder.clone())?;
-            println!(
-                "Local projects folder: {}",
-                result["localProjectsFolder"].as_str().unwrap_or(folder)
-            );
-        }
-        Some("remove-unavailable") => {
-            let projects = crate::codex_projects::discover()?;
-            crate::anyblob::synchronize_project_registry(&projects)?;
-            let available: BTreeSet<_> =
-                projects.iter().map(|project| project.id.clone()).collect();
-            let (root, mut data) = load_data()?;
-            let mut configuration = crate::settings_from_data(&data).codex_integration;
-            let before = configuration.projects.len();
-            configuration
-                .projects
-                .retain(|id, _| available.contains(id));
-            let removed = before.saturating_sub(configuration.projects.len());
-            data["settings"]["codexIntegration"] = serde_json::to_value(configuration)
-                .map_err(|_| "Could not encode the saved project permissions.")?;
-            save_data(&root, &data)?;
-            println!("Removed {removed} unavailable project permission set(s).");
-        }
-        Some(name) => {
-            if name.starts_with('-') {
-                return Err("Usage: blob-ui project <name> info|perms ...".into());
-            }
-            project_named_command(name, &args[1..])?;
-        }
-        None => {
-            return Err(
-                "Usage: blob-ui project ls|config|remove-unavailable|<name> info|perms ...".into(),
-            )
-        }
-    }
-    Ok(())
-}
-
-fn project_named_command(name: &str, args: &[String]) -> Result<(), String> {
-    let projects = crate::codex_projects::discover()?;
-    let matches: Vec<_> = projects
-        .iter()
-        .filter(|project| project.name == name)
-        .collect();
-    let project = match matches.as_slice() {
-        [] => return Err(format!("Local Anyblob project `{name}` was not found.")),
-        [project] => *project,
-        _ => {
-            return Err(format!(
-                "More than one project is named `{name}`. Rename a project before using its name."
-            ))
-        }
-    };
-    match args.first().map(String::as_str) {
-        Some("info") => {
-            if args.len() > 2 || (args.len() == 2 && args[1] != "--full") {
-                return Err(format!("Usage: blob-ui project {name} info [--full]"));
-            }
-            project_info(project, args.get(1).is_some_and(|arg| arg == "--full"))
-        }
-        Some("perms") => project_permissions_command(project, &args[1..]),
-        _ => Err(format!(
-            "Usage: blob-ui project {name} info [--full]|perms ..."
-        )),
-    }
-}
-
-fn project_info(project: &crate::codex_projects::Project, full: bool) -> Result<(), String> {
-    let projects = crate::codex_projects::discover()?;
-    crate::anyblob::synchronize_project_registry(&projects)?;
-    let folder = PathBuf::from(
-        project
-            .root_paths
-            .first()
-            .ok_or("The project folder is unavailable.")?,
-    );
-    let config_path = folder.join("anyblob.config.toml");
-    crate::reject_reparse_component(&config_path)?;
-    let text = fs::read_to_string(&config_path)
-        .map_err(|_| "Could not read the local project configuration.".to_string())?;
-    let config = crate::codex_projects::parse_config(&text)?;
-    let mut result = json!({
-        "id": project.id,
-        "name": project.name,
-        "folder": folder,
-        "configFile": config_path,
-        "authenticationKey": toml::from_str::<toml::Value>(&text)
-            .ok().and_then(|value| value.get("key").and_then(toml::Value::as_str).map(String::from))
-            .unwrap_or_default(),
-    });
-    if full {
-        let records = crate::settings_store::load_anyblob_project_registry(&ensure_settings()?)?;
-        result["authenticatedChats"] = records
-            .iter()
-            .find(|record| record["id"].as_str() == Some(&config.id))
-            .and_then(|record| record.get("authenticatedChats"))
-            .cloned()
-            .unwrap_or_else(|| json!([]));
-    }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).unwrap_or_default()
-    );
-    Ok(())
-}
-
-fn project_permissions_command(
-    project: &crate::codex_projects::Project,
-    args: &[String],
-) -> Result<(), String> {
-    if args.first().map(String::as_str) == Some("ls") {
-        if args.len() > 3 || (args.len() > 1 && (args.len() != 3 || args[1] != "--filter")) {
-            return Err("Usage: blob-ui project <name> perms ls [--filter <source-kind>]".into());
-        }
-        if option_value(args, "--filter").is_some_and(|filter| normalize_kind(filter).is_err()) {
-            return Err("Project permission filters must be space, object, object_type, query, or collection.".into());
-        }
-        let data = crate::load_settings_data(&ensure_settings()?)?;
-        let configuration = crate::settings_from_data(&data).codex_integration;
-        let entries = configuration
-            .projects
-            .get(&project.id)
-            .map(|config| config.sources.as_slice())
-            .unwrap_or_default();
-        let filter = option_value(args, "--filter");
-        let rows: Vec<_> = entries
-            .iter()
-            .filter(|source| filter.is_none_or(|filter| kind_matches(filter, &source.kind)))
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&rows).unwrap_or_default()
-        );
-        return Ok(());
-    }
-    if args.len() < 2 {
-        return Err("Usage: blob-ui project <name> perms <space|object|object_type|query|collection> <id> --approval <value> --permission <value> --file-uploads <bool>".into());
-    }
-    let kind = normalize_kind(&args[0])?;
-    let id = &args[1];
-    validate_cli_id(id, "source")?;
-    let permission = permission_from_args(&args[2..], true)?;
-    let (space_id, source_name, space_name) =
-        validate_project_source(project, &kind, id, &args[2..])?;
-    let (root, mut data) = load_data()?;
-    let mut configuration = crate::settings_from_data(&data).codex_integration;
-    let project_config = configuration
-        .projects
-        .entry(project.id.clone())
-        .or_insert_with(|| crate::codex::ProjectConfiguration {
-            name: project.name.clone(),
-            root_paths: project.root_paths.clone(),
-            sources: Vec::new(),
-        });
-    project_config.name = project.name.clone();
-    project_config.root_paths = project.root_paths.clone();
-    if let Some(source) = project_config
-        .sources
-        .iter_mut()
-        .find(|source| source.space_id == space_id && source.kind == kind && source.id == *id)
-    {
-        source.permission = permission;
-        source.name = source_name.clone();
-        source.space = space_name.clone();
-    } else {
-        project_config.sources.push(crate::codex::SourcePermission {
-            space_id: space_id.clone(),
-            kind: kind.clone(),
-            id: id.clone(),
-            name: source_name.clone(),
-            space: space_name.clone(),
-            permission,
-        });
-    }
-    project_config.sources.sort_by(|left, right| {
-        (&left.space, &left.kind, &left.name, &left.id).cmp(&(
-            &right.space,
-            &right.kind,
-            &right.name,
-            &right.id,
-        ))
-    });
-    data["settings"]["codexIntegration"] =
-        serde_json::to_value(configuration).map_err(|_| "Could not encode project permissions.")?;
-    save_data(&root, &data)?;
-    println!("Saved {kind} permission for `{source_name}` in `{space_name}`.");
-    Ok(())
-}
-
-fn validate_project_source(
-    project: &crate::codex_projects::Project,
-    kind: &str,
-    id: &str,
-    options: &[String],
-) -> Result<(String, String, String), String> {
-    if let Some(space_id) = option_value(options, "--space-id") {
-        validate_cli_id(space_id, "space")?;
+fn spaces_command(args: &[String]) -> Result<(), String> {
+    if args.len() != 1 || args[0] != "ls" {
+        return Err("Usage: blob-ui spaces ls".into());
     }
     let client = crate::kanban_api::Client::connect()?;
-    if kind == "object" {
-        let requested_space = option_value(options, "--space-id");
-        let spaces = client.pages("GET", "/v2/spaces?ids=full", None)?;
-        let mut matches = Vec::new();
-        for space in spaces {
-            let space_id = space["id"]
-                .as_str()
+    let spaces = client.pages("GET", "/v2/spaces?ids=full", None)?;
+    let rows = space_list_rows(spaces)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&rows).unwrap_or_default()
+    );
+    Ok(())
+}
+
+fn space_list_rows(spaces: Vec<Value>) -> Result<Vec<Value>, String> {
+    spaces
+        .into_iter()
+        .map(|space| {
+            let id = space
+                .get("id")
+                .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
                 .ok_or("Anytype returned a space without an ID.")?;
-            if requested_space.is_some_and(|requested| requested != space_id) {
-                continue;
-            }
-            let path = format!(
-                "/v2/spaces/{}/objects/{}?ids=full",
-                crate::api::encode_segment(space_id),
-                crate::api::encode_segment(id)
-            );
-            let object = match client.request("GET", &path, None) {
-                Ok(object) if object["id"].as_str() == Some(id) => object,
-                Ok(_) | Err(_) => continue,
-            };
-            let name = object["name"]
-                .as_str()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or("Unnamed object");
-            matches.push((
-                space_id.to_string(),
-                name.to_string(),
-                space["name"]
-                    .as_str()
-                    .unwrap_or("Unnamed space")
-                    .to_string(),
-            ));
-        }
-        return match matches.as_slice() {
-            [(space_id, name, space)] => Ok((space_id.clone(), name.clone(), space.clone())),
-            [] => Err("The object ID was not found in an accessible Anytype space.".into()),
-            _ => Err("This object ID exists in more than one space. Add `--space-id <space-id>` to select one.".into()),
-        };
-    }
-    let sources = crate::codex::discover_sources(&client)?;
-    let expected_kind = kind;
-    let rows: Vec<_> = sources
-        .iter()
-        .filter(|source| {
-            source["kind"].as_str() == Some(expected_kind)
-                && source["id"].as_str() == Some(id)
-                && source.get("spaceId").and_then(Value::as_str).is_some()
-                && option_value(options, "--space-id")
-                    .is_none_or(|space| source["spaceId"].as_str() == Some(space))
+            Ok(json!({
+                "id": id,
+                "name": space.get("name").and_then(Value::as_str).unwrap_or("Unnamed space")
+            }))
         })
-        .collect();
-    match rows.as_slice() {
-        [row] => Ok((
-            row["spaceId"].as_str().unwrap().into(),
-            row["name"].as_str().unwrap_or("Unnamed").into(),
-            row["space"].as_str().unwrap_or("Unnamed space").into(),
-        )),
-        [] => Err(format!(
-            "No {kind} with ID `{id}` was found for project `{}`.",
-            project.name
-        )),
-        _ => Err(format!(
-            "ID `{id}` appears in more than one space. Use a unique object ID."
-        )),
-    }
+        .collect()
 }
 
 fn global_perms_command(args: &[String]) -> Result<(), String> {
     if args.first().map(String::as_str) == Some("ls") {
-        if args.len() > 3 || (args.len() > 1 && (args.len() != 3 || args[1] != "--filter")) {
-            return Err("Usage: blob-ui perms ls [--filter space]".into());
-        }
-        if option_value(args, "--filter").is_some_and(|filter| filter != "space") {
-            return Err("Global permissions support only the `space` filter.".into());
+        if args.len() != 1 {
+            return Err("Usage: blob-ui perms ls".into());
         }
         let (_, data) = load_data()?;
         let entries = data
@@ -899,28 +634,11 @@ fn permission_value(permission: &crate::codex::Permission) -> Value {
     json!({"access":permission.access,"approval":permission.approval,"filesEnabled":permission.files_enabled})
 }
 
-fn option_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find(|pair| pair[0] == name)
-        .map(|pair| pair[1].as_str())
-}
-
 fn parse_bool(value: &str) -> Result<bool, String> {
     match value.to_ascii_lowercase().as_str() {
         "true" | "yes" | "1" => Ok(true),
         "false" | "no" | "0" => Ok(false),
         _ => Err("Expected true or false.".into()),
-    }
-}
-
-fn normalize_kind(value: &str) -> Result<String, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "space" => Ok("space".into()),
-        "object" => Ok("object".into()),
-        "object_type" | "object-type" | "type" => Ok("type".into()),
-        "query" | "set" => Ok("query".into()),
-        "collection" => Ok("collection".into()),
-        _ => Err("Source kind must be space, object, object_type, query, or collection.".into()),
     }
 }
 
@@ -931,10 +649,6 @@ fn validate_cli_id(value: &str, label: &str) -> Result<(), String> {
     }
     .validate()
     .map_err(|_| format!("The {label} ID is invalid."))
-}
-
-fn kind_matches(filter: &str, kind: &str) -> bool {
-    normalize_kind(filter).is_ok_and(|filter| filter == kind)
 }
 
 fn toggle_anyblob(enabled: bool) -> Result<(), String> {
@@ -1118,219 +832,6 @@ fn mark_space_selection(
         object.insert("selected".into(), json!(selected));
     }
     Ok(rows)
-}
-
-fn search_command(args: &[String]) -> Result<(), String> {
-    if args.is_empty() {
-        return Err("Usage: blob-ui search <input> [--filter kind:id]".into());
-    }
-    let filter_index = args.iter().position(|arg| arg == "--filter");
-    if filter_index.is_some_and(|index| index == 0 || index + 2 != args.len()) {
-        return Err("Usage: blob-ui search <input> [--filter kind:id]".into());
-    }
-    let query_args = filter_index.map_or(args, |index| &args[..index]);
-    let query = query_args.join(" ");
-    let filter = filter_index
-        .and_then(|index| args.get(index + 1))
-        .map(String::as_str);
-    let (root, data) = load_data()?;
-    let configuration = crate::settings_from_data(&data).codex_integration;
-    let client = crate::kanban_api::Client::connect()?;
-    let accessible: Vec<_> = configuration
-        .spaces
-        .iter()
-        .filter(|(_, permission)| permission.permits("read"))
-        .map(|(id, _)| id.clone())
-        .collect();
-    if accessible.is_empty() {
-        return Err("Search needs global Read permission for at least one Anytype space. Set it with `blob-ui perms <space-id> --permission read --approval auto --file-uploads false`.".into());
-    }
-    let parsed = parse_search_filter(filter)?;
-    if let Some((kind, id, requested_space)) = parsed {
-        let rows = match kind.as_str() {
-            "space" => {
-                if !accessible.contains(&id) { return Err("Search is not allowed in that space by global permissions.".into()); }
-                let mut filters = crate::anyblob_mentions::Filters::default();
-                filters.spaces = crate::anyblob_mentions::Selection { all: false, items: vec![crate::anyblob_mentions::Space { id: id.clone(), name: id.clone() }] };
-                crate::anyblob_mentions::search(&client, &filters, &query, &|| Ok(()))?
-            }
-            "type" => {
-                let requested_space = requested_space.as_deref().ok_or("Object type filters require a space ID.")?;
-                if !accessible.iter().any(|space| space == requested_space) { return Err("Search is not allowed in that space by global permissions.".into()); }
-                let source = find_source(&client, "type", &id, Some(requested_space))?;
-                let mut filters = crate::anyblob_mentions::Filters::default();
-                filters.spaces = crate::anyblob_mentions::Selection { all: false, items: vec![crate::anyblob_mentions::Space { id: requested_space.to_string(), name: source["space"].as_str().unwrap_or_default().into() }] };
-                filters.types = crate::anyblob_mentions::Selection { all: false, items: vec![crate::anyblob_mentions::ObjectType {
-                    space_id: requested_space.to_string(), id, name: source["name"].as_str().unwrap_or("Unnamed type").into(),
-                    space: source["space"].as_str().unwrap_or("Unnamed space").into(),
-                }] };
-                crate::anyblob_mentions::search(&client, &filters, &query, &|| Ok(()))?
-            }
-            "query" | "collection" => {
-                let source = find_source(&client, &kind, &id, requested_space.as_deref())?;
-                let space_id = source["spaceId"].as_str().unwrap().to_string();
-                if !accessible.contains(&space_id) { return Err("Search is not allowed in that space by global permissions.".into()); }
-                search_source_members(&client, &source, &query)?
-            }
-            _ => return Err("Search filter must be space:<id>, object_type:<space-id>/<type-id>, query:<id>, or collection:<id>.".into()),
-        };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&rows).unwrap_or_default()
-        );
-        return Ok(());
-    }
-    let spaces = client.pages("GET", "/v2/spaces?ids=full", None)?;
-    let selected = accessible
-        .iter()
-        .filter_map(|id| spaces.iter().find(|space| space["id"] == *id))
-        .map(|space| crate::anyblob_mentions::Space {
-            id: space["id"].as_str().unwrap_or_default().into(),
-            name: space["name"].as_str().unwrap_or("Unnamed space").into(),
-        })
-        .collect();
-    let mut filters = crate::anyblob_mentions::Filters::default();
-    filters.spaces = crate::anyblob_mentions::Selection {
-        all: false,
-        items: selected,
-    };
-    let results = crate::anyblob_mentions::search(&client, &filters, &query, &|| Ok(()))?;
-    let _ = root;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&results).unwrap_or_default()
-    );
-    Ok(())
-}
-
-fn parse_search_filter(
-    filter: Option<&str>,
-) -> Result<Option<(String, String, Option<String>)>, String> {
-    let Some(filter) = filter else {
-        return Ok(None);
-    };
-    let (kind, value) = filter
-        .split_once(':')
-        .ok_or("Search filter must use kind:id syntax.")?;
-    let kind = normalize_kind(kind)?;
-    if !matches!(kind.as_str(), "space" | "type" | "query" | "collection") {
-        return Err("Search filters support spaces, object types, queries, or collections.".into());
-    }
-    if kind == "type" {
-        let (space, id) = value
-            .split_once('/')
-            .ok_or("Object type filters use object_type:<space-id>/<type-id>.")?;
-        validate_cli_id(space, "space")?;
-        validate_cli_id(id, "object type")?;
-        Ok(Some((kind, id.to_string(), Some(space.to_string()))))
-    } else if value.trim().is_empty() {
-        Err("Search filter ID cannot be empty.".into())
-    } else {
-        validate_cli_id(value, "filter")?;
-        Ok(Some((kind, value.to_string(), None)))
-    }
-}
-
-fn find_source(
-    client: &crate::kanban_api::Client,
-    kind: &str,
-    id: &str,
-    space: Option<&str>,
-) -> Result<Value, String> {
-    let sources = crate::codex::discover_sources(client)?;
-    let matches: Vec<_> = sources
-        .into_iter()
-        .filter(|source| {
-            source["kind"].as_str() == Some(kind)
-                && source["id"].as_str() == Some(id)
-                && space.is_none_or(|space| source["spaceId"].as_str() == Some(space))
-        })
-        .collect();
-    match matches.as_slice() {
-        [source] => Ok(source.clone()),
-        [] => Err(format!("No {kind} with ID `{id}` was found.")),
-        _ => Err(format!(
-            "ID `{id}` appears in more than one space. Add the space ID to the filter."
-        )),
-    }
-}
-
-fn search_source_members(
-    client: &crate::kanban_api::Client,
-    source: &Value,
-    query: &str,
-) -> Result<Value, String> {
-    let space = source["spaceId"]
-        .as_str()
-        .ok_or("Source has no space ID.")?;
-    let id = source["id"].as_str().ok_or("Source has no ID.")?;
-    let kind = source["kind"].as_str().ok_or("Source has no kind.")?;
-    let base = format!(
-        "/v2/spaces/{}/{}",
-        crate::api::encode_segment(space),
-        if kind == "query" {
-            "queries"
-        } else {
-            "collections"
-        }
-    );
-    let path = format!("{base}/{}", crate::api::encode_segment(id));
-    let rows = if kind == "query" {
-        let views = client.pages("GET", &format!("{path}/views?ids=full"), None)?;
-        let mut object_rows = BTreeMap::new();
-        let mut view_ids = BTreeSet::new();
-        for view in views {
-            let view_id = view["id"]
-                .as_str()
-                .filter(|id| !id.is_empty())
-                .ok_or("Anytype returned a query view without an ID.")?;
-            if !view_ids.insert(view_id.to_string()) {
-                return Err("Query views changed during pagination. Retry the search.".into());
-            }
-            let mut page_ids = BTreeSet::new();
-            for row in client.pages(
-                "GET",
-                &format!(
-                    "{path}/objects?ids=full&view={}",
-                    crate::api::encode_segment(view_id)
-                ),
-                None,
-            )? {
-                let object_id = row["id"]
-                    .as_str()
-                    .filter(|id| !id.is_empty())
-                    .ok_or("Anytype returned a query result without an object ID.")?;
-                if !page_ids.insert(object_id.to_string()) {
-                    return Err("Query results changed during pagination. Retry the search.".into());
-                }
-                object_rows.insert(object_id.to_string(), row);
-            }
-        }
-        object_rows.into_values().collect()
-    } else {
-        client.pages("GET", &format!("{path}/objects?ids=full"), None)?
-    };
-    let terms: Vec<_> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    let mut results = BTreeMap::new();
-    for row in rows {
-        let Some(object_id) = row["id"].as_str().filter(|id| !id.is_empty()) else {
-            continue;
-        };
-        let Some(name) = row["name"].as_str().filter(|name| !name.trim().is_empty()) else {
-            continue;
-        };
-        if !terms.iter().all(|term| name.to_lowercase().contains(term)) {
-            continue;
-        }
-        results.insert(object_id.to_string(), json!({"type":"resource_link","uri":blobui_mcp::object_uri(space, object_id),"name":name,"title":name,"description":source["space"]}));
-    }
-    let mut items: Vec<_> = results.into_values().collect();
-    items.truncate(20);
-    Ok(json!({"items":items}))
 }
 
 struct HeadlessRelease {
@@ -1838,7 +1339,6 @@ fn import_archive(source: &Path) -> Result<(), String> {
             "kanban-calc.json",
             "keybinds.json",
             "anyblob/settings.json",
-            "anyblob/projects.json",
             "anyblob/permissions.json",
             "DO-NOT-SHARE/connection.json",
             "DO-NOT-SHARE/anytype-api-key.dpapi",
@@ -2373,34 +1873,34 @@ mod tests {
     }
 
     #[test]
-    fn search_filters_accept_only_supported_source_ids() {
+    fn spaces_listing_preserves_full_ids_and_names() {
+        let rows = space_list_rows(vec![
+            json!({"id":"space-full-id-1234567890","name":"Work"}),
+            json!({"id":"personal-space-id","name":"Personal"}),
+        ])
+        .unwrap();
         assert_eq!(
-            parse_search_filter(Some("space:space-1")).unwrap(),
-            Some(("space".into(), "space-1".into(), None))
+            rows,
+            vec![
+                json!({"id":"space-full-id-1234567890","name":"Work"}),
+                json!({"id":"personal-space-id","name":"Personal"}),
+            ]
         );
-        assert_eq!(
-            parse_search_filter(Some("object_type:space-1/type_2")).unwrap(),
-            Some(("type".into(), "type_2".into(), Some("space-1".into())))
-        );
-        assert_eq!(
-            parse_search_filter(Some("query:query.3")).unwrap(),
-            Some(("query".into(), "query.3".into(), None))
-        );
-        assert_eq!(
-            parse_search_filter(Some("collection:collection_4")).unwrap(),
-            Some(("collection".into(), "collection_4".into(), None))
-        );
-        for value in [
-            "space:",
-            "space:../secret",
-            "object_type:space/type/extra",
-            "object_type:/type",
-            "query:bad id",
-        ] {
-            assert!(parse_search_filter(Some(value)).is_err(), "{value}");
-        }
+        assert!(space_list_rows(vec![json!({"name":"Missing ID"})]).is_err());
     }
 
+    #[test]
+    fn removed_project_and_search_commands_are_unknown() {
+        assert!(run(vec!["project".into()])
+            .unwrap_err()
+            .contains("Unknown command"));
+        assert!(run(vec!["search".into(), "term".into()])
+            .unwrap_err()
+            .contains("Unknown command"));
+        assert!(run(vec!["spaces".into()])
+            .unwrap_err()
+            .contains("Usage: blob-ui spaces ls"));
+    }
     #[test]
     fn object_mention_spaces_use_the_documented_command_order() {
         assert_eq!(

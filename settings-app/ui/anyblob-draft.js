@@ -1,8 +1,8 @@
 export function createAnyblobDraft() {
   let api, baseline = null, pending = null;
-  let snapshot = { loaded: false, locked: true, enabled: false, folder: "" };
+  let snapshot = { loaded: false, locked: true, enabled: false };
   const listeners = new Set();
-  const values = () => ({ enabled: snapshot.enabled, folder: snapshot.folder });
+  const values = () => ({ enabled: snapshot.enabled });
   const publish = patch => { snapshot = { ...snapshot, ...patch }; listeners.forEach(listener => listener()); };
   const dirty = () => baseline !== null && JSON.stringify(values()) !== JSON.stringify(baseline);
   const commit = patch => { baseline = { ...baseline, ...patch }; publish(patch); api?.onChange(); };
@@ -23,7 +23,7 @@ export function createAnyblobDraft() {
       pending = (async () => {
         const integration = await api.invoke("anyblob_status");
         if (!baseline || !dirty()) {
-          baseline = { enabled: integration.enabled, folder: integration.localProjectsFolder || "" };
+          baseline = { enabled: integration.enabled };
           publish({ ...baseline, loaded: true });
         }
         return integration;
@@ -36,10 +36,6 @@ export function createAnyblobDraft() {
       if (next.enabled !== baseline.enabled) {
         await api.invoke("configure_anyblob", { enabled: next.enabled });
         commit({ enabled: next.enabled });
-      }
-      if (next.folder !== baseline.folder) {
-        const result = await api.invoke("set_anyblob_projects_folder", { folder: next.folder });
-        commit({ folder: result.localProjectsFolder });
       }
     },
   };

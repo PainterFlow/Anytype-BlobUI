@@ -46,7 +46,7 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
       if(name==='save_keyboard_shortcuts')return args.shortcuts;
       if(name==='get_updater_state')return {automaticChecksEnabled:false,automaticUpdatesEnabled:false};
       if(name==='anyblob_status')return {enabled:false};
-      if(name.startsWith('discover_')&&name!=='discover_codex_projects'){
+      if(name.startsWith('discover_')){
         const key=JSON.stringify([name,args.spaceIds]);
         if(!args.forceRefresh&&cache.has(key))return cache.get(key);
         window.network++;
@@ -56,7 +56,6 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
         if(name==='discover_calendar_colors')result={types:[],views:[]};
         if(name==='discover_codex_spaces')result=[{id:'s',name:'Work'}];
         if(name==='discover_anyblob_types')result={types:window.revision?[]:[{spaceId:'s',id:'t',name:'Task',space:'Work'}],errors:[]};
-        if(name==='discover_codex_sources')result=[];
         cache.set(key,result);return result;
       }
       return null;
@@ -76,11 +75,10 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(()=>window.calls.some(c=>c.name==='check_for_updates')),false,'Startup respects disabled automatic checks');
     const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
-    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
+    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_anyblob_types']){
       assert.equal(startup.filter(c=>c.name===name).length,1,name+' refreshes once at startup');
       assert.equal(startup.find(c=>c.name===name).args.forceRefresh,true,name+' bypasses persistent cache at startup');
     }
-    assert(!startup.some(c=>c.name==='discover_codex_projects'));
     assert.equal(await page.evaluate(()=>window.calls.some(c=>/^(save_|evaluate_|configure_)/.test(c.name))),false);
     assert.equal(await page.getByRole('button',{name:'Reload options',exact:true}).count(),0);
     await page.evaluate(()=>{window.themeRevision=1;window.themeFailure=true;});
@@ -97,7 +95,7 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.keyboard.press('Escape');
     await page.evaluate(()=>{window.hold=true;window.calls=[];});
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
-    await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_codex_sources'));
+    await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_codex_spaces'));
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
@@ -108,11 +106,10 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='reload_custom_themes').length),1);
     assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),3);
     const calls=await page.evaluate(()=>window.calls);
-    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
+    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');
       assert.equal(calls.find(c=>c.name===name).args.forceRefresh,true);
     }
-    assert(!calls.some(c=>c.name==='discover_codex_projects'),'Local project discovery stays separate');
     for(const name of ['anyblob_status','check_for_updates']) {
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' refreshes once across coalesced shortcuts');
     }
@@ -143,7 +140,7 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
     assert.equal(await page.evaluate(()=>window.network),requests);
     await page.evaluate(()=>{window.BlobUI.AppReload.setLocked(false);return window.BlobUI.AppReload.run();});
-    assert.equal(await page.evaluate(()=>window.network),requests+5);
+    assert.equal(await page.evaluate(()=>window.network),requests+4);
     await page.locator('#codex-tab-1').click();
     assert.match(await page.getByRole('button',{name:/Access for Work/}).innerText(),/Read/);
     assert.match(await page.getByRole('button',{name:/Approval for Work/}).innerText(),/Always Ask/);

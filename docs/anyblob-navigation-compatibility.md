@@ -30,7 +30,7 @@ The host also renders the actual HTTPS resource URL in its source-details subtit
 
 Clicking a Sources row dispatches the HTTPS universal link through Codex's external-link handler. Anytype handles opening and its own current account access. This replaces the original proposal to open Sources through the BlobUI MCP resource reader. No fake HTTPS proxy or installed-app patch is used.
 
-MCP reads and mutations retain all BlobUI approvals and project restrictions. The canonical `anyblob://objects/{space_id}/{object_id}` resource still resolves through the existing permission-checked reader when used through MCP. Neither kind of link grants access. Historical titles and identities already stored in a chat can remain visible after permission changes; Codex does not offer a verified callback to revoke historical source metadata.
+MCP reads and mutations use BlobUI's saved per-space permissions and approval rules. The canonical `anyblob://objects/{space_id}/{object_id}` resource still resolves through the existing permission-checked reader when used through MCP. Neither kind of link grants access. Historical titles and identities already stored in a chat can remain visible after permission changes; Codex does not offer a verified callback to revoke historical source metadata.
 
 ## Host verification
 

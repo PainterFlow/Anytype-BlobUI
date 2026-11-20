@@ -5,7 +5,7 @@ const path=require('node:path');
 const {loadSettings}=require('./frontend-fixture.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 
-test('Anyblob uses local project settings and opens the shared setup guide in a dark fixture',async()=>{
+test('Anyblob settings omit local project controls and open the setup guide in a dark fixture',async()=>{
   const workspace=path.resolve(__dirname,'../..');
   const fixture=path.join(workspace,'.test-run/anyblob-ui');
   fs.mkdirSync(fixture,{recursive:true});
@@ -15,16 +15,14 @@ test('Anyblob uses local project settings and opens the shared setup guide in a 
     const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(()=>{
-      window.calls=[];window.enabled=false;window.localProjectsFolder='';window.folderSelection=null;
+      window.calls=[];window.enabled=false;
       window.__TAURI__={event:{listen:async()=>()=>{}},core:{invoke:async(name,args)=>{
         calls.push(name);
         if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
-        if(name==='anyblob_status')return{enabled:window.enabled,localProjectsFolder:window.localProjectsFolder};
+        if(name==='anyblob_status')return{enabled:window.enabled};
         if(name==='configure_anyblob'){window.enabled=args.enabled;return{enabled:args.enabled};}
-        if(name==='select_anyblob_projects_folder')return window.folderSelection;
-        if(name==='set_anyblob_projects_folder'){window.localProjectsFolder=args.folder;return{localProjectsFolder:args.folder};}
         if(name==='save_settings')return{};
         return null;
       }}};
@@ -34,22 +32,18 @@ test('Anyblob uses local project settings and opens the shared setup guide in a 
     await page.locator('#codex-nav').click();
     const panel=page.locator('#codex-panel-0');
     const toggle=panel.getByRole('switch',{name:'Enable Anyblob'});
-    const folder=panel.getByRole('button',{name:'Local Projects Folder',exact:true});
     assert.equal(await toggle.isChecked(),false);
-    assert.equal(await folder.isDisabled(),true);
+    assert.equal(await page.getByRole('tab',{name:'Projects'}).count(),0);
+    assert.equal(await panel.getByRole('button',{name:'Local Projects Folder',exact:true}).count(),0);
     assert.equal(await panel.getByRole('button',{name:'Install',exact:true}).count(),0);
     assert.equal(await panel.getByRole('switch',{name:'Secure MCP Tunnel'}).count(),0);
     assert.equal(await panel.getByRole('heading',{name:'Remote Codex',exact:true}).count(),0);
 
     await toggle.check();
     assert.equal(await page.evaluate(()=>window.enabled),false,'Toggle changes stay in the settings draft before Save.');
-    await page.evaluate(()=>{window.folderSelection='C:/Fixture Projects';});
-    await folder.click();
-    assert.equal(await folder.inputValue(),'C:/Fixture Projects');
     await page.locator('#save-button').click();
     await page.locator('#save-button').waitFor({state:'hidden'});
     assert.equal(await page.evaluate(()=>window.enabled),true);
-    assert.equal(await page.evaluate(()=>window.localProjectsFolder),'C:/Fixture Projects');
 
     const helpButton=panel.getByRole('button',{name:'Anyblob help'});
     assert.equal(await helpButton.getAttribute('aria-describedby'),null);

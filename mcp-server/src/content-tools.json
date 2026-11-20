@@ -1186,7 +1186,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "Create an object from an AnyBlock document or type, name, properties and Markdown. Scoped creation needs a destination and caller idempotency_key. For query destinations use template none and list_creation_targets. needs_input means nothing was created. Follow its requirements and reuse the key. Only resume a confirmed placement failure with the same key and payload. Use body.type for the query type.",
+    "description": "Create an object from an AnyBlock document or type, name, properties, and Markdown. Creating in a collection or query needs a destination and caller-supplied idempotency_key. For query destinations, use template none and list_creation_targets. needs_input means nothing was created. Follow the tool's requirements and reuse the key. Only retry a confirmed placement failure with the same key and payload. Use body.type for the query type.",
     "query": [
       "dry_run",
       "create_missing_options"
@@ -1477,7 +1477,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List available property definitions with pagination after scope filtering. A missing property may be outside scope. Schema changes require whole-space permission.",
+    "description": "List available property definitions in a space with saved read access. Schema changes require whole-space permission.",
     "query": [
       "offset",
       "limit"
@@ -3013,7 +3013,7 @@
       ],
       "additionalProperties": false
     },
-    "description": "List object types. Restricted projects return accessible types. Pagination follows scope filtering.",
+    "description": "List object types in a space with saved read access. Pagination follows the Anytype API response.",
     "query": [
       "offset",
       "limit"

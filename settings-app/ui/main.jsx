@@ -14,7 +14,6 @@ import "./calculator-math.js";
 import "./view-catalog.js";
 import "./reload-controller.js";
 import "./formula-page.js";
-import "./project-permissions.js";
 import "./object-mentions.js";
 import "./codex-page.js";
 import React, { useSyncExternalStore } from "react";

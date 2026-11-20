@@ -3,7 +3,6 @@ const METADATA_COMMANDS = new Set([
   "discover_calendar_colors",
   "discover_codex_spaces",
   "discover_anyblob_types",
-  "discover_codex_sources",
 ]);
 
 // Wraps the Tauri bridge without depending on Settings DOM or page state.

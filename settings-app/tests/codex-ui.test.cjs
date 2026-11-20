@@ -30,12 +30,14 @@ test('Codex permissions preserve drafts, save and undo in the standard layout', 
     await page.locator('#codex-nav').click();
     assert.equal(await page.locator('#codex-panel-0').getAttribute('hidden'),null);
     assert.match(await page.locator('#codex-panel-0').innerText(),/Enable Anyblob/);
+    assert.equal(await page.getByRole('tab',{name:'Projects'}).count(),0);
+    assert.equal(await page.locator('#codex-panel-0').getByRole('button',{name:'Local Projects Folder',exact:true}).count(),0);
     assert.equal(await page.evaluate(()=>calls.filter(c=>c==='discover_codex_spaces').length),1);
     await page.locator('#codex-tab-0').focus();await page.keyboard.press('ArrowRight');
     await page.locator('#codex-panel-1').getByRole('status').filter({hasText:'Loading spaces'}).waitFor();
     await page.evaluate(()=>{window.holdDiscovery=false;window.resolveDiscovery();});
     await page.locator('.codex-space').first().waitFor();
-    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},projects:{},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false}});
+    assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({spaces:{invalid:{access:'bad',approval:4,filesEnabled:'yes'}}})),{spaces:{invalid:{access:'none',filesEnabled:false,approval:'approveForMe'}},objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false}});
     assert.deepEqual(await page.evaluate(()=>window.BlobUI.CodexPage.normalize({objectMentions:null}).objectMentions),{spaces:{all:false,items:[]},types:{all:false,items:[]},filterIncompleteTasks:false});
     const filters={spaces:{all:false,items:[{id:'unavailable',name:'Saved'}]},types:{all:false,items:[{spaceId:'other',id:'missing',name:'Task',space:'Old'}]},filterIncompleteTasks:true};
     assert.deepEqual(await page.evaluate(filters=>window.BlobUI.CodexPage.normalize({objectMentions:filters}).objectMentions,filters),filters);

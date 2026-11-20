@@ -31,7 +31,6 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
       if(name==='discover_calendar_colors')return {types:[{spaceId:'s',key:'task',name:'Task',space:'Work',properties:[{key:'status',name:'Status',format:'select'},{key:'priority',name:'Priority',format:'select'}]}],views:[]};
       if(name==='discover_codex_spaces')return [];
       if(name==='discover_anyblob_types')return {types:[],errors:[]};
-      if(name==='discover_codex_sources')return [];
       if(name==='get_keyboard_shortcuts')return [];
       if(name==='save_kanban_formulas'){
         window.lastSave=args;if(window.holdSave)await new Promise(resolve=>window.releaseSave=resolve);
