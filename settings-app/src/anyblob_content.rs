@@ -30,22 +30,17 @@ impl Drop for Prepared {
 }
 pub fn permission(
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     request: &ContentRequest,
     files: bool,
 ) -> Result<Permission, String> {
-    let permission = if let Some(scope) = scope {
-        scope.content_permission(request, files)
-    } else {
-        config
-            .spaces
-            .get(
-                request.arguments["space_id"]
-                    .as_str()
-                    .ok_or("Missing space ID.")?,
-            )
-            .cloned()
-    };
+    let permission = config
+        .spaces
+        .get(
+            request.arguments["space_id"]
+                .as_str()
+                .ok_or("Missing space ID.")?,
+        )
+        .cloned();
     permission.filter(|p|p.permits(request.capability())&&(!files||p.files_enabled)).ok_or_else(||"Access denied by saved BlobUI content permissions. Save the required access level; file actions also require the file switch.".into())
 }
 pub fn needs_files(value: &Value) -> bool {
@@ -177,7 +172,6 @@ fn missing_option_detail(
     client: &Client,
     req: &ContentRequest,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
     response: &Value,
 ) -> Option<(String, String, Vec<String>)> {
@@ -189,8 +183,7 @@ fn missing_option_detail(
         return None;
     }
     let space = req.arguments["space_id"].as_str()?;
-    let can_read_space_metadata = req.arguments.get("destination").is_none()
-        && scope.is_none_or(|scope| scope.has_whole_space(space));
+    let can_read_space_metadata = req.arguments.get("destination").is_none();
 
     let fields = req.arguments.pointer("/body/properties")?.as_object()?;
     if fields.is_empty() {
@@ -202,7 +195,7 @@ fn missing_option_detail(
         arguments: json!({"space_id":space}),
     };
     let properties = if can_read_space_metadata
-        && permission(config, scope, &request, false).is_ok()
+        && permission(config, &request, false).is_ok()
         && check().is_ok()
     {
         client
@@ -245,7 +238,7 @@ fn missing_option_detail(
                 tool: "list_property_options".into(),
                 arguments: json!({"space_id":space,"key":key}),
             };
-            let options = if permission(config, scope, &options_request, false).is_ok()
+            let options = if permission(config, &options_request, false).is_ok()
                 && check().is_ok()
             {
                 client
@@ -321,14 +314,13 @@ fn create_object_error(
     client: &Client,
     req: &ContentRequest,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
     value: &Value,
 ) -> String {
     let error = api_error_details(value);
     let technical = value.to_string();
     if let Some((property, option, available)) =
-        missing_option_detail(client, req, config, scope, check, value)
+        missing_option_detail(client, req, config, check, value)
     {
         let available = if available.is_empty() {
             String::new()
@@ -343,7 +335,7 @@ fn create_object_error(
         };
         let guidance = if req.arguments.get("destination").is_some() {
             format!(
-                "Scoped creation cannot create select options. Choose an existing {property} option."
+                "Choose an existing {property} option.{available} Select options cannot be created as destination objects."
             )
         } else {
             format!(
@@ -357,8 +349,13 @@ fn create_object_error(
     let reason = error["message"]
         .as_str()
         .unwrap_or("Anytype rejected the request.");
+    let guidance = if req.arguments.get("destination").is_some() {
+        "Check that the object type and property keys are valid. Select options cannot be created as destination objects."
+    } else {
+        "Check that the object type and property keys are valid. If a select value needs a new option, explicitly request create_missing_options=true. Creating a missing option requires space-wide Create-Delete permission."
+    };
     format!(
-        "Cannot create the object because {}. Check that the object type and property keys are valid. If a select value needs a new option, explicitly request create_missing_options=true. Creating a missing option requires space-wide Create-Delete permission. Technical details: {technical}",
+        "Cannot create the object because {}. {guidance} Technical details: {technical}",
         reason.trim_end_matches('.')
     )
 }
@@ -367,7 +364,6 @@ fn response_for_request(
     client: &Client,
     req: &ContentRequest,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
     value: Value,
 ) -> Result<Value, String> {
@@ -376,7 +372,7 @@ fn response_for_request(
             return Err(STALE_PATCH_ETAG_ERROR.into());
         }
         if req.tool == "create_object" {
-            return Err(create_object_error(client, req, config, scope, check, &value));
+            return Err(create_object_error(client, req, config, check, &value));
         }
         return response(value);
     }
@@ -484,12 +480,11 @@ pub fn prepare(
     _client: &Client,
     req: &ContentRequest,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Prepared, String> {
     req.validate()?;
     let files = req.tool == "upload_file" || needs_files(&req.arguments["body"]);
-    permission(config, scope, req, files)?;
+    permission(config, req, files)?;
     check()?;
     let mut prepared = Prepared {
         request: req.clone(),
@@ -613,7 +608,6 @@ pub fn inspect(
     client: &Client,
     prepared: &mut Prepared,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let req = &prepared.request;
@@ -650,7 +644,7 @@ pub fn inspect(
             }
             .into();
             wide.arguments["type"] = json!("permission-check");
-            permission(config, scope, &wide, files)?;
+            permission(config, &wide, files)?;
         }
     }
     if req.mutates() && req.arguments.get("body").is_some() {
@@ -694,7 +688,7 @@ pub fn inspect(
             }
         }
     }
-    permission(config, scope, req, files)?;
+    permission(config, req, files)?;
 
     if req.tool == "delete_chat_message" {
         // Message deletion can destroy attachment content. Inspect before committing, and
@@ -740,7 +734,7 @@ pub fn inspect(
             return Err("Could not establish the target message's attachment access. No deletion was dispatched.".into());
         }
     }
-    permission(config, scope, req, files)?;
+    permission(config, req, files)?;
     prepared.files = files;
     check()?;
     Ok(())
@@ -752,11 +746,11 @@ pub fn execute(
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
     let config = crate::codex::Configuration::default();
-    let validation = preflight(client, prepared, &config, None, check)?;
+    let validation = preflight(client, prepared, &config, check)?;
     if let Some(result) = validation {
         return Ok(result);
     }
-    execute_validated(client, prepared, check, &|| Ok(()), &config, None)
+    execute_validated(client, prepared, check, &|| Ok(()), &config)
 }
 /// Validate mutation semantics without committing. The returned value is present only when
 /// the caller explicitly requested dry_run.
@@ -764,7 +758,6 @@ pub fn preflight(
     client: &Client,
     prepared: &mut Prepared,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Option<Value>, String> {
     let req = &prepared.request;
@@ -847,7 +840,7 @@ pub fn preflight(
         file,
     )? {
         value if value.get("_http_error").is_some() => {
-            return Err(create_or_response_error(client, req, config, scope, check, value));
+            return Err(create_or_response_error(client, req, config, check, value));
         }
         value => value,
     };
@@ -865,11 +858,10 @@ fn create_or_response_error(
     client: &Client,
     req: &ContentRequest,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
     check: &impl Fn() -> Result<(), String>,
     value: Value,
 ) -> String {
-    match response_for_request(client, req, config, scope, check, value) {
+    match response_for_request(client, req, config, check, value) {
         Err(error) => error,
         Ok(_) => "Anytype validation returned an unexpected response.".into(),
     }
@@ -881,7 +873,6 @@ pub fn execute_validated(
     check: &impl Fn() -> Result<(), String>,
     before_commit: &impl Fn() -> Result<(), String>,
     config: &crate::codex::Configuration,
-    scope: Option<&crate::anyblob_scope::Scope>,
 ) -> Result<Value, String> {
     let req = &prepared.request;
     let spec = req.specification()?;
@@ -899,11 +890,6 @@ pub fn execute_validated(
     let etag = req.arguments["etag"].as_str();
     if !req.mutates() {
         check()?;
-        if req.tool == "list_objects" {
-            if let Some(scope) = scope {
-                return scope.list_objects(client, req, check);
-            }
-        }
         return request(client, method, &route(req, false)?, body, etag, None);
     }
     let key = prepared
@@ -922,7 +908,7 @@ pub fn execute_validated(
             if is_stale_patch_etag(req, &value) {
                 Ok(json!({"outcome":"rejected","error":STALE_PATCH_ETAG_ERROR,"idempotency_key":key}))
             } else if req.tool == "create_object" {
-                let error = create_object_error(client, req, config, scope, check, &value);
+                let error = create_object_error(client, req, config, check, &value);
                 Ok(json!({"outcome":"rejected","error":error,"technical_details":value,"receipt":value,"idempotency_key":key}))
             } else {
                 Ok(json!({"outcome":"rejected","receipt":value,"idempotency_key":key}))
@@ -1100,8 +1086,8 @@ pub(crate) mod tests {
             "upload_file",
             json!({"space_id":"s","url":"https://example.com/fixture"}),
         );
-        assert!(permission(&config("createDelete", true, false), None, &upload, true).is_err());
-        assert!(permission(&full, None, &upload, true).is_ok());
+        assert!(permission(&config("createDelete", true, false), &upload, true).is_err());
+        assert!(permission(&full, &upload, true).is_ok());
     }
     #[test]
     fn source_display_metadata_is_narrow_and_checks_identity() {
@@ -1200,8 +1186,8 @@ pub(crate) mod tests {
         let (client, capture, server) = fixture(vec![json!("disconnect")]);
         let req=content("create_object",json!({"space_id":"s","body":{"type":"page","name":"fixture"}}));
         let config=config("createDelete",true,false);
-        let mut prepared=prepare(&client,&req,&config,None,&||Ok(())).unwrap();
-        let error=preflight(&client,&mut prepared,&config,None,&||Ok(())).unwrap_err();
+        let mut prepared=prepare(&client,&req,&config,&||Ok(())).unwrap();
+        let error=preflight(&client,&mut prepared,&config,&||Ok(())).unwrap_err();
         assert!(error.contains("No mutation was dispatched"),"{error}");
         assert!(!error.contains("Mutation outcome unknown"),"{error}");
         server.join().unwrap();
@@ -1228,7 +1214,6 @@ pub(crate) mod tests {
             &client,
             &req,
             &config("createDelete", true, true),
-            None,
             &|| Ok(()),
         )
         .unwrap();
@@ -1263,7 +1248,6 @@ pub(crate) mod tests {
             &client,
             &mut prepared,
             &config("createDelete", true, false),
-            None,
             &|| Ok(())
         )
         .is_err());
@@ -1329,7 +1313,6 @@ pub(crate) mod tests {
             &client,
             &mut prepared,
             &config("readWrite", true, false),
-            None,
             &|| Ok(())
         )
         .is_err());
@@ -1351,7 +1334,6 @@ pub(crate) mod tests {
                 &client,
                 &req,
                 &config("createDelete", true, true),
-                None,
                 &|| Ok(())
             )
             .is_err());

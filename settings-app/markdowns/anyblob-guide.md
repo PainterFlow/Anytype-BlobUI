@@ -1,52 +1,46 @@
 # Anyblob setup guide
 
-Anyblob is a codex integration that allows codex to access your Anytype through a MCP server where each request goes to the BlobUI app, which allows you to configure additional context restrictions & permissions, which then forwards the requests to Anytype's API.
-Important to note, if you allow the agent to edit, delete, create and upload files, then we are not responsible for any damage.
-Even though the agent could bypass these guard rails(It's AI) they are good enough to make sure no delusional AI decides to just delete everything(*if ykyk*).
-All-in-all, Anyblob allows the agent to use Anytype with API v2 and you can also @ mention objects in codex for easy access.
+Anyblob connects Codex to Anytype through BlobUI and the Anytype API v2. BlobUI applies saved access, file, and approval rules per space. The API key also limits what Anyblob can do. Object mentions suggest matches but do not grant permission to read them.
 
-## Local Method (Windows Only)
+## Local method for Windows
 
-This is the method you probably use, unless you have cloud servers which complicate things a bit.
-Anyblob has to be updated manually, it does not update with BlobUI.
+Install the regular BlobUI Settings app and enable Anyblob under Integrations. Configure the Anytype API v2 connection in Advanced Settings. In Anytype, create an API key with access only to the spaces and actions you want Codex to use. In BlobUI, save a permission for each space and choose its access level, approval rule, and file setting.
 
-#### Add BlobUI repo as a marketplace in codex.
+Add the BlobUI repository as a Codex plugin marketplace:
 
-1. Go to the Plugins tab on the left side.
-2. Press Add -> Add a marketplace.
-3. Fill in the form:
-	- `https://github.com/PainterFlow/Anytype-BlobUI`
-	- `main`
-	- `codex-plugin`
+1. Open the Plugins tab and choose Add, then Add a marketplace.
+2. Enter `https://github.com/PainterFlow/Anytype-BlobUI`, select the `main` branch, and enter `codex-plugin` as the directory.
+3. Install Anyblob from the Plugins Directory.
 
 You can also follow the video guide below.
 
 @anyblob-installation
 
-Now just restart codex by pressing Ctrl+Q and then you’re good to go.
+Keep BlobUI Settings running while Codex uses Anyblob. Restart Codex after installing or updating the plugin.
 
----
+## Remote method for Windows and Linux
 
-## Remote Method (Windows & Linux supported, requires BlobUI Headless)
+Use BlobUI Headless with Anytype Headless when Anyblob will run on a remote computer.
 
-The second method to use Anyblob is to use it on a remote pc together with BlobUI Headless CLI and Anytype Headless.
+### Part 1: Installing Anytype
 
-#### Part 1: Installing Anytype (if you already have a local API key then this is not needed)
+If you already have an API v2 key, continue to Part 2. Otherwise, install [Anytype Headless](https://github.com/anyproto/anytype-heart/releases), create or sign in to an account, then create an API key with access only to the spaces and actions you need.
 
-1. Download & install Anytype Headless from https://github.com/anyproto/anytype-heart/releases
-2. Run `anytype auth create <USERNAME>` and copy the login key to somewhere save (you can also use anytype auth login to log-in to an existing account you own).
-3. Run `anytype auth apikey create <name> --all-spaces --read-write` (use `--spaces <space id or name>` to limit spaces instead of `--all-spaces` and you can use `--read-only` for read only access).
+### Part 2: Installing BlobUI Headless
 
-#### Part 2: Installing BlobUI headless CLI
+1. Download BlobUI Headless from [GitHub Releases](https://github.com/PainterFlow/Anytype-BlobUI/releases) and add `blob-ui` to PATH.
+2. Run `blob-ui api login` and enter the API key. The terminal does not display the key while you type.
+3. Run `blob-ui spaces ls` to list spaces and their IDs.
+4. Run `blob-ui perms ls` to inspect saved global permissions. Set one for a space with `blob-ui perms <space-id> --permission read --approval always --file-uploads false`. Permission values are `read`, `read-write`, and `create-delete`. Approval values are `always`, `auto`, and `never`.
 
-1. Download & install BlobUI headless from https://github.com/PainterFlow/Anytype-BlobUI/releases (make sure to install it on PATH)
-2. Run `blob-ui api login` and paste the API key you just got(don’t worry if you see nothing appear).
+### Part 3: Installing Anyblob in Codex CLI
 
-#### Part 3: Installing Anyblob to codex CLI
+1. Install [Codex CLI](https://github.com/openai/codex) with `npm install -g @openai/codex`.
+2. Add the marketplace with `codex plugin marketplace add https://github.com/PainterFlow/Anytype-BlobUI`.
+3. Install the plugin with `codex plugin install anyblob@anyblob`.
 
-1. Download & install Codex CLI with `npm install -g @openai/codex` (https://github.com/openai/codex)
-2. Run: `codex plugin marketplace add https://github.com/PainterFlow/Anytype-BlobUI`
-3. Run: `codex plugin install anyblob@anyblob`
+Restart Codex after installation. BlobUI Headless supports the Anyblob content tools. BlobUI Settings-only Kanban calculations and calendar coloring tools are unavailable in headless mode.
 
-Now restart codex and you should be done.
-An important thing to note is that Kanban view calculations and calendar coloring by property mcp tools are unavailable with BlobUI CLI.
+## Object mention filters
+
+On Windows, configure mention spaces and object types in BlobUI Settings. On Linux, use `blob-ui object-mention ls`, `blob-ui object-mention add <object-type-id>`, or `blob-ui object-mention remove <object-type-id>`. Use `blob-ui object-mention spaces ls|add|remove <space-id>` to manage mention spaces. These filters change suggestions only. Anyblob still checks the saved permission for a space before reading an object.

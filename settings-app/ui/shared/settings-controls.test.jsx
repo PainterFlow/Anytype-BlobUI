@@ -19,15 +19,15 @@ describe("Settings controls", () => {
   it("renders a read-only copy field with the shared Logs icons", () => {
     const onCopy = vi.fn();
     const { rerender } = render(<CopyTextField
-      value="C:/Projects"
-      inputAttributes={{ id: "local-projects-folder", "aria-label": "Local Projects Folder" }}
+      value="C:/Anytype"
+      inputAttributes={{ id: "anytype-folder", "aria-label": "Anytype Folder" }}
       copyLabel="Copy folder path"
       copiedLabel="Folder path copied"
       onCopy={onCopy}
     />);
 
-    const input = screen.getByRole("textbox", { name: "Local Projects Folder" });
-    expect(input.value).toBe("C:/Projects");
+    const input = screen.getByRole("textbox", { name: "Anytype Folder" });
+    expect(input.value).toBe("C:/Anytype");
     expect(input.readOnly).toBe(true);
 
     const copyButton = screen.getByRole("button", { name: "Copy folder path" });
@@ -37,8 +37,8 @@ describe("Settings controls", () => {
     expect(onCopy).toHaveBeenCalledTimes(1);
 
     rerender(<CopyTextField
-      value="C:/Projects"
-      inputAttributes={{ id: "local-projects-folder", "aria-label": "Local Projects Folder" }}
+      value="C:/Anytype"
+      inputAttributes={{ id: "anytype-folder", "aria-label": "Anytype Folder" }}
       copied
       copyLabel="Copy folder path"
       copiedLabel="Folder path copied"
@@ -102,8 +102,8 @@ describe("Settings controls", () => {
   });
 
   it("keeps question mark help on the shared focus and hover tooltip behavior", () => {
-    render(<HelpTooltip label="Project source help" text="Choose the sources this local project can access." />);
-    const trigger = screen.getByRole("button", { name: "Project source help" });
+    render(<HelpTooltip label="Space permission help" text="Choose the spaces this integration can access." />);
+    const trigger = screen.getByRole("button", { name: "Space permission help" });
     expect(trigger.querySelector("svg circle")).not.toBeNull();
     expect(trigger.querySelector("svg path")).not.toBeNull();
     const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
@@ -120,8 +120,8 @@ describe("Settings controls", () => {
   });
 
   it("closes a tooltip when its question mark is clicked", () => {
-    render(<HelpTooltip label="Project source help" text="Choose the sources this local project can access." />);
-    const trigger = screen.getByRole("button", { name: "Project source help" });
+    render(<HelpTooltip label="Space permission help" text="Choose the spaces this integration can access." />);
+    const trigger = screen.getByRole("button", { name: "Space permission help" });
     const popover = document.getElementById(trigger.getAttribute("aria-describedby"));
 
     fireEvent.pointerEnter(trigger.parentElement);

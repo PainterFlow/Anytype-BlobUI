@@ -37,7 +37,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
     assert.equal(await page.locator('#save-button').isVisible(), false);
     assert.equal(await page.locator('#preferences-page input[type="search"], #advanced-page input[type="search"], #accessibility-page input[type="search"], .v21-search').count(), 0);
     assert.equal(await page.locator('#advanced-section-links .v21-section-link').nth(1).innerText(), 'App Settings');
-    assert.equal(await page.locator('.v21-section-link svg').count(), 12);
+    assert.equal(await page.locator('.v21-section-link svg').count(), 11);
     assert.deepEqual(await page.locator('.sidebar-nav [data-settings-page]').evaluateAll(nodes => nodes.map(node => node.dataset.settingsPage)),
       ['preferences', 'accessibility', 'calendar-events', 'kanban-views', 'advanced', 'codex']);
     assert.equal(await page.locator('.v21-section-links .documentation-chevron').count(), 0);

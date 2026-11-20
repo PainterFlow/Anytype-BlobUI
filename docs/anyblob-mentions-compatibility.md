@@ -2,13 +2,13 @@
 
 Anyblob 0.2.7 adds individual Sources entries through HTTPS resource activity metadata while retaining canonical MCP resource links. See [Sources integration](anyblob-navigation-compatibility.md) for the production-fixture host checks, installation steps and opening behavior. Task-row integration is outside this change.
 
-Implemented on 2026-11-01 for Anyblob 0.1.3 and Settings 2.0.1. The earlier project-specific suggestions and message-scoped approval exceptions are superseded.
+Implemented on 2026-11-01 for Anyblob 0.1.3 and Settings 2.0.1. The earlier mention suggestions and message-scoped approval exceptions are superseded.
 
 ## Settings
 
 Object Mentions appears below General with Filtered spaces and Filtered object types. The shared category box and multi-select controls stay independently editable during loading, empty selections and discovery failures. Dynamic All includes newly accessible spaces and types. All and individual selections are mutually exclusive; an empty explicit selection matches nothing.
 
-Types use space IDs and full type IDs, and labels include space names. Explicit type selections outside filtered spaces stay saved and appear inactive. Unavailable selections stay visible. Discovery failures preserve saved filters and available options. The existing Save/Undo draft flow applies edits. Unsaved changes never affect searches. Space and type discovery do not load project membership or object documents.
+Types use space IDs and full type IDs, and labels include space names. Explicit type selections outside filtered spaces stay saved and appear inactive. Unavailable selections stay visible. Discovery failures preserve saved filters and available options. The existing Save/Undo draft flow applies edits. Unsaved changes never affect searches. Space and type discovery do not load object documents.
 
 Long picker labels truncate on one line with an ellipsis. Filter Incomplete Tasks sits below the type picker and defaults off. Saved `filterIncompleteTasks` excludes checked Done values before the result limit, including custom task types. Search requests only the Done property in addition to its normal metadata when this option is on. Unset or unchecked values remain eligible, and malformed completion values return an error. Completion data is never included in suggestions. Changing this saved option invalidates in-flight searches through the existing filter comparison.
 
@@ -16,7 +16,7 @@ Long picker labels truncate on one line with an ellipsis. Filter Incomplete Task
 
 Initialization advertises `openai/mentions` with `searchTool: search_mentions` through extensions and the legacy experimental capability location. The read-only tool is app-visible, accepts `{query: string}` including empty queries and returns structured `{items: ResourceLink[]}` with at most 20 results. This follows the [official extension documentation](https://developers.openai.com/plugins/build/extensions) and linked [composer mention specification](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md#composer-at-mentions).
 
-Metadata search requires the enabled integration and existing bridge authentication. It is independent of project identity and saved read grants. Suggestions contain only object identity, title and space metadata, and may include objects the project cannot read. They contain no previews, properties, bodies or attachment metadata. Selecting a suggestion grants no access.
+Metadata search requires the enabled integration and existing bridge authentication. It is independent of saved read grants. Suggestions contain only object identity, title and space metadata, and may include objects that the saved space permission does not allow Anyblob to read. They contain no previews, properties, bodies or attachment metadata. Selecting a suggestion grants no access.
 
 Search uses API v2, enumerating selected spaces with empty-query search and matching titles by Unicode lowercase substring comparison. This avoids full-text capped snapshots and overlapping pages. Saved full type IDs resolve to current API keys before filtering, preserving space-scoped identity despite duplicate names or keys. Unknown types never broaden searches. Filtering precedes deduplication, deterministic sorting and limiting. Sort order is title, space name, space ID and object ID in Rust string order.
 
@@ -28,17 +28,15 @@ Failures return errors without broader fallbacks. Enumeration fails at 100,000 r
 
 Object URIs use `anyblob://objects/{space_id}/{object_id}`. Some Codex hosts wrap that URI as one percent-encoded path segment in `mcp-resource://anyblob/{encoded_uri}`. Anyblob decodes exactly that wrapper once, then applies the same strict canonical URI checks. Extra segments, encoded IDs, query strings, fragments, other schemes and model-controlled identity or consent arguments remain rejected.
 
-`resources/read` maps directly to the existing `ReadObject` path with host-provided `_meta.threadId`. Global/project permissions, Always Ask, membership checks, revocation, project moves and cancellation retain their existing behavior. Missing identity still denies reads when saved project restrictions require it. Resource content is JSON text containing the existing authorized object document and Markdown. Denials return MCP errors without content. No approval exceptions or writes were added.
-
-If the host omits chat metadata when opening a resource link, Anyblob cannot infer project access from the resource URI. Call `read_object` as a tool in the current chat, or use an MCP host that forwards verified chat metadata.
+`resources/read` maps directly to the existing `ReadObject` path. Resource reads use the same saved per-space permission and approval checks as `read_object`. A resource URI does not grant access. Resource content is JSON text containing the authorized object document and Markdown. Denials return MCP errors without content. No approval exceptions or writes were added.
 
 ## Validation and limits
 
-Focused fixtures cover Unicode, duplicate titles/types, empty queries and selections, dynamic All, type ID/key resolution, filtering before limiting, sorting, pagination, metadata projection, cancellation, concurrent queries, filter changes during HTTP and bridge failures. Existing permission fixtures cover differing projects, missing identity, Always Ask, revocation, source changes and project moves. The packaged executable-to-pipe fixture also covers mention searches, resource resolution with host identity, Always Ask and denied resource reads.
+Focused fixtures cover Unicode, duplicate titles/types, empty queries and selections, dynamic All, type ID/key resolution, filtering before limiting, sorting, pagination, metadata projection, cancellation, concurrent queries, filter changes during HTTP and bridge failures. Permission fixtures cover saved space permissions, Always Ask, revocation and source changes. The packaged executable-to-pipe fixture also covers mention searches, resource resolution, Always Ask and denied resource reads.
 
-Dark browser fixtures cover both layouts, keyboard use, Save/Undo, unavailable and inactive selections, dynamic All, discovery failures and unlocked controls during both space and type loading. The old Anyblob fixture's stale End-key assertion now expects the third Projects tab rather than Permissions.
+Dark browser fixtures cover both layouts, keyboard use, Save/Undo, unavailable and inactive selections, dynamic All, discovery failures and unlocked controls during both space and type loading. The Anyblob fixture's End-key assertion targets the Permissions tab.
 
-The installed-host probe reads package `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0` without registering plugins, creating chats or accessing personal state. The installed provider selector accepts discovery responses from the packaged MCP executable and rejects a non-read-only control. The installed mention dispatcher and resource-read helper run against an isolated resolver and stdio fixture. Global concurrent metadata searches and resource-read identity at the webview RPC boundary pass. Synthetic projects see the same metadata and receive different read outcomes.
+The installed-host probe reads package `OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0` without registering plugins, creating chats or accessing personal state. The installed provider selector accepts discovery responses from the packaged MCP executable and rejects a non-read-only control. The installed mention dispatcher and resource-read helper run against an isolated resolver and stdio fixture. Global concurrent metadata searches and resource reads at the webview RPC boundary pass. Synthetic space permissions produce the expected read outcomes.
 
 Validation passed 32 focused native tests, the packaged executable/pipe fixture, four MCP unit/stdio tests, three dark UI fixtures, the existing UI state checks and the installed-host probe. Plugin packaging and `scripts/Build-App.ps1 -s -c` passed with `BLOBUI_BUILD_ONLY=1`.
 

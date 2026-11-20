@@ -90,7 +90,7 @@ fn verify_codex_catalog_budget(instructions: &str, tools: &[Value]) {
         total += bytes;
         largest = largest.max(bytes);
     }
-    assert_eq!(count, 57);
+    assert_eq!(count, 56);
     assert!(total < CATALOG_TARGET, "Codex tool catalog occupies {total} bytes");
     println!("{count} model tools, {total} bytes, largest tool {largest} bytes");
 }
@@ -124,7 +124,7 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(initialize["result"]["serverInfo"]["name"], "anyblob");
     let tools = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
     let catalog = tools["result"]["tools"].as_array().unwrap();
-    assert_eq!(catalog.len(), 58);
+    assert_eq!(catalog.len(), 57);
     verify_codex_catalog_budget(initialize["result"]["instructions"].as_str().unwrap(), catalog);
     let patch = catalog.iter().find(|tool| tool["name"] == "patch_object").unwrap();
     assert_eq!(patch["annotations"]["readOnlyHint"], false);
@@ -154,23 +154,16 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
         .unwrap()
         .contains("call read_object as a tool"));
     assert_eq!(call(json!({"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"anyblob://objects/a/b?consent=true"}}))["error"]["code"],-32602);
-    assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
-    assert_eq!(call(json!({"jsonrpc":"2.0","id":37,"method":"resources/read","params":{"uri":"mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb","_meta":{"threadId":"host-chat"}}}))["error"]["code"],-32000);
-    let auth_error=call(json!({"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":"true"},"_meta":{"threadId":"host-chat"}}}));
-    assert_eq!(auth_error["error"]["code"],-32602);
-    let auth_message=auth_error["error"]["message"].as_str().unwrap();
-    assert!(auth_message.contains("optional remote:boolean"));
-    assert!(!auth_message.contains("secret-value"));
-    let auth_without_remote=call(json!({"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value"},"_meta":{"threadId":"host-chat"}}}));
-    assert_eq!(auth_without_remote["result"]["isError"],true);
-    assert_ne!(auth_without_remote["result"]["content"][0]["text"],"Unknown tool or invalid arguments.");
-    let valid_auth=call(json!({"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value","remote":true},"_meta":{"threadId":"host-chat"}}}));
-    assert_eq!(valid_auth["result"]["isError"],true);
-    assert_ne!(valid_auth["result"]["content"][0]["text"],"Unknown tool or invalid arguments.");
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"anyblob://objects/a/b"}}))["error"]["code"],-32000);
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":37,"method":"resources/read","params":{"uri":"mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb"}}))["error"]["code"],-32000);
+    assert!(catalog.iter().all(|tool| tool["name"] != "authenticate_project"));
+    let removed_auth=call(json!({"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"authenticate_project","arguments":{"name":"Work","key":"secret-value"}}}));
+    assert_eq!(removed_auth["error"]["code"],-32602);
+    assert_eq!(removed_auth["error"]["message"],"Unknown tool or invalid arguments.");
     for tool in tools["result"]["tools"].as_array().unwrap() {
         assert!(tool["annotations"]["readOnlyHint"].is_boolean());
     }
-    assert_eq!(call(json!({"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"create_object","arguments":{"space_id":"s","body":{"type":"page","name":"fixture"}},"_meta":{"threadId":"host-chat"}}}))["result"]["isError"],true);
+    assert_eq!(call(json!({"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"create_object","arguments":{"space_id":"s","body":{"type":"page","name":"fixture"}}}}))["result"]["isError"],true);
     assert_eq!(call(json!({"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"list_objects","arguments":{"space_id":"s","fields":"markdown"}}}))["error"]["code"],-32602);
     for (id, params) in [
         (4, json!({"name":"delete_object","arguments":{}})),

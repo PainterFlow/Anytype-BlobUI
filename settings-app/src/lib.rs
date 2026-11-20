@@ -16,7 +16,6 @@ mod anyblob_blobui;
 mod anyblob_content;
 mod anyblob_creation;
 mod anyblob_mentions;
-mod anyblob_scope;
 mod api;
 mod autostart;
 mod backup;
@@ -24,8 +23,6 @@ mod calculator;
 mod calendar;
 mod category_identity;
 mod codex;
-mod codex_identity;
-mod codex_projects;
 mod connection;
 mod css;
 mod folder_dialog;
@@ -813,19 +810,6 @@ async fn select_blob_backup_folder(
 }
 
 #[tauri::command]
-async fn select_anyblob_projects_folder(
-    app: tauri::AppHandle,
-    current_directory: Option<String>,
-) -> Result<Option<String>, String> {
-    select_blob_folder(
-        app,
-        current_directory,
-        "Select Local Projects Folder",
-        "Select",
-    )
-    .await
-}
-
 async fn select_blob_folder(
     app: tauri::AppHandle,
     current_directory: Option<String>,
@@ -2959,11 +2943,7 @@ pub fn app_main() {
         .invoke_handler(tauri::generate_handler![
             codex::discover_codex_spaces,
             codex::discover_anyblob_types,
-            codex::discover_codex_sources,
-            codex_projects::discover_codex_projects,
             anyblob::anyblob_status,
-            anyblob::set_anyblob_projects_folder,
-            select_anyblob_projects_folder,
             anyblob::configure_anyblob,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,

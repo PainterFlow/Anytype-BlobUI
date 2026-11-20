@@ -107,10 +107,10 @@ impl ContentRequest {
                 return Err("Invalid destination ID.".into());
             }
             if self.arguments["idempotency_key"].as_str().is_none() {
-                return Err("Scoped creation requires a caller-supplied idempotency_key.".into());
+                return Err("Creating in a collection or query requires a caller-supplied idempotency_key.".into());
             }
             if self.arguments["create_missing_options"] == true {
-                return Err("Scoped creation cannot create select options.".into());
+                return Err("Select options cannot be created as destination objects.".into());
             }
         }
         if self.arguments.to_string().len() > 11 * 1024 * 1024 {
