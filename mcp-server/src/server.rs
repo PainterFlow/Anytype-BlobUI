@@ -74,6 +74,22 @@ where
     T: Fn() -> Result<String, String> + Send + Sync + 'static,
     D: Fn(Request, &AtomicBool, Arc<Approval>) -> Result<Response, String> + Send + Sync + 'static,
 {
+    serve_stdio_mode(token_provider, false, dispatch);
+}
+
+pub fn serve_headless_stdio<T, D>(token_provider: T, dispatch: D)
+where
+    T: Fn() -> Result<String, String> + Send + Sync + 'static,
+    D: Fn(Request, &AtomicBool, Arc<Approval>) -> Result<Response, String> + Send + Sync + 'static,
+{
+    serve_stdio_mode(token_provider, true, dispatch);
+}
+
+fn serve_stdio_mode<T, D>(token_provider: T, headless_mode: bool, dispatch: D)
+where
+    T: Fn() -> Result<String, String> + Send + Sync + 'static,
+    D: Fn(Request, &AtomicBool, Arc<Approval>) -> Result<Response, String> + Send + Sync + 'static,
+{
     let token_provider = Arc::new(token_provider);
     let dispatch = Arc::new(dispatch);
     let answers: Answers = Arc::default();
@@ -166,7 +182,10 @@ where
             }
             _ if !initialized => error(id, -32002, "Initialize the MCP connection first."),
             "ping" => reply(id, json!({})),
-            "tools/list" => reply(id, json!({"tools":tools()})),
+            "tools/list" => reply(
+                id,
+                json!({"tools":if headless_mode {blobui_mcp::headless_tools()} else {tools()}}),
+            ),
             "resources/list" => reply(id, json!({"resources":[]})),
             "resources/templates/list" => reply(
                 id,
@@ -174,6 +193,18 @@ where
             ),
             "tools/call" | "resources/read" => {
                 let params = &message["params"];
+                if method == "tools/call" {
+                    if let Some(error_message) = blobui_mcp::headless_tool_error(
+                        params["name"].as_str().unwrap_or_default(),
+                        headless_mode,
+                    ) {
+                        reply(
+                            id,
+                            json!({"content":[{"type":"text","text":error_message}],"isError":true}),
+                        );
+                        continue;
+                    }
+                }
                 let resource_uri = if method == "resources/read" {
                     params["uri"].as_str().map(String::from)
                 } else {

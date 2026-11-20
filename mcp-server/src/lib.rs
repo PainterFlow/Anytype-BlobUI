@@ -12,11 +12,43 @@ pub mod blobui;
 pub mod server;
 
 pub fn serve_bridge_stdio() {
-    server::serve_stdio(credential::read, |request, cancel, approve| {
+    serve_bridge_stdio_with_mode(false);
+}
+
+pub fn serve_headless_bridge_stdio() {
+    serve_bridge_stdio_with_mode(true);
+}
+
+fn serve_bridge_stdio_with_mode(headless_mode: bool) {
+    let dispatch = |request: Request,
+                    cancel: &std::sync::atomic::AtomicBool,
+                    approve: std::sync::Arc<server::Approval>|
+     -> Result<Response, String> {
         transport::call_with_approval(&request, cancel, &|message, remaining| {
             approve(message, remaining)
         })
+    };
+    if headless_mode {
+        server::serve_headless_stdio(credential::read, dispatch);
+    } else {
+        server::serve_stdio(credential::read, dispatch);
+    }
+}
+
+pub const HEADLESS_BLOBUI_TOOL_ERROR: &str =
+    "Tools that interact with BlobUI app features are unavailable in headless mode.";
+
+pub fn headless_tool_error(tool_name: &str, headless_mode: bool) -> Option<&'static str> {
+    (headless_mode && blobui::NAMES.contains(&tool_name)).then_some(HEADLESS_BLOBUI_TOOL_ERROR)
+}
+
+pub fn headless_tools() -> Value {
+    let mut tool_list = tools();
+    tool_list.as_array_mut().unwrap().retain(|tool| {
+        let name = tool["name"].as_str().unwrap_or_default();
+        !blobui::NAMES.contains(&name)
     });
+    tool_list
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -105,6 +137,46 @@ fn bridge_response_rejects_unrecognized_envelopes() {
     })).is_err());
     let response: Response = serde_json::from_value(json!({"result":{"items":[]},"error":null})).unwrap();
     assert_eq!(response.result.unwrap(), json!({"items":[]}));
+}
+
+#[cfg(test)]
+mod headless_tests {
+    use super::*;
+
+    #[test]
+    fn headless_tool_catalog_omits_blobui_app_feature_tools() {
+        let regular_tools = tools();
+        let regular_names = regular_tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        let headless_tool_specs = headless_tools();
+        let headless_names = headless_tool_specs
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(regular_names.len(), headless_names.len() + blobui::NAMES.len());
+        assert!(blobui::NAMES.iter().all(|name| regular_names.contains(name)));
+        assert!(blobui::NAMES.iter().all(|name| !headless_names.contains(name)));
+        assert!(headless_names.iter().all(|name| regular_names.contains(name)));
+    }
+
+    #[test]
+    fn headless_blobui_calls_return_a_short_unavailable_error() {
+        for tool_name in blobui::NAMES {
+            assert_eq!(
+                headless_tool_error(tool_name, true),
+                Some(HEADLESS_BLOBUI_TOOL_ERROR)
+            );
+            assert_eq!(headless_tool_error(tool_name, false), None);
+        }
+        assert_eq!(headless_tool_error("list_spaces", true), None);
+    }
 }
 pub fn capabilities() -> Value {
     json!({"tools":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},
