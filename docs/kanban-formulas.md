@@ -28,7 +28,7 @@ Each category uses all matching cards. Numeric aggregates ignore missing values.
 
 The sidebar Save and Undo include calculations and the display preference. Searching, changing filters, or changing Settings pages preserves pending edits.
 
-Save reads fresh data and publishes every saved calculation as one snapshot. Press Ctrl+R in Anytype after saving. Results remain snapshots until the next save. The toolbar reload action discovers views without publishing calculation results.
+Save reads fresh data and publishes every saved calculation as one snapshot. Press Ctrl+R in Anytype after saving. Results remain snapshots until the next save or Settings reload. Reloading Settings republishes every saved calculation when the Anytype API answers. The toolbar reload action discovers views without publishing calculation results.
 
 Publication updates the workspace configuration, installed BlobUI data, and stylesheet in one transaction. A failed API read or file replacement retains the previous snapshot and pending edits. Normal appearance saves preserve the snapshot. The API key remains in the native backend; the browser never receives it.
 

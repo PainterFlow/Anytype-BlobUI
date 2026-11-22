@@ -18,6 +18,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     const page = await context.newPage();
     await page.addInitScript(() => {
       window.__availability = 'missing';
+      window.__availabilityCalls = 0;
       window.__pending = [];
       window.__connections = [];
       window.__saves = [];
@@ -25,6 +26,7 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
       window.__TAURI__ = { core: { invoke: async (name, args) => {
         if (name === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, settings: {} };
         if (name === 'get_calendar_api_availability') {
+          window.__availabilityCalls++;
           if (window.__availability === 'pending') return new Promise(resolve => window.__pending.push(resolve));
           return window.__availability;
         }
@@ -91,6 +93,17 @@ test('Calendar Colors preserves drafts, gates interaction, and recovers API avai
     await page.evaluate(() => { window.__pending.splice(0).forEach(resolve => resolve('unavailable')); });
     assert.equal(await toggle.isDisabled(), false);
     assert.equal(await toggle.isChecked(), false);
+    // A stale result never sticks: Ctrl+R re-checks the connection and unlocks the toggle once the API answers.
+    await page.evaluate(() => { window.__availability = 'unavailable'; });
+    const checked = await page.evaluate(() => window.__availabilityCalls);
+    await page.evaluate(() => window.BlobUI.AppReload.run({ checkUpdates: false }));
+    assert.equal(await page.evaluate(() => window.__availabilityCalls), checked + 1);
+    await page.waitForFunction(() => document.getElementById('calendar-colors-help').textContent.includes('unavailable'));
+    assert.equal(await toggle.isDisabled(), true);
+    await page.evaluate(() => { window.__availability = 'available'; });
+    await page.evaluate(() => window.BlobUI.AppReload.run({ checkUpdates: false }));
+    await page.waitForFunction(() => !document.getElementById('calendar-colors-enabled').disabled);
+    assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
     for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       await page.locator('#calendar-events-panel-0').screenshot({ path: path.join(root, theme + '.png') });

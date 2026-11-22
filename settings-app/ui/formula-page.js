@@ -738,6 +738,22 @@
       }
     },
     refresh() { if (!discovered && !discovering && !loading) return discover(); },
+    async refreshResults(bridge) {
+      if (!bridge || loading || locked || !persistedState.definitions.length) return null;
+      try {
+        const result = await bridge("refresh_kanban_results");
+        if (!result) return null;
+        (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+        configurationRevision = result.revision || configurationRevision;
+        calculatedAt = result.calculatedAt || calculatedAt;
+        updateTimestamp();
+        setMessage("Results refreshed. Press Ctrl+R in Anytype to apply.", true);
+        return result;
+      } catch (error) {
+        setMessage(String(error.message || error) + " Previous published results are kept.");
+        throw error;
+      }
+    },
     reload() {
       discovered = false;
       discoveryRequested = true;
