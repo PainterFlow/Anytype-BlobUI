@@ -1790,15 +1790,31 @@ pub fn validate_install_directory(path: &Path) -> Result<PathBuf, String> {
     reject_reparse_path(&install)?;
     let data_path = install.join("blob/data.json");
     reject_reparse_path(&data_path)?;
-    let bytes = fs::read(&data_path).map_err(|_| {
-        "BlobUI settings were not found in the selected Anytype folder.".to_string()
-    })?;
+    let bytes = read_install_data(&data_path)?;
     let data: Value = crate::parse_settings_json(&bytes)
         .map_err(|_| "BlobUI data.json in the selected Anytype folder is invalid.".to_string())?;
     if !data_matches_install(&data, &install) {
         return Err("BlobUI settings do not match the selected Anytype folder.".into());
     }
     Ok(install)
+}
+
+/// Read the legacy install settings file, tolerating the brief window in
+/// which a concurrent atomic replacement hides or locks it.
+fn read_install_data(path: &Path) -> Result<Vec<u8>, String> {
+    const RETRY_LIMIT: u32 = 8;
+    for attempt in 0..=RETRY_LIMIT {
+        match fs::read(path) {
+            Ok(bytes) => return Ok(bytes),
+            Err(error) if attempt == RETRY_LIMIT || !is_transient_file_error(&error) => {
+                return Err(
+                    "BlobUI settings were not found in the selected Anytype folder.".to_string(),
+                );
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    }
+    unreachable!()
 }
 
 fn data_matches_install(data: &Value, install: &Path) -> bool {
