@@ -731,6 +731,11 @@ mod tests {
                 !settings["settings"]["objectMentionHoverEffect"].as_bool().unwrap(),
                 "object mention preview toggle was not compiled independently in case {index}"
             );
+            assert_eq!(
+                compiled.contains(".widget .viewCalendar .day.today"),
+                settings["settings"]["accentColor"].as_str().unwrap() != "Default",
+                "widget calendar today accent was not compiled independently in case {index}"
+            );
             if index == 0 {
                 assert!(compiled.contains("record-default-case"));
             } else if index == 1 {
