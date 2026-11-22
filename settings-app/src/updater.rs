@@ -24,6 +24,8 @@ const MAX_RELEASE_NOTES_BYTES: u64 = 512 * 1024;
 const MAX_RELEASE_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_RELEASE_VIDEO_BYTES: u64 = 64 * 1024 * 1024;
 
+static PREFERENCES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UpdaterPreferences {
@@ -168,10 +170,14 @@ pub fn preferences_path(app_data_directory: &Path) -> PathBuf {
             let path = app.join("cache/updater.json");
             let legacy = legacy_preferences_path(app_data_directory);
             if !path.exists() {
-                if let Ok(metadata) = fs::symlink_metadata(&legacy) {
-                    if metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse_point(&metadata) {
-                        if let Ok(bytes) = fs::read(&legacy) {
-                            let _ = storage::write_atomic(&path, &bytes);
+                if let Ok(_guard) = PREFERENCES_LOCK.lock() {
+                    if !path.exists() {
+                        if let Ok(metadata) = fs::symlink_metadata(&legacy) {
+                            if metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse_point(&metadata) {
+                                if let Ok(bytes) = fs::read(&legacy) {
+                                    let _ = storage::write_atomic(&path, &bytes);
+                                }
+                            }
                         }
                     }
                 }
@@ -199,22 +205,10 @@ fn app_root_from_preferences_path(path: &Path) -> Option<PathBuf> {
 }
 
 pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
-    let mut preferences = match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            reject_reparse_path(path)?;
-            if !metadata.is_file() {
-                return Err("The saved BlobUI updater settings are not a regular file.".into());
-            }
-            let text = fs::read_to_string(path)
-                .map_err(|_| "The saved BlobUI updater settings could not be read.".to_string())?;
-            serde_json::from_str(&text)
-                .map_err(|_| "The saved BlobUI updater settings are not valid JSON.".to_string())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(UpdaterPreferences::default())
-        }
-        Err(_) => Err("The saved BlobUI updater settings could not be inspected safely.".into()),
-    }?;
+    let _guard = PREFERENCES_LOCK
+        .lock()
+        .map_err(|_| "The BlobUI updater settings lock is unavailable.")?;
+    let mut preferences = read_preferences(path)?.unwrap_or_default();
     if let Some(root) = app_root_from_preferences_path(path) {
         let settings_directory = root.join("Settings");
         if settings_directory.is_dir() {
@@ -235,7 +229,59 @@ pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
     Ok(preferences)
 }
 
+/// Read the updater preferences file, tolerating the brief window in which a
+/// concurrent atomic replacement hides or locks it. `None` means no file exists.
+fn read_preferences(path: &Path) -> Result<Option<UpdaterPreferences>, String> {
+    const RETRY_LIMIT: u32 = 8;
+    for attempt in 0..=RETRY_LIMIT {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                reject_reparse_path(path)?;
+                if !metadata.is_file() {
+                    return Err(
+                        "The saved BlobUI updater settings are not a regular file.".into(),
+                    );
+                }
+                match fs::read_to_string(path) {
+                    Ok(text) => {
+                        return serde_json::from_str(&text).map(Some).map_err(|_| {
+                            "The saved BlobUI updater settings are not valid JSON.".to_string()
+                        });
+                    }
+                    Err(error) if attempt == RETRY_LIMIT || !is_transient_file_error(&error) => {
+                        return Err(
+                            "The saved BlobUI updater settings could not be read.".to_string(),
+                        );
+                    }
+                    Err(_) => {}
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if attempt == RETRY_LIMIT {
+                    return Ok(None);
+                }
+            }
+            Err(error) if attempt == RETRY_LIMIT || !is_transient_file_error(&error) => {
+                return Err(
+                    "The saved BlobUI updater settings could not be inspected safely.".into(),
+                );
+            }
+            Err(_) => {}
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    unreachable!()
+}
+
+fn is_transient_file_error(error: &std::io::Error) -> bool {
+    // Windows briefly reports these while ReplaceFile swaps the destination.
+    matches!(error.raw_os_error(), Some(2 | 3 | 5 | 32 | 33))
+}
+
 fn save_preferences(path: &Path, preferences: &UpdaterPreferences) -> Result<(), String> {
+    let _guard = PREFERENCES_LOCK
+        .lock()
+        .map_err(|_| "The BlobUI updater settings lock is unavailable.")?;
     let root = app_root_from_preferences_path(path)
         .filter(|root| root.join("Settings").is_dir());
     let mut cached = serde_json::to_value(preferences)
@@ -2364,6 +2410,33 @@ mod tests {
             fs::read(install.join("blob/assets/spacebanner/banner.png")).unwrap(),
             original_banner
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_preference_reads_survive_atomic_replacement() {
+        let root = fixture_root("concurrent-preferences");
+        let path = root.join("updater.json");
+        let preferences = UpdaterPreferences {
+            install_directory: Some("D:\\Anytype data".into()),
+            ..UpdaterPreferences::default()
+        };
+        save_preferences(&path, &preferences).unwrap();
+
+        let writer_path = path.clone();
+        let writer_preferences = preferences.clone();
+        let writer = std::thread::spawn(move || {
+            for _ in 0..50 {
+                save_preferences(&writer_path, &writer_preferences).unwrap();
+            }
+        });
+        for _ in 0..50 {
+            assert_eq!(
+                load_preferences(&path).unwrap().install_directory.as_deref(),
+                Some("D:\\Anytype data")
+            );
+        }
+        writer.join().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 

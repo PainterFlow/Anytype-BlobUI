@@ -59,23 +59,63 @@ impl Drop for UpdaterGuard {
     }
 }
 
+const GUARD_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
+const GUARD_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(20);
+
+fn acquire_flag(flag: &AtomicBool) -> bool {
+    flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+fn wait_for_flag(flag: &AtomicBool, message: &str) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + GUARD_WAIT_LIMIT;
+    while !acquire_flag(flag) {
+        if std::time::Instant::now() >= deadline {
+            return Err(message.to_string());
+        }
+        std::thread::sleep(GUARD_WAIT_STEP);
+    }
+    Ok(())
+}
+
 fn acquire_save_guard(message: &str) -> Result<SaveGuard, String> {
-    SAVE_IN_PROGRESS
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map(|_| SaveGuard)
-        .map_err(|_| message.to_string())
+    acquire_flag(&SAVE_IN_PROGRESS)
+        .then_some(SaveGuard)
+        .ok_or_else(|| message.to_string())
+}
+
+fn wait_save_guard(message: &str) -> Result<SaveGuard, String> {
+    wait_for_flag(&SAVE_IN_PROGRESS, message).map(|_| SaveGuard)
 }
 
 fn acquire_updater_guard() -> Result<UpdaterGuard, String> {
-    UPDATER_IN_PROGRESS
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map(|_| UpdaterGuard)
-        .map_err(|_| "An update check or installation is already in progress.".into())
+    acquire_flag(&UPDATER_IN_PROGRESS)
+        .then_some(UpdaterGuard)
+        .ok_or_else(|| "An update check or installation is already in progress.".to_string())
+}
+
+fn wait_updater_guard() -> Result<UpdaterGuard, String> {
+    wait_for_flag(
+        &UPDATER_IN_PROGRESS,
+        "An update check or installation is already in progress.",
+    )
+    .map(|_| UpdaterGuard)
 }
 
 fn acquire_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String> {
     let save = acquire_save_guard("Wait for the current settings save to finish.")?;
     match acquire_updater_guard() {
+        Ok(updater) => Ok((save, updater)),
+        Err(error) => {
+            drop(save);
+            Err(error)
+        }
+    }
+}
+
+fn wait_save_and_updater_guards() -> Result<(SaveGuard, UpdaterGuard), String> {
+    let save = wait_save_guard("Wait for the current settings save to finish.")?;
+    match wait_updater_guard() {
         Ok(updater) => Ok((save, updater)),
         Err(error) => {
             drop(save);
@@ -270,9 +310,8 @@ fn get_app_state(app: tauri::AppHandle) -> Result<AppState, String> {
 
 #[tauri::command]
 async fn reload_custom_themes() -> Result<ThemeReloadResult, String> {
-    let guard = acquire_save_guard("Wait for the current settings save to finish.")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+    tauri::async_runtime::spawn_blocking(|| {
+        let _guard = wait_save_guard("Wait for the current settings save to finish.")?;
         reload_custom_themes_blocking()
     })
     .await
@@ -343,9 +382,8 @@ fn get_anytype_theme(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn get_saved_state_snapshot() -> Result<Value, String> {
-    let guard = acquire_save_guard("Wait for the current save before reloading Settings.")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+    tauri::async_runtime::spawn_blocking(|| {
+        let _guard = wait_save_guard("Wait for the current save before reloading Settings.")?;
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
@@ -368,40 +406,44 @@ fn get_keyboard_shortcuts() -> Vec<hotkey::Shortcut> {
 }
 
 #[tauri::command]
-fn save_keyboard_shortcuts(
+async fn save_keyboard_shortcuts(
     shortcuts: Vec<hotkey::Shortcut>,
 ) -> Result<Vec<hotkey::Shortcut>, String> {
     let app_data = app_data_directory();
     #[cfg(not(test))]
     let install = resolve_install_directory(&app_data)?;
-    #[cfg(test)]
-    {
-        let path = app_data
-            .parent()
-            .unwrap_or(&app_data)
-            .join("BlobUI/shortcuts.json");
-        return hotkey::save_shortcuts(&path, shortcuts);
-    }
-    #[cfg(not(test))]
-    {
-        let _guard = acquire_save_guard("Wait for the current settings save to finish.")?;
-        let _ = settings_data_path(&install)?;
-        let root = settings_root_for_install(&install)?;
-        let mut data = settings_store::load(&root)?;
-        let before = data.clone();
-        hotkey::validate_shortcuts(&shortcuts)?;
-        data["keybinds"] = json!(shortcuts);
-        settings_store::save(&root, &data)?;
-        match hotkey::set_shortcuts(shortcuts) {
-            Ok(saved) => Ok(saved),
-            Err(error) => {
-                if let Err(rollback) = settings_store::save(&root, &before) {
-                    return Err(format!("{error} The saved Settings shortcut list could not be restored: {rollback}"));
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        {
+            let path = app_data
+                .parent()
+                .unwrap_or(&app_data)
+                .join("BlobUI/shortcuts.json");
+            return hotkey::save_shortcuts(&path, shortcuts);
+        }
+        #[cfg(not(test))]
+        {
+            let _guard = wait_save_guard("Wait for the current settings save to finish.")?;
+            let _ = settings_data_path(&install)?;
+            let root = settings_root_for_install(&install)?;
+            let mut data = settings_store::load(&root)?;
+            let before = data.clone();
+            hotkey::validate_shortcuts(&shortcuts)?;
+            data["keybinds"] = json!(shortcuts);
+            settings_store::save(&root, &data)?;
+            match hotkey::set_shortcuts(shortcuts) {
+                Ok(saved) => Ok(saved),
+                Err(error) => {
+                    if let Err(rollback) = settings_store::save(&root, &before) {
+                        return Err(format!("{error} The saved Settings shortcut list could not be restored: {rollback}"));
+                    }
+                    Err(error)
                 }
-                Err(error)
             }
         }
-    }
+    })
+    .await
+    .map_err(|_| "The keyboard shortcut task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -512,9 +554,8 @@ fn anytype_executable_version(path: &Path) -> Option<String> {
 
 #[tauri::command]
 async fn save_settings(settings: SettingsDraft) -> Result<SaveResult, String> {
-    let guard = acquire_save_guard("Settings are already being saved.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = wait_save_guard("Settings are already being saved.")?;
         save_settings_blocking(settings)
     })
     .await
@@ -535,9 +576,8 @@ struct ConnectionDraft {
 
 #[tauri::command]
 async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult, String> {
-    let guard = acquire_save_guard("Wait for the current save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = wait_save_guard("Wait for the current save to finish.")?;
         configure_connection_blocking(connection)
     })
     .await
@@ -637,9 +677,8 @@ async fn get_release_note_history_video(tag: String, source: String) -> Result<S
 
 #[tauri::command]
 async fn acknowledge_release_notes(version: String) -> Result<bool, String> {
-    let guard = acquire_updater_guard()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = wait_updater_guard()?;
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
@@ -733,10 +772,8 @@ fn handle_webview_new_window(url: &url::Url) {
 async fn save_updater_settings(
     settings: updater::UpdaterSettingsDraft,
 ) -> Result<updater::UpdaterState, String> {
-    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _save_guard = save_guard;
-        let _updater_guard = updater_guard;
+        let (_save_guard, _updater_guard) = wait_save_and_updater_guards()?;
         let app_data = app_data_directory();
         let default_install = resolve_default_install_directory(&app_data)?;
         let previous_startup = autostart::snapshot()?;
@@ -761,10 +798,8 @@ async fn save_updater_settings(
 
 #[tauri::command]
 async fn recover_install_directory(install_directory: String) -> Result<(), String> {
-    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _save_guard = save_guard;
-        let _updater_guard = updater_guard;
+        let (_save_guard, _updater_guard) = wait_save_and_updater_guards()?;
         updater::recover_install_directory(&app_data_directory(), Path::new(&install_directory))
     })
     .await
@@ -835,10 +870,8 @@ async fn select_blob_folder(
 
 #[tauri::command]
 async fn create_blob_backup(destination_directory: String) -> Result<String, String> {
-    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _save_guard = save_guard;
-        let _updater_guard = updater_guard;
+        let (_save_guard, _updater_guard) = wait_save_and_updater_guards()?;
         let install = resolve_install_directory(&app_data_directory())?;
         let _ = settings_data_path(&install)?;
         let settings_root = settings_root_for_install(&install)?;
@@ -852,10 +885,8 @@ async fn create_blob_backup(destination_directory: String) -> Result<String, Str
 
 #[tauri::command]
 async fn import_blob_backup(backup_directory: String) -> Result<(), String> {
-    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _save_guard = save_guard;
-        let _updater_guard = updater_guard;
+        let (_save_guard, _updater_guard) = wait_save_and_updater_guards()?;
         let install = resolve_install_directory(&app_data_directory())?;
         let _ = settings_data_path(&install)?;
         let settings_root = settings_root_for_install(&install)?;
@@ -876,9 +907,8 @@ async fn import_blob_backup(backup_directory: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn check_for_updates() -> Result<updater::UpdaterState, String> {
-    let guard = acquire_updater_guard()?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = wait_updater_guard()?;
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
@@ -893,15 +923,14 @@ async fn apply_update(
     app: tauri::AppHandle,
     automatic: Option<bool>,
 ) -> Result<updater::UpdaterState, String> {
-    let (save_guard, updater_guard) = acquire_save_and_updater_guards()?;
-    let startup_mode = autostart::get_mode()?;
-    let state = tauri::async_runtime::spawn_blocking(move || {
-        let _save_guard = save_guard;
-        let _updater_guard = updater_guard;
+    let (state, startup_mode) = tauri::async_runtime::spawn_blocking(move || {
+        let (_save_guard, _updater_guard) = wait_save_and_updater_guards()?;
+        let startup_mode = autostart::get_mode()?;
         let app_data = app_data_directory();
         let install = resolve_install_directory(&app_data)?;
         let runtime = resolve_runtime_directory_for_install(&install)?;
         updater::apply_update(&app_data, &install, &runtime, automatic.unwrap_or(false))
+            .map(|state| (state, startup_mode))
     })
     .await
     .map_err(|_| "The update installation task stopped unexpectedly.".to_string())??;
@@ -4111,6 +4140,19 @@ mod tests {
         let serialized = serde_json::to_value(state).unwrap();
         assert_eq!(serialized["hasSavedApiKey"], true);
         assert!(serialized.get("apiKey").is_none());
+    }
+
+    #[test]
+    fn save_guard_wait_acquires_an_active_save_once_it_finishes() {
+        let held = acquire_save_guard("held").unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            drop(held);
+        });
+        assert!(acquire_save_guard("busy").is_err());
+        let waited = wait_save_guard("Wait for the current settings save to finish.").unwrap();
+        drop(waited);
+        releaser.join().unwrap();
     }
 }
 

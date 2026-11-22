@@ -264,9 +264,8 @@ pub async fn discover_calendar_colors(force_refresh: Option<bool>) -> Result<Val
 #[tauri::command]
 pub async fn save_calendar_rules(configuration: Configuration, settings: Option<crate::SettingsDraft>, revision: Option<String>) -> Result<Value, String> {
     configuration.validate()?;
-    let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = crate::wait_save_guard("Wait for the current settings save to finish.")?;
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
         let data = crate::load_settings_data(&install)?;
         if revision.as_deref()!=Some(crate::anyblob_blobui::calendar_revision(&data)?.as_str()) {return Err("Saved calendar rules changed. Reload Settings before saving your draft.".into());}

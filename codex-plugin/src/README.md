@@ -1,6 +1,6 @@
 # Anyblob
 
-Anyblob 1.1.2 gives Codex access to Anytype content through BlobUI. The repository marketplace supplies the plugin, and Codex starts `blob-ui mcp` from PATH. On Windows, both the installer and the developer build provide the Settings executable as the `blob-ui` MCP entrypoint. It uses the running app's local bridge. Settings registers its launcher directory on the user PATH when it starts. Restart Codex after Settings adds the entry. No separate Headless CLI install is needed on Windows. On Linux, install BlobUI Headless. It connects to Anytype CLI and starts `anytype serve` in the background when the API is unavailable at a loopback address.
+Anyblob 1.1.3 gives Codex access to Anytype content through BlobUI. The repository marketplace supplies the plugin, and Codex starts `blob-ui mcp` from PATH. On Windows, both the installer and the developer build provide the Settings executable as the `blob-ui` MCP entrypoint. It uses the running app's local bridge. Settings registers its launcher directory on the user PATH when it starts. Restart Codex after Settings adds the entry. No separate Headless CLI install is needed on Windows. On Linux, install BlobUI Headless. It connects to Anytype CLI and starts `anytype serve` in the background when the API is unavailable at a loopback address.
 
 ## Setup
 

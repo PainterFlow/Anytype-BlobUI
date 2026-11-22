@@ -407,9 +407,8 @@ pub async fn evaluate_kanban_formula(
 }
 #[tauri::command]
 pub async fn save_kanban_formulas(configuration: Configuration, revision: Option<String>) -> Result<Published, String> {
-    let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = crate::wait_save_guard("Wait for the current settings save to finish.")?;
         let current=load()?;
         if revision.as_deref()!=Some(crate::anyblob_blobui::revision(&json!(current)).as_str()) {return Err("Saved formulas changed. Reload Settings before saving your draft.".into());}
         publish(configuration)
@@ -419,9 +418,8 @@ pub async fn save_kanban_formulas(configuration: Configuration, revision: Option
 }
 #[tauri::command]
 pub async fn refresh_kanban_results() -> Result<Published, String> {
-    let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = crate::wait_save_guard("Wait for the current settings save to finish.")?;
         publish(load()?)
     })
     .await

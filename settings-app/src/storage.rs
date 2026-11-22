@@ -231,39 +231,66 @@ pub(crate) fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs
 }
 
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    let result = {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH};
-        let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let replaced = unsafe {
-            if destination.exists() {
-                ReplaceFileW(destination_wide.as_ptr(), source_wide.as_ptr(), std::ptr::null(), REPLACEFILE_WRITE_THROUGH, std::ptr::null(), std::ptr::null())
-            } else {
-                MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
-            }
-        };
-        if replaced == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
-    };
-    #[cfg(not(windows))]
-    let result = fs::rename(source, destination);
-    maybe_fail_after_replace(destination, result)
+    retry_replace(destination, || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH};
+            let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let replaced = unsafe {
+                if destination.exists() {
+                    ReplaceFileW(destination_wide.as_ptr(), source_wide.as_ptr(), std::ptr::null(), REPLACEFILE_WRITE_THROUGH, std::ptr::null(), std::ptr::null())
+                } else {
+                    MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+                }
+            };
+            if replaced == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(source, destination)
+        }
+    })
 }
 
 pub(crate) fn replace_credential(source: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    let result = {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
-        let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let result = unsafe { MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
-        if result == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
-    };
-    #[cfg(not(windows))]
-    let result = fs::rename(source, destination);
-    maybe_fail_after_replace(destination, result)
+    retry_replace(destination, || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+            let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let result = unsafe { MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+            if result == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(source, destination)
+        }
+    })
+}
+
+/// A Windows replace reports a transient failure while the destination is held
+/// by an indexer, antivirus scan, or a reader in another process.
+fn retry_replace(
+    destination: &Path,
+    replace: impl Fn() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    const RETRY_LIMIT: u32 = 10;
+    for attempt in 0..=RETRY_LIMIT {
+        match maybe_fail_after_replace(destination, replace()) {
+            Err(error)
+                if attempt < RETRY_LIMIT
+                    && matches!(error.raw_os_error(), Some(2 | 3 | 5 | 32 | 33 | 1175 | 1176)) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            result => return result,
+        }
+    }
+    unreachable!()
 }
 
 fn maybe_fail_after_replace(_destination: &Path, result: std::io::Result<()>) -> std::io::Result<()> {
