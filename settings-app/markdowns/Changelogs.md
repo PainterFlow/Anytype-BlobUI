@@ -22,7 +22,7 @@ This update is a massive technical one, internal files are getting a remake, Any
     - You can also toggle the based theme(*controls text color, etc.*).
     - There are also 2 built-in themes: "OLED" and "Dark Mode+".
 
-## Anyblob (0.2.25 -> 1.1.1)
+## Anyblob (0.2.25 -> 1.1.4)
 
 - Added Linux support. (User#pxlarified)
 - The `read_object` tool now returns e-tags.
@@ -43,6 +43,8 @@ This update is a massive technical one, internal files are getting a remake, Any
 
 *Developers Note: Fixed a variety of undocumented backend issues with settings, you shouldn't notice any difference though.*
 
+- Issue#117: The today day in the calendar widget is not effected by the custom accent color setting.
+- Issue#115: Some boxed options are weirdly thick at the bottom. 
 - Issue#108: When an agent uses "dry_run" it still asks for approval even though no anytype changes happen. 
 - Issue#103: There can sometimes be duplicate blob ui mcp servers.
 - Issue#100: Rename "Accent color" section to "Accent Color".
