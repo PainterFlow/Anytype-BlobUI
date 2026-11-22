@@ -151,7 +151,7 @@ fn configure_at(
     Ok(())
 }
 fn migrate() -> Result<bool, String> {
-    let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
+    let _guard = crate::wait_save_guard("Wait for the current save before changing Anyblob.")?;
     let path = bridge_path()?;
     let enabled = migrate_at(&path, &blobui_mcp::credential::path()?)?;
     remove_legacy_tunnel_secret(&path)?;
@@ -223,10 +223,14 @@ pub fn anyblob_status() -> Result<Value, String> {
     Ok(json!({"enabled":enabled}))
 }
 #[tauri::command]
-pub fn configure_anyblob(enabled: bool) -> Result<Value, String> {
-    let _guard = crate::acquire_save_guard("Wait for the current save before changing Anyblob.")?;
-    configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
-    Ok(json!({"enabled":enabled}))
+pub async fn configure_anyblob(enabled: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = crate::wait_save_guard("Wait for the current save before changing Anyblob.")?;
+        configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
+        Ok(json!({"enabled":enabled}))
+    })
+    .await
+    .map_err(|_| "The Anyblob task stopped unexpectedly.")?
 }
 
 fn saved() -> Result<crate::codex::Configuration, String> {

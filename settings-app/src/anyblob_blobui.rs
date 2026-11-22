@@ -373,7 +373,7 @@ pub(crate) fn execute_at(
         return Ok(result);
     }
     let _guard = if request.mutates() && request.arguments["dry_run"] != true {
-        Some(crate::acquire_save_guard(
+        Some(crate::wait_save_guard(
             "Wait for the current Settings save to finish.",
         )?)
     } else {
