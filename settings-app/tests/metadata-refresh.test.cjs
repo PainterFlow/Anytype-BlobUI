@@ -114,6 +114,8 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' refreshes once across coalesced shortcuts');
     }
     assert(!calls.some(c=>c.name==='apply_update'),'Reload only checks for updates');
+    assert.equal(calls.filter(c=>c.name==='get_calendar_api_availability').length,1,'Reload re-checks the Anytype API once per coalesced run');
+    assert.equal(calls.some(c=>c.name==='refresh_kanban_results'),false,'Reload publishes nothing when no calculations are saved');
     await openFormulas(page);await page.getByRole('button',{name:'Board',exact:false}).first().click();
     const dialog=page.locator('#formula-calculator-dialog');await dialog.waitFor({state:'visible'});
     await dialog.getByRole('button',{name:'Show LaTeX',exact:true}).click();

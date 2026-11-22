@@ -1487,10 +1487,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     const pending = (async () => {
       try {
         const status = await invoke("get_calendar_api_availability");
-        if (request !== calendarApiRequest) return;
+        if (request !== calendarApiRequest) return calendarApiAvailabilityPromise ?? calendarApiAvailability;
         calendarApiAvailability = ["available", "missing"].includes(status) ? status : "unavailable";
       } catch (_) {
-        if (request !== calendarApiRequest) return;
+        if (request !== calendarApiRequest) return calendarApiAvailabilityPromise ?? calendarApiAvailability;
         calendarApiAvailability = "unavailable";
       }
       help.textContent = calendarApiAvailability === "available"
@@ -1500,9 +1500,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
           : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
       help.hidden = calendarApiAvailability === "available";
       updateSaveButton();
+      return calendarApiAvailability;
     })();
     calendarApiAvailabilityPromise = pending;
-    try { await pending; }
+    try { return await pending; }
     finally { if (calendarApiAvailabilityPromise === pending) calendarApiAvailabilityPromise = null; }
   }
 
@@ -2933,6 +2934,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       themeDirectory: String(state.themeDirectory || ""),
     });
     if (result.cssRebuilt === false) setStatus("Custom theme CSS could not be rebuilt. Check Logs.", "error", false);
+  });
+  window.BlobUI.AppReload.register(async () => {
+    const availability = await refreshCalendarApiAvailability(true);
+    if (disposed || availability !== "available") return;
+    await window.BlobUI.FormulaPage?.refreshResults?.(invoke);
   });
   window.BlobUI.AnyblobDraft.init({ invoke, onChange: updateSaveButton });
   window.BlobUI.CodexPage.init({ invoke, listen: nativeService.listen, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });

@@ -38,6 +38,7 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
       }
       if(name==='save_settings'){window.remote.app.settings=args.settings;return {calendarStatus:'off'};}
       if(name==='save_calendar_rules') {window.lastCalendarSave=args;window.remote.calendar={...args.configuration,revision:'c-saved'};return {revision:'c-saved'};}
+      if(name==='refresh_kanban_results'){window.refreshes=(window.refreshes||0)+1;return {revision:'r-refresh-'+window.refreshes,calculatedAt:'2026-11-02T20:00:00Z',categories:1,info:[]};}
       return null;
     }}};
     window.publish=()=>window.listeners['blobui-saved-state-changed']({payload:{sections:['formulas','calendarRules'],revision:window.remote.formulas.revision}});
@@ -114,6 +115,8 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
     await calendarDialog.getByRole('button',{name:'Close color rules',exact:true}).click();
     await page.locator('#save-button').click();await page.waitForFunction(()=>window.lastCalendarSave);
     assert.equal(await page.evaluate(()=>window.lastCalendarSave.revision),'c3');await settle();
+    const refreshes=await page.evaluate(()=>window.calls.filter(c=>c.name==='refresh_kanban_results').length);
+    assert(refreshes>0,'A reload republishes saved Kanban calculation results');
     // Focus recovery loads missed publications and all saved settings without publishing.
     await page.evaluate(()=>{window.remote.app.settings.fontFamily='Arial';window.remote.updater.autoplayVideos=false;window.remote.app.apiPort=32000;window.dispatchEvent(new Event('focus'));});
     await page.waitForFunction(()=>document.getElementById('font-family').value==='Arial');
@@ -133,6 +136,7 @@ test('saved-state refresh reconciles Codex edits, dialogs, revisions, failures a
     await page.evaluate(()=>window.BlobUI.discardChanges());
     assert.deepEqual(await page.evaluate(()=>window.BlobUI.CalendarPage.read().types),[]);
     assert.deepEqual(errors,[]);
-    assert.equal(await page.evaluate(()=>window.calls.some(c=>/^evaluate_|refresh_kanban_results/.test(c.name))),false);
+    assert.equal(await page.evaluate(()=>window.calls.some(c=>/^evaluate_/.test(c.name))),false);
+    assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='refresh_kanban_results').length),refreshes,'Saved-state events and focus recovery never republish results');
   }finally{await browser.close();}
 });

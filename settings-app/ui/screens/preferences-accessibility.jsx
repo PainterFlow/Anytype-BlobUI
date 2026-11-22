@@ -250,7 +250,7 @@ export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, k
       <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
     </SettingsSection>
     <SettingsSection className="settings-group kanban-calculations-page" aria-label="Kanban Calculations">
-      <SettingsHeading title="Kanban calculations" help="Calculations use the optional Anytype Local API v2 connection. Saved results are snapshots until you save again and rebuild in Anytype." />
+      <SettingsHeading title="Kanban calculations" help="Calculations use the optional Anytype Local API v2 connection. Saved results are snapshots until you save or reload Settings and rebuild in Anytype." />
       <FormulaPageView controller={formulaController} />
     </SettingsSection>
   </Tabs>;
