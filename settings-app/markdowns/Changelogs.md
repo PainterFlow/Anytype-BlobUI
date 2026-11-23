@@ -26,6 +26,10 @@ This update is a massive technical one, internal files are getting a remake, Any
 
 - Added Linux support. (User#pxlarified)
 - The `read_object` tool now returns e-tags.
+- Anyblob is now installed through the git repository as the marketplace.
+
+*Developers Note: You should find a new guide in the Anyblob settings.*
+
 - Added agents guide feature, by enabled it you can create as many objects as you want that are called "Agents Guide" which will have to be read by any agents wanting to access your space. Supports multiple guides and is per-space. The agent has to follow these rules just like AGENTS.md. All other tools(besides listing spaces) are also looked until the agent has read your guide. (Can be toggled in settings, off by default)
 - I hope I fixed a few stale mcp servers that could spawn when re-compiling the app.
 - You should no longer experience a variety of cases where an agent would ask you twice for approval.
@@ -33,7 +37,7 @@ This update is a massive technical one, internal files are getting a remake, Any
 
 *Developers Note: I'm really sorry to remove this, but I had to, it was too janky to set up in the CLI and I've been working on remote support for like 1 week straight with like 3 recodes of Anyblob.*
 
-## Introducing the all new BlobUI CLI Headless (v1.0.0) :O
+## Introducing the all new BlobUI Headless CLI (v1.0.0) :O
 
 - Allows you to use a variety of commands to manage Anyblob remotely.
 - Supports Linux & Windows.
@@ -84,4 +88,5 @@ This update is a massive technical one, internal files are getting a remake, Any
 - Explanations are brief and short so you don't have to read that much.
 
 ---
-*Developers Note: All changes without explicitly denoted credits are made by User#PainterFlow*
+*Developers Note: All changes without explicitly denoted credits are made by User#PainterFlow.*
+*Extra Credits: Special thanks to User#pxlarified for being generous and providing me with access to SWE-2 with infinite usage.*
