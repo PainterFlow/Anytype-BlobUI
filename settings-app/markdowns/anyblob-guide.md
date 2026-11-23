@@ -1,4 +1,3 @@
-# Anyblob setup guide
 
 Anyblob connects Codex to Anytype through BlobUI and the Anytype API v2. BlobUI applies saved access, file, and approval rules per space. The API key also limits what Anyblob can do. Object mentions suggest matches but do not grant permission to read them.
 
