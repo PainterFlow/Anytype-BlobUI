@@ -22,10 +22,11 @@ This update is a massive technical one, internal files are getting a remake, Any
     - You can also toggle the based theme(*controls text color, etc.*).
     - There are also 2 built-in themes: "OLED" and "Dark Mode+".
 
-## Anyblob (0.2.25 -> 1.1.4)
+## Anyblob (0.2.25 -> 1.2.0)
 
 - Added Linux support. (User#pxlarified)
 - The `read_object` tool now returns e-tags.
+- Added agents guide feature, by enabled it you can create as many objects as you want that are called "Agents Guide" which will have to be read by any agents wanting to access your space. Supports multiple guides and is per-space. The agent has to follow these rules just like AGENTS.md. All other tools(besides listing spaces) are also looked until the agent has read your guide. (Can be toggled in settings, off by default)
 - I hope I fixed a few stale mcp servers that could spawn when re-compiling the app.
 - You should no longer experience a variety of cases where an agent would ask you twice for approval.
 - Removed project specific settings.
