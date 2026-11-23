@@ -89,6 +89,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .ok_or("Expected `true` or `false` after --toggle-anyblob.")?;
             toggle_anyblob(parse_bool(value)?)
         }
+        "--toggle-agents-guide" => {
+            if args.len() != 2 {
+                return Err("Usage: blob-ui --toggle-agents-guide <bool>".into());
+            }
+            let value = args
+                .get(1)
+                .ok_or("Expected `true` or `false` after --toggle-agents-guide.")?;
+            toggle_agents_guide(parse_bool(value)?)
+        }
         "import" => {
             if args.len() != 2 {
                 return Err("Usage: blob-ui import <path.zip>".into());
@@ -130,6 +139,7 @@ fn print_help() {
            object-mention spaces ls|add|remove ... Manage mention spaces\n\
            object-mention --filter-done <bool> Filter completed task mentions\n\
            --toggle-anyblob <bool>          Enable or disable Anyblob\n\
+           --toggle-agents-guide <bool>     Enable or disable the AGENTS.md page setting\n\
            import <path.zip> | export <path.zip>  Import or export settings\n\
            mcp                               Start the stdio MCP server\n\
          Permission values are read, read-write, or create-delete. Approval values are always, never, or auto.\n\
@@ -761,6 +771,15 @@ fn toggle_anyblob(enabled: bool) -> Result<(), String> {
     crate::anyblob::invalidate();
     println!(
         "Anyblob is {}.",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    Ok(())
+}
+
+fn toggle_agents_guide(enabled: bool) -> Result<(), String> {
+    crate::anyblob::set_agents_guide_at(&crate::anyblob::bridge_path()?, enabled)?;
+    println!(
+        "The AGENTS.md page setting is {}.",
         if enabled { "enabled" } else { "disabled" }
     );
     Ok(())

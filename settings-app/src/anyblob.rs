@@ -5,6 +5,7 @@ use blobui_mcp::transport::Bridge;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeSet,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -19,8 +20,14 @@ static PROMPT: Mutex<()> = Mutex::new(());
 #[cfg(windows)]
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static REVISION: AtomicU64 = AtomicU64::new(0);
+// Spaces whose 'agents guide' objects were read in this bridge session. Any
+// settings change relocks every space until read_guide runs again.
+static GUIDE_UNLOCKED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 pub fn invalidate() {
     REVISION.fetch_add(1, Ordering::AcqRel);
+    if let Ok(mut spaces) = GUIDE_UNLOCKED.lock() {
+        spaces.clear();
+    }
 }
 fn install() -> Result<PathBuf, String> {
     crate::resolve_install_directory(&crate::app_data_directory())
@@ -220,7 +227,7 @@ pub fn anyblob_status() -> Result<Value, String> {
         Err(error) => return Err(error),
     };
     let enabled = current["enabled"] == true;
-    Ok(json!({"enabled":enabled}))
+    Ok(json!({"enabled":enabled,"agentsGuide":current["agentsGuide"]==true}))
 }
 #[tauri::command]
 pub async fn configure_anyblob(enabled: bool) -> Result<Value, String> {
@@ -228,6 +235,34 @@ pub async fn configure_anyblob(enabled: bool) -> Result<Value, String> {
         let _guard = crate::wait_save_guard("Wait for the current save before changing Anyblob.")?;
         configure_at(&bridge_path()?, &blobui_mcp::credential::path()?, enabled)?;
         Ok(json!({"enabled":enabled}))
+    })
+    .await
+    .map_err(|_| "The Anyblob task stopped unexpectedly.")?
+}
+pub(crate) fn set_agents_guide_at(path: &std::path::Path, enabled: bool) -> Result<(), String> {
+    crate::reject_reparse_component(path)?;
+    let mut state = if path.is_file() {
+        crate::read_json_file(path)?
+    } else {
+        json!({})
+    };
+    state
+        .as_object_mut()
+        .ok_or("Anyblob settings must contain a JSON object.")?
+        .insert("agentsGuide".into(), json!(enabled));
+    crate::storage::write_atomic(
+        path,
+        &serde_json::to_vec(&state).map_err(|_| "Could not encode Anyblob settings.")?,
+    )?;
+    invalidate();
+    Ok(())
+}
+#[tauri::command]
+pub async fn configure_anyblob_agents_guide(agents_guide: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = crate::wait_save_guard("Wait for the current save before changing Anyblob.")?;
+        set_agents_guide_at(&bridge_path()?, agents_guide)?;
+        Ok(json!({"agentsGuide":agents_guide}))
     })
     .await
     .map_err(|_| "The Anyblob task stopped unexpectedly.")?
@@ -247,6 +282,62 @@ fn allowed(config: &crate::codex::Configuration, op: &Operation) -> Result<(), S
     } else {
         Ok(())
     }
+}
+// When the AGENTS.md page setting is on, each readable space stays locked until
+// read_guide has returned its 'agents guide' objects (or confirmed none exist).
+// list_spaces and read_guide itself are exempt, and spaces without read
+// permission keep their normal access errors instead.
+fn guide_gate(config: &crate::codex::Configuration, op: &Operation) -> Result<(), String> {
+    if matches!(op, Operation::ListSpaces {} | Operation::ReadGuide { .. }) {
+        return Ok(());
+    }
+    let unlocked = GUIDE_UNLOCKED
+        .lock()
+        .map_err(|_| "The Anyblob guide state is unavailable.")?;
+    let pending = |space: &str| readable(config, space) && !unlocked.contains(space);
+    let space = match op {
+        Operation::SearchMentions { .. } => config
+            .spaces
+            .keys()
+            .find(|space| pending(space))
+            .cloned(),
+        _ => op.space().filter(|space| pending(space)).map(str::to_owned),
+    };
+    match space {
+        Some(space) => Err(format!(
+            "The 'agents guide' objects for space '{space}' must be read first. Call read_guide for that space before using other Anyblob tools in it."
+        )),
+        None => Ok(()),
+    }
+}
+fn guide_object(row: &Value) -> bool {
+    let name = row["name"]
+        .as_str()
+        .or_else(|| row.pointer("/properties/name").and_then(Value::as_str))
+        .unwrap_or_default();
+    let normalized: String = name
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect();
+    if normalized != "agentsguide" {
+        return false;
+    }
+    if row["id"].as_str().is_none_or(|id| id.is_empty()) {
+        return false;
+    }
+    // Collections and queries cannot be guides.
+    let kind = row["type"]
+        .as_str()
+        .or_else(|| row.pointer("/type/key").and_then(Value::as_str))
+        .or_else(|| row.pointer("/type/name").and_then(Value::as_str))
+        .unwrap_or_default();
+    if ["collection", "query", "set"].contains(&kind.to_ascii_lowercase().as_str()) {
+        return false;
+    }
+    !row["layout"]
+        .as_str()
+        .is_some_and(|layout| ["collection", "set"].contains(&layout.to_ascii_lowercase().as_str()))
 }
 fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes())
@@ -298,6 +389,77 @@ fn execute(
                 Ok(json!({"id":v["id"].as_str().ok_or("Invalid space ID.")?,"name":v["name"].as_str().ok_or("Invalid space name.")?}))
             }).collect::<Result<Vec<Value>,String>>()?;
             Ok(json!({"spaces":rows}))
+        }
+        Operation::ReadGuide { space_id } => {
+            let targets: Vec<String> = match space_id {
+                Some(space) => vec![space.clone()],
+                None => config
+                    .spaces
+                    .iter()
+                    .filter(|(_, permission)| permission.permits("read"))
+                    .map(|(id, _)| id.clone())
+                    .collect(),
+            };
+            if targets.is_empty() {
+                return Err("No space is readable through saved BlobUI permissions.".into());
+            }
+            let mut spaces = Vec::with_capacity(targets.len());
+            for space in &targets {
+                check()?;
+                let rows = client
+                    .pages(
+                        "POST",
+                        &format!("/v2/spaces/{}/search?ids=full", enc(space)),
+                        Some(&json!({})),
+                    )
+                    .map_err(unavailable)?;
+                let mut guides = Vec::new();
+                for row in rows {
+                    if !guide_object(&row) {
+                        continue;
+                    }
+                    let id = row["id"].as_str().unwrap_or_default();
+                    blobui_mcp::Operation::ReadObject {
+                        space_id: space.clone(),
+                        object_id: id.into(),
+                    }
+                    .validate()?;
+                    check()?;
+                    let document = client
+                        .request(
+                            "GET",
+                            &format!(
+                                "/v2/spaces/{}/objects/{}?ids=full&format=md",
+                                enc(space),
+                                enc(id)
+                            ),
+                            None,
+                        )
+                        .map_err(unavailable)?;
+                    if document["id"] != json!(id) {
+                        return Err("Anytype returned Markdown for a different object.".into());
+                    }
+                    let markdown = document["markdown"]
+                        .as_str()
+                        .ok_or("Anytype did not return Markdown content.")?;
+                    guides.push(
+                        json!({"id":id,"name":row["name"],"type":row["type"],"markdown":markdown}),
+                    );
+                }
+                if let Ok(mut unlocked) = GUIDE_UNLOCKED.lock() {
+                    unlocked.insert(space.clone());
+                }
+                spaces.push(json!({"space_id":space,"guides":guides}));
+            }
+            if let Some(space) = space_id {
+                if spaces[0]["guides"].as_array().is_some_and(|guides| guides.is_empty()) {
+                    return Err(format!(
+                        "No 'agents guide' objects were found in space '{space}'. Its Anyblob tools are unlocked anyway."
+                    ));
+                }
+                return Ok(spaces.pop().unwrap());
+            }
+            Ok(json!({"spaces":spaces}))
         }
         Operation::SearchObjects {
             space_id,
@@ -480,6 +642,13 @@ fn dispatch_with(
     let initial = load_state()?;
     authenticate(&initial, &request.token)?;
     let config = load_config()?;
+    if initial["agentsGuide"] == true {
+        guide_gate(&config, &request.request)?;
+    } else if let Operation::ReadGuide { .. } = &request.request {
+        return Err(
+            "The AGENTS.md page setting is disabled. Enable it in BlobUI Integrations > Anyblob > Advanced Settings.".into(),
+        );
+    }
     if let Operation::SearchMentions { query } = &request.request {
         let revision = REVISION.load(Ordering::Acquire);
         let check = || {
@@ -632,13 +801,6 @@ fn dispatch_with(
         return Ok(result);
     }
     allowed(&config, &request.request)?;
-    let approval = request
-        .request
-        .space()
-        .and_then(|space| config.spaces.get(space));
-    if approval.is_some_and(|p| p.approval == "alwaysAsk") {
-        approve(&request.request, &check)?;
-    }
     check()?;
     let client = connect()?;
     let mut result = guarded_read(&client, &config, &request.request, &check)?;
@@ -855,6 +1017,7 @@ pub fn start(_app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     #[test]
     fn saved_state_notifications_only_follow_confirmed_blobui_publications() {
         let confirmed = Ok(
@@ -1490,20 +1653,26 @@ mod tests {
                     },
                 );
                 assert!(result.is_err());
-                assert_eq!(asked.load(Ordering::Acquire), approval == "alwaysAsk");
+                // Listing and reading tools bypass Always Ask.
+                assert!(!asked.load(Ordering::Acquire));
             }
         }
-        *saved.lock().unwrap() = config("read", "alwaysAsk");
+        // Reads skip approval, so a permission revoked mid-request still aborts
+        // through the saved-configuration recheck before connecting.
+        let loads = AtomicUsize::new(0);
         assert!(dispatch_with(
             request(search()),
             || true,
             || Ok(enabled()),
-            || Ok(saved.lock().unwrap().clone()),
+            || {
+                Ok(if loads.fetch_add(1, Ordering::AcqRel) == 0 {
+                    config("read", "alwaysAsk")
+                } else {
+                    config("none", "alwaysAsk")
+                })
+            },
             || panic!("revoked read must not connect"),
-            |_, check| {
-                *saved.lock().unwrap() = config("none", "alwaysAsk");
-                check()
-            }
+            |_, _| panic!("reads bypass approval")
         )
         .is_err());
         assert!(dispatch_with(
@@ -1526,30 +1695,240 @@ mod tests {
         .is_err());
     }
     #[test]
-    fn token_rotation_and_disconnect_during_approval() {
-        let state = Mutex::new(enabled());
-        let connected = AtomicBool::new(true);
+    fn token_rotation_and_disconnect_abort_reads_without_approval() {
         for rotate in [true, false] {
-            *state.lock().unwrap() = enabled();
-            connected.store(true, Ordering::Release);
+            let loads = AtomicUsize::new(0);
+            let pings = AtomicUsize::new(0);
             assert!(dispatch_with(
                 request(search()),
-                || connected.load(Ordering::Acquire),
-                || Ok(state.lock().unwrap().clone()),
+                || pings.fetch_add(1, Ordering::AcqRel) == 0 || rotate,
+                || {
+                    loads.fetch_add(1, Ordering::AcqRel);
+                    Ok(if rotate && loads.load(Ordering::Acquire) > 1 {
+                        json!({"enabled":true,"verifier":digest(&"b".repeat(64))})
+                    } else {
+                        enabled()
+                    })
+                },
                 || Ok(config("read", "alwaysAsk")),
                 || panic!("must not connect"),
-                |_, check| {
-                    if rotate {
-                        *state.lock().unwrap() =
-                            json!({"enabled":true,"verifier":digest(&"b".repeat(64))});
-                    } else {
-                        connected.store(false, Ordering::Release);
-                    }
-                    check()
-                }
+                |_, _| panic!("reads bypass approval")
             )
             .is_err());
         }
+    }
+    #[test]
+    fn agents_guide_normalization_and_guide_unlocking_are_per_space() {
+        assert!(guide_object(&json!({"id":"g","name":"agents guide","type":"page"})));
+        assert!(guide_object(&json!({"id":"g","name":" AGENTS  Guide ","type":"page"})));
+        assert!(guide_object(&json!({"id":"g","name":"AgentsGuide","type":"note"})));
+        for row in [
+            json!({"id":"g","name":"agents guide","type":"collection"}),
+            json!({"id":"g","name":"agents guide","type":"query"}),
+            json!({"id":"g","name":"agents guide","type":"set"}),
+            json!({"id":"g","name":"agents guide","layout":"collection"}),
+            json!({"id":"g","name":"agent guide","type":"page"}),
+            json!({"id":"g","name":"agents guide 2","type":"page"}),
+            json!({"id":"","name":"agents guide","type":"page"}),
+        ] {
+            assert!(!guide_object(&row), "{row}");
+        }
+        let config = crate::codex::normalize(&json!({"spaces":{
+            "gate-space":{"access":"read","approval":"alwaysAsk"},
+            "gate-other":{"access":"read","approval":"alwaysAsk"}
+        }}));
+        let state = || Ok(json!({"enabled":true,"verifier":digest(&"a".repeat(64)),"agentsGuide":true}));
+        // Every space tool except list_spaces and read_guide is locked first.
+        for op in [
+            Operation::SearchObjects {
+                space_id: "gate-space".into(),
+                query: "q".into(),
+                limit: 20,
+                offset: 0,
+            },
+            Operation::ReadObject {
+                space_id: "gate-space".into(),
+                object_id: "object".into(),
+            },
+            Operation::SearchMentions { query: "q".into() },
+        ] {
+            let error = dispatch_with(
+                request(op),
+                || true,
+                state,
+                || Ok(config.clone()),
+                || panic!("locked space must not connect"),
+                |_, _| panic!("the guide gate precedes approval"),
+            )
+            .unwrap_err();
+            assert!(error.contains("read_guide"), "{error}");
+        }
+        let (client, server) = mock(
+            vec![(
+                "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
+                json!({"data":[{"id":"gate-space","name":"Gate"}],"has_more":false}),
+            )],
+            None,
+        );
+        let result = dispatch_with(
+            request(Operation::ListSpaces {}),
+            || true,
+            state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("list_spaces bypasses approval"),
+        )
+        .unwrap();
+        assert_eq!(result["spaces"][0]["id"], "gate-space");
+        server.join().unwrap();
+        let (client, server) = mock(
+            vec![
+                (
+                    "POST /v2/spaces/gate-space/search?ids=full&limit=100&offset=0 ".into(),
+                    json!({"_fixture_request_body":{},"data":[
+                        {"id":"guide-1","name":"Agents Guide","type":"page"},
+                        {"id":"guide-2","name":"agentsguide","type":"note"},
+                        {"id":"other","name":"Unrelated","type":"page"},
+                        {"id":"collection","name":"agents guide","type":"collection"},
+                        {"id":"query","name":"agents guide","type":"query"}
+                    ],"has_more":false,"total":5}),
+                ),
+                (
+                    "GET /v2/spaces/gate-space/objects/guide-1?ids=full&format=md ".into(),
+                    json!({"id":"guide-1","markdown":"# Rules\nNever delete."}),
+                ),
+                (
+                    "GET /v2/spaces/gate-space/objects/guide-2?ids=full&format=md ".into(),
+                    json!({"id":"guide-2","markdown":"# More rules"}),
+                ),
+            ],
+            None,
+        );
+        let result = dispatch_with(
+            request(Operation::ReadGuide {
+                space_id: Some("gate-space".into()),
+            }),
+            || true,
+            state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("read_guide bypasses approval"),
+        )
+        .unwrap();
+        assert_eq!(result["guides"].as_array().unwrap().len(), 2);
+        assert_eq!(result["guides"][0]["id"], "guide-1");
+        assert_eq!(result["guides"][0]["markdown"], "# Rules\nNever delete.");
+        server.join().unwrap();
+        // gate-space unlocked itself; gate-other stays locked.
+        let error = dispatch_with(
+            request(Operation::SearchObjects {
+                space_id: "gate-other".into(),
+                query: "q".into(),
+                limit: 20,
+                offset: 0,
+            }),
+            || true,
+            state,
+            || Ok(config.clone()),
+            || panic!("a different space stays locked"),
+            |_, _| panic!("the guide gate precedes approval"),
+        )
+        .unwrap_err();
+        assert!(error.contains("gate-other") && error.contains("read_guide"), "{error}");
+    }
+    #[test]
+    fn agents_guide_disabled_or_empty_spaces_report_errors_and_unlock() {
+        let config = crate::codex::normalize(&json!({"spaces":{
+            "gate-empty":{"access":"read","approval":"alwaysAsk"}
+        }}));
+        let guide_state = || {
+            Ok(json!({"enabled":true,"verifier":digest(&"a".repeat(64)),"agentsGuide":true}))
+        };
+        // Disabled setting blocks read_guide itself.
+        let error = dispatch_with(
+            request(Operation::ReadGuide { space_id: None }),
+            || true,
+            || Ok(enabled()),
+            || Ok(config.clone()),
+            || panic!("disabled read_guide must not connect"),
+            |_, _| panic!("disabled read_guide must not prompt"),
+        )
+        .unwrap_err();
+        assert!(error.contains("disabled"), "{error}");
+        // A space without guides errors but still unlocks its tools.
+        let (client, server) = mock(
+            vec![(
+                "POST /v2/spaces/gate-empty/search?ids=full&limit=100&offset=0 ".into(),
+                json!({"_fixture_request_body":{},"data":[{"id":"n","name":"Note","type":"page"}],"has_more":false,"total":1}),
+            )],
+            None,
+        );
+        let error = dispatch_with(
+            request(Operation::ReadGuide {
+                space_id: Some("gate-empty".into()),
+            }),
+            || true,
+            guide_state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("read_guide bypasses approval"),
+        )
+        .unwrap_err();
+        assert!(error.contains("No 'agents guide'"), "{error}");
+        server.join().unwrap();
+        let (client, server) = mock(
+            vec![(
+                "POST /v2/spaces/gate-empty/search?ids=full&limit=20&offset=0 ".into(),
+                json!({"_fixture_request_body":{"query":"q"},"data":[{"id":"n","name":"Note","type":"page"}],"has_more":false,"total":1}),
+            )],
+            None,
+        );
+        let result = dispatch_with(
+            request(Operation::SearchObjects {
+                space_id: "gate-empty".into(),
+                query: "q".into(),
+                limit: 20,
+                offset: 0,
+            }),
+            || true,
+            guide_state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("reads bypass approval"),
+        )
+        .unwrap();
+        assert_eq!(result["objects"][0]["id"], "n");
+        server.join().unwrap();
+        // read_guide without a space scans every permitted space.
+        let config = crate::codex::normalize(&json!({"spaces":{
+            "gate-all":{"access":"read","approval":"alwaysAsk"},
+            "gate-denied":{"access":"none","approval":"alwaysAsk"}
+        }}));
+        let (client, server) = mock(
+            vec![
+                (
+                    "POST /v2/spaces/gate-all/search?ids=full&limit=100&offset=0 ".into(),
+                    json!({"_fixture_request_body":{},"data":[{"id":"g","name":"Agents Guide","type":"page"}],"has_more":false,"total":1}),
+                ),
+                (
+                    "GET /v2/spaces/gate-all/objects/g?ids=full&format=md ".into(),
+                    json!({"id":"g","markdown":"# All spaces"}),
+                ),
+            ],
+            None,
+        );
+        let result = dispatch_with(
+            request(Operation::ReadGuide { space_id: None }),
+            || true,
+            guide_state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("read_guide bypasses approval"),
+        )
+        .unwrap();
+        assert_eq!(result["spaces"].as_array().unwrap().len(), 1);
+        assert_eq!(result["spaces"][0]["space_id"], "gate-all");
+        server.join().unwrap();
     }
     #[test]
     fn permissions_and_tokens_fail_closed() {

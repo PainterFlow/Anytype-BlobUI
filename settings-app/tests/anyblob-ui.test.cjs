@@ -15,14 +15,15 @@ test('Anyblob settings omit local project controls and open the setup guide in a
     const page=await browser.newPage({viewport:{width:1100,height:900},colorScheme:'dark'}),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(()=>{
-      window.calls=[];window.enabled=false;
+      window.calls=[];window.enabled=false;window.agentsGuide=false;
       window.__TAURI__={event:{listen:async()=>()=>{}},core:{invoke:async(name,args)=>{
         calls.push(name);
         if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
-        if(name==='anyblob_status')return{enabled:window.enabled};
+        if(name==='anyblob_status')return{enabled:window.enabled,agentsGuide:window.agentsGuide};
         if(name==='configure_anyblob'){window.enabled=args.enabled;return{enabled:args.enabled};}
+        if(name==='configure_anyblob_agents_guide'){window.agentsGuide=args.agentsGuide;return{agentsGuide:args.agentsGuide};}
         if(name==='save_settings')return{};
         return null;
       }}};
@@ -39,11 +40,25 @@ test('Anyblob settings omit local project controls and open the setup guide in a
     assert.equal(await panel.getByRole('switch',{name:'Secure MCP Tunnel'}).count(),0);
     assert.equal(await panel.getByRole('heading',{name:'Remote Codex',exact:true}).count(),0);
 
+    assert.equal(await panel.getByRole('heading',{name:'Advanced Settings',exact:true}).count(),1);
+    const headings=await panel.locator('.section-heading h2').allInnerTexts();
+    assert.ok(headings.indexOf('Advanced Settings')>headings.indexOf('Object Mentions'),'Advanced Settings renders below Object Mentions.');
+    const guideToggle=panel.getByRole('switch',{name:/Enable AGENTS\.md page/});
+    assert.equal(await guideToggle.isChecked(),false);
+    assert.equal(await guideToggle.isDisabled(),true,'AGENTS.md page stays off while Anyblob is disabled.');
+    const guideHelp=panel.getByRole('button',{name:'Enable AGENTS.md page help'});
+    assert.equal(await guideHelp.count(),1);
+    await guideHelp.hover();
+    assert.equal(await page.locator('[role="tooltip"][data-open="true"]').textContent(),'For each space, you can create an object of any type(unless it is a collection/query) called "agents guide" the agent will always read all objects with that name before using Anyblob and will follow that objects guidelines like AGENTS.md.');
+
     await toggle.check();
+    assert.equal(await guideToggle.isDisabled(),false,'AGENTS.md page unlocks while Anyblob is enabled.');
+    await guideToggle.check();
     assert.equal(await page.evaluate(()=>window.enabled),false,'Toggle changes stay in the settings draft before Save.');
     await page.locator('#save-button').click();
     await page.locator('#save-button').waitFor({state:'hidden'});
     assert.equal(await page.evaluate(()=>window.enabled),true);
+    assert.equal(await page.evaluate(()=>window.agentsGuide),true);
 
     const helpButton=panel.getByRole('button',{name:'Anyblob help'});
     assert.equal(await helpButton.getAttribute('aria-describedby'),null);

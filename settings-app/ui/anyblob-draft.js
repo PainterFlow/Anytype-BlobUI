@@ -1,8 +1,8 @@
 export function createAnyblobDraft() {
   let api, baseline = null, pending = null;
-  let snapshot = { loaded: false, locked: true, enabled: false };
+  let snapshot = { loaded: false, locked: true, enabled: false, agentsGuide: false };
   const listeners = new Set();
-  const values = () => ({ enabled: snapshot.enabled });
+  const values = () => ({ enabled: snapshot.enabled, agentsGuide: snapshot.agentsGuide });
   const publish = patch => { snapshot = { ...snapshot, ...patch }; listeners.forEach(listener => listener()); };
   const dirty = () => baseline !== null && JSON.stringify(values()) !== JSON.stringify(baseline);
   const commit = patch => { baseline = { ...baseline, ...patch }; publish(patch); api?.onChange(); };
@@ -23,7 +23,7 @@ export function createAnyblobDraft() {
       pending = (async () => {
         const integration = await api.invoke("anyblob_status");
         if (!baseline || !dirty()) {
-          baseline = { enabled: integration.enabled };
+          baseline = { enabled: integration.enabled, agentsGuide: integration.agentsGuide === true };
           publish({ ...baseline, loaded: true });
         }
         return integration;
@@ -36,6 +36,10 @@ export function createAnyblobDraft() {
       if (next.enabled !== baseline.enabled) {
         await api.invoke("configure_anyblob", { enabled: next.enabled });
         commit({ enabled: next.enabled });
+      }
+      if (next.agentsGuide !== baseline.agentsGuide) {
+        await api.invoke("configure_anyblob_agents_guide", { agentsGuide: next.agentsGuide });
+        commit({ agentsGuide: next.agentsGuide });
       }
     },
   };

@@ -90,7 +90,7 @@ fn verify_codex_catalog_budget(instructions: &str, tools: &[Value]) {
         total += bytes;
         largest = largest.max(bytes);
     }
-    assert_eq!(count, 56);
+    assert_eq!(count, 57);
     assert!(total < CATALOG_TARGET, "Codex tool catalog occupies {total} bytes");
     println!("{count} model tools, {total} bytes, largest tool {largest} bytes");
 }
@@ -124,7 +124,7 @@ fn stdio_initialization_schemas_malformed_unknown_and_no_credentials() {
     assert_eq!(initialize["result"]["serverInfo"]["name"], "anyblob");
     let tools = call(json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
     let catalog = tools["result"]["tools"].as_array().unwrap();
-    assert_eq!(catalog.len(), 57);
+    assert_eq!(catalog.len(), 58);
     verify_codex_catalog_budget(initialize["result"]["instructions"].as_str().unwrap(), catalog);
     let patch = catalog.iter().find(|tool| tool["name"] == "patch_object").unwrap();
     assert_eq!(patch["annotations"]["readOnlyHint"], false);

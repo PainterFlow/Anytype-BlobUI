@@ -2974,6 +2974,7 @@ pub fn app_main() {
             codex::discover_anyblob_types,
             anyblob::anyblob_status,
             anyblob::configure_anyblob,
+            anyblob::configure_anyblob_agents_guide,
             calendar::load_calendar_rules,
             calendar::discover_calendar_colors,
             calendar::save_calendar_rules,

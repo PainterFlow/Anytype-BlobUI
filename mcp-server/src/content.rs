@@ -41,9 +41,10 @@ impl ContentRequest {
         self.specification()
             .is_ok_and(|s| s["irreversible"] == true)
     }
-    /// Validation-only requests never require confirmation.
+    /// Read-only and validation-only requests never require confirmation.
     pub fn requires_confirmation(&self, approval: &str) -> bool {
-        self.arguments["dry_run"] != true
+        self.mutates()
+            && self.arguments["dry_run"] != true
             && (approval == "alwaysAsk"
                 || self.irreversible()
                 || (approval == "approveForMe" && self.capability() == "createDelete"))
@@ -470,8 +471,11 @@ mod tests {
             assert_eq!(request.requires_confirmation("approveForMe"),
                 spec["capability"] == "createDelete" || spec["irreversible"] == true,
                 "{}", request.tool);
-            assert_eq!(request.requires_confirmation("fullAccess"), spec["irreversible"] == true);
-            assert!(request.requires_confirmation("alwaysAsk"));
+            assert_eq!(request.requires_confirmation("fullAccess"),
+                spec["capability"] != "read" && spec["irreversible"] == true,
+                "{}", request.tool);
+            assert_eq!(request.requires_confirmation("alwaysAsk"),
+                spec["capability"] != "read", "{}", request.tool);
         }
         for op in ["insert_view", "delete_view"] {
             let request = ContentRequest {
