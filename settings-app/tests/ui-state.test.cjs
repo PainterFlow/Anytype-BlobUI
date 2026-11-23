@@ -292,7 +292,7 @@ const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
 assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*var\(--accent\)/);
-assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
+assert.match(settingsCss, /\.sidebar-actions\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/, 'Sidebar actions stack as a column so hidden controls collapse.');
 assert.match(settingsCss, /\.danger-button\s*\{[^}]*background:\s*#b8323c/);
 assert.match(settingsCss, /\.danger-button:hover:not\(:disabled\)\s*\{[^}]*background:\s*#942630/);
 assert(!settingsCss.includes('`n'), 'The stylesheet must contain real line breaks rather than literal PowerShell escapes.');
@@ -397,6 +397,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
           row.textContent = text;
           return row;
         }));
+        element('log-control').hidden = !patch.logRows.length;
         element('log-button').hidden = !patch.logRows.length;
         element('log-button').dataset.severity = patch.logSeverity;
         element('log-label').textContent = patch.logSeverity === 'error' ? 'Errors and logs'
@@ -563,7 +564,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(viewState.releaseChannel, 'release', 'Missing release channel settings default to Release.');
   context.testApp.changeReleaseChannel('invalid');
   assert.equal(viewState.releaseChannel, 'release', 'Unknown release channels are ignored.');
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
   const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
   assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
   element('advanced-nav').handlers.click();
@@ -727,7 +727,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert(f9Prevented);
   assert.equal(calls.at(-1), 'simulate_update', 'F9 uses the display-only update simulation command.');
   assert.equal(element('update-now-button').hidden, false, 'A simulated update reveals the pink sidebar action.');
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), true);
   assert.equal(element('check-updates-button').textContent, 'Update now');
   await updaterInterval.callback();
   assert.equal(calls.filter(name => name === 'check_for_updates').length, realCheckCallsBeforeSimulation, 'Scheduled checks preserve the F9 preview.');
@@ -735,7 +734,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('update-now-button').handlers.click();
   assert.equal(calls.filter(name => name === 'apply_update').length, realApplyCallsBeforeSimulation, 'Clicking a simulated update never invokes the installer.');
   assert.equal(element('update-now-button').hidden, true, 'Completing the preview clears its update action.');
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
   assert.equal(element('update-status').textContent, 'Preview complete. No files were changed.');
 
   updaterCheckState = {
@@ -921,6 +919,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('preferences-nav').handlers.click();
   assert.equal(typeof rebuildListener, 'function', 'The global rebuild shortcut must be connected to the UI save action.');
   assert.equal(element('save-button').hidden, true);
+  assert.equal(element('log-control').hidden, false, 'The Logs container appears with its first message.');
   assert.equal(element('log-button').hidden, false);
   assert.equal(element('log-button').dataset.severity, 'info');
   const logsBeforePreferenceEdits = element('log-entries').children.length;
@@ -1034,6 +1033,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.match(element('log-entries').children.at(-1).textContent, /Clipboard unavailable/);
   element('clear-logs').handlers.click();
   assert.equal(element('log-entries').children.length, 0, 'Clear removes every log entry.');
+  assert.equal(element('log-control').hidden, true, 'Clear hides the Logs container so the remaining actions close the gap.');
   assert.equal(element('log-button').hidden, true, 'Clear hides the Logs control after resetting it.');
   assert.equal(element('log-button').dataset.severity, 'info', 'Clear restores the default severity.');
   assert.equal(element('log-popup').hidden, true, 'Clear closes the now-empty Logs popup.');

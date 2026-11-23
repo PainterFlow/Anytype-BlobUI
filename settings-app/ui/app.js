@@ -67,7 +67,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const createBlobBackupButton = el("create-blob-backup-button");
   const importBlobBackupButton = el("import-blob-backup-button");
   const blobBackupStatus = el("blob-backup-status");
-  const sidebarActions = el("sidebar-actions");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
   const advancedApiPort = el("advanced-api-port");
@@ -667,7 +666,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       : "Check for updates";
     checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
     updateNowButton.hidden = !updateAvailable;
-    sidebarActions.classList.toggle("has-update", updateAvailable);
     updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges();
     updateNowButton.title = simulated ? "Preview update only" : "Update now";
     updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");

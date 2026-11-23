@@ -337,23 +337,20 @@ input[role="button"] { user-select: none; }
 .blob-import-path { margin-top: -12px !important; overflow-wrap: anywhere; color: var(--text-secondary); font-family: var(--font-code); font-size: 12px !important; }
 #blob-import-error { color: var(--color-red); }
 #blob-import-error:empty { display: none; }
-.sidebar-actions { flex: 0 0 28px; display: grid; grid-template-rows: repeat(4, 28px); gap: 4px; }
+.sidebar-actions { flex: 0 0 28px; display: flex; flex-direction: column; gap: 4px; }
 .sidebar-action { position: relative; isolation: isolate; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .sidebar-action::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: color-mix(in srgb, currentColor 22%, transparent); opacity: 0; pointer-events: none; }
 .sidebar-action:hover:not(:disabled)::before, .log-button[aria-expanded="true"]::before, .help-button[aria-expanded="true"]::before { opacity: 1; }
 .sidebar-action:disabled { cursor: default; opacity: .6; }
 .action-icon { flex: 0 0 20px; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.save-button { grid-row: 1; color: var(--accent); }
-.discard-button { grid-row: 2; color: var(--text-secondary); }
+.save-button { color: var(--accent); }
+.discard-button { color: var(--text-secondary); }
 .discard-button:hover:not(:disabled) { color: var(--color-red); }
-.update-now-button { grid-row: 3; color: var(--accent); }
+.update-now-button { color: var(--accent); }
 .log-button[data-severity="error"] { color: var(--color-red); }
 .log-button[data-severity="warning"] { color: var(--color-yellow); }
-.log-control { position: relative; grid-row: 3; }
-.help-control { position: relative; grid-row: 4; }
-.sidebar-actions.has-update { grid-template-rows: repeat(5, 28px); }
-.sidebar-actions.has-update .log-control { grid-row: 4; }
-.sidebar-actions.has-update .help-control { grid-row: 5; }
+.log-control { position: relative; }
+.help-control { position: relative; }
 .log-popup { position: absolute; z-index: 10; left: 0; bottom: calc(100% + 8px); width: min(400px, calc(100vw - 32px)); max-height: min(360px, calc(100vh - 80px)); display: flex; flex-direction: column; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--input-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .help-popup { position: absolute; z-index: 10; left: 0; bottom: calc(100% + 8px); width: 208px; display: grid; gap: 2px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--input-bg); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .help-item { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 9px; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }

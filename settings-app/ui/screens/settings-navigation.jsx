@@ -61,7 +61,7 @@ export function SettingsNavigation({ page, onNavigate, onSection }) {
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="10" r="5" fill="currentColor" /><path d="M12 5a5 5 0 0 1 0 10 7 7 0 0 0 0-10" fill="currentColor" /></svg>
     </NavigationGroup>
     <NavigationGroup {...group("accessibility")} label="Accessibility">
-      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="6" r="1.2" fill="currentColor" /><path d="M6.5 8.5h7M10 8.5v6m0-3-3 3m3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="10" cy="6" r="1.2" fill="currentColor" /><path d="M6.5 8.5h7M10 8.5v3l-3 3m3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </NavigationGroup>
     <NavigationGroup {...group("calendar-events")} label="Calendar Events" sections={["Appearance", "Color by property"]}>
       <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
