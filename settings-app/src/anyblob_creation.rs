@@ -1524,9 +1524,6 @@ pub fn dispatch_global(
                 id: id.into(),
                 name: row["name"].as_str().unwrap_or("").into(),
             };
-            if permission.approval == "alwaysAsk" {
-                approve(&Operation::Content { content: req.clone() }, check)?;
-            }
             let def = definition(client, &destination, check)?;
             let requirements = if destination.kind == "query" {
                 query::discovery(client, &destination, &def, check)?

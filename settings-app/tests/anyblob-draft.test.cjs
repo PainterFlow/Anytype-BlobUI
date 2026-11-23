@@ -38,6 +38,26 @@ test('Save persists Anyblob enablement', async () => {
   assert.equal(draft.isDirty(), false);
 });
 
+test('Save persists the AGENTS.md page setting', async () => {
+  const { draft, calls } = await fixture();
+  draft.change({ agentsGuide: true });
+  await draft.save();
+  assert.deepEqual(calls, [
+    { command: 'configure_anyblob_agents_guide', args: { agentsGuide: true } },
+  ]);
+  assert.equal(draft.isDirty(), false);
+  assert.equal(draft.getSnapshot().agentsGuide, true);
+});
+
+test('the AGENTS.md page draft survives reload until Undo', async () => {
+  const { draft } = await fixture();
+  draft.change({ agentsGuide: true });
+  await draft.load();
+  assert.equal(draft.getSnapshot().agentsGuide, true);
+  draft.discard();
+  assert.equal(draft.getSnapshot().agentsGuide, false);
+});
+
 test('failed Anyblob configuration preserves the draft for Undo', async () => {
   const { draft, rejectToggle } = await fixture();
   draft.change({ enabled: false });

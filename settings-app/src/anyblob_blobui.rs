@@ -317,7 +317,8 @@ pub(crate) fn execute_at(
         let _ = id;
         permission(config, space, false).map(|_| ())
     };
-    let ask = p.approval == "alwaysAsk";
+    // Read-only inspections never change Anytype, so they bypass Always Ask.
+    let ask = p.approval == "alwaysAsk" && request.mutates();
     if ask {
         approve(
             &Operation::Blobui {

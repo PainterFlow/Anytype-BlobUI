@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { ObjectMentions } from "./object-mentions.jsx";
-import { CodexIntegration } from "./codex-integration.jsx";
+import { AnyblobAdvancedSettings, CodexIntegration } from "./codex-integration.jsx";
 import { CodexPermissions } from "./codex-permissions.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 
@@ -17,7 +17,7 @@ export function CodexPage() {
       {tabId:"codex-tab-1",panelId:"codex-panel-1",title:"Permissions"},
     ]}>
       {[
-        <section><CodexIntegration /><ObjectMentions /></section>,
+        <section><CodexIntegration /><ObjectMentions /><AnyblobAdvancedSettings /></section>,
         <section><CodexPermissions /></section>,
       ]}
     </Tabs>

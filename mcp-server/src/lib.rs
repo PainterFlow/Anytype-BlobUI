@@ -58,6 +58,10 @@ pub enum Operation {
     Content { content: content::ContentRequest },
     SearchMentions { query: String },
     ListSpaces {},
+    ReadGuide {
+        #[serde(default)]
+        space_id: Option<String>,
+    },
     SearchObjects {
         space_id: String,
         query: String,
@@ -90,6 +94,7 @@ impl Operation {
             Self::Content { content } => content.validate(),
             Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
             Self::ListSpaces{} => Ok(()),
+            Self::ReadGuide { space_id } if space_id.as_deref().is_none_or(id) => Ok(()),
             Self::SearchObjects { space_id, query, limit, offset } if id(space_id) && query.len() <= 4096 && *limit > 0 && *limit <= 100 && *offset <= i32::MAX as u32 => Ok(()),
             Self::ReadObject { space_id, object_id } if id(space_id) && id(object_id) => Ok(()),
             _ => Err("Invalid arguments. Use explicit IDs, a limit of 1–100, and a nonnegative 32-bit offset.".into()),
@@ -101,6 +106,7 @@ impl Operation {
             Self::Content { content } => &content.tool,
             Self::SearchMentions { .. } => "search_mentions",
             Self::ListSpaces {} => "list_spaces",
+            Self::ReadGuide { .. } => "read_guide",
             Self::SearchObjects { .. } => "search_objects",
             Self::ReadObject { .. } => "read_object",
         }
@@ -110,6 +116,7 @@ impl Operation {
             Self::Blobui { blobui } => blobui.arguments["space_id"].as_str(),
             Self::Content { content } => content.arguments["space_id"].as_str(),
             Self::ListSpaces {} | Self::SearchMentions { .. } => None,
+            Self::ReadGuide { space_id } => space_id.as_deref(),
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
                 Some(space_id)
             }
@@ -241,6 +248,7 @@ pub fn tools() -> Value {
     let mut tools = json!([
         {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
+        {"name":"read_guide","description":"Read every 'agents guide' object in a space. When BlobUI's AGENTS.md page setting is enabled, other space tools require this call once per space; omit space_id to read every permitted space.","inputSchema":{"type":"object","properties":{"space_id":id},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
         {"name":"read_object","description":"Read an explicit object as properties, Markdown, and its ETag. Attachments remain references. Use the exact returned ETag with patch_object. If patch_object reports a stale ETag, re-read the object and rebuild the patch from the current document.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"etag":{"type":"string","minLength":1}},"required":["etag"],"additionalProperties":true},"annotations":annotations}
     ]);
@@ -360,5 +368,20 @@ mod tests {
             }
         ));
         assert!(operation("list_spaces", json!({"extra":true})).is_err());
+        assert!(matches!(
+            operation("read_guide", json!({})).unwrap(),
+            Operation::ReadGuide { space_id: None }
+        ));
+        assert!(matches!(
+            operation("read_guide", json!({"space_id":"space-1"})).unwrap(),
+            Operation::ReadGuide { space_id: Some(id) } if id == "space-1"
+        ));
+        for args in [
+            json!({"space_id":""}),
+            json!({"space_id":"../escape"}),
+            json!({"space_id":"s","limit":5}),
+        ] {
+            assert!(operation("read_guide", args).is_err());
+        }
     }
 }
