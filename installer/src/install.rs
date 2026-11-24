@@ -947,9 +947,11 @@ fn valid_changelog_id(id: &str) -> bool {
 
 fn validate_changelog_source(source: &str, video: bool) -> Result<(), String> {
     if let Some(filename) = source.strip_prefix("./cdn/") {
-        if video || filename.is_empty() || filename.contains('/')
+        let extension = Path::new(filename).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase);
+        let supported = if video { extension.as_deref() == Some("mp4") } else { matches!(extension.as_deref(), Some("svg" | "png" | "jpg" | "jpeg" | "gif" | "webp")) };
+        if filename.is_empty() || filename.contains('/')
             || !filename.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-            || !matches!(Path::new(filename).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("svg" | "png" | "jpg" | "jpeg" | "gif" | "webp"))
+            || !supported
         {
             return Err("md-images.yaml contains an unsafe or unsupported local Markdown image path.".into());
         }
@@ -1821,6 +1823,12 @@ mod tests {
         fs::write(package.join("md-images.yaml"), manifest).unwrap();
         fs::write(package.join("Changelogs.md"), "# Demo\n\n![Board demo](@demo)\n").unwrap();
         validate_package(&package, "1.3.0").unwrap();
+        let cdn_manifest = manifest.replace("alt: Board demo\n", "alt: Board demo\n  - id: guide-demo\n    src: ./cdn/guide-demo.mp4\n    alt: Guide demo\n");
+        fs::write(package.join("md-images.yaml"), &cdn_manifest).unwrap();
+        validate_package(&package, "1.3.0").unwrap();
+        fs::write(package.join("md-images.yaml"), manifest).unwrap();
+        assert!(parse_changelog_image_manifest(&cdn_manifest.replace("./cdn/guide-demo.mp4", "./cdn/nested/guide-demo.mp4")).is_err());
+        assert!(parse_changelog_image_manifest(&cdn_manifest.replace("./cdn/guide-demo.mp4", "./cdn/guide-demo.png")).is_err());
         assert!(parse_changelog_image_manifest(&manifest.replace("videos:", "images:")).is_err());
         assert!(parse_changelog_image_manifest(&manifest.replace("demo.mp4", "../demo.mp4")).is_err());
         assert!(parse_changelog_image_manifest(&(manifest.to_string() + "videos: []\n")).is_err());
