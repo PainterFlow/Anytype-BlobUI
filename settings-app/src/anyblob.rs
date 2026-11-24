@@ -286,23 +286,21 @@ fn allowed(config: &crate::codex::Configuration, op: &Operation) -> Result<(), S
 // When the AGENTS.md page setting is on, each readable space stays locked until
 // read_guide has returned its 'agents guide' objects (or confirmed none exist).
 // list_spaces and read_guide itself are exempt, and spaces without read
-// permission keep their normal access errors instead.
+// permission keep their normal access errors instead. search_mentions is exempt
+// too: it returns identity metadata only, and host composers call it on their
+// own without a chance to read guides first.
 fn guide_gate(config: &crate::codex::Configuration, op: &Operation) -> Result<(), String> {
-    if matches!(op, Operation::ListSpaces {} | Operation::ReadGuide { .. }) {
+    if matches!(
+        op,
+        Operation::ListSpaces {} | Operation::ReadGuide { .. } | Operation::SearchMentions { .. }
+    ) {
         return Ok(());
     }
     let unlocked = GUIDE_UNLOCKED
         .lock()
         .map_err(|_| "The Anyblob guide state is unavailable.")?;
     let pending = |space: &str| readable(config, space) && !unlocked.contains(space);
-    let space = match op {
-        Operation::SearchMentions { .. } => config
-            .spaces
-            .keys()
-            .find(|space| pending(space))
-            .cloned(),
-        _ => op.space().filter(|space| pending(space)).map(str::to_owned),
-    };
+    let space = op.space().filter(|space| pending(space)).map(str::to_owned);
     match space {
         Some(space) => Err(format!(
             "The 'agents guide' objects for space '{space}' must be read first. Call read_guide for that space before using other Anyblob tools in it."
@@ -657,9 +655,11 @@ fn dispatch_with(
             }
             let current = load_state()?;
             authenticate(&current, &request.token)?;
+            // Permission saves also change which spaces may suggest, so the full
+            // configuration snapshot is compared, not only the mention filters.
             if revision != REVISION.load(Ordering::Acquire)
                 || current != initial
-                || load_config()?.object_mentions != config.object_mentions
+                || load_config()? != config
             {
                 return Err(
                     "Anyblob mention filters or integration changed. Retry the search.".into(),
@@ -668,8 +668,13 @@ fn dispatch_with(
             Ok(())
         };
         check()?;
-        let result =
-            crate::anyblob_mentions::search(&connect()?, &config.object_mentions, query, &check)?;
+        let result = crate::anyblob_mentions::search(
+            &connect()?,
+            &config.object_mentions,
+            &config.spaces,
+            query,
+            &check,
+        )?;
         check()?;
         return Ok(result);
     }
@@ -1342,18 +1347,20 @@ mod tests {
         json!({"enabled":true,"verifier":digest(&"a".repeat(64))})
     }
     #[test]
-    fn mention_metadata_ignores_read_grants_but_never_authorizes_reads() {
+    fn mention_metadata_stays_within_read_grants_and_never_authorizes_reads() {
         let config = crate::codex::normalize(
             &json!({"spaces":{"another-space":{"access":"read","approval":"alwaysAsk"}}}),
         );
+        // 'denied' has no saved permission: it is never searched, so the fixture
+        // only answers the permitted space's requests.
         let (client, server) = mock(
             vec![
                 (
                     "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
-                    json!({"data":[{"id":"denied","name":"Private"}],"has_more":false}),
+                    json!({"data":[{"id":"denied","name":"Private"},{"id":"another-space","name":"Work"}],"has_more":false}),
                 ),
                 (
-                    "POST /v2/spaces/denied/search?ids=full&limit=100&offset=0 ".into(),
+                    "POST /v2/spaces/another-space/search?ids=full&limit=100&offset=0 ".into(),
                     json!({"_fixture_request_body":{},"data":[{"id":"object","name":"Visible metadata","markdown":"secret","properties":{"secret":true}}],"has_more":false}),
                 ),
             ],
@@ -1371,7 +1378,8 @@ mod tests {
             || panic!("metadata search does not use identity"),
         )
         .unwrap();
-        assert_eq!(result["items"][0]["uri"], "anyblob://objects/denied/object");
+        assert_eq!(result["items"].as_array().unwrap().len(), 1);
+        assert_eq!(result["items"][0]["uri"], "anyblob://objects/another-space/object");
         assert!(!result.to_string().contains("secret"));
         server.join().unwrap();
         let read = Operation::ReadObject {
@@ -1738,7 +1746,7 @@ mod tests {
             "gate-other":{"access":"read","approval":"alwaysAsk"}
         }}));
         let state = || Ok(json!({"enabled":true,"verifier":digest(&"a".repeat(64)),"agentsGuide":true}));
-        // Every space tool except list_spaces and read_guide is locked first.
+        // Every space tool except list_spaces, read_guide and search_mentions is locked first.
         for op in [
             Operation::SearchObjects {
                 space_id: "gate-space".into(),
@@ -1750,7 +1758,6 @@ mod tests {
                 space_id: "gate-space".into(),
                 object_id: "object".into(),
             },
-            Operation::SearchMentions { query: "q".into() },
         ] {
             let error = dispatch_with(
                 request(op),
@@ -1763,6 +1770,34 @@ mod tests {
             .unwrap_err();
             assert!(error.contains("read_guide"), "{error}");
         }
+        // search_mentions returns identity metadata only and composers cannot call
+        // read_guide first, so it stays usable while every space is still locked.
+        let (client, server) = mock(
+            vec![
+                (
+                    "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),
+                    json!({"data":[{"id":"gate-space","name":"Gate"}],"has_more":false}),
+                ),
+                (
+                    "POST /v2/spaces/gate-space/search?ids=full&limit=100&offset=0 ".into(),
+                    json!({"_fixture_request_body":{},"data":[{"id":"note","name":"Gate note"}],"has_more":false}),
+                ),
+            ],
+            None,
+        );
+        let result = dispatch_with(
+            request(Operation::SearchMentions {
+                query: "gate".into(),
+            }),
+            || true,
+            state,
+            || Ok(config.clone()),
+            || Ok(client.clone_for_fixture()),
+            |_, _| panic!("metadata search must not prompt"),
+        )
+        .unwrap();
+        assert_eq!(result["items"][0]["uri"], "anyblob://objects/gate-space/note");
+        server.join().unwrap();
         let (client, server) = mock(
             vec![(
                 "GET /v2/spaces?ids=full&limit=100&offset=0 ".into(),

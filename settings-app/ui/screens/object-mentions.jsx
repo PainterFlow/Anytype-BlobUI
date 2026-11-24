@@ -23,7 +23,7 @@ export function ObjectMentions() {
       {[ ["spaces","Filtered spaces"],["types","Filtered object types"] ].map(([kind,label])=><div key={kind} className="settings-row kanban-setting-row object-mention-row"><div className="kanban-setting-copy"><span className="kanban-setting-title">{label}</span></div><MentionPicker kind={kind} label={label} controller={controller} state={state} /></div>)}
       <Switch id="filter-incomplete-tasks" label="Filter Incomplete Tasks" className="native-accent-control settings-row kanban-setting-row" inputAttributes={{"aria-label":"Filter Incomplete Tasks"}} checked={state.selections.filterIncompleteTasks} onChange={checked=>controller.setIncomplete(checked)} />
     </div>
-    <p className="input-hint">Filters control suggestions. Reading an object still requires permission, including Always Ask. Save to apply changes.</p>
+    <p className="input-hint">Filters control suggestions. Only spaces with saved read permission appear. Reading an object still requires permission, including Always Ask. Save to apply changes.</p>
     <p className="input-hint" role="status" id="object-mentions-status">{state.status}</p>
   </section>;
 }

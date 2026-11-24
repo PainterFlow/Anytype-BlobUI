@@ -831,6 +831,17 @@ fn object_mention_command(args: &[String]) -> Result<(), String> {
                 [] => return Err(format!("Object type ID `{id}` was not found.")),
                 _ => return Err("This object type ID appears in more than one space. Use <space-id>/<object-type-id>.".into()),
             };
+            let type_space = type_row["spaceId"].as_str().unwrap_or_default();
+            if args[0] == "add"
+                && !configuration
+                    .spaces
+                    .get(type_space)
+                    .is_some_and(|permission| permission.permits("read"))
+            {
+                return Err(format!(
+                    "Space '{type_space}' has no saved read permission. Save Read Only or Read-Write access for it first."
+                ));
+            }
             let selection = &mut configuration.object_mentions.types;
             if args[0] == "add" {
                 if selection.all { selection.all = false; selection.items.clear(); }
@@ -869,7 +880,11 @@ fn mention_spaces_command(
         "ls" => {
             let client = crate::kanban_api::Client::connect()?;
             let rows = client.pages("GET", "/v2/spaces?ids=full", None)?;
-            let result = mark_space_selection(rows, &configuration.object_mentions.spaces)?;
+            let result = mark_space_selection(
+                rows,
+                &configuration.object_mentions.spaces,
+                &configuration.spaces,
+            )?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&result).unwrap_or_default()
@@ -885,6 +900,16 @@ fn mention_spaces_command(
                 .iter()
                 .find(|row| row["id"].as_str() == Some(id))
                 .ok_or("Space ID was not found in the authenticated Anytype account.")?;
+            if action == "add"
+                && !configuration
+                    .spaces
+                    .get(id)
+                    .is_some_and(|permission| permission.permits("read"))
+            {
+                return Err(format!(
+                    "Space '{id}' has no saved read permission. Save Read Only or Read-Write access for it first."
+                ));
+            }
             let selection = &mut configuration.object_mentions.spaces;
             if action == "add" {
                 if selection.all {
@@ -924,6 +949,7 @@ fn parse_mention_space_args(args: &[String]) -> Result<(&str, Option<&str>), Str
 fn mark_space_selection(
     mut rows: Vec<Value>,
     selection: &crate::anyblob_mentions::Selection<crate::anyblob_mentions::Space>,
+    permissions: &BTreeMap<String, crate::codex::Permission>,
 ) -> Result<Vec<Value>, String> {
     for row in &mut rows {
         let object = row
@@ -937,6 +963,10 @@ fn mark_space_selection(
             .to_string();
         let selected = selection.all || selection.items.iter().any(|space| space.id == id);
         object.insert("selected".into(), json!(selected));
+        object.insert(
+            "permitted".into(),
+            json!(permissions.get(&id).is_some_and(|p| p.permits("read"))),
+        );
     }
     Ok(rows)
 }
@@ -2118,14 +2148,20 @@ mod tests {
             json!({"id":"space-1","name":"One"}),
             json!({"id":"space-2","name":"Two"}),
         ];
+        let permissions = crate::codex::normalize(
+            &json!({"spaces":{"space-1":{"access":"read","approval":"fullAccess"}}}),
+        )
+        .spaces;
         let empty = crate::anyblob_mentions::Selection {
             all: false,
             items: Vec::new(),
         };
-        let listed = mark_space_selection(spaces.clone(), &empty).unwrap();
+        let listed = mark_space_selection(spaces.clone(), &empty, &permissions).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0]["selected"], false);
         assert_eq!(listed[1]["selected"], false);
+        assert_eq!(listed[0]["permitted"], true);
+        assert_eq!(listed[1]["permitted"], false);
 
         let selected = crate::anyblob_mentions::Selection {
             all: false,
@@ -2134,7 +2170,7 @@ mod tests {
                 name: "Two".into(),
             }],
         };
-        let listed = mark_space_selection(spaces, &selected).unwrap();
+        let listed = mark_space_selection(spaces, &selected, &permissions).unwrap();
         assert_eq!(listed[0]["selected"], false);
         assert_eq!(listed[1]["selected"], true);
     }

@@ -1,4 +1,5 @@
-//! Global metadata discovery. These filters never authorize object reads.
+//! Global metadata discovery limited to spaces with saved read permission.
+//! These filters never authorize object reads.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -64,19 +65,25 @@ fn valid_id(id: &str) -> Result<(), String> {
 }
 
 /// No cache, bodies, project lookup or approval exceptions. Check before each HTTP request
-/// and again before publishing the complete, filtered and sorted result.
+/// and again before publishing the complete, filtered and sorted result. Only spaces whose
+/// saved permission permits reading contribute suggestions; All resolves to them.
 pub fn search(
     client: &crate::kanban_api::Client,
     filters: &Filters,
+    permissions: &BTreeMap<String, crate::codex::Permission>,
     query: &str,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
-    search_with(filters, query, check, |method, path, body| client.request(method, path, body))
+    let permitted = |sid: &str| permissions.get(sid).is_some_and(|p| p.permits("read"));
+    search_with(filters, query, check, &permitted, |method, path, body| {
+        client.request(method, path, body)
+    })
 }
 fn search_with(
     filters: &Filters,
     query: &str,
     check: &impl Fn() -> Result<(), String>,
+    permitted: &impl Fn(&str) -> bool,
     mut request: impl FnMut(&str, &str, Option<&Value>) -> Result<Value, String>,
 ) -> Result<Value, String> {
     fn pages(
@@ -125,6 +132,9 @@ fn search_with(
     for space in spaces {
         let sid = text(&space, "id")?;
         valid_id(sid)?;
+        // Spaces without a saved read permission never contribute suggestions,
+        // whether the filter is All or an explicit saved selection.
+        if !permitted(sid) { continue; }
         if !filters.spaces.all && !filters.spaces.items.iter().any(|s| s.id == sid) { continue; }
         if !filters.types.all && !filters.types.items.iter().any(|t| t.space_id == sid) { continue; }
         let space_name = text(&space, "name")?;
@@ -224,7 +234,7 @@ mod tests {
             {"spaceId":"a","id":"task","name":"Task","space":"Same"},
             {"spaceId":"b","id":"task","name":"Task","space":"Same"}]}}));
         let mut calls = Vec::new();
-        let result = search_with(&saved, "Ü", &|| Ok(()), |method,path,body| {
+        let result = search_with(&saved, "Ü", &|| Ok(()), &|_| true, |method,path,body| {
             calls.push(path.to_string());
             assert!(!path.contains("/objects/"));
             if path.contains("/types?"){return Ok(json!({"data":[{"id":"task","key":"task-key"}],"has_more":false}));}
@@ -245,7 +255,7 @@ mod tests {
     }
     #[test]
     fn dynamic_all_empty_selection_unicode_and_deduplication() {
-        let run = |saved: &Filters, query: &str| search_with(saved,query,&||Ok(()), |method,_,_| {
+        let run = |saved: &Filters, query: &str| search_with(saved,query,&||Ok(()),&|_|true, |method,_,_| {
             Ok(if method=="GET" {json!({"data":[{"id":"new-space","name":"新"}],"has_more":false})}
             else {json!({"data":[{"id":"one","name":"猫"},{"id":"one","name":"猫"},{"id":"two","name":""}],"has_more":false})})
         }).unwrap();
@@ -253,7 +263,7 @@ mod tests {
         assert_eq!(run(&Filters::default(),"猫")["items"].as_array().unwrap().len(),1);
         for saved in [filters(json!({"spaces":{"all":false,"items":[]},"types":{"all":true}})),
             filters(json!({"spaces":{"all":true},"types":{"all":false,"items":[]}}))] {
-            let result=search_with(&saved,"",&||Ok(()),|_,_,_|panic!("Empty selection must not make HTTP calls")).unwrap();
+            let result=search_with(&saved,"",&||Ok(()),&|_|true,|_,_,_|panic!("Empty selection must not make HTTP calls")).unwrap();
             assert_eq!(result,json!({"items":[]}));
         }
     }
@@ -263,7 +273,7 @@ mod tests {
             {"spaceId":"a","id":"full-task","name":"Duplicate","space":"Same"},
             {"spaceId":"b","id":"unavailable","name":"Duplicate","space":"Same"}]}}));
         let mut calls=Vec::new();
-        let result=search_with(&saved,"",&||Ok(()),|method,path,_|{
+        let result=search_with(&saved,"",&||Ok(()),&|_|true,|method,path,_|{
             calls.push(path.to_string());
             Ok(if path.starts_with("/v2/spaces?") {json!({"data":[{"id":"a","name":"Same"},{"id":"b","name":"Same"}],"has_more":false})}
             else if path.contains("/types?"){json!({"data":[{"key":"renamed task / key"}],"has_more":false})}
@@ -281,7 +291,7 @@ mod tests {
             let barrier=barrier.clone();
             std::thread::spawn(move||{
                 let saved=filters(json!({"spaces":{"all":false,"items":[{"id":sid,"name":"Saved"}]},"types":{"all":true}}));
-                search_with(&saved,query,&||Ok(()),|method,path,_|{
+                search_with(&saved,query,&||Ok(()),&|_|true,|method,path,_|{
                     if method=="GET"{barrier.wait();return Ok(json!({"data":[{"id":"a","name":"A"},{"id":"b","name":"B"}],"has_more":false}));}
                     assert!(path.contains(&format!("/spaces/{sid}/")));
                     Ok(json!({"data":[{"id":"cat","name":"猫"},{"id":"word","name":"Über"}],"has_more":false}))
@@ -294,14 +304,14 @@ mod tests {
     }
     #[test]
     fn cancellation_failures_and_forged_ids_fail_closed() {
-        assert!(search_with(&Filters::default(),"",&||Err("cancelled".into()),|_,_,_|panic!()).is_err());
-        assert!(search_with(&Filters::default(),"",&||Ok(()),|_,_,_|Err("secret server error".into())).unwrap_err().contains("search failed"));
+        assert!(search_with(&Filters::default(),"",&||Err("cancelled".into()),&|_|true,|_,_,_|panic!()).is_err());
+        assert!(search_with(&Filters::default(),"",&||Ok(()),&|_|true,|_,_,_|Err("secret server error".into())).unwrap_err().contains("search failed"));
         for response in [json!({"data":[],"has_more":true}),json!({"data":[],"has_more":false,"total":1}),
             json!({"data":[{"id":"../escape","name":"bad"}],"has_more":false})] {
-            assert!(search_with(&Filters::default(),"",&||Ok(()),|_,_,_|Ok(response.clone())).is_err());
+            assert!(search_with(&Filters::default(),"",&||Ok(()),&|_|true,|_,_,_|Ok(response.clone())).is_err());
         }
         let changed=std::cell::Cell::new(false);
-        let result=search_with(&Filters::default(),"",&||if changed.get(){Err("filters changed".into())}else{Ok(())},|_,_,_| {
+        let result=search_with(&Filters::default(),"",&||if changed.get(){Err("filters changed".into())}else{Ok(())},&|_|true,|_,_,_| {
             changed.set(true);Ok(json!({"data":[],"has_more":false}))
         });
         assert_eq!(result.unwrap_err(),"filters changed");
@@ -310,7 +320,7 @@ mod tests {
     fn completed_tasks_are_excluded_before_the_limit_without_exposing_properties() {
         let mut filters=Filters::default();filters.filter_incomplete_tasks=true;
         assert_eq!(filters,Filters::normalize(Some(&serde_json::to_value(&filters).unwrap())));
-        let result=search_with(&filters,"",&||Ok(()),|method,path,body|{
+        let result=search_with(&filters,"",&||Ok(()),&|_|true,|method,path,body|{
             if method=="GET" {return Ok(json!({"data":[{"id":"s","name":"Space"}],"has_more":false}));}
             assert_eq!(body,Some(&json!({"fields":["done"]})));
             Ok(if path.ends_with("offset=0") {
@@ -326,7 +336,7 @@ mod tests {
         for row in [json!({}),json!({"properties":{"done":null}}),json!({"properties":{"done":false}})] {assert!(!completed(&row).unwrap());}
         assert!(completed(&json!({"properties":{"done":{"checkbox":true}}})).unwrap());
         assert!(completed(&json!({"properties":{"done":"true"}})).is_err());
-        let off=search_with(&Filters::default(),"",&||Ok(()),|method,_,body|{
+        let off=search_with(&Filters::default(),"",&||Ok(()),&|_|true,|method,_,body|{
             Ok(if method=="GET"{json!({"data":[{"id":"s","name":"Space"}],"has_more":false})}
             else{assert_eq!(body,Some(&json!({})));json!({"data":[{"id":"done","name":"Done task","properties":{"done":true}},{"id":"page","name":"Regular page"}],"has_more":false})})
         }).unwrap();
@@ -335,10 +345,33 @@ mod tests {
     #[test]
     fn typing_spaces_does_not_clear_matching_mentions() {
         for query in ["School", "School ", " School   Notebook ", "notebook school", "school\tnotebook", "  "] {
-            let result=search_with(&Filters::default(),query,&||Ok(()),|method,_,_|Ok(if method=="GET"{
+            let result=search_with(&Filters::default(),query,&||Ok(()),&|_|true,|method,_,_|Ok(if method=="GET"{
                 json!({"data":[{"id":"s","name":"Space"}],"has_more":false})
             }else{json!({"data":[{"id":"note","name":"School Notebook Entry"}],"has_more":false})})).unwrap();
             assert_eq!(result["items"].as_array().unwrap().len(),1,"{query:?}");
         }
+    }
+    #[test]
+    fn spaces_without_read_permission_never_contribute_suggestions() {
+        let permitted=|sid:&str|sid=="allowed";
+        for saved in [Filters::default(),filters(json!({"spaces":{"all":false,
+            "items":[{"id":"denied","name":"D"},{"id":"allowed","name":"A"}]},"types":{"all":true}}))] {
+            let mut calls=Vec::new();
+            let result=search_with(&saved,"",&||Ok(()),&permitted,|method,path,_|{
+                calls.push(path.to_string());
+                Ok(if method=="GET"{json!({"data":[{"id":"allowed","name":"A"},{"id":"denied","name":"D"}],"has_more":false})}
+                else{json!({"data":[{"id":"note","name":"Note"}],"has_more":false})})
+            }).unwrap();
+            assert_eq!(result["items"].as_array().unwrap().len(),1);
+            assert_eq!(result["items"][0]["uri"],"anyblob://objects/allowed/note");
+            assert!(calls.iter().all(|p|!p.contains("/spaces/denied/")));
+        }
+        // A selection limited to non-permitted spaces yields nothing and searches no space.
+        let denied_only=filters(json!({"spaces":{"all":false,"items":[{"id":"denied","name":"D"}]},"types":{"all":true}}));
+        let result=search_with(&denied_only,"",&||Ok(()),&permitted,|method,_,_|{
+            Ok(if method=="GET"{json!({"data":[{"id":"denied","name":"D"}],"has_more":false})}
+            else{panic!("a non-permitted space must not be searched")})
+        }).unwrap();
+        assert_eq!(result,json!({"items":[]}));
     }
 }
