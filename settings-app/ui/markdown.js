@@ -276,13 +276,19 @@
         name: "blobuiImageMention",
         level: "inline",
         start(source) {
-          const pattern = /(^|[^A-Za-z0-9_+.-])@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/g;
+          const pattern = /(^|[^A-Za-z0-9_+.-])@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?=[ \t]*(?:\n|$))/g;
           const match = pattern.exec(source);
           return match ? match.index + match[1].length : undefined;
         },
-        tokenizer(source) {
-          const match = /^@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/.exec(source);
+        tokenizer(source, tokens) {
+          const match = /^@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?=[ \t]*(?:\n|$))/.exec(source);
           if (!match || !images[match[1]] && !Object.hasOwn(videos, match[1])) return undefined;
+          for (let i = (tokens || []).length - 1; i >= 0; i--) {
+            const previous = tokens[i];
+            if (previous.type === "br") break;
+            if (previous.type === "text" && !/\S/.test(String(previous.text ?? previous.raw ?? ""))) continue;
+            return undefined;
+          }
           return { type: "blobuiImageMention", raw: match[0], alias: match[1] };
         },
         renderer(token) {
@@ -329,9 +335,23 @@
     return parser;
   }
 
+  function mediaAliases(markdown) {
+    const text = String(markdown || "");
+    const aliases = new Set();
+    for (const line of text.split("\n")) {
+      const mention = /^[ \t]*@([A-Za-z0-9][A-Za-z0-9_-]{0,63})[ \t]*\r?$/.exec(line);
+      if (mention) aliases.add(mention[1]);
+    }
+    for (const match of text.matchAll(/!\[[^\]]*\]\(@([A-Za-z0-9][A-Za-z0-9_-]{0,63})\)|src=["']@([A-Za-z0-9][A-Za-z0-9_-]{0,63})["']/g)) {
+      aliases.add(match[1] || match[2]);
+    }
+    return aliases;
+  }
+
   BlobUI.Markdown = Object.freeze({
     parseImageManifest,
     parseMediaManifest,
+    mediaAliases,
     attachMedia(container, options = {}) {
       if (!container?.querySelectorAll) return;
       BlobUI.VideoPlayer?.destroyTree(container);

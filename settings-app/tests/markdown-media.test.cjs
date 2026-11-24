@@ -12,8 +12,10 @@ const context = {
     ok: true,
     headers: { get: name => name.toLowerCase() === 'content-type' ? 'image/png' : '4' },
     arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+    blob: async () => new Blob([Uint8Array.from([1, 2, 3, 4])], { type: 'video/mp4' }),
   }),
   btoa: value => Buffer.from(value, 'binary').toString('base64'),
+  Blob,
 };
 vm.runInNewContext(fs.readFileSync(path.join(uiRoot, 'markdown.js'), 'utf8'), context, { filename: 'markdown.js' });
 vm.runInNewContext(fs.readFileSync(path.join(uiRoot, 'markdown-media.js'), 'utf8'), context, { filename: 'markdown-media.js' });
@@ -33,4 +35,37 @@ test('Markdown loads configured video aliases and keeps local image loading safe
   assert.equal(manifestVideos['anyblob-installation'].src, './cdn/anyblob-instillation.mp4');
   assert.match(manifestVideos['anyblob-installation'].src, /^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/);
   assert.equal(fs.existsSync(path.join(uiRoot, manifestVideos['anyblob-installation'].src)), true, 'The configured video asset exists.');
+
+  assert.equal(await MarkdownMedia.loadVideo('https://example.com/video.mp4'), null);
+  assert.equal(await MarkdownMedia.loadVideo('./cdn/../secret.mp4'), null);
+  const video = await MarkdownMedia.loadVideo('./cdn/anyblob-instillation.mp4');
+  assert.equal(video.blob.type, 'video/mp4');
+  assert.equal(video.blob.size, 4);
+});
+
+test('Markdown media aliases resolve only standalone mentions and image syntax', () => {
+  const aliases = Markdown.mediaAliases([
+    'Inline text keeps @inline as plain text.',
+    '',
+    '@standalone',
+    '',
+    '![Caption](@embed)',
+    '',
+    '   @indented   ',
+    '',
+    '    @code-sample',
+    '',
+    'A line ending in @trailing stays text.',
+    '`@code-span`',
+    '<img src="@raw-html" alt="x">',
+  ].join('\n'));
+  assert(aliases.has('standalone'));
+  assert(aliases.has('embed'));
+  assert(aliases.has('indented'));
+  assert(aliases.has('code-sample'), 'A bare indented mention overfetches rather than underfetches.');
+  assert(aliases.has('raw-html'));
+  assert.equal(aliases.has('inline'), false);
+  assert.equal(aliases.has('trailing'), false);
+  assert.equal(aliases.has('code-span'), false);
+  assert.deepEqual([...Markdown.mediaAliases(null)], []);
 });

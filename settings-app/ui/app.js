@@ -773,7 +773,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updateReleaseNotesScrollbar();
 
     const markdownText = String(notes.markdown || "");
-    const imageRequests = Object.entries(mediaManifest.images).filter(([alias]) => markdownText.includes(`@${alias}`)).map(async ([alias, image]) => {
+    const mentioned = window.BlobUI.Markdown.mediaAliases ? window.BlobUI.Markdown.mediaAliases(markdownText) : new Set();
+    const imageRequests = Object.entries(mediaManifest.images).filter(([alias]) => mentioned.has(alias)).map(async ([alias, image]) => {
       const src = image.src.startsWith("./cdn/")
         ? (await window.BlobUI.MarkdownMedia.loadImage(image.src))?.src
         : historical
@@ -782,7 +783,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (!src) throw new Error("The Markdown image could not be loaded.");
       return ["image", alias, { src, alt: image.alt }];
     });
-    const videoRequests = Object.entries(mediaManifest.videos).map(async ([alias, video]) => {
+    const videoRequests = Object.entries(mediaManifest.videos).filter(([alias]) => mentioned.has(alias)).map(async ([alias, video]) => {
+      if (video.src.startsWith("./cdn/")) {
+        const loaded = await window.BlobUI.MarkdownMedia.loadVideo(video.src);
+        if (!loaded) throw new Error("The Markdown video could not be loaded.");
+        return ["video", alias, { ...loaded, alt: video.alt }];
+      }
       const args = { source: video.src };
       const src = historical
         ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })

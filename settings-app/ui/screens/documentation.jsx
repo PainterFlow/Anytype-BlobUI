@@ -1,8 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-const aliasPattern = /@([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])/g;
 const imageCache = new Map();
-const videoCache = new Map();
 let mediaManifestPromise;
 
 function loadMediaManifest() {
@@ -33,26 +31,12 @@ async function imageAsset(alias, images) {
 }
 
 async function videoAsset(source) {
-  if (!/^\.\/cdn\/[A-Za-z0-9_-]+\.mp4$/i.test(source)) return null;
-  if (!videoCache.has(source)) {
-    videoCache.set(source, (async () => {
-      try {
-        const response = await fetch(source);
-        const length = Number(response.headers.get("content-length"));
-        if (!response.ok || (Number.isFinite(length) && length > 64 * 1024 * 1024)) return null;
-        const blob = await response.blob();
-        return blob.size > 0 && blob.size <= 64 * 1024 * 1024
-          ? { blob: new Blob([blob], { type: "video/mp4" }) }
-          : null;
-      } catch { return null; }
-    })());
-  }
-  return videoCache.get(source);
+  return window.BlobUI.MarkdownMedia.loadVideo(source);
 }
 
 async function mediaForMarkdown(markdown) {
   const source = String(markdown || "");
-  const aliases = new Set([...source.matchAll(aliasPattern)].map(match => match[1]));
+  const aliases = window.BlobUI.Markdown.mediaAliases(source);
   const altByAlias = new Map([...source.matchAll(/!\[([^\]]*)\]\(@([A-Za-z0-9][A-Za-z0-9_-]{0,63})\)/g)].map(match => [match[2], match[1].trim()]));
   const manifest = await loadMediaManifest();
   const images = Object.create(null);
