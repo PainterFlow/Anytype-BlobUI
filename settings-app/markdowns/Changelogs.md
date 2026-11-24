@@ -22,7 +22,7 @@ This update is a massive technical one, internal files are getting a remake, Any
     - You can also toggle the based theme(*controls text color, etc.*).
     - There are also 2 built-in themes: "OLED" and "Dark Mode+".
 
-## Anyblob (0.2.25 -> 1.2.0)
+## Anyblob (0.2.25 -> 1.3.0)
 
 - Added Linux support. (User#pxlarified)
 - The `read_object` tool now returns e-tags.

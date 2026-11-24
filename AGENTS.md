@@ -7,7 +7,7 @@
 - Make sure to always test and build/compile the app after you finished implementing the feature.
 - Anytypes v1 API is completely banned.
 - Never modify files under `./settings-app/markdowns/*` unless I explicitly request it in my prompt.
-- When modifying Anyblob or the MCP for anyblob, bump the anyblob minor version in the last edit even if I forgot to specify an exact version for anyblob(if I do specify one then bump it to that version). 
+- When modifying Anyblob or the MCP for anyblob, bump the anyblob minor version(minor = the last version, the `x.x.THIS-ONE`) in the last edit even if I forgot to specify an exact version for anyblob(if I do specify one then bump it to that version). 
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.
