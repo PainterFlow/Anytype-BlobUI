@@ -3,7 +3,6 @@ const METADATA_COMMANDS = new Set([
   "discover_calendar_colors",
   "discover_codex_spaces",
   "discover_anyblob_types",
-  "discover_codex_sources",
 ]);
 
 // Wraps the Tauri bridge without depending on Settings DOM or page state.
@@ -30,7 +29,7 @@ export function createNativeService({ tauri, onMetadataError = null } = {}) {
     let nativeResult;
     try { nativeResult = api.invoke(name, params); }
     catch (error) { nativeResult = Promise.reject(error); }
-    const request = Promise.resolve(nativeResult).then(result => {
+    let request = Promise.resolve(nativeResult).then(result => {
       if (disposed) throw new Error("The Settings native service is closed.");
       if (metadata && epoch !== metadataEpoch) throw new Error("The saved Anytype connection changed. Refresh metadata again.");
       if (metadata && Array.isArray(result?.errors) && typeof onMetadataError === "function") {
@@ -39,6 +38,10 @@ export function createNativeService({ tauri, onMetadataError = null } = {}) {
       return result;
     });
     if (metadata) {
+      request = request.catch(error => {
+        if (error !== null && (typeof error === "object" || typeof error === "function")) throw error;
+        throw new Error(String(error));
+      });
       pendingMetadata.add(request);
       metadataRequests.set(requestKey, request);
       request.then(
@@ -46,7 +49,7 @@ export function createNativeService({ tauri, onMetadataError = null } = {}) {
         error => {
           pendingMetadata.delete(request);
           metadataRequests.delete(requestKey);
-          if (!disposed && typeof onMetadataError === "function") onMetadataError(String(error.message || error));
+          if (!disposed && typeof onMetadataError === "function") onMetadataError(String(error.message || error), error);
         },
       );
     }

@@ -32,8 +32,24 @@ try {
     $archive = [IO.Compression.ZipFile]::OpenRead($package)
     try {
         Assert (@($archive.Entries | Where-Object { $_.FullName -match '\.(ps1|psm1|cmd)$' }).Count -eq 0) 'The release package contains legacy scripts or launchers.'
-        foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
+        foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
             Assert (@($archive.Entries | Where-Object { $_.FullName -ceq $name }).Count -eq 1) "The release package must contain $name at its root."
+        }
+        Assert (@($archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }).Count -eq 1) 'The release package must include the Anyblob MCP launcher.'
+        $settingsEntry = $archive.Entries | Where-Object { $_.FullName -ceq 'settings-app/dist/blobui-settings.exe' }
+        $mcpEntry = $archive.Entries | Where-Object { $_.FullName -ceq 'bin/blob-ui.exe' }
+        Assert ($null -ne $settingsEntry) 'The release package must include the compiled Settings app.'
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $settingsStream = $settingsEntry.Open()
+        $mcpStream = $mcpEntry.Open()
+        try {
+            $settingsHash = [Convert]::ToHexString($sha.ComputeHash($settingsStream))
+            $mcpHash = [Convert]::ToHexString($sha.ComputeHash($mcpStream))
+            Assert ($settingsHash -eq $mcpHash) 'The Windows MCP launcher must be the compiled Settings app.'
+        } finally {
+            $settingsStream.Dispose()
+            $mcpStream.Dispose()
+            $sha.Dispose()
         }
     } finally { $archive.Dispose() }
     # A development install must ignore the normal profile locations completely.
@@ -49,8 +65,8 @@ try {
     $dataPath = Join-Path $testRoot 'Anytype/blob/data.json'
     Assert (Test-Path -LiteralPath $dataPath) 'Development EXE did not create isolated settings.'
     Assert (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/settings-app.exe')) 'Native installation omitted the Settings runtime.'
-    foreach ($name in @('Changelogs.md', 'Changelogs.yaml')) {
-        $source = Join-Path $repo $name
+    foreach ($name in @('Changelogs.md', 'md-images.yaml')) {
+        $source = Join-Path $repo ("settings-app/markdowns/$name")
         $installed = Join-Path $testRoot ("Anytype/blob/runtime/" + $name)
         Assert (Test-Path -LiteralPath $installed -PathType Leaf) "Native installation omitted runtime/$name."
         Assert ((Get-FileHash -LiteralPath $source).Hash -eq (Get-FileHash -LiteralPath $installed).Hash) "Installed runtime/$name does not match the release source."
@@ -58,6 +74,9 @@ try {
     $apps = Get-TestApps
     Assert ($apps.Count -eq 1) 'First development installation did not create one app folder.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'blobui-settings.exe')) 'Native installation omitted the app executable.'
+    Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'bin/blob-ui.exe')) 'Native installation omitted the Anyblob MCP launcher.'
+    & node (Join-Path $PSScriptRoot 'Test-Desktop-Mcp.cjs') (Join-Path $apps[0].FullName 'bin/blob-ui.exe')
+    Assert ($LASTEXITCODE -eq 0) 'The installed Settings executable did not provide the MCP stdio entrypoint.'
     Assert (Test-Path -LiteralPath (Join-Path $apps[0].FullName '.blobui-install.json')) 'Native installation omitted the install pointer.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $apps[0].FullName 'scripts'))) 'Native installation included legacy scripts.'
     $releaseMetadata = Get-Content -LiteralPath (Join-Path $repo 'blobui-release.json') -Raw | ConvertFrom-Json
@@ -66,12 +85,14 @@ try {
     $managedPath = Join-Path $testRoot 'Anytype/blob/.blobui-managed-files.json'
     $managed = Get-Content -LiteralPath $managedPath -Raw | ConvertFrom-Json
     Assert ($managed.managedFiles -contains 'runtime/Changelogs.md') 'The changelog Markdown is not tracked by the runtime ownership manifest.'
-    Assert ($managed.managedFiles -contains 'runtime/Changelogs.yaml') 'The changelog image manifest is not tracked by the runtime ownership manifest.'
+    Assert ($managed.managedFiles -contains 'runtime/md-images.yaml') 'The changelog image manifest is not tracked by the runtime ownership manifest.'
     $managed.managedFiles += 'runtime/scripts/obsolete.ps1'
+    $managed.managedFiles += 'runtime/Changelogs.yaml'
     $managed | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $managedPath -Encoding UTF8
     $oldScripts = Join-Path $testRoot 'Anytype/blob/runtime/scripts'
     [IO.Directory]::CreateDirectory($oldScripts) | Out-Null
     [IO.File]::WriteAllText((Join-Path $oldScripts 'obsolete.ps1'), 'old managed script')
+    [IO.File]::WriteAllText((Join-Path $testRoot 'Anytype/blob/runtime/Changelogs.yaml'), 'images: []')
     [IO.File]::WriteAllText((Join-Path $oldScripts 'user-local.ps1'), 'keep local file')
     $data = Get-Content -LiteralPath $dataPath -Raw | ConvertFrom-Json
     $data.settings.accentColor = '#123456'
@@ -89,6 +110,7 @@ try {
     & $devExe --no-pause --package $package
     Assert ($LASTEXITCODE -eq 0) 'Repeated native development installation failed.'
     Assert (-not (Test-Path -LiteralPath (Join-Path $oldScripts 'obsolete.ps1'))) 'Repeated installation left an obsolete managed script.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $testRoot 'Anytype/blob/runtime/Changelogs.yaml'))) 'Repeated installation left the obsolete image manifest.'
     Assert ([IO.File]::ReadAllText((Join-Path $oldScripts 'user-local.ps1')) -eq 'keep local file') 'Repeated installation removed an unmanaged local script.'
     Assert ((Get-FileHash -LiteralPath $dataPath).Hash -eq $savedDataHash) 'Repeated installation rewrote or reset saved settings.'
     Assert ([IO.File]::ReadAllText($credentialPath) -eq 'keep-encrypted-credential') 'Repeated installation changed credentials.'

@@ -69,11 +69,10 @@ impl Runner {
         }
         let op = blobui_mcp::operation(name, args)?;
         let token = "a".repeat(64);
-        let result = dispatch_resolved_with(
+        let result = dispatch_with(
             Request {
                 id: format!("live-{name}"),
                 token: token.clone(),
-                thread_id: None,
                 request: op,
             },
             || true,
@@ -81,7 +80,6 @@ impl Runner {
             || Ok(self.config.clone()),
             || Ok(self.client.clone_for_fixture()),
             |_, check| check(),
-            || Ok(None),
         );
         self.ledger["calls"].as_array_mut().unwrap().push(json!({"tool":name,"outcome":result.as_ref().ok().and_then(|v|v["outcome"].as_str()).unwrap_or(if result.is_ok(){"read"}else{"failed"})}));
         self.save()?;

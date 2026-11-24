@@ -1,24 +1,26 @@
 export const pageTitles = Object.freeze({
   preferences: "Preferences",
   accessibility: "Accessibility",
+  "calendar-events": "Calendar Events",
+  "kanban-views": "Kanban Views",
   advanced: "Advanced Settings",
-  formulas: "Kanban View Formulas",
-  "calendar-colors": "Color by Property",
   codex: "Anyblob",
 });
 
 export function createSettingsView() {
   const listeners = new Set();
   let snapshot = {
-    page: "preferences", preferenceTab: 0, advancedTab: 0,
+    page: "preferences", preferenceTab: 0, calendarTab: 0, kanbanTab: 0, advancedTab: 0,
+    customThemes: [], themeDirectory: "", customThemeDisabled: true,
     documentationOpened: false, releaseNotesMedia: null,
-    logRows: [], logSeverity: "info", shortcutRows: [],
+    logRows: [], logSeverity: "info", copyLogsCopied: false, shortcutRows: [],
     startupMode: "off", startupModeDisabled: true,
     backgroundExperiment: "disabled", backgroundExperimentDisabled: true,
     kanbanStyle: "default", kanbanStyleDisabled: true,
     saveVisible: false, saveDisabled: true, discardDisabled: true, saveBusy: false,
     settingsFields: {
       "font-family": "", "code-font-family": "", "accent-value": "",
+      "enable-custom-themes": false, "based-theme": "auto", "custom-theme": "", "theme-color-value": "#191918",
       "include-selections": false, "native-accent": false, "reduced-motion": false,
       "tab-hover-effect": false, "link-hover-effect": false, "object-mention-hover-effect": false,
       "collapsed-categories": false, "calendar-colors-enabled": true,

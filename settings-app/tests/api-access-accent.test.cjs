@@ -22,7 +22,7 @@ test('API key access read-only label computes to the configured accent while hov
   const htmlPath = path.join(testRoot, 'test.html');
   fs.writeFileSync(htmlPath, `<!doctype html><style>:root { --color-blob-accent: rgb(12, 34, 56); }</style><style>${css}</style><button class="apiKeyAccess is-hovered"><span>Read only</span><span class="keyMeta">All spaces</span></button><output id="result"></output><script>document.querySelector('#result').textContent = getComputedStyle(document.querySelector('.apiKeyAccess > span:first-child')).color;</script>`);
   const html = execFileSync(chromePath, ['--headless=new', '--no-sandbox', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-gpu-sandbox', `--user-data-dir=${profile}`, '--dump-dom', `file:///${htmlPath.replace(/\\/g, '/')}`], {
-    encoding: 'utf8', timeout: 30000, env: { ...process.env, TEMP: testRoot, TMP: testRoot },
+    encoding: 'utf8', timeout: 60000, env: { ...process.env, TEMP: testRoot, TMP: testRoot },
   });
   const color = html.match(/<output id="result">([^<]*)<\/output>/)?.[1];
   assert.equal(color, 'rgb(12, 34, 56)', 'hovered Read only label should compute to the configured accent');

@@ -54,19 +54,11 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   try {
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady && window.__calls.includes('load_calendar_rules'));
-    assert.equal(await page.locator('#open-calendar-colors').count(), 1);
-    assert.deepEqual(await page.evaluate(() => {
-      const metrics = id => {
-        const style = getComputedStyle(document.getElementById(id));
-        return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
-      };
-      return metrics('open-formulas');
-    }), await page.evaluate(() => {
-      const style = getComputedStyle(document.getElementById('open-calendar-colors'));
-      return ['minHeight', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderRadius', 'fontSize', 'backgroundColor'].map(key => style[key]);
-    }));
+    assert.equal(await page.locator('#calendar-events-tab-1').innerText(), 'Color by property');
+    assert.equal(await page.locator('#kanban-views-tab-1').innerText(), 'Kanban Calculations');
     assert.equal(await page.locator('#calendar-colors-help').isHidden(), true);
-    await page.locator('#open-calendar-colors').evaluate(button => button.click());
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
     await typeRow().click();
     await choose('Default', 'Status');
     assert.equal(await modal.getByRole('button', { name: 'Default color property', exact: true }).count(), 1);
@@ -92,10 +84,9 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     const read = () => page.evaluate(() => window.BlobUI.CalendarPage.read());
     assert.equal((await read()).types[0].default.key, 'status');
     assert.equal((await read()).types[0].overrides[0].rule.mode, 'none');
-    await page.locator('#preferences-nav').click();
-    await page.locator('#preference-tab-2').click();
+    await page.locator('#calendar-events-tab-0').click();
     await page.locator('#calendar-colors-enabled').uncheck();
-    await page.locator('#open-calendar-colors').click();
+    await page.locator('#calendar-events-tab-1').click();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__calendarSettings[0].calendarColorsEnabled), false);
@@ -154,15 +145,53 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
   } finally { await browser.close(); }
 });
 
+test('opening Calendar Colors while rules load starts discovery after the rules load', async () => {
+  fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
+  process.env.TEMP = process.env.TMP = path.join(root, 'temp');
+  const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 }, colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    window.__discoveryCalls = 0;
+    window.__TAURI__ = { core: { invoke: async command => {
+      if (command === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: {} };
+      if (command === 'get_calendar_api_availability') return 'missing';
+      if (command === 'load_kanban_formulas') return { configuration: { version: 2, display: 'balanced', definitions: [] } };
+      if (command === 'load_calendar_rules') return new Promise(resolve => { window.__resolveCalendarRules = resolve; });
+      if (command === 'discover_calendar_colors') {
+        window.__discoveryCalls++;
+        return { types: [{ spaceId: 'space-a', key: 'task', name: 'Task', space: 'Work', properties: [] }], views: [] };
+      }
+      return null;
+    } } };
+  });
+  try {
+    await loadSettings(page);
+    await page.waitForFunction(() => window.__resolveCalendarRules);
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
+    assert.match(await page.locator('#calendar-type-list').textContent(), /Loading object types/);
+    assert.equal(await page.evaluate(() => window.__discoveryCalls), 0, 'Discovery waits until the saved rules request finishes.');
+    await page.evaluate(() => {
+      const resolve = window.__resolveCalendarRules;
+      window.__resolveCalendarRules = null;
+      resolve({ version: 1, types: [] });
+    });
+    await page.locator('#calendar-type-list').getByRole('button', { name: 'Task Work' }).waitFor({ state: 'visible' });
+    assert.equal(await page.evaluate(() => window.__discoveryCalls), 1, 'The visible catalog refresh starts after saved rules load.');
+    assert.doesNotMatch(await page.locator('#calendar-type-list').textContent(), /Loading object types/);
+  } finally { await browser.close(); }
+});
+
 test('calendar CSS scopes overrides and suppression to their exact view while overflow keeps defaults', async () => {
   const css = fs.readFileSync(path.join(root, 'scoped.css'), 'utf8');
   const browser = await chromium.launch({ executablePath, headless: true });
-  const page = await browser.newPage({ colorScheme: 'dark' });
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 }, colorScheme: 'dark' });
   const calendar = (object, block, view) => `<section id="block-${block}"><div data-root-id="${object}"><div id="view-item-${block}-${view}" class="viewItem active"></div></div><div class="viewContent viewCalendar"><div class="record" id="record-event"><span class="name">Event</span></div></div></section>`;
   try {
-    await page.setContent(`<style>:root{--color-purple:purple;--color-green:green;--color-lime:green}body{background:#171717}.record{background:rgb(40,40,40);color:rgb(200,200,200)}${css}</style>
+    await page.setContent(`<style>:root{--color-purple:purple;--color-green:green;--color-lime:green}body{background:#171717;font:16px sans-serif}main{padding:12px;margin:8px}#light-mode{--color-bg-primary:#ffffff;--color-text-primary:#252525;background:var(--color-bg-primary);color:var(--color-text-primary)}#dark-mode{--color-bg-primary:#171717;--color-text-primary:#e1e1e1;background:var(--color-bg-primary);color:var(--color-text-primary)}.record{background:rgb(40,40,40);color:rgb(200,200,200)}${css}</style>
       <main id="green">${calendar('host','calendar','green')}</main><main id="none">${calendar('host','calendar','none')}</main>
       <main id="other-view">${calendar('host','calendar','other')}</main><main id="other-object">${calendar('other','calendar','green')}</main><main id="other-block">${calendar('host','other','green')}</main>
+      <main id="light-mode">${calendar('host','calendar','other')}</main><main id="dark-mode">${calendar('host','calendar','other')}</main>
       <div class="content"><div class="wrap"><div class="items"><div class="item" id="item-event"><i class="iconObject" id="menuCalendarDay-event-icon"></i><span class="name">Event</span></div></div></div></div>`);
     const border = id => page.locator(`#${id} .record`).evaluate(el => getComputedStyle(el).borderLeftColor);
     assert.equal(await border('green'), 'rgb(0, 128, 0)');
@@ -170,6 +199,20 @@ test('calendar CSS scopes overrides and suppression to their exact view while ov
     assert.equal(await page.locator('#none .record').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(40, 40, 40)');
     assert.equal(await page.locator('#none .name').evaluate(el => getComputedStyle(el).color), 'rgb(200, 200, 200)');
     assert.equal(await page.locator('#item-event').evaluate(el => getComputedStyle(el).borderLeftColor), 'rgb(128, 0, 128)');
+    const eventColors = async mode => page.locator(`#${mode}-mode .record`).evaluate(el => ({
+      background: getComputedStyle(el).backgroundColor,
+      text: getComputedStyle(el).color,
+      title: getComputedStyle(el.querySelector('.name')).color,
+    }));
+    const lightColors = await eventColors('light');
+    const darkColors = await eventColors('dark');
+    assert.notEqual(lightColors.background, darkColors.background);
+    assert.equal(lightColors.text, 'rgb(37, 37, 37)');
+    assert.equal(lightColors.title, 'rgb(37, 37, 37)');
+    assert.equal(darkColors.text, 'rgb(225, 225, 225)');
+    assert.equal(darkColors.title, 'rgb(225, 225, 225)');
+    await page.locator('#light-mode').screenshot({ path: path.join(root, 'theme-aware-light-calendar.png') });
+    await page.locator('#dark-mode').screenshot({ path: path.join(root, 'theme-aware-dark-calendar.png') });
   } finally { await browser.close(); }
 });
 
@@ -216,8 +259,9 @@ test('saved calendar rules do not become unavailable during initial loading, fai
   const list = page.locator('#calendar-type-list');
   try {
     await loadSettings(page);
-    await page.waitForFunction(() => window.appReady && !document.querySelector('#open-calendar-colors').disabled);
-    await page.locator('#open-calendar-colors').evaluate(button => button.click());
+    await page.waitForFunction(() => window.appReady);
+    await page.locator('#calendar-events-nav').click();
+    await page.locator('#calendar-events-tab-1').click();
     await page.waitForFunction(() => !!window.__pendingDiscover);
     assert.match(await list.textContent(), /Loading object types/);
     assert.doesNotMatch(await list.textContent(), /Unavailable type/);

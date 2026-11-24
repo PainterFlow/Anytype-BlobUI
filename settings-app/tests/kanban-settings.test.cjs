@@ -22,13 +22,13 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
       window.__TAURI__ = { core: { invoke: async (name, args) => {
         if (name === 'get_app_state') return { ready: true, theme: document.documentElement.dataset.theme || 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: { fontFamily: 'Segoe UI', codeFontFamily: 'Consolas', accentColor: 'Default', accentMode: 'native', kanbanViewStyle: 'default', collapsedCategories: false } };
         if (name === 'save_settings') { window.__saves.push(args.settings); return { calendarStatus: 'cached' }; }
-        if (name === 'get_theme') return 'dark';
+        if (name === 'get_anytype_theme') return 'dark';
         return null;
       } } };
     });
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
-    await page.locator('#preference-tab-1').click();
+    await page.locator('#kanban-views-nav').click();
     const trigger = page.locator('#kanban-view-style');
     const menu = page.locator('#kanban-style-options');
     assert.equal(await trigger.evaluate(el => el.tagName), 'BUTTON');
@@ -69,7 +69,7 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
     assert.deepEqual(await formulaOptions.allTextContents(), ['Balanced', 'Spacious']);
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('#collapsed-categories').evaluate(el => el === document.activeElement), true);
-    const section = page.locator('#preference-panel-1');
+    const section = page.locator('#kanban-views-panel-0');
     for (const theme of ['dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       await section.scrollIntoViewIfNeeded();
@@ -86,7 +86,7 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
       assert.equal(await trigger.evaluate(el => getComputedStyle(el).borderTopWidth), '0px');
       if (theme === 'dark') assert.notEqual(await menu.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
       await menu.screenshot({ path: path.join(root, `picker-${theme}.png`) });
-      await page.locator('#kanban-heading').click();
+      await page.locator('#kanban-general-heading').click();
       await menu.waitFor({ state: 'hidden' });
     assert.equal(await menu.isVisible(), false);
     }

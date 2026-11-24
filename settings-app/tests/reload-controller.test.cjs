@@ -49,6 +49,18 @@ test('reload runs are deduplicated while busy and always release busy state', as
   controller.destroy();
 });
 
+test('reload callback distinguishes scheduled startup refreshes from user refreshes', async () => {
+  const origins = [];
+  const { controller } = harness({ onReload: event => origins.push(event.startup) });
+  controller.register(() => {});
+
+  await controller.run({ checkUpdates: false, startup: true });
+  await controller.run({ checkUpdates: false });
+
+  assert.deepEqual(origins, [true, false]);
+  controller.destroy();
+});
+
 test('reload reports synchronous and asynchronous handler errors without leaving busy state set', async () => {
   for (const [handler, expected] of [
     [() => { throw new Error('synchronous failure'); }, 'synchronous failure'],
@@ -62,6 +74,18 @@ test('reload reports synchronous and asynchronous handler errors without leaving
     assert.deepEqual(errors, [expected]);
     controller.destroy();
   }
+});
+
+test('reload reports every handler failure, including identical messages', async () => {
+  const errors = [];
+  const { controller } = harness({ onError: error => errors.push(error) });
+  controller.register(() => { throw new Error('same failure'); });
+  controller.register(() => Promise.reject(new Error('same failure')));
+  await controller.run();
+  assert.equal(errors.length, 2);
+  assert.notEqual(errors[0], errors[1]);
+  assert.equal(errors[0].message, errors[1].message);
+  controller.destroy();
 });
 
 test('Ctrl+R reloads the app, while other modifiers pass through', async () => {

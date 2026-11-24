@@ -55,7 +55,30 @@ pub fn default_banner_preview(runtime_root: &Path) -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
+#[cfg(not(feature = "installer"))]
 pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> Result<String, String> {
+    let settings_root = crate::settings_root_for_install(install_directory)?;
+    compile_with_settings_directory(runtime_root, install_directory, &settings_root.join("Settings"), data)
+}
+
+pub(crate) fn compile_with_settings_directory(
+    runtime_root: &Path,
+    install_directory: &Path,
+    settings_directory: &Path,
+    data: &Value,
+) -> Result<String, String> {
+    let include_selections = crate::themes::effective_include_selections(settings_directory, data)?;
+    let theme_css = crate::themes::render_generated_css_with_include(settings_directory, data, include_selections)?;
+    compile_with_theme_css(runtime_root, install_directory, data, &theme_css, include_selections)
+}
+
+pub(crate) fn compile_with_theme_css(
+    runtime_root: &Path,
+    install_directory: &Path,
+    data: &Value,
+    theme_css: &str,
+    include_selections: bool,
+) -> Result<String, String> {
     let dev_directory = runtime_root.join("Dev");
     let asset_directory = runtime_root.join("assets");
     if !dev_directory.is_dir() {
@@ -91,7 +114,7 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
         .into_iter()
         .map(|name| (name, settings.get(name).and_then(Value::as_bool).unwrap_or(false)))
         .collect::<BTreeMap<_, _>>();
-    bool_settings.insert("includeSelections", settings.get("includeSelections").and_then(Value::as_bool).unwrap_or(true));
+    bool_settings.insert("includeSelections", include_selections);
     let kanban_style = settings.get("kanbanViewStyle").and_then(Value::as_str).unwrap_or("default");
     bool_settings.insert("kanbanBalanced", kanban_style == "balanced");
     bool_settings.insert("kanbanCompact", kanban_style == "compact");
@@ -184,6 +207,9 @@ pub fn compile(runtime_root: &Path, install_directory: &Path, data: &Value) -> R
             }
         }
     }
+    if !theme_css.trim().is_empty() {
+        css_text = format!("{}{newline}{newline}{}", css_text.trim_end(), theme_css.trim_end());
+    }
     if Regex::new(r"\{\{[^}]+\}\}").unwrap().is_match(&css_text) {
         return Err("Compiled CSS still contains an unresolved placeholder.".into());
     }
@@ -204,6 +230,7 @@ fn same_install_directory(saved: &Path, selected: &Path) -> bool {
     }
 }
 
+#[cfg(windows)]
 fn comparable_windows_path(path: &Path) -> String {
     const VERBATIM_PREFIX: &str = "\\\\?\\";
     const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
@@ -417,35 +444,35 @@ fn calendar_color_css_scoped(colors: Option<&Value>, overrides: Option<&Value>) 
         rules.push(selector);
         rules.push(format!("{calendar} {{"));
         rules.push(format!("    background-color: {color} !important;"));
-        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important;"));
+        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important;"));
         rules.push(format!("    border-left: 3px solid {color} !important;"));
         rules.push("    border-radius: 3px !important;".into());
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name,"));
         rules.push(format!("[data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{object_id}\"]{exclusions} .name span,"));
         rules.push(format!("{calendar} .name,"));
         rules.push(format!("{calendar} .name span {{"));
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         let menu = format!(".content > .wrap > .items > .item[id=\"item-{object_id}\"]:has(> .iconObject[id=\"menuCalendarDay-{object_id}-icon\"])");
         rules.push(format!("{menu} {{"));
         rules.push(format!("    background-color: {color} !important;"));
-        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important;"));
+        rules.push(format!("    background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important;"));
         rules.push(format!("    border-left: 3px solid {color} !important;"));
         rules.push("    border-radius: 3px !important;".into());
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
         rules.push(format!("{menu} .name,"));
         rules.push(format!("{menu} .name span {{"));
-        rules.push("    color: #FFFFFF !important;".into());
+        rules.push("    color: var(--color-text-primary) !important;".into());
         rules.push("}".into());
     }
     for (scope, id, color) in scopes {
         let Some(color) = color.filter(|color| !color.is_empty()) else { continue; };
         let selector = format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"], {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"]:not(.record *)");
-        rules.push(format!("{selector} {{ background-color: color-mix(in srgb, {color} 18%, #1b1b1b) !important; border-left: 3px solid {color} !important; border-radius: 3px !important; color: #FFFFFF !important; }}"));
-        rules.push(format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name, {scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name span, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name span {{ color: #FFFFFF !important; }}"));
+        rules.push(format!("{selector} {{ background-color: color-mix(in srgb, {color} 18%, var(--color-bg-primary)) !important; border-left: 3px solid {color} !important; border-radius: 3px !important; color: var(--color-text-primary) !important; }}"));
+        rules.push(format!("{scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name, {scope} .viewContent.viewCalendar .record[id=\"record-{id}\"] .name span, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name, {scope} [data-view-type=\"4\"][data-drop-type=\"record\"][data-id=\"{id}\"] .name span {{ color: var(--color-text-primary) !important; }}"));
     }
     if rules.is_empty() { Ok(None) } else { Ok(Some(format!("/* BlobUI Calendar Color overrides */{newline}{}", rules.join(newline)))) }
 }
@@ -455,7 +482,7 @@ fn newline() -> &'static str { "\r\n" }
 #[cfg(not(windows))]
 fn newline() -> &'static str { "\n" }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "installer")))]
 mod tests {
     use super::*;
     use serde_json::json;
@@ -472,6 +499,10 @@ mod tests {
         let css = calendar_color_css_scoped(Some(&colors), Some(&overrides)).unwrap().unwrap();
         assert!(css.contains(":not([id="));
         assert!(css.contains("color-mix"));
+        assert!(css.contains("var(--color-bg-primary)"));
+        assert!(css.contains("var(--color-text-primary)"));
+        assert!(!css.contains("#1b1b1b"));
+        assert!(!css.contains("#FFFFFF"));
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".test-run/calendar-property");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("scoped.css"), &css).unwrap();
@@ -626,6 +657,38 @@ mod tests {
     }
 
     #[test]
+    fn preset_accent_metadata_overrides_user_accent_and_selection_settings() {
+        let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let fixture = runtime.join(".test-run/preset-accent-compiled");
+        let install = fixture.join("Anytype");
+        let settings_directory = fixture.join("Settings");
+        let themes = crate::themes::theme_directory(&settings_directory);
+        fs::create_dir_all(&themes).unwrap();
+        let preset = themes.join("custom-accent.css");
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\naccent-color: #27A879\naccent-color-selection: true\n*/\n").unwrap();
+        let mut data = json!({"installDirectory": install, "settings": {
+            "fontFamily":"Inter", "codeFontFamily":"Consolas", "accentColor":"#3656D4",
+            "enableCustomThemes":true, "basedTheme":"dark", "themePreset":"custom-accent.css",
+            "themeColor":"#191918", "includeSelections":false
+        }});
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(compiled.rfind("--color-blob-accent: #27A879;").unwrap() > compiled.rfind("--color-blob-accent: #3656D4;").unwrap());
+        assert!(compiled.contains("--blobui-selection-fill:"));
+
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\naccent-color-selection: false\n*/\n").unwrap();
+        data["settings"]["includeSelections"] = json!(true);
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(!compiled.contains("--blobui-selection-fill:"));
+        assert!(compiled.contains("--color-blob-accent: #3656D4;"));
+
+        fs::write(&preset, "/*\nname: Custom Accent\nauthor: Example\n*/\n").unwrap();
+        let compiled = compile_with_settings_directory(runtime, &install, &settings_directory, &data).unwrap();
+        assert!(compiled.contains("--blobui-selection-fill:"));
+        assert!(compiled.contains("--color-blob-accent: #3656D4;"));
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
     fn compiles_repository_theme_for_accent_accessibility_and_calendar_settings() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let fixture = fixture().join("parity");
@@ -667,6 +730,11 @@ mod tests {
                 compiled.contains("#preview.previewWrapper:has(.previewDefault, .previewObject)"),
                 !settings["settings"]["objectMentionHoverEffect"].as_bool().unwrap(),
                 "object mention preview toggle was not compiled independently in case {index}"
+            );
+            assert_eq!(
+                compiled.contains(".widget .viewCalendar .day.today"),
+                settings["settings"]["accentColor"].as_str().unwrap() != "Default",
+                "widget calendar today accent was not compiled independently in case {index}"
             );
             if index == 0 {
                 assert!(compiled.contains("record-default-case"));

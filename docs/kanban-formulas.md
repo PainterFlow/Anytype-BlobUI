@@ -28,7 +28,7 @@ Each category uses all matching cards. Numeric aggregates ignore missing values.
 
 The sidebar Save and Undo include calculations and the display preference. Searching, changing filters, or changing Settings pages preserves pending edits.
 
-Save reads fresh data and publishes every saved calculation as one snapshot. Press Ctrl+R in Anytype after saving. Results remain snapshots until the next save. The toolbar reload action discovers views without publishing calculation results.
+Save reads fresh data and publishes every saved calculation as one snapshot. Press Ctrl+R in Anytype after saving. Results remain snapshots until the next save or Settings reload. Reloading Settings republishes every saved calculation when the Anytype API answers. The toolbar reload action discovers views without publishing calculation results.
 
 Publication updates the workspace configuration, installed BlobUI data, and stylesheet in one transaction. A failed API read or file replacement retains the previous snapshot and pending edits. Normal appearance saves preserve the snapshot. The API key remains in the native backend; the browser never receives it.
 
@@ -68,7 +68,7 @@ The version 2 configuration is `.blobui-kanban-formulas.json` at the source work
 
 Implementation and automated validation use workspace-local fixtures. A read-only live probe verifies discovery and calculation without publishing to the user's installed files.
 
-Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Scoped Anyblob grants can use option mappings already supplied by permitted property metadata without requiring separate object access to those options.
+Column identity rules follow [Anytype heart core/kanban](https://github.com/anyproto/anytype-heart/tree/46135d4d28053e0e0d9afb65d6bf75028602216d/core/kanban). Explicit original tag IDs in stored group metadata can resolve option names; hashed group IDs are never fetched as option objects. Global per-space Anyblob grants can use option mappings already supplied by readable property metadata without requiring separate object access to those options.
 
 Select categories use exact, case-sensitive option names scoped to a space and stable property key. Names retain their whitespace. Duplicate names exclude the entire property from Kanban results and calendar property colors, with an error naming the space, property and duplicate. Saved formulas and rules remain intact. Unrelated properties continue to publish.
 

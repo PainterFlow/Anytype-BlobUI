@@ -19,7 +19,7 @@ async function browserFixture(name, run) {
   try { await run(await context.newPage(), root); } finally { await context.close(); }
 }
 
-test('Include selections sits inside the accent box and supports migration, Save, Undo and native mode', { skip }, async () => {
+test('Include selections controls Settings selection and supports migration, Save, Undo and native mode', { skip }, async () => {
   await browserFixture('selection-settings', async (page, root) => {
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('selection-fixture-started')) {
@@ -42,7 +42,31 @@ test('Include selections sits inside the accent box and supports migration, Save
       } } };
     });
     await loadSettings(page);
+    await page.bringToFront();
     await page.waitForFunction(() => window.appReady);
+    const heading = page.locator('#accent-heading');
+    const selection = () => heading.evaluate(el => {
+      const selected = getComputedStyle(el, '::selection');
+      return { background: selected.backgroundColor, text: selected.color, normal: getComputedStyle(el).color };
+    });
+    const anytypeSelection = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--color-system-selection)';
+      document.body.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
+    const focusedSelection = await selection();
+    assert.notEqual(focusedSelection.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(focusedSelection.text, focusedSelection.normal);
+    assert.equal(focusedSelection.background, anytypeSelection);
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    const unfocusedSelection = await selection();
+    assert.deepEqual(unfocusedSelection, focusedSelection, 'The app keeps its selection color when its window loses focus');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.deepEqual(await selection(), focusedSelection);
+    assert.equal(await page.locator("#accent-heading").innerText(), "Accent Color");
     const toggle = page.locator('#include-selections');
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await toggle.isEnabled(), true, 'Native accent must not disable this control');
@@ -62,20 +86,25 @@ test('Include selections sits inside the accent box and supports migration, Save
     await page.reload();
     await page.waitForFunction(() => window.appReady);
     assert.equal(await toggle.isChecked(), false);
+    assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'false');
+    assert.equal((await selection()).background, anytypeSelection, 'Saved Include selections off keeps Anytype selection color');
     await toggle.check();
     await page.locator('#save-button').click();
     await page.waitForFunction(() => window.__saves.length === 1);
     assert.equal(await page.evaluate(() => window.__saves[0].includeSelections), true);
+    assert.deepEqual(await selection(), focusedSelection, 'Turning Include selections back on restores the accent color');
     await page.locator('#native-accent').uncheck();
     await page.locator('#accent-value').fill('#27a879');
     const appSelection = () => page.locator('#accent-value').evaluate(el => getComputedStyle(el, '::selection').backgroundColor);
     const customSelection = await appSelection();
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
     await toggle.uncheck();
-    assert.notEqual(await appSelection(), customSelection, 'Disabling selections restores the Settings default');
+    assert.notEqual(await appSelection(), customSelection);
+    assert.equal(await appSelection(), anytypeSelection, 'Include selections off restores Anytype selection color');
     await page.evaluate(() => window.BlobUI.discardChanges());
     assert.equal(await toggle.isChecked(), true);
     assert.equal(await page.locator('html').getAttribute('data-include-selections'), 'true');
+    assert.equal(await appSelection(), focusedSelection.background, 'Undo restores the saved selection color');
     await page.locator('#native-accent').uncheck();
     await page.locator('#accent-value').fill('#27a879');
     await page.locator('#save-button').click();

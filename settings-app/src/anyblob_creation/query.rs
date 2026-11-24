@@ -206,7 +206,7 @@ fn valid_definition(def: &Value) -> Result<(), String> {
 
 fn type_document(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     row: &mut Value,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
@@ -234,7 +234,7 @@ fn type_document(
 }
 fn load_types(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Vec<Value>, String> {
     check()?;
@@ -243,9 +243,18 @@ fn load_types(
         &format!("{}/types?ids=full", base(&source.space_id)),
         None,
     )?;
+    normalize_types(client, source, &mut types, check)?;
+    Ok(types)
+}
+fn normalize_types(
+    client: &Client,
+    source: &Destination,
+    types: &mut Vec<Value>,
+    check: &impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
     let mut keys = std::collections::BTreeSet::new();
     let mut ids = std::collections::BTreeSet::new();
-    for row in &mut types {
+    for row in types.iter_mut() {
         let key = row["key"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -266,7 +275,7 @@ fn load_types(
             return Err("Ambiguous type object IDs in metadata.".into());
         }
     }
-    Ok(types)
+    Ok(())
 }
 fn contains_type_filter(value: &Value, properties: &[Value]) -> bool {
     match value {
@@ -282,7 +291,7 @@ fn contains_type_filter(value: &Value, properties: &[Value]) -> bool {
 }
 fn query_metadata(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     def: &Value,
     types: &mut Vec<Value>,
     check: &impl Fn() -> Result<(), String>,
@@ -436,7 +445,7 @@ fn requirements(
 
 pub(super) fn discovery(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     def: &Value,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Value, String> {
@@ -468,9 +477,10 @@ pub(super) fn discovery(
 
 pub(super) fn assess_with_type(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     def: &Value,
     req: &ContentRequest,
+    files_enabled: bool,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<(Option<Value>, String), String> {
     let body = &req.arguments["body"];
@@ -482,7 +492,7 @@ pub(super) fn assess_with_type(
             .any(|k| !["type", "name", "properties", "markdown", "template"].contains(&k.as_str()))
     }) {
         return Err(
-            "Scoped query creation initially requires the shortcut creation payload.".into(),
+            "Query creation requires the basic object payload.".into(),
         );
     }
     valid_definition(def)?;
@@ -505,7 +515,7 @@ pub(super) fn assess_with_type(
     ]
     .contains(&canonical_type.as_str())
     {
-        return Err("Scoped creation cannot create source or schema definitions.".into());
+        return Err("Destination creation cannot create source or schema definitions.".into());
     }
     let source_types = source_entries(def, "types")?;
     let type_matches = source_types
@@ -519,7 +529,7 @@ pub(super) fn assess_with_type(
             let p = property(key, &properties)?;
             supplied(p, body, &properties)?;
             if matches!(p["format"].as_str(), Some("file" | "files"))
-                && !source.permission.files_enabled
+                && !files_enabled
             {
                 return Err(
                     "File-valued properties require the saved file permission switch.".into(),
@@ -570,10 +580,10 @@ pub(super) fn assess_with_type(
 #[cfg(test)]
 pub(super) fn assess(
     client: &Client,
-    source: &SourcePermission,
+    source: &Destination,
     def: &Value,
     req: &ContentRequest,
     check: &impl Fn() -> Result<(), String>,
 ) -> Result<Option<Value>, String> {
-    assess_with_type(client, source, def, req, check).map(|r| r.0)
+    assess_with_type(client, source, def, req, false, check).map(|r| r.0)
 }

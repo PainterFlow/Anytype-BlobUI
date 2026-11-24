@@ -8,6 +8,7 @@ const contentTypes = new Map([
   ['.js', 'application/javascript'],
   ['.css', 'text/css'],
   ['.md', 'text/plain'],
+  ['.yaml', 'text/yaml'],
   ['.svg', 'image/svg+xml'],
   ['.png', 'image/png'],
   ['.mp4', 'video/mp4'],
@@ -32,9 +33,8 @@ async function loadSettings(page) {
 }
 
 async function openFormulas(page) {
-  await page.locator('#preferences-nav').click();
-  await page.locator('#preference-tab-1').click();
-  await page.locator('#open-formulas').click();
+  await page.locator('#kanban-views-nav').click();
+  await page.locator('#kanban-views-section-links').getByRole('button', { name: 'Kanban Calculations', exact: true }).click();
 }
 
 module.exports = { loadSettings, openFormulas };

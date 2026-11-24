@@ -64,11 +64,15 @@ const savedUpdaterSettings = [];
 const savedShortcuts = [];
 const releaseNotesScenarioArg = process.argv.find(argument => argument.startsWith('--release-notes-scenario='));
 const releaseNotesScenario = releaseNotesScenarioArg ? releaseNotesScenarioArg.split('=', 2)[1] : null;
+const startupModeScenarioArg = process.argv.find(argument => argument.startsWith('--startup-mode='));
+const startupModeScenario = startupModeScenarioArg ? startupModeScenarioArg.split('=', 2)[1] : null;
 const loadErrorScenarioArg = process.argv.find(argument => argument.startsWith('--load-error-scenario='));
 const loadErrorScenario = loadErrorScenarioArg ? loadErrorScenarioArg.split('=', 2)[1] : null;
 const releaseNotesPayload = releaseNotesScenario && releaseNotesScenario !== 'parse-error'
   ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'images: []' }
   : releaseNotesScenario === 'parse-error' ? { version: '1.2.0', markdown: '# Fixture release notes', imageManifest: 'invalid: [' } : null;
+let deferStartupReleaseNotes = releaseNotesScenario === 'slow-startup';
+let pendingStartupReleaseNotesResolve = null;
 const releaseNotesAcknowledgements = [];
 const updaterPrefs = {
   installDirectory: '%APPDATA%\\anytype',
@@ -86,6 +90,10 @@ let recoveryCompleted = false;
 const recoveryRequests = [];
 let deferGeneralSave = false;
 let pendingGeneralSaveResolve = null;
+let deferShortcutLoad = false;
+let pendingShortcutLoadResolve = null;
+let deferLatestReleaseNotes = false;
+let pendingLatestReleaseNotesResolve = null;
 let deferUpdateApply = false;
 let pendingUpdateApplyReject = null;
 let rebuildListener = null;
@@ -101,6 +109,8 @@ let delayFileRead = false;
 let copiedLogs = '';
 let copyError = false;
 const context = {
+  Event,
+  queueMicrotask,
   navigator: { clipboard: { async writeText(text) { if (copyError) throw new Error('Clipboard unavailable.'); copiedLogs = text; } } },
   document: {
     handlers: {},
@@ -142,6 +152,7 @@ const context = {
     },
     clearTimeout(id) { timers.delete(id); },
     addEventListener(name, handler) { this.handlers[name] = handler; },
+    dispatchEvent(event) { this.handlers[event.type]?.(event); return true; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: {
       event: { async listen(name, handler) {
@@ -152,13 +163,17 @@ const context = {
       } },
       core: { async invoke(name, args) {
       calls.push(name);
-      if (name === 'get_keyboard_shortcuts') return [
-        { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
-        { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
-        { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
-      ];
+      if (name === 'get_keyboard_shortcuts') {
+        if (deferShortcutLoad) return new Promise(resolve => { pendingShortcutLoadResolve = resolve; });
+        return [
+          { action: 'openSettings', code: 'Numpad1', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'rebuildCss', code: 'KeyR', ctrl: false, alt: true, shift: false, meta: false },
+          { action: 'openComponentCatalog', code: 'F10', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'showOnboarding', code: 'F8', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'simulateUpdate', code: 'F9', ctrl: false, alt: false, shift: false, meta: false },
+          { action: 'quitSettings', code: 'KeyQ', ctrl: true, alt: false, shift: false, meta: false },
+        ];
+      }
       if (name === 'save_keyboard_shortcuts') {
         savedShortcuts.push(args.shortcuts);
         return args.shortcuts;
@@ -172,13 +187,16 @@ const context = {
         return;
       }
       if (name === 'reveal_api_key') return 'fixture-revealed-key';
+      if (name === 'reload_custom_themes') return { cssRebuilt: true, state: {
+        theme: 'dark', themeCss: '', previewTheme: 'dark', themeDiagnostics: [], customThemes: [], themeDirectory: 'Settings/themes/built-in-themes',
+      } };
       // External refresh behavior is covered by saved-state-refresh.test.cjs.
       if (name === 'get_saved_state_snapshot') return new Promise(() => {});
       if (name === 'get_app_state') {
         if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
         return {
         ready: true, theme: 'dark',
-        apiPort: 31009, apiIp: '', hasSavedApiKey: true,
+        apiPort: 31009, apiIp: '', hasSavedApiKey: true, startupMode: startupModeScenario || 'off',
         defaultBannerPreview: 'data:image/png;base64,default-preview',
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
@@ -194,11 +212,17 @@ const context = {
         lastCheckedAt: null, status: 'idle', message: null,
         };
       }
-      if (name === 'get_release_notes') return releaseNotesPayload;
-      if (name === 'get_latest_release_notes') return {
+      if (name === 'get_release_notes') {
+        if (deferStartupReleaseNotes) return new Promise(resolve => { pendingStartupReleaseNotesResolve = resolve; });
+        return releaseNotesPayload;
+      }
+      if (name === 'get_latest_release_notes') {
+        if (deferLatestReleaseNotes) return new Promise(resolve => { pendingLatestReleaseNotesResolve = resolve; });
+        return {
         version: releaseNotesScenario === 'history' ? '1.2.0' : '1.4.0',
         markdown: '# Latest fixture notes', imageManifest: 'images: []',
-      };
+        };
+      }
       if (name === 'get_adjacent_release_notes') {
         if (releaseNotesScenario === 'offline') throw new Error('offline');
         if (releaseNotesScenario === 'history' && args.older) return {
@@ -257,7 +281,7 @@ const changeToggle = async (id, checked) => {
 const status = () => element('status-message').textContent;
 // DOM contracts are exercised against mounted components in markup-contract.test.cjs.
 const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
-for (const shortcut of ['openSettings', 'rebuildCss', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
+for (const shortcut of ['openSettings', 'rebuildCss', 'openComponentCatalog', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
 assert.match(settingsCss, /\.space-preview-row[^}]*font-family:\s*var\(--font-interface\)/);
 assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
 assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
@@ -267,8 +291,8 @@ assert.match(settingsCss, /\.visibility-toggle:focus-visible/);
 const confirmationDialogStyles = settingsCss.match(/\.confirm-dialog\s*\{([^}]*)\}/)?.[1] || '';
 assert(!/opacity\s*:\s*0/.test(confirmationDialogStyles) && !/transform\s*:\s*translateY/.test(confirmationDialogStyles), 'The confirmation dialog stays visible when reduced motion disables animations.');
 assert.match(settingsCss, /data-reduced-motion="true"[^}]*\.confirm-dialog[^}]*animation:\s*none/, 'Reduced Motion must disable confirmation animations.');
-assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*#de50de/);
-assert.match(settingsCss, /\.sidebar-actions\.has-update \.log-control\s*\{[^}]*grid-row:\s*4/);
+assert.match(settingsCss, /\.update-now-button\s*\{[^}]*color:\s*var\(--accent\)/);
+assert.match(settingsCss, /\.sidebar-actions\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/, 'Sidebar actions stack as a column so hidden controls collapse.');
 assert.match(settingsCss, /\.danger-button\s*\{[^}]*background:\s*#b8323c/);
 assert.match(settingsCss, /\.danger-button:hover:not\(:disabled\)\s*\{[^}]*background:\s*#942630/);
 assert(!settingsCss.includes('`n'), 'The stylesheet must contain real line breaks rather than literal PowerShell escapes.');
@@ -278,6 +302,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/visibility-field.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/modal.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/edit-session.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/anyblob-draft.js'), 'utf8')
+    .replace(/^export function /, 'function ') + '\nwindow.BlobUI.AnyblobDraft = createAnyblobDraft();', context);
   if (releaseNotesScenario) {
     context.window.BlobUI.Markdown = {
       parseImageManifest(value) {
@@ -285,6 +311,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         assert.equal(value, 'images: []');
         return {};
       },
+      render(markdown) { return `<p>${markdown}</p>`; },
+    };
+  }
+  if (!context.window.BlobUI.Markdown) {
+    context.window.BlobUI.Markdown = {
+      parseImageManifest() { return {}; },
       render(markdown) { return `<p>${markdown}</p>`; },
     };
   }
@@ -324,16 +356,20 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/scrollbar.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/reload-controller.js'), 'utf8'), context);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/saved-state.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/log-store.js'), 'utf8'), context);
   context.createNativeService = require('../ui/native-service.js').createNativeService;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../ui/external-links.js'), 'utf8'), context);
+  let viewState = { page: 'preferences', calendarTab: 0, kanbanTab: 0, releaseChannel: 'release', releaseChannelDisabled: true };
   context.view = {
     updateSettingsFields(values) {
       for (const [id, value] of Object.entries(values)) element(id)[typeof value === 'boolean' ? 'checked' : 'value'] = value;
     },
+    getSnapshot() { return viewState; },
     update(patch) {
+      viewState = { ...viewState, ...patch };
       if ('page' in patch) {
-        const pages = { preferences: 'Preferences', accessibility: 'Accessibility', advanced: 'Advanced Settings',
-          formulas: 'Kanban View Formulas', 'calendar-colors': 'Color by Property', codex: 'Anyblob' };
+        const pages = { preferences: 'Preferences', accessibility: 'Accessibility', 'calendar-events': 'Calendar Events',
+          'kanban-views': 'Kanban Views', advanced: 'Advanced Settings', codex: 'Anyblob' };
         for (const name of Object.keys(pages)) {
           const selected = patch.page === name;
           element(name + '-page').hidden = !selected;
@@ -349,6 +385,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         element('save-button.save-label').textContent = patch.saveBusy ? 'Saving…' : 'Save changes';
       }
       if ('backgroundExperiment' in patch) { element('background-experiment').value = patch.backgroundExperiment; element('window-background').hidden = patch.backgroundExperiment === 'disabled'; }
+      if ('copyLogsCopied' in patch) element('copy-logs').dataset.copied = String(patch.copyLogsCopied);
       if ('startupMode' in patch) element('startup-mode').value = patch.startupMode;
       if ('startupModeDisabled' in patch) element('startup-mode').disabled = patch.startupModeDisabled;
       if ('kanbanStyle' in patch) element('kanban-view-style').value = patch.kanbanStyle;
@@ -360,6 +397,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
           row.textContent = text;
           return row;
         }));
+        element('log-control').hidden = !patch.logRows.length;
         element('log-button').hidden = !patch.logRows.length;
         element('log-button').dataset.severity = patch.logSeverity;
         element('log-label').textContent = patch.logSeverity === 'error' ? 'Errors and logs'
@@ -385,7 +423,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
         element('release-notes-content').innerHTML = patch.releaseNotesMedia
           ? context.window.BlobUI.Markdown.render(patch.releaseNotesMedia.markdown, patch.releaseNotesMedia) : '';
       }
-      if (patch.documentationOpened) context.window.BlobUI.DocsUI.load();
     },
   };
   const appSource = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8');
@@ -418,6 +455,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('release-notes-dialog').children.push(...releaseNotesButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
+  for (let turn = 0; turn < 10 && element('autoplay-videos').disabled; turn += 1) await flush();
+  assert.equal(element('autoplay-videos').disabled, false, 'Updater controls unlock after saved App Settings load.');
+  if (startupModeScenario) {
+    for (let turn = 0; turn < 10 && ![...timers.values()].some(timer => timer.delay === 1600); turn += 1) await flush();
+    assert([...timers.values()].some(timer => timer.delay === 1600), 'Autostart delays the initial metadata refresh by 1.6 seconds.');
+    const startupTimer = [...timers.entries()].find(([, timer]) => timer.delay === 1600);
+    timers.delete(startupTimer[0]);
+  }
   if (loadErrorScenario) {
     assert.match(status(), /not valid JSON/, 'The original state-load failure remains visible.');
     assert.equal(element('install-directory').disabled, false, 'The folder picker remains available after a profile load error.');
@@ -433,6 +478,21 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
   if (releaseNotesScenario) {
     assert(calls.includes('get_release_notes'), 'Startup checks for pending release notes.');
+    if (releaseNotesScenario === 'slow-startup') {
+      assert.equal(context.window.appReady, true, 'Settings become usable before the pending changelog request completes.');
+      assert.equal(calls.includes('onboarding_ready'), true, 'The frontend finishes startup while release notes load.');
+      assert.equal(element('release-notes-backdrop').hidden, true, 'A slow startup changelog does not block Settings.');
+      assert.equal(status(), 'Settings loaded from this device.');
+      assert.equal(typeof pendingStartupReleaseNotesResolve, 'function');
+      deferStartupReleaseNotes = false;
+      pendingStartupReleaseNotesResolve(releaseNotesPayload);
+      await flush();
+      await flush();
+      assert.equal(element('release-notes-backdrop').hidden, false, 'The changelog opens after its payload arrives.');
+      assert.equal(element('release-notes-content').innerHTML, '<p># Fixture release notes</p>');
+      console.log('Slow startup changelog loading does not delay Settings.');
+      return;
+    }
     if (releaseNotesScenario === 'parse-error') {
       assert.equal(element('release-notes-backdrop').hidden, true, 'Invalid notes do not open a partially rendered dialog.');
       assert.deepEqual(releaseNotesAcknowledgements, [], 'A parse failure leaves the release notes pending.');
@@ -501,7 +561,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(element('startup-mode').value, 'off', 'Startup is opt-in by default.');
   assert.equal(element('automatic-updates-enabled').checked, false);
   assert.equal(element('automatic-checks-enabled').checked, false);
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
+  assert.equal(viewState.releaseChannel, 'release', 'Missing release channel settings default to Release.');
+  context.testApp.changeReleaseChannel('invalid');
+  assert.equal(viewState.releaseChannel, 'release', 'Unknown release channels are ignored.');
   const updaterInterval = intervals.find(interval => interval.delay === 5 * 60 * 1000);
   assert(updaterInterval, 'Automatic update checks use a five-minute interval.');
   element('advanced-nav').handlers.click();
@@ -562,11 +624,13 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
+  context.testApp.changeReleaseChannel('dev');
+  assert.equal(viewState.releaseChannel, 'dev', 'Selecting Dev Builds updates the updater draft.');
   assert.equal(element('save-button').hidden, false, 'App Settings edits use the shared Save action.');
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true,
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -589,13 +653,28 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
   assert.equal(element('startup-mode').value, 'background', 'Undo restores the startup preference.');
+  context.testApp.changeReleaseChannel('release');
+  assert.equal(viewState.releaseChannel, 'release', 'Changing Release Channel edits the updater draft.');
+  context.window.BlobUI.discardChanges();
+  assert.equal(viewState.releaseChannel, 'dev', 'Undo restores the saved Release Channel.');
 
   element('help-button').handlers.click();
   assert.equal(element('help-popup').hidden, false, 'The Help button opens its mini-menu.');
   assert.equal(element('help-button').attributes['aria-expanded'], 'true');
   assert(element('help-whats-new').focused, 'Opening Help moves focus into the menu.');
-  await element('help-keybinds').handlers.click();
-  assert.equal(element('keybind-list').children.length, 6, 'Keybinds lists global shortcuts and the in-app refresh shortcut.');
+  deferShortcutLoad = true;
+  const shortcutReadCount = calls.filter(name => name === 'get_keyboard_shortcuts').length;
+  element('help-keybinds').handlers.click();
+  assert.equal(element('keybinds-backdrop').hidden, false, 'Keybinds opens with its cached bindings.');
+  assert.equal(element('keybind-status').textContent, '');
+  assert.equal(element('keybind-list').children.length, 7, 'Keybinds keeps its rows available while the app is open.');
+  assert.equal(element('keybind-button-openComponentCatalog').textContent, 'F10');
+  assert.equal(calls.filter(name => name === 'get_keyboard_shortcuts').length, shortcutReadCount, 'Opening Keybinds does not reload a saved list.');
+  assert.equal(pendingShortcutLoadResolve, null);
+  deferShortcutLoad = false;
+  assert.equal(element('keybind-list').children.length, 7, 'Keybinds lists global shortcuts and the in-app reload shortcut.');
+  assert.equal(element('keybind-button-openComponentCatalog').textContent, 'F10', 'The component catalog shortcut is listed.');
+  assert.equal(element('keybind-status').textContent, '', 'Shortcut loading clears its status after success.');
   const shortcutButton = element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]');
   await shortcutButton.handlers.click();
   assert.equal(activeElement, element('keybind-list').querySelector('[data-shortcut-action="showOnboarding"]'), 'Shortcut capture keeps focus on the active action.');
@@ -609,11 +688,36 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(JSON.stringify(savedShortcuts[0].find(binding => binding.action === 'showOnboarding')),
     JSON.stringify({ action: 'showOnboarding', code: 'KeyZ', ctrl: true, alt: true, shift: false, meta: false }));
   assert.equal(element('keybind-status').textContent, 'Shortcut saved.');
+  await element('keybind-list').querySelector('[data-shortcut-action="openComponentCatalog"]').handlers.click();
+  await context.document.handlers.keydown({
+    key: 'F10', code: 'F10', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {},
+  });
+  assert.equal(savedShortcuts.at(-1).find(binding => binding.action === 'openComponentCatalog').ctrl, true, 'F10 can be reassigned and saved.');
   element('keybinds-close').handlers.click();
   finishRemovalTransition();
 
+  deferLatestReleaseNotes = true;
+  element('help-button').handlers.click();
+  element('help-whats-new').handlers.click();
+  assert.equal(element('release-notes-backdrop').hidden, false, 'What’s New opens before the native changelog request finishes.');
+  assert.equal(element('release-notes-status').textContent, 'Loading the latest changelog…');
+  assert.equal(typeof pendingLatestReleaseNotesResolve, 'function');
+  deferLatestReleaseNotes = false;
+  pendingLatestReleaseNotesResolve({ version: '1.4.0', markdown: '# Latest fixture notes', imageManifest: 'images: []' });
+  await flush();
+  assert.equal(element('release-notes-content').innerHTML, '<p># Latest fixture notes</p>', 'The changelog text appears as soon as it arrives.');
+  assert.equal(element('release-notes-status').hidden, true);
+  context.document.handlers.keydown({ key: 'Escape', code: 'Escape', preventDefault() {} });
+  finishReleaseNotesTransition();
+
   const realApplyCallsBeforeSimulation = calls.filter(name => name === 'apply_update').length;
   const realCheckCallsBeforeSimulation = calls.filter(name => name === 'check_for_updates').length;
+  let componentShortcutPrevented = false;
+  await context.document.handlers.keydown({ key: 'F10', code: 'F10', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false,
+    preventDefault() { componentShortcutPrevented = true; } });
+  assert(componentShortcutPrevented);
+  assert.equal(calls.at(-1), 'open_component_catalog', 'The reassigned component catalog shortcut opens its window.');
   let f9Prevented = false;
   context.document.handlers.keydown({ key: 'F9', code: 'F9', repeat: true, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} });
   context.document.handlers.keydown({ key: 'F9', code: 'F9', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} });
@@ -623,7 +727,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert(f9Prevented);
   assert.equal(calls.at(-1), 'simulate_update', 'F9 uses the display-only update simulation command.');
   assert.equal(element('update-now-button').hidden, false, 'A simulated update reveals the pink sidebar action.');
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), true);
   assert.equal(element('check-updates-button').textContent, 'Update now');
   await updaterInterval.callback();
   assert.equal(calls.filter(name => name === 'check_for_updates').length, realCheckCallsBeforeSimulation, 'Scheduled checks preserve the F9 preview.');
@@ -631,7 +734,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('update-now-button').handlers.click();
   assert.equal(calls.filter(name => name === 'apply_update').length, realApplyCallsBeforeSimulation, 'Clicking a simulated update never invokes the installer.');
   assert.equal(element('update-now-button').hidden, true, 'Completing the preview clears its update action.');
-  assert.equal(element('sidebar-actions').classList.contains('has-update'), false);
   assert.equal(element('update-status').textContent, 'Preview complete. No files were changed.');
 
   updaterCheckState = {
@@ -817,6 +919,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('preferences-nav').handlers.click();
   assert.equal(typeof rebuildListener, 'function', 'The global rebuild shortcut must be connected to the UI save action.');
   assert.equal(element('save-button').hidden, true);
+  assert.equal(element('log-control').hidden, false, 'The Logs container appears with its first message.');
   assert.equal(element('log-button').hidden, false);
   assert.equal(element('log-button').dataset.severity, 'info');
   const logsBeforePreferenceEdits = element('log-entries').children.length;
@@ -894,6 +997,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
     preventDefault() { altRPrevented = true; },
   });
   assert(altRPrevented, 'Alt+R must stay out of the focused input.');
+  await flush();
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeAltR + 1, 'The in-window shortcut must use the existing save/rebuild action.');
   const saveCallsBeforeGlobalEvent = calls.filter(name => name === 'save_settings').length;
   await Promise.all([rebuildListener(), rebuildListener()]);
@@ -906,6 +1010,12 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('copy-logs').handlers.click();
   assert(copiedLogs.includes('Rebuild failed.'));
   assert.equal(copiedLogs.split('\n').length, element('log-entries').children.length);
+  assert.equal(element('copy-logs').dataset.copied, 'true', 'Copying logs shows the checkmark state.');
+  const copyFeedback = [...timers.entries()].find(([, timer]) => timer.delay === 1400);
+  assert(copyFeedback, 'The copied state has a short reset timer.');
+  timers.delete(copyFeedback[0]);
+  copyFeedback[1].callback();
+  assert.equal(element('copy-logs').dataset.copied, 'false');
   context.document.handlers.pointerdown({ target: element('log-control') });
   assert.equal(element('log-popup').hidden, false);
   context.document.handlers.pointerdown({ target: element('font-family') });
@@ -921,6 +1031,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('copy-logs').handlers.click();
   assert.match(element('copy-status').textContent, /Could not copy/);
   assert.match(element('log-entries').children.at(-1).textContent, /Clipboard unavailable/);
+  element('clear-logs').handlers.click();
+  assert.equal(element('log-entries').children.length, 0, 'Clear removes every log entry.');
+  assert.equal(element('log-control').hidden, true, 'Clear hides the Logs container so the remaining actions close the gap.');
+  assert.equal(element('log-button').hidden, true, 'Clear hides the Logs control after resetting it.');
+  assert.equal(element('log-button').dataset.severity, 'info', 'Clear restores the default severity.');
+  assert.equal(element('log-popup').hidden, true, 'Clear closes the now-empty Logs popup.');
+  assert.equal(element('copy-status').textContent, '');
+  assert(element('help-button').focused, 'Focus moves to a visible control when clearing hides Logs.');
 
   for (const [id, command] of [
     ['window-minimize', 'minimize_window'], ['window-close', 'hide_window'],

@@ -17,6 +17,20 @@ use std::sync::{
 
 const DISCOVERY_CONCURRENCY: usize = 4;
 
+fn configured_endpoint(data: &Value, headless: bool) -> Result<(String, u16), String> {
+    let ip = crate::normalize_api_ip(
+        data.pointer("/apiConnection/ip").and_then(Value::as_str),
+    )?;
+    let default_port = if headless { 31012 } else { 31009 };
+    let port = data
+        .pointer("/apiConnection/port")
+        .and_then(Value::as_u64)
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(default_port);
+    Ok((ip, port))
+}
+
 
 pub struct Client {
     metadata_revision: String,
@@ -42,30 +56,30 @@ impl Client {
     }
     pub fn connect() -> Result<Self, String> {
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-        let data = crate::read_json_file(&install.join("blob/data.json"))?;
+        let data = crate::load_settings_data(&install)?;
+        let credential = crate::api_credential_path(&install)?;
         if data
             .pointer("/apiConnection/enabled")
             .and_then(Value::as_bool)
             == Some(false)
-            || !install
-                .join("blob/credentials/anytype-api-key.dpapi")
-                .is_file()
+            || !credential.is_file()
         {
             return Err(
                 "Add an Anytype API key in Advanced Settings to use Kanban formulas.".into(),
             );
         }
+        let (ip, port) =
+            configured_endpoint(&data, crate::HEADLESS_MODE.load(Ordering::Acquire))?;
+        #[cfg(all(feature = "headless-cli", not(windows)))]
+        if crate::HEADLESS_MODE.load(Ordering::Acquire) {
+            crate::headless_cli::ensure_anytype_serve(&ip, port)?;
+        }
         Ok(Self {
             metadata_revision: data.pointer("/apiConnection/metadataRevision").and_then(Value::as_str).unwrap_or_default().into(),
             info: Mutex::new(BTreeSet::new()), excluded_properties: Mutex::new(BTreeSet::new()),
             key: crate::SecretString::new(crate::read_saved_api_key_at(&install)?),
-            ip: crate::normalize_api_ip(data.pointer("/apiConnection/ip").and_then(Value::as_str))?,
-            port: data
-                .pointer("/apiConnection/port")
-                .and_then(Value::as_u64)
-                .and_then(|p| u16::try_from(p).ok())
-                .filter(|p| *p > 0)
-                .unwrap_or(31009),
+            ip,
+            port,
         })
     }
     pub(crate) fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -1178,6 +1192,35 @@ impl Grouping {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_defaults_and_custom_hosts_match_the_running_app() {
+        assert_eq!(
+            configured_endpoint(&json!({}), false).unwrap(),
+            ("127.0.0.1".into(), 31009),
+        );
+        assert_eq!(
+            configured_endpoint(
+                &json!({"apiConnection":{"ip":"192.168.1.12","port":31010}}),
+                false,
+            )
+            .unwrap(),
+            ("192.168.1.12".into(), 31010),
+        );
+        assert_eq!(
+            configured_endpoint(&json!({}), true).unwrap(),
+            ("127.0.0.1".into(), 31012),
+        );
+        assert_eq!(
+            configured_endpoint(
+                &json!({"apiConnection":{"ip":"192.168.1.12","port":31010}}),
+                true,
+            )
+            .unwrap(),
+            ("192.168.1.12".into(), 31010),
+        );
+    }
+
     #[test]
     fn exact_id_representations_and_conflicts() {
         use std::{io::{Read, Write}, net::TcpListener};
@@ -1193,10 +1236,35 @@ mod tests {
             let stopped = stop.clone();
             let server = std::thread::spawn(move || {
                 while !stopped.load(Ordering::SeqCst) {
-                    let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(std::time::Duration::from_millis(2)); continue; };
-                    let mut bytes = [0; 8192];
-                    let n = stream.read(&mut bytes).unwrap();
-                    let request = String::from_utf8_lossy(&bytes[..n]);
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(accepted) => accepted,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                            continue;
+                        }
+                        Err(error) => panic!("fixture accept failed: {error}"),
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream.set_read_timeout(Some(std::time::Duration::from_millis(100))).unwrap();
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 8192];
+                    loop {
+                        match stream.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(count) => {
+                                bytes.extend_from_slice(&buffer[..count]);
+                                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && std::time::Instant::now() < deadline => {
+                                std::thread::sleep(std::time::Duration::from_millis(2));
+                            }
+                            Err(error) => panic!("fixture request read failed: {error}"),
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&bytes);
                     let value = if request.contains("/options?") {
                         json!({"data":[if direct {json!({"id":"option-a","name":"A"})} else {json!({"name":"A"})}],"has_more":false})
                     } else {

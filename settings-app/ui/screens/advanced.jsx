@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Button,
+  FolderPathInput,
   SettingsGroup,
   SettingsHeading,
   SettingsRow,
@@ -12,16 +13,16 @@ import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 
 const advancedTabs = [
-  { title: "API key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
-  { title: "App settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
+  { title: "API Key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
+  { title: "App Settings", tabId: "advanced-app-tab", panelId: "advanced-app-panel" },
   { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
 
-export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
+export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, releaseChannel = "release", releaseChannelDisabled = true, onReleaseChannelChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
-      <SettingsHeading id="advanced-api-heading" title="API key" description="Configure the local API connection used by BlobUI." />
+      <SettingsHeading id="advanced-api-heading" title="API Key" description="Configure the local API connection used by BlobUI." />
       <SettingsGroup className="settings-list advanced-fields">
         <VisibilityTextField label="Anytype API key" inputAttributes={{
           id: "advanced-api-key",
@@ -94,7 +95,7 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
       <SettingsSection aria-labelledby="anytype-installation-heading">
         <SettingsHeading id="anytype-installation-heading" title="Anytype Folder" description="Choose the Anytype data folder that contains custom.css." />
         <div className="app-install-directory-row">
-          <input id="install-directory" className="color-text-input" type="text" readOnly role="button" aria-haspopup="dialog" aria-label="Anytype Folder" autoComplete="off" spellCheck={false} maxLength={1024} placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+          <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
         </div>
         <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
       </SettingsSection>
@@ -104,6 +105,11 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
         <SettingsGroup>
           <Switch id="automatic-updates-enabled" label="Install updates automatically" className="native-accent-control settings-row accessibility-row" />
           <Switch id="automatic-checks-enabled" label="Check for updates automatically" className="native-accent-control settings-row accessibility-row" />
+          <SettingsRow className="native-accent-control settings-row accessibility-row" label="Release Channel">
+            <SelectPicker id="release-channel" label="Release Channel" value={releaseChannel} disabled={releaseChannelDisabled}
+              options={[{ value: "release", label: "Release" }, { value: "dev", label: "Dev Builds" }]}
+              onChange={onReleaseChannelChange} fixed />
+          </SettingsRow>
         </SettingsGroup>
         <div className="update-check-row">
           <div>

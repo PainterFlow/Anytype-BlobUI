@@ -6,13 +6,13 @@ const { loadSettings, openFormulas } = require('./frontend-fixture.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const workspace=path.resolve(__dirname,'../..');
 
-test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publishing',async()=>{
+test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing drafts',async()=>{
   const temp=path.join(workspace,'.test-run/metadata-refresh/temp');fs.mkdirSync(temp,{recursive:true});process.env.TEMP=process.env.TMP=temp;
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
   const page=await browser.newPage({colorScheme:'dark',viewport:{width:1050,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.addInitScript(()=>{
-    window.calls=[];window.network=0;window.revision=0;window.hold=false;
+    window.calls=[];window.network=0;window.revision=0;window.themeRevision=0;window.themeFailure=false;window.hold=false;
     const cache=new Map([[JSON.stringify(["discover_kanban_views",undefined]),{views:[],info:[]}]]);
     window.__TAURI__={core:{invoke:async(name,args={})=>{
       window.calls.push({name,args});
@@ -20,14 +20,33 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
         const invoke=window.__TAURI__.core.invoke;
         return {app:await invoke('get_app_state'),updater:await invoke('get_updater_state'),formulas:await invoke('load_kanban_formulas'),calendar:await invoke('load_calendar_rules')};
       }
-      if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,settings:{codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
+      if(name==='get_app_state')return {ready:true,theme:'dark',onboardingComplete:true,hasSavedApiKey:true,
+        customThemes:window.themeRevision?[{id:'original.css',name:'Original Theme',author:'Fixture'},{id:'added.css',name:'Added Theme',author:'Fixture'}]:[{id:'original.css',name:'Original Theme',author:'Fixture'}],
+        themeDirectory:'Settings/themes/built-in-themes',
+        themeCss:`html { --theme-revision: ${window.themeRevision}; }`,previewTheme:'dark',
+        themeDiagnostics:[
+          {message:'original.css:6:3: CSS parser warning.',level:'warning'},
+          {message:'broken.css:1:1: Invalid theme header.',level:'error'},
+          ...(window.themeRevision?[{message:'added.css:8:2: CSS parser warning.',level:'warning'}]:[]),
+          ...(window.themeFailure?[{message:'Custom theme CSS could not be rebuilt. Permission denied.',level:'error'}]:[])
+        ],
+        settings:{enableCustomThemes:true,themePreset:'original.css',codexIntegration:{spaces:{s:{access:'read',filesEnabled:false,approval:'alwaysAsk'}},objectMentions:{spaces:{all:false,items:[{id:'s',name:'Work'}]},types:{all:false,items:[{spaceId:'s',id:'t',name:'Task',space:'Work'}]},filterIncompleteTasks:false}}}};
+      if(name==='reload_custom_themes')return {state:await window.__TAURI__.core.invoke('get_app_state'),cssRebuilt:!window.themeFailure};
       if(name==='load_kanban_formulas')return {configuration:{version:2,display:'balanced',definitions:[]}};
       if(name==='load_calendar_rules')return {version:1,types:[]};
       if(name==='get_calendar_api_availability')return 'available';
-      if(name==='get_keyboard_shortcuts'||name==='save_keyboard_shortcuts')return [{action:'openSettings',code:'KeyS',ctrl:true,alt:false,shift:false,meta:false}];
+      if(name==='get_keyboard_shortcuts')return [
+        {action:'openSettings',code:'KeyS',ctrl:true,alt:false,shift:false,meta:false},
+        {action:'rebuildCss',code:'KeyR',ctrl:false,alt:true,shift:false,meta:false},
+        {action:'openComponentCatalog',code:'F10',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'showOnboarding',code:'F8',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'simulateUpdate',code:'F9',ctrl:false,alt:false,shift:false,meta:false},
+        {action:'quitSettings',code:'KeyQ',ctrl:true,alt:false,shift:false,meta:false},
+      ];
+      if(name==='save_keyboard_shortcuts')return args.shortcuts;
       if(name==='get_updater_state')return {automaticChecksEnabled:false,automaticUpdatesEnabled:false};
       if(name==='anyblob_status')return {enabled:false};
-      if(name.startsWith('discover_')&&name!=='discover_codex_projects'){
+      if(name.startsWith('discover_')){
         const key=JSON.stringify([name,args.spaceIds]);
         if(!args.forceRefresh&&cache.has(key))return cache.get(key);
         window.network++;
@@ -37,7 +56,6 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
         if(name==='discover_calendar_colors')result={types:[],views:[]};
         if(name==='discover_codex_spaces')result=[{id:'s',name:'Work'}];
         if(name==='discover_anyblob_types')result={types:window.revision?[]:[{spaceId:'s',id:'t',name:'Task',space:'Work'}],errors:[]};
-        if(name==='discover_codex_sources')result=[];
         cache.set(key,result);return result;
       }
       return null;
@@ -47,32 +65,57 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
   try{
     await loadSettings(page);
     await page.waitForFunction(()=>window.appReady && window.calls.some(c=>c.name==='discover_anyblob_types') && !document.getElementById('object-mentions-status').textContent.includes('Loading'));
+    await page.waitForFunction(()=>window.calls.some(c=>c.name==='reload_custom_themes'));
+    assert.match(await page.locator('#custom-theme-preview').textContent(),/--theme-revision: 0/);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),1);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),1);
+    const presetTrigger=page.locator('#custom-theme-select .kanban-select-trigger');
+    await presetTrigger.click();
+    await page.getByRole('option',{name:'Original Theme',exact:true}).waitFor();
+    await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(()=>window.calls.some(c=>c.name==='check_for_updates')),false,'Startup respects disabled automatic checks');
     const startup=await page.evaluate(()=>window.calls.filter(c=>c.name.startsWith('discover_')));
-    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
+    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_anyblob_types']){
       assert.equal(startup.filter(c=>c.name===name).length,1,name+' refreshes once at startup');
       assert.equal(startup.find(c=>c.name===name).args.forceRefresh,true,name+' bypasses persistent cache at startup');
     }
-    assert(!startup.some(c=>c.name==='discover_codex_projects'));
     assert.equal(await page.evaluate(()=>window.calls.some(c=>/^(save_|evaluate_|configure_)/.test(c.name))),false);
     assert.equal(await page.getByRole('button',{name:'Reload options',exact:true}).count(),0);
+    await page.evaluate(()=>{window.themeRevision=1;window.themeFailure=true;});
+    await refresh();
+    assert.match(await page.locator('#custom-theme-preview').textContent(),/--theme-revision: 1/);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'added.css:8:2: CSS parser warning.'}).count(),1);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'Custom theme CSS could not be rebuilt. Permission denied.'}).count(),1);
+    assert.match(await page.locator('#status-message').textContent(),/Custom theme CSS could not be rebuilt/);
+    await presetTrigger.click();
+    await page.getByRole('option',{name:'Added Theme',exact:true}).waitFor();
+    assert.equal(await page.getByRole('option',{name:'Original Theme',exact:true}).count(),1);
+    await page.keyboard.press('Escape');
     await page.evaluate(()=>{window.hold=true;window.calls=[];});
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
-    await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_codex_sources'));
+    await page.waitForFunction(()=>window.calls.some(c=>c.name==='discover_codex_spaces'));
     await page.evaluate(()=>{window.refreshDone=window.BlobUI.AppReload.run();});
     await page.evaluate(()=>{window.hold=false;window.releases.forEach(resolve=>resolve());});
     await page.evaluate(()=>window.refreshDone);
-    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata. Refreshing Anytype lists and pickers.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'original.css:6:3: CSS parser warning.'}).count(),3);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'broken.css:1:1: Invalid theme header.'}).count(),3);
+    assert.equal(await page.locator('#log-entries .log-entry.warning').filter({hasText:'added.css:8:2: CSS parser warning.'}).count(),2);
+    assert.equal(await page.locator('#log-entries .log-entry.error').filter({hasText:'Custom theme CSS could not be rebuilt. Permission denied.'}).count(),2);
+    assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.name==='reload_custom_themes').length),1);
+    assert.equal(await page.locator('#log-entries').locator('.log-entry.info').filter({hasText:'Reloading app metadata and refreshing Anytype lists and pickers.'}).count(),3);
     const calls=await page.evaluate(()=>window.calls);
-    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_codex_sources','discover_anyblob_types']){
+    for(const name of ['discover_kanban_views','discover_calendar_colors','discover_codex_spaces','discover_anyblob_types']){
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' is coalesced across repeated shortcuts and consumers');
       assert.equal(calls.find(c=>c.name===name).args.forceRefresh,true);
     }
-    assert(!calls.some(c=>c.name==='discover_codex_projects'),'Local project discovery stays separate');
-    for(const name of ['anyblob_status','anyblob_installation_status','check_for_updates']) {
+    for(const name of ['anyblob_status','check_for_updates']) {
       assert.equal(calls.filter(c=>c.name===name).length,1,name+' refreshes once across coalesced shortcuts');
     }
     assert(!calls.some(c=>c.name==='apply_update'),'Reload only checks for updates');
+    assert.equal(calls.filter(c=>c.name==='get_calendar_api_availability').length,1,'Reload re-checks the Anytype API once per coalesced run');
+    assert.equal(calls.some(c=>c.name==='refresh_kanban_results'),false,'Reload publishes nothing when no calculations are saved');
     await openFormulas(page);await page.getByRole('button',{name:'Board',exact:false}).first().click();
     const dialog=page.locator('#formula-calculator-dialog');await dialog.waitFor({state:'visible'});
     await dialog.getByRole('button',{name:'Show LaTeX',exact:true}).click();
@@ -99,7 +142,7 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     await page.keyboard.press('Control+r');await page.keyboard.press('Control+r');
     assert.equal(await page.evaluate(()=>window.network),requests);
     await page.evaluate(()=>{window.BlobUI.AppReload.setLocked(false);return window.BlobUI.AppReload.run();});
-    assert.equal(await page.evaluate(()=>window.network),requests+5);
+    assert.equal(await page.evaluate(()=>window.network),requests+4);
     await page.locator('#codex-tab-1').click();
     assert.match(await page.getByRole('button',{name:/Access for Work/}).innerText(),/Read/);
     assert.match(await page.getByRole('button',{name:/Approval for Work/}).innerText(),/Always Ask/);
@@ -114,6 +157,16 @@ test('startup and Ctrl+R refresh hidden catalogs without changing drafts or publ
     assert.equal(await localShortcut.locator('kbd').allTextContents().then(keys=>keys.join('+')),'Ctrl+R');
     assert.equal(await page.locator('#keybind-label-refreshMetadata').innerText(),'Reload BlobUI');
     assert.equal(await localShortcut.evaluate(node=>node.tagName),'SPAN');
+    const componentCatalogShortcut=page.locator('#keybind-button-openComponentCatalog');
+    await componentCatalogShortcut.waitFor({state:'visible'});
+    await page.waitForFunction(()=>document.getElementById('keybind-button-openComponentCatalog')?.tagName==='BUTTON');
+    assert.equal(await componentCatalogShortcut.locator('kbd').innerText(),'F10');
+    assert.equal(await page.locator('#keybind-label-openComponentCatalog').innerText(),'Open component catalog');
+    assert.equal(await componentCatalogShortcut.evaluate(node=>node.tagName),'BUTTON');
+    await componentCatalogShortcut.click();
+    await page.evaluate(()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',code:'F10',ctrlKey:true,bubbles:true,cancelable:true})));
+    await page.waitForFunction(()=>window.calls.some(c=>c.name==='save_keyboard_shortcuts'));
+    assert.equal(await page.evaluate(()=>window.calls.find(c=>c.name==='save_keyboard_shortcuts').args.shortcuts.find(row=>row.action==='openComponentCatalog').ctrl),true,'The component catalog shortcut can be changed and saved.');
     await page.locator('#keybinds-backdrop').evaluate(node=>Promise.all(node.getAnimations({subtree:true}).map(animation=>animation.finished)));
     await page.screenshot({path:path.join(temp,'keybinds-dark.png')});
     await page.locator('#keybind-button-openSettings').click();

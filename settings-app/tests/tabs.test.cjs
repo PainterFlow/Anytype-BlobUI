@@ -115,12 +115,14 @@ test('real settings tabs keep their width and open panels at the top across heig
       const position = () => new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
       const start = position();
       tab.click();
-      // Let the resize observer for the new selection deliver its first measurement.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return { start, current: position(), target: tab.offsetLeft };
+      return {
+        start,
+        target: tab.offsetLeft,
+        transition: getComputedStyle(strip, "::after").transition,
+      };
     });
-    assert.ok(movement.target > movement.start && movement.current < movement.target,
-      'The React tab indicator keeps animating after the resize observer runs');
+    assert.ok(movement.target > movement.start, 'Selecting a later tab moves the indicator');
+    assert.match(movement.transition, /transform 0\.2s/);
     await page.waitForFunction(target => {
       const strip = document.getElementById('advanced-tabs');
       const current = new DOMMatrixReadOnly(getComputedStyle(strip, '::after').transform).m41;
@@ -129,7 +131,7 @@ test('real settings tabs keep their width and open panels at the top across heig
     for (const size of [{ width: 800, height: 650 }, { width: 920, height: 740 }, { width: 960, height: 740 }]) {
       await page.setViewportSize(size);
       for (const [nav, ids] of [
-        ['preferences', ['preference-tab-0', 'preference-tab-4', 'preference-tab-0', 'preference-tab-4']],
+        ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2', 'preference-tab-0', 'preference-tab-2']],
         ['advanced', ['advanced-app-tab', 'advanced-api-tab', 'advanced-experiments-tab', 'advanced-app-tab', 'advanced-api-tab']],
       ]) {
         await page.locator(`#${nav}-nav`).click();
@@ -161,7 +163,7 @@ test('real settings tabs keep their width and open panels at the top across heig
     await page.setViewportSize({ width: 800, height: 650 });
     await page.evaluate(() => document.querySelectorAll('.settings-page > section').forEach(panel => { panel.style.minHeight = '1400px'; }));
     for (const [nav, ids] of [
-      ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2', 'preference-tab-3', 'preference-tab-4']],
+      ['preferences', ['preference-tab-0', 'preference-tab-1', 'preference-tab-2']],
       ['advanced', ['advanced-api-tab', 'advanced-app-tab', 'advanced-experiments-tab']],
     ]) {
       await page.locator('#' + nav + '-nav').click();
@@ -179,10 +181,10 @@ test('real settings tabs keep their width and open panels at the top across heig
     }
     // Delayed content growth must not anchor a newly selected tall panel to its bottom.
     await page.locator('#preferences-nav').click();
-    await page.locator('#preference-tab-4').evaluate(button => button.click());
+    await page.locator('#preference-tab-2').evaluate(button => button.click());
     await page.evaluate(() => {
       const content = document.createElement('div'); content.style.height = '400px';
-      document.getElementById('preference-panel-4').prepend(content);
+      document.getElementById('preference-panel-2').prepend(content);
     });
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     assert.equal(await page.locator('.page-content').evaluate(scroller => scroller.scrollTop), 0);

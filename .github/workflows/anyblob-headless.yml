@@ -1,0 +1,201 @@
+name: Test BlobUI and release Anyblob or Headless
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+    tags: ['anyblob-v*', 'headless-v*', 'headless-dev-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            asset: blob-ui-linux-x86_64
+            executable: blob-ui
+          - runner: windows-2022
+            asset: blob-ui-windows-x86_64.exe
+            executable: blob-ui.exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.17.1
+          cache: npm
+          cache-dependency-path: settings-app/package-lock.json
+      - name: Build the Settings frontend for Tauri context generation
+        working-directory: settings-app
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install Linux build libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Test Anyblob MCP and the headless CLI
+        run: |
+          cargo test --locked --manifest-path mcp-server/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path settings-app/Cargo.toml --no-default-features --features headless-cli --lib --bin blob-ui -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the Windows headless release executable
+        if: runner.os == 'Windows'
+        env:
+          BLOBUI_BUILD_CHANNEL: ${{ startsWith(github.ref_name, 'headless-dev-') && 'dev' || 'main' }}
+        run: ./scripts/Build-BlobUI-Headless.ps1
+      - name: Build the Linux headless release executable
+        if: runner.os == 'Linux'
+        env:
+          BLOBUI_BUILD_CHANNEL: ${{ startsWith(github.ref_name, 'headless-dev-') && 'dev' || 'main' }}
+        shell: bash
+        run: bash scripts/Build-BlobUI-Headless.sh
+      - name: Stage the headless release executable
+        env:
+          HEADLESS_EXECUTABLE: ${{ matrix.executable }}
+          HEADLESS_ASSET: ${{ matrix.asset }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -LiteralPath "settings-app/dist/headless-cli/$env:HEADLESS_EXECUTABLE" -Destination "dist/$env:HEADLESS_ASSET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  anyblob:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.17.1
+      - name: Validate and package the repository plugin
+        shell: pwsh
+        run: ./scripts/Build-Codex.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anyblob
+          path: codex-plugin/dist/anyblob.zip
+          if-no-files-found: error
+
+  settings:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BLOBUI_BUILD_ONLY: '1'
+      APPDATA: ${{ github.workspace }}\.test-run\ci-roaming
+      LOCALAPPDATA: ${{ github.workspace }}\.test-run\ci-local
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.17.1
+          cache: npm
+          cache-dependency-path: settings-app/package-lock.json
+      - name: Build Settings without starting it
+        run: |
+          New-Item -ItemType Directory -Force $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+          ./scripts/Build-App.ps1 -s -c
+      - name: Test Settings
+        run: |
+          cargo test --locked --release --manifest-path settings-app/Cargo.toml -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/tests/Test-Desktop-Mcp.cjs settings-app/dist/blobui-settings.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix settings-app run test:ui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix settings-app test
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag' && (startsWith(github.ref_name, 'anyblob-v') || startsWith(github.ref_name, 'headless-v') || startsWith(github.ref_name, 'headless-dev-'))
+    needs: [headless, anyblob, settings]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the matching release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            anyblob-v*)
+              version=$(node -p 'require("./codex-plugin/src/plugin.json").version')
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              test "$RELEASE_TAG" = "anyblob-v$version"
+              git merge-base --is-ancestor HEAD origin/main
+              channel=stable
+              assets=(dist/anyblob.zip)
+              title="Anyblob $version"
+              ;;
+            headless-v*|headless-dev-*)
+              metadata_version=$(jq -er 'select(.formatVersion == 1) | .version | select(type == "string")' blobui-headless-release.json)
+              dev_version=$(jq -er 'select(.formatVersion == 1) | .devVersion | select(type == "string")' blobui-headless-release.json)
+              [[ "$metadata_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              [[ "$dev_version" =~ ^dev-[0-9]+\.[0-9]+\.[0-9]+$ ]]
+              if [[ "$RELEASE_TAG" == headless-v* ]]; then
+                version="${RELEASE_TAG#headless-v}"
+                test "$RELEASE_TAG" = "headless-v$metadata_version"
+                git merge-base --is-ancestor HEAD origin/main
+                channel=stable
+              else
+                version="${RELEASE_TAG#headless-dev-}"
+                test "$RELEASE_TAG" = "headless-$dev_version"
+                git merge-base --is-ancestor HEAD origin/dev
+                channel=dev
+              fi
+              assets=(dist/blob-ui-linux-x86_64 dist/blob-ui-windows-x86_64.exe)
+              if [[ "$channel" == dev ]]; then
+                title="BlobUI Headless Dev $version"
+              else
+                title="BlobUI Headless $version"
+              fi
+              ;;
+            *) exit 1 ;;
+          esac
+          for asset in "${assets[@]}"; do
+            (cd dist && sha256sum "${asset#dist/}" > "${asset#dist/}.sha256")
+          done
+          checksum_assets=()
+          for asset in "${assets[@]}"; do checksum_assets+=("$asset.sha256"); done
+          release_args=(--verify-tag --latest=false --title "$title" --generate-notes)
+          if [[ "${channel:-stable}" == dev ]]; then release_args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "${release_args[@]}" "${assets[@]}" "${checksum_assets[@]}"

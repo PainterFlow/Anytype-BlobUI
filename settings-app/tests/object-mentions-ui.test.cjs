@@ -10,13 +10,15 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     page.on('pageerror',e=>errors.push(e.message));
     await page.addInitScript(()=>{
       window.saved=null;window.discoveryPending=true;window.spaceError=false;window.typeError=false;
-      window.fixtureSpaces=[{id:'a',name:'Work'},{id:'b',name:'Personal'}];window.typeRequests=[];
+      window.fixtureSpaces=[{id:'a',name:'Work'},{id:'b',name:'Personal'},{id:'noperm',name:'No Access'}];window.typeRequests=[];
+      // Every discoverable space except 'noperm' has a saved read permission; the
+      // mention filters can only offer and search permitted spaces.
+      const permitted=Object.fromEntries(['a','b','c','long',...Array.from({length:40},(_,i)=>'private-id-'+i)].map(id=>[id,{access:'read',filesEnabled:false,approval:'fullAccess'}]));
       window.__TAURI__={core:{invoke:async(name,args)=>{
-        if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{}};
+        if(name==='get_app_state')return{ready:true,onboardingComplete:true,theme:'dark',settings:{codexIntegration:{spaces:permitted}}};
         if(name==='get_updater_state')return{automaticChecksEnabled:false};
         if(name==='get_calendar_api_availability')return'available';
         if(name==='anyblob_status')return{enabled:false};
-        if(name==='anyblob_installation_status')return{installed:false};
         if(name==='discover_codex_spaces'){
           if(window.discoveryPending)await new Promise(resolve=>window.releaseSpaces=resolve);
           if(window.spaceError)throw Error('Fixture space discovery failed');return window.fixtureSpaces;
@@ -50,13 +52,15 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     assert.equal(await spaces.isEnabled(),true);assert.equal(await types.isEnabled(),true);
     await page.evaluate(()=>{window.holdTypes=true;window.discoveryPending=false;window.releaseSpaces();});
     await page.waitForFunction(()=>window.typeRequests.length>0);
+    assert.equal(await page.evaluate(()=>window.typeRequests.every(ids=>!ids.includes('noperm'))),true,'Type discovery never queries a space without read permission');
     assert.equal(await types.isEnabled(),true);assert.equal(await spaces.isEnabled(),true);
     assert.match(await page.locator('#object-mentions-status').innerText(),/Loading object types/);
     await page.evaluate(()=>{window.holdTypes=false;window.releaseTypes();});
     await types.click();await typeMenu.getByRole('option',{name:'Task · Work',exact:true}).click();
     assert.equal(await typeMenu.getByRole('option',{name:'All',exact:true}).getAttribute('aria-selected'),'false');
     await page.keyboard.press('Escape');assert.equal(await types.innerText(),'1 selected');
-    await spaces.click();await spaceMenu.getByRole('option',{name:'Personal',exact:true}).click();await page.keyboard.press('Escape');
+    await spaces.click();assert.equal(await spaceMenu.getByRole('option',{name:'No Access',exact:true}).count(),0,'Spaces without read permission are not selectable');
+    await spaceMenu.getByRole('option',{name:'Personal',exact:true}).click();await page.keyboard.press('Escape');
     await types.click();const inactive=typeMenu.getByRole('option',{name:'Task · Work',exact:true});
     assert.match(await inactive.innerText(),/Inactive outside filtered spaces/);assert.equal(await inactive.getAttribute('aria-selected'),'true');
     assert.equal(await typeMenu.getByRole('option',{name:'Task · Personal',exact:true}).count(),1);
@@ -70,6 +74,12 @@ test('object mention filters stay editable and preserve saved drafts in dark mod
     await types.click();await typeMenu.getByRole('option',{name:'All',exact:true}).click();await page.keyboard.press('Escape');
     assert.equal(await types.innerText(),'All');
     await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await types.innerText(),'2 selected');
+    // A saved selection whose space loses read permission stays visible as inactive.
+    await page.evaluate(()=>window.BlobUI.CodexPage.changePermission('b',{access:'none',filesEnabled:false,approval:'fullAccess'}));
+    await spaces.click();assert.match(await spaceMenu.getByRole('option',{name:'Personal',exact:true}).innerText(),/Inactive without read permission/);await page.keyboard.press('Escape');
+    await types.click();assert.match(await typeMenu.getByRole('option',{name:'Task · Personal',exact:true}).innerText(),/Inactive without read permission/);await page.keyboard.press('Escape');
+    await page.evaluate(()=>window.BlobUI.discardChanges());
+    await spaces.click();assert.equal(await spaceMenu.getByRole('option',{name:'Personal',exact:true}).innerText(),'Personal');await page.keyboard.press('Escape');
     await page.evaluate(()=>{window.spaceError=true;window.typeError=true;});await page.keyboard.press('Control+r');await page.evaluate(()=>window.BlobUI.AppReload.run());
     await page.waitForFunction(()=>document.getElementById('object-mentions-status').textContent.includes('space discovery failed'));
     assert.equal(await spaces.isEnabled(),true);assert.equal(await types.isEnabled(),true);

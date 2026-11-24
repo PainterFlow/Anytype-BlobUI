@@ -21,6 +21,9 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     window.__TAURI__ = { core: { invoke: async (command, args) => {
       window.__calls.push(command);
       if (command === 'get_app_state') return { ready: true, theme: document.documentElement.dataset.theme || 'dark', onboardingComplete: true, settings: {}, hasSavedApiKey: true };
+      if (command === 'reload_custom_themes') return { cssRebuilt: true, state: {
+        theme: 'dark', themeCss: '', previewTheme: 'dark', themeDiagnostics: [], customThemes: [], themeDirectory: 'Settings/themes/built-in-themes',
+      } };
       if (command === 'load_kanban_formulas') return { configuration: configuration(), calculatedAt: sessionStorage.getItem('calculated-at') };
       if (command === 'discover_kanban_views') {
         return { views: ['view-a', 'view-b'].filter(id => !window.__hideView || id !== 'view-a').map(viewId => ({
@@ -59,7 +62,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(()=>document.querySelector('#status-message').textContent.includes('Settings loaded from this device.'));
     await page.waitForFunction(()=>window.__calls.includes('discover_kanban_views'));
     await page.locator('.formula-view-row').first().waitFor({state:'attached'});
-    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Startup discovery runs before opening the formula page.');
+    assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Startup discovery runs before opening the calculation tab.');
     const initialDiscoveries=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
     await page.evaluate(()=>{
       window.BlobUI.FormulaPage.setLocked(true,false);
@@ -69,7 +72,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,initialDiscoveries);
     await page.waitForFunction(()=>!document.getElementById('formula-reload').disabled);
     assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
-    assert.equal(await page.locator('#formulas-page').isVisible(),false,'Unlock retries queued discovery while the formula page is hidden.');
+    assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Unlock retries queued discovery while the calculation tab is hidden.');
     await openFormulas(page);await page.locator('.formula-view-row').first().waitFor();
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);
@@ -275,6 +278,42 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await page.evaluate(() => window.BlobUI.FormulaPage.isPersisted()), true);
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}
+});
+
+test('saved calculations are not marked unavailable before a successful view discovery', async () => {
+  fs.mkdirSync(path.join(root, 'temp'), { recursive: true });
+  process.env.TEMP = process.env.TMP = path.join(root, 'temp');
+  const browser = await chromium.launch({ executablePath, headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] });
+  const page = await browser.newPage({ viewport: { width: 900, height: 800 }, colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    const target = { spaceId: 'saved-space', objectId: 'saved-object', blockId: 'saved-board', viewId: 'saved-view' };
+    const configuration = { version: 2, display: 'balanced', definitions: [{ target, tokens: [{ kind: 'number', value: 7 }] }] };
+    window.__savedTarget = target;
+    window.__TAURI__ = { core: { invoke: async command => {
+      if (command === 'get_app_state') return { ready: true, theme: 'dark', onboardingComplete: true, hasSavedApiKey: false, settings: {} };
+      if (command === 'load_kanban_formulas') return { configuration };
+      if (command === 'discover_kanban_views') return new Promise((resolve, reject) => { window.__pendingDiscovery = { resolve, reject }; });
+      if (command === 'load_calendar_rules') return { version: 1, types: [] };
+      if (command === 'get_calendar_api_availability') return 'missing';
+      return null;
+    } } };
+  });
+  try {
+    await loadSettings(page);
+    await page.waitForFunction(() => window.__pendingDiscovery);
+    await openFormulas(page);
+    const unavailable = page.locator('.formula-view-row').filter({ hasText: 'Unavailable view' });
+    assert.equal(await unavailable.count(), 0, 'Pending discovery must not label a saved calculation unavailable.');
+    assert.match(await page.locator('.formula-empty-message').textContent(), /Loading Kanban views/);
+    await page.evaluate(() => {
+      const pending = window.__pendingDiscovery;
+      window.__pendingDiscovery = null;
+      pending.reject(new Error('Fixture connection unavailable'));
+    });
+    await page.waitForFunction(() => document.querySelector('#formula-storage-message').textContent.includes('Fixture connection unavailable'));
+    assert.equal(await unavailable.count(), 0, 'A failed discovery cannot confirm that the saved view is missing.');
+    assert.deepEqual(await page.evaluate(() => window.BlobUI.FormulaPage.read().definitions[0].target), await page.evaluate(() => window.__savedTarget));
+  } finally { await browser.close(); }
 });
 
 test('native-generated CSS scopes exact view/category IDs and wraps results on narrow headers', async () => {

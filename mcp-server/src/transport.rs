@@ -1,11 +1,21 @@
 //! Windows transport is separate from stdio MCP and the typed operations.
 use std::{
     io,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
+#[cfg(windows)]
+use std::sync::atomic::Ordering;
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(180);
+
+pub trait Bridge {
+    fn connected(&self) -> bool;
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()>;
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>>;
+}
+
+#[cfg(windows)]
 fn stopped(cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
     if cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
         Err(io::Error::new(
@@ -147,11 +157,13 @@ mod windows {
                     ERROR_NO_DATA | ERROR_BROKEN_PIPE => {
                         // A canceled typeahead can close its handle before our polling accept.
                         // Reset this instance instead of terminating the entire bridge listener.
-                        if DisconnectNamedPipe(self.0)==0 && GetLastError()!=ERROR_PIPE_NOT_CONNECTED {
+                        if DisconnectNamedPipe(self.0) == 0
+                            && GetLastError() != ERROR_PIPE_NOT_CONNECTED
+                        {
                             return Err(io::Error::last_os_error());
                         }
                         Ok(false)
-                    },
+                    }
                     _ => Err(io::Error::last_os_error()),
                 }
             }
@@ -179,10 +191,10 @@ mod windows {
                 Ok(Self(handle))
             }
         }
-        pub fn connect_wait(cancel:&AtomicBool, deadline:Instant)->io::Result<Self> {
+        pub fn connect_wait(cancel: &AtomicBool, deadline: Instant) -> io::Result<Self> {
             let startup_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
             loop {
-                stopped(cancel,deadline)?;
+                stopped(cancel, deadline)?;
                 match Self::connect() {
                     Ok(pipe)=>return Ok(pipe),
                     Err(error) if error.raw_os_error()==Some(ERROR_PIPE_BUSY as i32)=>{
@@ -291,37 +303,82 @@ mod windows {
 }
 #[cfg(windows)]
 pub use windows::Pipe;
-#[cfg(all(test,windows))]
+#[cfg(windows)]
+impl Bridge for Pipe {
+    fn connected(&self) -> bool {
+        Pipe::connected(self)
+    }
+    fn send(&self, bytes: &[u8], cancel: &AtomicBool, deadline: Instant) -> io::Result<()> {
+        Pipe::send(self, bytes, cancel, deadline)
+    }
+    fn receive(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<Vec<u8>> {
+        Pipe::receive(self, cancel, deadline)
+    }
+}
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     #[test]
     fn aborted_typeahead_connections_do_not_poison_the_listener() {
-        std::env::set_var("ANYBLOB_BRIDGE_INSTANCE",format!("fixture-aborted-{}",std::process::id()));
-        let listener=Pipe::listen(true).unwrap();
+        std::env::set_var(
+            "ANYBLOB_BRIDGE_INSTANCE",
+            format!("fixture-aborted-{}", std::process::id()),
+        );
+        let listener = Pipe::listen(true).unwrap();
         for _ in 0..3 {
             let client = Pipe::connect().expect(
                 "Connect to the same-user fixture pipe. On access denied, run the test in a normal Windows session outside the restricted sandbox.",
             );
             drop(client);
-            assert!(!listener.accept().expect("A client that leaves before accept must reset the listener"));
+            assert!(!listener
+                .accept()
+                .expect("A client that leaves before accept must reset the listener"));
             assert!(!listener.accept().unwrap()); // Re-arm the disconnected instance on the next poll.
         }
-        let client=Pipe::connect().unwrap();assert!(listener.accept().unwrap());
-        let cancel=AtomicBool::new(false);
-        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_millis(20)).err().unwrap().kind(),io::ErrorKind::TimedOut);
-        let waiting=std::thread::spawn(||Pipe::connect_wait(&AtomicBool::new(false),Instant::now()+Duration::from_secs(5)));
-        let next=Pipe::listen(false).unwrap();
-        let second=waiting.join().unwrap().expect("Concurrent searches wait for the next pipe instance");
+        let client = Pipe::connect().unwrap();
+        assert!(listener.accept().unwrap());
+        let cancel = AtomicBool::new(false);
+        assert_eq!(
+            Pipe::connect_wait(&cancel, Instant::now() + Duration::from_millis(20))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        let waiting = std::thread::spawn(|| {
+            Pipe::connect_wait(
+                &AtomicBool::new(false),
+                Instant::now() + Duration::from_secs(5),
+            )
+        });
+        let next = Pipe::listen(false).unwrap();
+        let second = waiting
+            .join()
+            .unwrap()
+            .expect("Concurrent searches wait for the next pipe instance");
         assert!(next.accept().unwrap());
-        cancel.store(true,Ordering::Release);
-        assert_eq!(Pipe::connect_wait(&cancel,Instant::now()+Duration::from_secs(5)).err().unwrap().kind(),io::ErrorKind::TimedOut);
-        drop((second,next,client,listener));
+        cancel.store(true, Ordering::Release);
+        assert_eq!(
+            Pipe::connect_wait(&cancel, Instant::now() + Duration::from_secs(5))
+                .err()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
+        drop((second, next, client, listener));
         // A temporarily absent listener may recover without replaying a request.
-        let waiting = std::thread::spawn(|| Pipe::connect_wait(
-            &AtomicBool::new(false), Instant::now() + Duration::from_secs(3)));
+        let waiting = std::thread::spawn(|| {
+            Pipe::connect_wait(
+                &AtomicBool::new(false),
+                Instant::now() + Duration::from_secs(3),
+            )
+        });
         std::thread::sleep(Duration::from_millis(50));
         let recovered = Pipe::listen(true).unwrap();
-        let client = waiting.join().unwrap().expect("Wait for a restarting bridge");
+        let client = waiting
+            .join()
+            .unwrap()
+            .expect("Wait for a restarting bridge");
         assert!(recovered.accept().unwrap());
         drop((client, recovered));
     }
@@ -336,11 +393,29 @@ pub fn call_with_approval(
     cancel: &AtomicBool,
     approve: &impl Fn(&str, Duration) -> Result<bool, String>,
 ) -> Result<crate::Response, String> {
+    let deadline = Instant::now() + CALL_TIMEOUT;
     #[cfg(windows)]
     {
-        let deadline = Instant::now() + CALL_TIMEOUT;
         let pipe = Pipe::connect_wait(cancel, deadline).map_err(|e| e.to_string())?;
-        pipe.send(
+        call_on_bridge(&pipe, request, cancel, deadline, approve)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (request, cancel, approve, deadline);
+        Err(crate::credential::WINDOWS_HOST_REQUIRED.into())
+    }
+}
+
+#[cfg(windows)]
+fn call_on_bridge(
+    bridge: &impl Bridge,
+    request: &crate::Request,
+    cancel: &AtomicBool,
+    deadline: Instant,
+    approve: &impl Fn(&str, Duration) -> Result<bool, String>,
+) -> Result<crate::Response, String> {
+    bridge
+        .send(
             &serde_json::to_vec(
                 &serde_json::json!({"version":crate::approval::VERSION,"request":request}),
             )
@@ -349,47 +424,45 @@ pub fn call_with_approval(
             deadline,
         )
         .map_err(|e| e.to_string())?;
-        loop {
-            let frame: crate::approval::Frame =
-                serde_json::from_slice(&pipe.receive(cancel, deadline).map_err(|e| e.to_string())?)
-                    .map_err(|_| crate::approval::UPDATE)?;
-            match frame {
-                crate::approval::Frame::Response { version, response }
-                    if version == crate::approval::VERSION =>
-                {
-                    if response.result.is_none() && response.error.is_none() {
-                        return Err(crate::approval::UPDATE.into());
-                    }
-                    return Ok(response)
+    loop {
+        let frame: crate::approval::Frame = serde_json::from_slice(
+            &bridge
+                .receive(cancel, deadline)
+                .map_err(|e| e.to_string())?,
+        )
+        .map_err(|_| crate::approval::UPDATE)?;
+        match frame {
+            crate::approval::Frame::Response { version, response }
+                if version == crate::approval::VERSION =>
+            {
+                if response.result.is_none() && response.error.is_none() {
+                    return Err(crate::approval::UPDATE.into());
                 }
-                crate::approval::Frame::ApprovalRequest {
+                return Ok(response);
+            }
+            crate::approval::Frame::ApprovalRequest {
+                version,
+                operation_id,
+                approval_id,
+                message,
+            } if version == crate::approval::VERSION && operation_id == request.id => {
+                let accepted =
+                    approve(&message, deadline.saturating_duration_since(Instant::now()))?;
+                let decision = crate::approval::Frame::ApprovalDecision {
                     version,
                     operation_id,
                     approval_id,
-                    message,
-                } if version == crate::approval::VERSION && operation_id == request.id => {
-                    let accepted =
-                        approve(&message, deadline.saturating_duration_since(Instant::now()))?;
-                    let decision = crate::approval::Frame::ApprovalDecision {
-                        version,
-                        operation_id,
-                        approval_id,
-                        accepted,
-                    };
-                    pipe.send(
+                    accepted,
+                };
+                bridge
+                    .send(
                         &serde_json::to_vec(&decision).map_err(|_| "Invalid decision")?,
                         cancel,
                         deadline,
                     )
                     .map_err(|e| e.to_string())?;
-                }
-                _ => return Err(crate::approval::UPDATE.into()),
             }
+            _ => return Err(crate::approval::UPDATE.into()),
         }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (request, cancel, approve);
-        Err("Anyblob requires local Windows execution alongside BlobUI.".into())
     }
 }

@@ -495,9 +495,10 @@
     records = [];
     const supported = catalog.filter(view => !view.unsupported);
     const views = UI.ViewCatalog ? UI.ViewCatalog.dedupeViews(supported).views : supported.slice();
-    for (const saved of state.definitions) {
+    if (discovered) for (const saved of state.definitions) {
+      // Only a successful catalog can confirm that a saved view is missing.
       // Keep hidden unsupported definitions in the draft without recreating
-      // them as unavailable rows. Missing views still offer manual removal.
+      // them as unavailable rows.
       if (catalog.some(view => view.unsupported && identity(view.target) === identity(saved.target))) continue;
       if (!views.some(view => identity(view.target) === identity(saved.target)) && !UI.ViewCatalog?.findViewForTarget(views,saved.target)) {
         views.push({
@@ -547,7 +548,7 @@
       discovered = true;
       setMessage([loadError, result.warning].filter(Boolean).join(" "));
     } catch (error) {
-      if (generation === discoveryGeneration) { setMessage(String(error.message || error)); api?.onInfo?.(String(error.message || error)); }
+      if (generation === discoveryGeneration) { setMessage(String(error.message || error)); api?.onInfo?.(String(error.message || error), error); }
     } finally {
       if (generation === discoveryGeneration) {
         discovering = false;
@@ -582,9 +583,6 @@
       api = options;
       initialized = true;
       syncDomRefs();
-      const nav = el("formulas-nav"), open = el("open-formulas"), title = el("page-title");
-      if (nav) nav.addEventListener("click", () => api.navigate("formulas"));
-      if (open) open.addEventListener("click", () => { api.navigate("formulas"); if (title) title.focus({ preventScroll: true }); });
       if (UI.AppReload) {
         reloadController = UI.AppReload;
         unregisterReload = reloadController.register(() => discover(true));
@@ -740,6 +738,22 @@
       }
     },
     refresh() { if (!discovered && !discovering && !loading) return discover(); },
+    async refreshResults(bridge) {
+      if (!bridge || loading || locked || !persistedState.definitions.length) return null;
+      try {
+        const result = await bridge("refresh_kanban_results");
+        if (!result) return null;
+        (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+        configurationRevision = result.revision || configurationRevision;
+        calculatedAt = result.calculatedAt || calculatedAt;
+        updateTimestamp();
+        setMessage("Results refreshed. Press Ctrl+R in Anytype to apply.", true);
+        return result;
+      } catch (error) {
+        setMessage(String(error.message || error) + " Previous published results are kept.");
+        throw error;
+      }
+    },
     reload() {
       discovered = false;
       discoveryRequested = true;

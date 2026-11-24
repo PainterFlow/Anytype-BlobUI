@@ -16,7 +16,7 @@
         return () => handlers.delete(handler);
       }
 
-      function run({ checkUpdates = true } = {}) {
+      function run({ checkUpdates = true, startup = false } = {}) {
         if (locked) { queued = true; return Promise.resolve(); }
         if (pending) return pending;
         if (!handlers.size) return Promise.resolve();
@@ -25,15 +25,15 @@
           try { onBusyChange(true); } catch (_) { /* Keep reload execution independent of UI callbacks. */ }
         }
         const execute = () => { if (locked) { queued = true; return []; }
-          try { onReload?.(); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
+          try { onReload?.({ startup }); } catch (_) { /* Logging must not interrupt metadata refresh. */ }
           return Promise.allSettled([...handlers].map(handler => Promise.resolve().then(() => handler({ checkUpdates })))); };
         pending = (beforeRun ? Promise.resolve().then(beforeRun).then(execute) : execute())
           .catch(error => [{ status: "rejected", reason: error }])
           .then(results => {
-            const error = results.find(result => result.status === "rejected")?.reason;
-            if (!error) return;
             if (typeof onError === "function") {
-              try { onError(error); } catch (_) { /* Keep keyboard reload errors handled. */ }
+              results.filter(result => result.status === "rejected").forEach(result => {
+                try { onError(result.reason); } catch (_) { /* Keep keyboard reload errors handled. */ }
+              });
             }
           })
           .finally(() => {

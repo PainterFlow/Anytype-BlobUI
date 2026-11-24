@@ -30,3 +30,14 @@
     border-radius: 999px;
     background-color: var(--color-blob-accent);
 }
+
+/* Move the widget calendar's today number and event dot onto the configured accent. */
+/* @blobui-if-custom-accent */
+.widget .viewCalendar .day.today {
+    color: var(--color-blob-accent) !important;
+}
+
+.widget .viewCalendar .day.today > .inner .bullet {
+    background: var(--color-blob-accent) !important;
+}
+/* @blobui-endif-custom-accent */

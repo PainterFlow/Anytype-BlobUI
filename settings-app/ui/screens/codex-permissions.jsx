@@ -1,7 +1,7 @@
 import React, { useState, useSyncExternalStore } from "react";
 import { ExpandableSearch } from "../shared/search.jsx";
+import { PermissionPicker } from "../shared/permission-picker.jsx";
 import { Switch } from "../shared/settings-controls.jsx";
-import { PermissionPicker } from "./codex-projects.jsx";
 
 const UI=()=>window.BlobUI;
 const access=[{value:"none",label:"No Access"},{value:"read",label:"Read Only"},{value:"readWrite",label:"Read-Write"},{value:"createDelete",label:"Create-Delete"}];

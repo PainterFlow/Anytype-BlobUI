@@ -1,11 +1,11 @@
 {
   "name": "blobui-settings-frontend",
   "private": true,
-  "version": "2.0.1",
+  "version": "2.0.3",
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --test --test-concurrency=4 tests/*.test.cjs",
+    "test": "node --test --test-concurrency=2 tests/*.test.cjs",
     "test:ui": "vitest run"
   },
   "dependencies": {

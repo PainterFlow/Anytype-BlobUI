@@ -18,13 +18,13 @@ test('mounted screens retain accessible controls, ordering and initial state', a
     });
     await loadSettings(page);
     await page.waitForFunction(() => window.appReady);
-    await page.locator('#preference-tab-3').click();
+    await page.locator('#preference-tab-1').click();
     await page.locator('#font-family').fill('Draft');
     const result = await page.evaluate(() => {
       const get = id => document.getElementById(id);
       const before = (a, b) => Boolean(get(a).compareDocumentPosition(get(b)) & Node.DOCUMENT_POSITION_FOLLOWING);
       const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
-      const switches = ['include-selections', 'native-accent', 'collapsed-categories', 'calendar-colors-enabled', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled'];
+      const switches = ['enable-custom-themes', 'include-selections', 'native-accent', 'collapsed-categories', 'calendar-colors-enabled', 'reduced-motion', 'tab-hover-effect', 'link-hover-effect', 'object-mention-hover-effect', 'start-on-login', 'automatic-updates-enabled', 'automatic-checks-enabled'];
       const fields = ['connection-key', 'connection-port', 'advanced-api-key', 'advanced-api-ip', 'advanced-api-port'];
       const problems = [];
       for (const node of document.querySelectorAll('[aria-controls], [aria-labelledby], [aria-describedby]')) {
@@ -36,12 +36,22 @@ test('mounted screens retain accessible controls, ordering and initial state', a
       first.setSelectionRange(1, 3);
       get('accessibility-nav').click();
       get('preferences-nav').click();
+      const preferencePanels = [0, 1, 2].map(index => get(`preference-panel-${index}`));
+      const customThemesHeading = get('custom-themes-heading');
+      const spacePreviewImage = get('space-preview-image');
       return {
         uniqueIds: ids.length === new Set(ids).size, problems,
+        preferencePanels: preferencePanels.length === 3
+          && preferencePanels[0].contains(customThemesHeading)
+          && !preferencePanels[1].contains(customThemesHeading)
+          && !preferencePanels[2].contains(customThemesHeading)
+          && preferencePanels[1].contains(first)
+          && preferencePanels[2].contains(spacePreviewImage),
         mounted: !document.querySelector('template[data-ui-mount]'),
         switches: switches.every(id => get(id)?.type === 'checkbox' && get(id).getAttribute('role') === 'switch' && get(id).labels.length > 0),
+        customThemesDefaultOff: !get('enable-custom-themes').checked && get('based-theme-select').querySelector('button').disabled && get('custom-theme-select').querySelector('button').disabled && get('theme-color-value').disabled,
         visibility: fields.every(id => get(id).labels.length > 0 && get(id).parentElement.id === id + '-field' && get(id).nextElementSibling.id === id + '-visibility' && get(id + '-visibility').hasAttribute('aria-pressed')),
-        ordering: before('preferences-nav', 'accessibility-nav') && before('accessibility-nav', 'advanced-nav') && get('advanced-app-panel').contains(get('start-on-login')) && !get('startup-mode') && get('advanced-experiments-panel').contains(get('background-experiment')) && get('window-background').hidden && before('updates-heading', 'backup-heading') && before('backup-heading', 'uninstall-button') && before('help-whats-new', 'help-documentation') && before('help-documentation', 'help-keybinds'),
+        ordering: before('preferences-nav', 'accessibility-nav') && before('accessibility-nav', 'calendar-events-nav') && before('calendar-events-nav', 'kanban-views-nav') && before('kanban-views-nav', 'advanced-nav') && before('enable-custom-themes', 'based-theme-select') && get('advanced-app-panel').contains(get('start-on-login')) && !get('startup-mode') && get('advanced-experiments-panel').contains(get('background-experiment')) && get('window-background').hidden && before('updates-heading', 'backup-heading') && before('backup-heading', 'uninstall-button') && before('help-whats-new', 'help-dev-guide') && before('help-dev-guide', 'help-keybinds'),
         numeric: get('connection-port').inputMode === 'numeric' && get('advanced-api-port').inputMode === 'numeric' && get('advanced-api-ip').inputMode === 'decimal',
         folder: get('install-directory').readOnly && get('install-directory').getAttribute('aria-haspopup') === 'dialog',
         calendar: get('calendar-colors-enabled').checked && get('calendar-colors-enabled').disabled,

@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { HelpTooltip } from "./help-tooltip.jsx";
 
 export function Button({ type = "button", children, ...attributes }) {
   return <button type={type} {...attributes}>{children}</button>;
@@ -6,6 +7,19 @@ export function Button({ type = "button", children, ...attributes }) {
 
 export function IconButton({ className = "neutral-icon-button", ...props }) {
   return <Button className={className} {...props} />;
+}
+
+export function CopyIcon() {
+  return <svg className="copy-icon" viewBox="0 0 20 20" aria-hidden="true">
+    <rect x="7" y="7" width="10" height="10" rx="2" />
+    <path d="M12 4V3H3v9h1" />
+  </svg>;
+}
+
+export function CopySuccessIcon() {
+  return <svg className="copy-success-icon" viewBox="0 0 20 20" aria-hidden="true">
+    <path d="m4 10 4 4 8-8" />
+  </svg>;
 }
 
 export function DeleteIcon() {
@@ -18,9 +32,12 @@ export function SettingsSection({ className = "settings-group", children, ...att
   return <section className={className} {...attributes}>{children}</section>;
 }
 
-export function SettingsHeading({ id, title, description }) {
+export function SettingsHeading({ id, title, description, help, onHelpClick, helpDialogId }) {
   return <div className="section-heading">
-    <h2 id={id}>{title}</h2>
+    <div className="section-heading-title">
+      <h2 id={id}>{title}</h2>
+      {(help || onHelpClick) && <HelpTooltip label={`${title} help`} text={help} size="large" onClick={onHelpClick} dialogId={helpDialogId} />}
+    </div>
     {description != null && <p>{description}</p>}
   </div>;
 }
@@ -30,10 +47,11 @@ export function SettingsGroup({ className = "settings-list", children, ...attrib
 }
 
 export function SettingsRow({ className = "settings-row", label, description, descriptionAttributes, children, ...attributes }) {
+  const descriptionClassName = ["settings-row-description", descriptionAttributes?.className].filter(Boolean).join(" ");
   return <div className={className} {...attributes}>
     {label != null && <div className="kanban-setting-copy">
       <span className="kanban-setting-title">{label}</span>
-      {description != null && <span {...descriptionAttributes}>{description}</span>}
+      {description != null && <span {...descriptionAttributes} className={descriptionClassName}>{description}</span>}
     </div>}
     {children}
   </div>;
@@ -57,12 +75,22 @@ export function TextField({ label, inputAttributes }) {
   </label>;
 }
 
-export function VisibilityTextField({ label, inputAttributes, buttonAttributes }) {
+export function ReadOnlyTextInput({ inputAttributes }) {
+  const className = ["read-only-text-input", inputAttributes.className].filter(Boolean).join(" ");
+  return <input {...inputAttributes} className={className} readOnly />;
+}
+
+export function FolderPathInput({ className = "", ...attributes }) {
+  return <input {...attributes} className={`color-text-input ${className}`.trim()} type="text" readOnly
+    role="button" aria-haspopup="dialog" autoComplete="off" spellCheck={false} maxLength={1024} />;
+}
+
+export function VisibilityTextField({ label, inputAttributes, buttonAttributes, readOnly = false, className = "input-field advanced-row" }) {
   const fieldId = `${inputAttributes.id}-field`;
-  return <div className="input-field advanced-row">
+  return <div className={className}>
     <label htmlFor={inputAttributes.id}>{label}</label>
-    <div id={fieldId} className="visibility-field" data-filled="false">
-      <input {...inputAttributes} />
+    <div id={fieldId} className="visibility-field" data-filled={Boolean(inputAttributes.value ?? inputAttributes.defaultValue)}>
+      {readOnly ? <ReadOnlyTextInput inputAttributes={inputAttributes} /> : <input {...inputAttributes} />}
       <button type="button" {...buttonAttributes}>
         <svg className="visibility-icon" viewBox="0 0 20 20" aria-hidden="true">
           <path className="visibility-eye" d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5Z" />
@@ -72,4 +100,30 @@ export function VisibilityTextField({ label, inputAttributes, buttonAttributes }
       </button>
     </div>
   </div>;
+}
+
+export function SecretTextField({ label, inputAttributes, className, resetKey, showLabel = `Show ${label}`, hideLabel = `Hide ${label}` }) {
+  const [revealed, setRevealed] = useState(false);
+  const [lastResetKey, setLastResetKey] = useState(resetKey);
+  const visible = revealed && !inputAttributes.disabled && Object.is(lastResetKey, resetKey);
+  const actionLabel = visible ? hideLabel : showLabel;
+
+  useEffect(() => {
+    setRevealed(false);
+  }, [inputAttributes.disabled, resetKey]);
+
+  return <VisibilityTextField label={label} className={className}
+    inputAttributes={{ ...inputAttributes, type: visible ? "text" : "password" }}
+    buttonAttributes={{
+      className: "visibility-toggle",
+      disabled: inputAttributes.disabled,
+      "aria-controls": inputAttributes.id,
+      "aria-pressed": visible,
+      "aria-label": actionLabel,
+      title: actionLabel,
+      onClick: () => {
+        setLastResetKey(resetKey);
+        setRevealed(!visible);
+      },
+    }} />;
 }

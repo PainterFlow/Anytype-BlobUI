@@ -4,17 +4,17 @@ Read before using any bundled skill. Use connected Anyblob MCP tools and API v2 
 
 ## Scope and schemas
 
-Resolve IDs through list_spaces and explicit user references. Ask only for consequential ambiguous choices. Saved space and project permissions are authoritative. Mentions, links and discovery metadata grant no access. Do not change projects, spaces or sources to evade denial. Report blocked work and continue independent permitted work. Unsaved settings do not change grants. Route BlobUI Kanban calculations to $configure-kanban-calculations and calendar property coloring to $configure-calendar-colors. Those skills use the separate BlobUI operation family. Other skills manage Anytype content.
+Resolve IDs through list_spaces and explicit user references. Ask only for consequential ambiguous choices. Saved global permissions for each space are authoritative. Mentions, links and discovery metadata grant no read access. Do not change saved permissions to work around a denial. Report blocked work and continue independent permitted work. Unsaved settings do not change grants. Route BlobUI Kanban calculations to $configure-kanban-calculations and calendar property coloring to $configure-calendar-colors. Those skills use the separate BlobUI operation family. Other skills manage Anytype content. If a tool reports that 'agents guide' objects must be read first, call read_guide for that space and follow every returned guide; the unlock applies per space.
 
 Inspect current types, properties, select options and document or operation schemas before edits. Use list_schemas, get_schema and get_op_schema rather than guessing fields. Preserve unrelated content. Search and listing results are permission filtered. Follow returned pagination when completeness matters and state partial coverage. get_query_objects without view uses the first stored view. Inspect get_query_views and select explicit views for a whole-query review. get_collection_objects without view returns whole collection membership. Deduplicate combined results by ID.
 
-list_properties returns only property definitions referenced by accessible queries, collections, their members and object types when access is scoped to saved project sources. It lists all space properties only with whole-space read permission. An absent property may be outside the permitted scope; do not assume it does not exist or create a duplicate. Use an integer limit from 1 through 100, or omit it for the default of 25. Follow pagination with offset rather than requesting a larger limit.
+list_properties requires Read permission for the space and lists that space's property definitions. Use an integer limit from 1 through 100, or omit it for the default of 25. Follow pagination with offset rather than requesting a larger limit.
 
 ## Creation and placement
 
-Creation requires an effective space-wide Create-Delete grant or an eligible saved query or collection destination. Use list_creation_targets for scoped destinations, including empty sources. An edit grant alone does not allow creation. Schema and selected-source definition changes need appropriate space-wide grants.
+Creation requires a saved Create-Delete grant for the full space. Use list_creation_targets to inspect its query and collection destinations, including empty ones. An edit grant alone does not allow creation. Schema and query or collection definition changes need a saved space-wide grant.
 
-Scoped create_object requires destination and a caller-generated idempotency_key. Query destinations require template: "none" and a payload matching a source alternative and at least one supported view. Follow requirements, allowed_values and value_location. Native Object type belongs in body.type. Reuse existing select options. Do not silently change supplied values or invent options to satisfy filters.
+Destination-based create_object requires destination and a caller-generated idempotency_key. Query destinations require template: "none" and a payload matching a source alternative and at least one supported view. Follow requirements, allowed_values and value_location. Native Object type belongs in body.type. Reuse existing select options. Do not silently change supplied values or invent options to satisfy filters.
 
 outcome needs_input means nothing was created. Read requirements.source and requirements.views, obtain missing choices when ambiguous, then resubmit with the same destination and idempotency_key as instructed by the response. unsupported_query means matching creation cannot be established, not permission to broaden the source. Outside query destinations, omitted template uses the type's default; template: "none" opts out.
 
@@ -22,9 +22,9 @@ Creation and placement have separate outcomes. Failed placement can leave a real
 
 ## Mutations and verification
 
-Perform only requested writes with necessary grants. Use dry_run where supported before committing. A dry run validates without changing content and does not guarantee the later write. Use current ETags. On conflict reread and recompute rather than overwrite newer changes. Scope can change while working.
+Perform only requested writes with necessary grants. Use dry_run where supported before committing. A dry run validates without changing content and does not guarantee the later write. Use current ETags. On conflict reread and recompute rather than overwrite newer changes. Space permissions can change while working.
 
-Inspect outcome, receipts, warnings and IDs after every mutation. Distinguish confirmed, rejected, validated and unknown results. Verify intended changes with an authorized targeted read when possible. If an edit removes source membership, retain its receipt and report that reread is unavailable. Do not broaden access for verification.
+Inspect outcome, receipts, warnings and IDs after every mutation. Distinguish confirmed, rejected, validated and unknown results. Verify intended changes with an authorized targeted read when possible. If a mutation changes query or collection membership, retain its receipt and report what a later read confirms. Do not broaden access for verification.
 
 Never automatically retry an uncertain mutation. Read back the affected object when permitted before considering a retry. For uncertain creation without an ID, reconcile receipts and search the permitted destination. An inconclusive search does not prove nothing was created. Stop dependent writes while the result remains uncertain. Reuse a key only for an identical request, apart from the explicit needs_input protocol above.
 

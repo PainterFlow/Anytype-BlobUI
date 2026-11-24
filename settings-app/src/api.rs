@@ -24,7 +24,15 @@ impl Drop for SecretBuffer {
 }
 
 pub fn verify_connection(api_key: &str, ip: &str, port: u16) -> Result<(), String> {
-    let response = request(api_key, ip, port, "GET", "/v2/spaces?limit=1", None)?;
+    verify_connection_with_timeout(api_key, ip, port, TIMEOUT)
+}
+
+pub fn verify_connection_quick(api_key: &str, ip: &str, port: u16) -> Result<(), String> {
+    verify_connection_with_timeout(api_key, ip, port, Duration::from_secs(3))
+}
+
+fn verify_connection_with_timeout(api_key: &str, ip: &str, port: u16, timeout: Duration) -> Result<(), String> {
+    let response = request_with_timeout(api_key, ip, port, "GET", "/v2/spaces?limit=1", None, timeout)?;
     if response.get("data").is_none() {
         return Err("This port did not return an Anytype API v2 spaces response.".into());
     }
@@ -177,15 +185,19 @@ fn paged(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Opt
 }
 
 pub(crate) fn request(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
+    request_with_timeout(api_key, ip, port, method, path, body, TIMEOUT)
+}
+
+fn request_with_timeout(api_key: &str, ip: &str, port: u16, method: &str, path: &str, body: Option<&Value>, timeout: Duration) -> Result<Value, String> {
     let address = ip.parse::<IpAddr>().map_err(|_| "API key IP must be a valid IPv4 or IPv6 address.".to_string())?;
     let socket = SocketAddr::new(address, port);
-    let mut stream = TcpStream::connect_timeout(&socket, TIMEOUT).map_err(|error| network_error(&error))?;
-    stream.set_read_timeout(Some(TIMEOUT)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
-    stream.set_write_timeout(Some(TIMEOUT)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
+    let mut stream = TcpStream::connect_timeout(&socket, timeout).map_err(|error| network_error(&error))?;
+    stream.set_read_timeout(Some(timeout)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
+    stream.set_write_timeout(Some(timeout)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
 
     let payload = body.map(serde_json::to_vec).transpose()
         .map_err(|_| "Could not encode an Anytype API request.".to_string())?;
-    let mut request = SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAccept: application/json\r\nConnection: close\r\n"));
+    let mut request = SecretBuffer::new(format!("{method} {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAnytype-Version: 2025-11-08\r\nAccept: application/json\r\nConnection: close\r\n"));
     if let Some(payload) = &payload {
         request.0.push_str("Content-Type: application/json\r\n");
         request.0.push_str(&format!("Content-Length: {}\r\n", payload.len()));
@@ -256,9 +268,9 @@ fn http_error(status: u16) -> String {
 
 fn network_error(error: &std::io::Error) -> String {
     if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) {
-        "The request to Anytype Local API timed out. Confirm Anytype is open and Local API is enabled.".into()
+        "The request to Anytype's Local API timed out. Confirm that Anytype is open and Local API is enabled.".into()
     } else {
-        "Could not reach Anytype Local API. Confirm Anytype is open and Local API is enabled.".into()
+        "Could not reach Anytype's Local API. Confirm that Anytype is open and Local API is enabled.".into()
     }
 }
 

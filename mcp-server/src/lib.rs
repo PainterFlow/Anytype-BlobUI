@@ -1,4 +1,6 @@
 //! Shared typed bridge contract. No Anytype credentials or HTTP client belong here.
+extern crate self as blobui_mcp;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 pub mod transport;
@@ -7,6 +9,47 @@ pub mod credential;
 pub mod content;
 pub mod sources;
 pub mod blobui;
+pub mod server;
+
+pub fn serve_bridge_stdio() {
+    serve_bridge_stdio_with_mode(false);
+}
+
+pub fn serve_headless_bridge_stdio() {
+    serve_bridge_stdio_with_mode(true);
+}
+
+fn serve_bridge_stdio_with_mode(headless_mode: bool) {
+    let dispatch = |request: Request,
+                    cancel: &std::sync::atomic::AtomicBool,
+                    approve: std::sync::Arc<server::Approval>|
+     -> Result<Response, String> {
+        transport::call_with_approval(&request, cancel, &|message, remaining| {
+            approve(message, remaining)
+        })
+    };
+    if headless_mode {
+        server::serve_headless_stdio(credential::read, dispatch);
+    } else {
+        server::serve_stdio(credential::read, dispatch);
+    }
+}
+
+pub const HEADLESS_BLOBUI_TOOL_ERROR: &str =
+    "Tools that interact with BlobUI app features are unavailable in headless mode.";
+
+pub fn headless_tool_error(tool_name: &str, headless_mode: bool) -> Option<&'static str> {
+    (headless_mode && blobui::NAMES.contains(&tool_name)).then_some(HEADLESS_BLOBUI_TOOL_ERROR)
+}
+
+pub fn headless_tools() -> Value {
+    let mut tool_list = tools();
+    tool_list.as_array_mut().unwrap().retain(|tool| {
+        let name = tool["name"].as_str().unwrap_or_default();
+        !blobui::NAMES.contains(&name)
+    });
+    tool_list
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -15,6 +58,10 @@ pub enum Operation {
     Content { content: content::ContentRequest },
     SearchMentions { query: String },
     ListSpaces {},
+    ReadGuide {
+        #[serde(default)]
+        space_id: Option<String>,
+    },
     SearchObjects {
         space_id: String,
         query: String,
@@ -47,6 +94,7 @@ impl Operation {
             Self::Content { content } => content.validate(),
             Self::SearchMentions { query } if query.len() <= 4096 => Ok(()),
             Self::ListSpaces{} => Ok(()),
+            Self::ReadGuide { space_id } if space_id.as_deref().is_none_or(id) => Ok(()),
             Self::SearchObjects { space_id, query, limit, offset } if id(space_id) && query.len() <= 4096 && *limit > 0 && *limit <= 100 && *offset <= i32::MAX as u32 => Ok(()),
             Self::ReadObject { space_id, object_id } if id(space_id) && id(object_id) => Ok(()),
             _ => Err("Invalid arguments. Use explicit IDs, a limit of 1–100, and a nonnegative 32-bit offset.".into()),
@@ -58,6 +106,7 @@ impl Operation {
             Self::Content { content } => &content.tool,
             Self::SearchMentions { .. } => "search_mentions",
             Self::ListSpaces {} => "list_spaces",
+            Self::ReadGuide { .. } => "read_guide",
             Self::SearchObjects { .. } => "search_objects",
             Self::ReadObject { .. } => "read_object",
         }
@@ -67,6 +116,7 @@ impl Operation {
             Self::Blobui { blobui } => blobui.arguments["space_id"].as_str(),
             Self::Content { content } => content.arguments["space_id"].as_str(),
             Self::ListSpaces {} | Self::SearchMentions { .. } => None,
+            Self::ReadGuide { space_id } => space_id.as_deref(),
             Self::SearchObjects { space_id, .. } | Self::ReadObject { space_id, .. } => {
                 Some(space_id)
             }
@@ -78,18 +128,7 @@ impl Operation {
 pub struct Request {
     pub id: String,
     pub token: String,
-    #[serde(default)]
-    pub thread_id: Option<String>,
     pub request: Operation,
-}
-/// Host metadata is deliberately separate from model-controlled tool arguments.
-pub fn thread_id(params: &Value) -> Result<Option<String>, String> {
-    match params.pointer("/_meta/threadId") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(id)) if !id.is_empty() && id.len() <= 128
-            && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') => Ok(Some(id.clone())),
-        _ => Err("Codex supplied invalid chat identity metadata.".into()),
-    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -106,6 +145,46 @@ fn bridge_response_rejects_unrecognized_envelopes() {
     let response: Response = serde_json::from_value(json!({"result":{"items":[]},"error":null})).unwrap();
     assert_eq!(response.result.unwrap(), json!({"items":[]}));
 }
+
+#[cfg(test)]
+mod headless_tests {
+    use super::*;
+
+    #[test]
+    fn headless_tool_catalog_omits_blobui_app_feature_tools() {
+        let regular_tools = tools();
+        let regular_names = regular_tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        let headless_tool_specs = headless_tools();
+        let headless_names = headless_tool_specs
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(regular_names.len(), headless_names.len() + blobui::NAMES.len());
+        assert!(blobui::NAMES.iter().all(|name| regular_names.contains(name)));
+        assert!(blobui::NAMES.iter().all(|name| !headless_names.contains(name)));
+        assert!(headless_names.iter().all(|name| regular_names.contains(name)));
+    }
+
+    #[test]
+    fn headless_blobui_calls_return_a_short_unavailable_error() {
+        for tool_name in blobui::NAMES {
+            assert_eq!(
+                headless_tool_error(tool_name, true),
+                Some(HEADLESS_BLOBUI_TOOL_ERROR)
+            );
+            assert_eq!(headless_tool_error(tool_name, false), None);
+        }
+        assert_eq!(headless_tool_error("list_spaces", true), None);
+    }
+}
 pub fn capabilities() -> Value {
     json!({"tools":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},
         "extensions":{"openai/mentions":{"searchTool":"search_mentions"}},
@@ -114,18 +193,53 @@ pub fn capabilities() -> Value {
 pub fn object_uri(space: &str, object: &str) -> String {
     format!("anyblob://objects/{space}/{object}")
 }
-/// Parse raw canonical URIs without URL normalization, decoding or model-selected paths.
+fn decode_percent_encoded_resource(value: &str) -> Result<String, String> {
+    let bytes=value.as_bytes();
+    let mut decoded=Vec::with_capacity(bytes.len());
+    let mut index=0;
+    while index<bytes.len() {
+        if bytes[index]==b'%' {
+            if index+2>=bytes.len() { return Err("Invalid wrapped Anyblob resource URI.".into()); }
+            let digit=|byte:u8| match byte {
+                b'0'..=b'9'=>Some(byte-b'0'),b'a'..=b'f'=>Some(byte-b'a'+10),b'A'..=b'F'=>Some(byte-b'A'+10),_=>None
+            };
+            let high=digit(bytes[index+1]).ok_or("Invalid wrapped Anyblob resource URI.")?;
+            let low=digit(bytes[index+2]).ok_or("Invalid wrapped Anyblob resource URI.")?;
+            decoded.push((high<<4)|low);
+            index+=3;
+        } else {
+            decoded.push(bytes[index]);
+            index+=1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_|"Invalid wrapped Anyblob resource URI.".into())
+}
+/// Parse canonical URIs, or the exact single-segment Codex wrapper around one.
 pub fn resource_operation(params: &Value) -> Result<Operation, String> {
     let params=params.as_object().ok_or("Resource read parameters must be an object.")?;
     if params.keys().any(|key| key!="uri" && key!="_meta") {
-        return Err("Unknown resource read argument. Chat identity must come from host metadata.".into());
+        return Err("Unknown resource read argument.".into());
     }
     let uri=params.get("uri").and_then(Value::as_str).ok_or("Resource URI is required.")?;
-    let path=uri.strip_prefix("anyblob://objects/").ok_or("Unsupported Anyblob resource URI.")?;
+    let owned;
+    let canonical=if uri.starts_with("anyblob://objects/") {
+        uri
+    } else {
+        let wrapped=uri.strip_prefix("mcp-resource://anyblob/").ok_or("Unsupported Anyblob resource URI.")?;
+        if wrapped.is_empty() || wrapped.bytes().any(|byte| matches!(byte,b'/'|b'?'|b'#')) {
+            return Err("Invalid wrapped Anyblob resource URI.".into());
+        }
+        owned=decode_percent_encoded_resource(wrapped)?;
+        if !owned.starts_with("anyblob://objects/") {
+            return Err("Invalid wrapped Anyblob resource URI.".into());
+        }
+        &owned
+    };
+    let path=canonical.strip_prefix("anyblob://objects/").ok_or("Unsupported Anyblob resource URI.")?;
     let (space,object)=path.split_once('/').ok_or("Invalid Anyblob object resource URI.")?;
     let op=Operation::ReadObject{space_id:space.into(),object_id:object.into()};
     op.validate()?;
-    if object_uri(space,object)!=uri {return Err("Invalid Anyblob object resource URI.".into());}
+    if object_uri(space,object)!=canonical {return Err("Invalid Anyblob object resource URI.".into());}
     Ok(op)
 }
 pub fn tools() -> Value {
@@ -134,8 +248,9 @@ pub fn tools() -> Value {
     let mut tools = json!([
         {"name":"search_mentions","description":"Find object mentions using saved global filters. Suggestions grant no read permission.","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":4096}},"required":["query"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"items":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"}},"required":["type","uri","name"]}}},"required":["items"],"additionalProperties":false},"_meta":{"ui":{"visibility":["app"]}},"annotations":annotations},
         {"name":"list_spaces","description":"List spaces readable through saved BlobUI permissions.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":annotations},
+        {"name":"read_guide","description":"Read every 'agents guide' object in a space. When BlobUI's AGENTS.md page setting is enabled, other space tools require this call once per space; omit space_id to read every permitted space.","inputSchema":{"type":"object","properties":{"space_id":id},"additionalProperties":false},"annotations":annotations},
         {"name":"search_objects","description":"Search one explicit space. BlobUI may require approval.","inputSchema":{"type":"object","properties":{"space_id":id,"query":{"type":"string","maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"offset":{"type":"integer","minimum":0,"maximum":2147483647,"default":0}},"required":["space_id","query"],"additionalProperties":false},"annotations":annotations},
-        {"name":"read_object","description":"Read an explicit object as properties and Markdown. Attachments remain references.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"annotations":annotations}
+        {"name":"read_object","description":"Read an explicit object as properties, Markdown, and its ETag. Attachments remain references. Use the exact returned ETag with patch_object. If patch_object reports a stale ETag, re-read the object and rebuild the patch from the current document.","inputSchema":{"type":"object","properties":{"space_id":id,"object_id":id},"required":["space_id","object_id"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"etag":{"type":"string","minLength":1}},"required":["etag"],"additionalProperties":true},"annotations":annotations}
     ]);
     tools.as_array_mut().unwrap().extend(content::tools());
     tools.as_array_mut().unwrap().extend(blobui::tools());
@@ -161,7 +276,7 @@ pub fn operation(name: &str, arguments: Value) -> Result<Operation, String> {
     }
     arguments.insert("operation".into(), name.into());
     let op: Operation = serde_json::from_value(Value::Object(arguments))
-        .map_err(|_| "Unknown tool or invalid arguments.".to_string())?;
+        .map_err(|_| "Unknown tool or invalid arguments.")?;
     op.validate()?;
     Ok(op)
 }
@@ -171,7 +286,21 @@ mod tests {
     #[test]
     fn resource_uris_are_canonical_and_never_carry_consent_or_identity() {
         assert!(matches!(resource_operation(&json!({"uri":object_uri("space-id","object_id"),"_meta":{"threadId":"host-chat"}})).unwrap(),Operation::ReadObject{..}));
+        let wrapped="mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fspace-id%2Fobject_id";
+        assert!(matches!(resource_operation(&json!({"uri":wrapped,"_meta":{"threadId":"host-chat"}})).unwrap(),Operation::ReadObject{space_id,object_id} if space_id=="space-id"&&object_id=="object_id"));
         for uri in ["anyblob://objects/a/b/c","anyblob://objects/a/..","anyblob://objects/a/%62","anyblob://objects/a/b?consent=true","anyblob://objects/a/b#x","anyblob://objects/a/","anyblob://other/a/b","ANYBLOB://objects/a/b","anyblob://objects/a\\b/c","anyblob://objects/a/猫"] {
+            assert!(resource_operation(&json!({"uri":uri})).is_err(),"{uri}");
+        }
+        for uri in [
+            "mcp-resource://other/anyblob%3A%2F%2Fobjects%2Fa%2Fb",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb/extra",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb?consent=true",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb#fragment",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb%3Fconsent%3Dtrue",
+            "mcp-resource://anyblob/anyblob%253A%252F%252Fobjects%252Fa%252Fb",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2F..",
+            "mcp-resource://anyblob/anyblob%3A%2F%2Fobjects%2Fa%2Fb%ZZ",
+        ] {
             assert!(resource_operation(&json!({"uri":uri})).is_err(),"{uri}");
         }
         for key in ["threadId","consent","approval","space_id"] {
@@ -180,20 +309,43 @@ mod tests {
         }
     }
     #[test]
-    fn chat_identity_comes_only_from_host_metadata() {
-        assert_eq!(thread_id(&json!({"_meta":{"threadId":"chat-123"},"arguments":{"threadId":"spoof"}})).unwrap(),Some("chat-123".into()));
-        assert_eq!(thread_id(&json!({"arguments":{"threadId":"spoof"}})).unwrap(),None);
-        for bad in [json!(""),json!(false),json!("../escape"),json!("x".repeat(129))] {
-            assert!(thread_id(&json!({"_meta":{"threadId":bad}})).is_err());
-        }
+    fn requests_have_no_chat_identity_field() {
         assert!(operation("list_spaces",json!({"threadId":"spoof"})).is_err());
+        for key in ["host_id", "project_id", "remoteMembership", "remote_membership"] {
+            let mut arguments = json!({"query":"task"});
+            arguments[key] = json!("spoof");
+            assert!(operation("search_mentions", arguments).is_err(), "{key}");
+        }
+        let request: Request = serde_json::from_value(json!({
+            "id":"request",
+            "token":"a".repeat(64),
+            "request":{"operation":"list_spaces"},
+        })).unwrap();
+        let envelope = serde_json::to_value(&request).unwrap();
+        assert!(envelope.get("thread_id").is_none());
+        assert!(envelope.get("remoteMembership").is_none());
+        assert!(serde_json::from_value::<Request>(json!({
+            "id":"request",
+            "token":"a".repeat(64),
+            "thread_id":"chat-123",
+            "request":{"operation":"list_spaces"}
+        })).is_err());
+        assert!(serde_json::from_value::<Request>(json!({
+            "id":"request",
+            "token":"a".repeat(64),
+            "request":{"operation":"list_spaces"},
+            "remoteMembership":{"hostId":"host_1","projectId":null}
+        })).is_err());
     }
     #[test]
     fn strict_arguments() {
         assert!(operation("search_mentions",json!({"query":"猫"})).is_ok());
+        assert!(operation("authenticate_project",json!({"name":"Work","key":"key"})).is_err());
+        let tool_list=tools();
+        assert!(tool_list.as_array().unwrap().iter().all(|tool| tool["name"] != "authenticate_project"));
         assert!(operation("search_mentions",json!({"query":""})).is_ok());
         assert!(operation("search_mentions",json!({"query":"x".repeat(4097)})).is_err());
-        for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {
+        for extra in [json!({"query":"","threadId":"forged"}),json!({"query":"","host_id":"forged"}),json!({"query":"","project_id":"forged"}),json!({"query":"","remoteMembership":{"hostId":"forged","projectId":"forged"}}),json!({"query":"","remote_membership":{"host_id":"forged","project_id":"forged"}}),json!({"query":"","consent":true}),json!({"query":"","space_id":"override"})] {
             assert!(operation("search_mentions",extra).is_err());
         }
         for name in ["delete_object", "GET", ""] {
@@ -216,5 +368,20 @@ mod tests {
             }
         ));
         assert!(operation("list_spaces", json!({"extra":true})).is_err());
+        assert!(matches!(
+            operation("read_guide", json!({})).unwrap(),
+            Operation::ReadGuide { space_id: None }
+        ));
+        assert!(matches!(
+            operation("read_guide", json!({"space_id":"space-1"})).unwrap(),
+            Operation::ReadGuide { space_id: Some(id) } if id == "space-1"
+        ));
+        for args in [
+            json!({"space_id":""}),
+            json!({"space_id":"../escape"}),
+            json!({"space_id":"s","limit":5}),
+        ] {
+            assert!(operation("read_guide", args).is_err());
+        }
     }
 }

@@ -1,6 +1,7 @@
 param(
     [switch]$s,
-    [switch]$c,
+    [Alias('c', 'close')]
+    [switch]$CloseExisting,
     [Alias('n')]
     [switch]$Onboarding,
     [switch]$b,
@@ -24,8 +25,10 @@ $workspaceRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectDirectory = Join-Path $workspaceRoot 'settings-app'
 $manifestPath = Join-Path $projectDirectory 'Cargo.toml'
 $releaseExecutable = Join-Path $projectDirectory 'target\release\blobui-settings.exe'
+$frontendOutputDirectory = Join-Path $projectDirectory 'frontend-dist'
 $distributionDirectory = Join-Path $projectDirectory 'dist'
 $distributionExecutable = Join-Path $distributionDirectory 'blobui-settings.exe'
+$markdownDirectory = Join-Path $projectDirectory 'markdowns'
 $buildCommit = & git -C $workspaceRoot rev-parse --short HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the local Git commit.' }
 Write-Host "Building blobui-app Dev+$buildCommit"
@@ -34,32 +37,39 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "The BlobUI Settings Rust project was not found: $manifestPath"
 }
 
-if ($c -and $env:BLOBUI_BUILD_ONLY -ne '1') {
-    $oldInstances = @(Get-Process -Name 'blobui-settings', 'settings-app' -ErrorAction SilentlyContinue)
-    $closedInstances = 0
-    foreach ($instance in $oldInstances) {
-        $instancePath = $null
-        try { $instancePath = $instance.Path } catch { }
-        if ([string]::IsNullOrWhiteSpace($instancePath)) {
-            Write-Host "Skipped Settings process $($instance.Id) because its executable path could not be verified."
-            continue
-        }
-        $resolvedInstancePath = [System.IO.Path]::GetFullPath($instancePath)
-        $workspacePrefix = $workspaceRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-        if (-not $resolvedInstancePath.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Write-Host "Skipped Settings process $($instance.Id) outside this workspace."
-            continue
-        }
-        Stop-Process -Id $instance.Id -Force -ErrorAction Stop
-        $instance.WaitForExit()
-        $closedInstances++
+if ($CloseExisting) {
+    if ($env:BLOBUI_BUILD_ONLY -eq '1') {
+        Write-Host 'Skipped closing Settings because BLOBUI_BUILD_ONLY=1.'
     }
-    if ($closedInstances -gt 0) {
-        Write-Host "Closed $closedInstances existing workspace BlobUI Settings instance(s)."
+    else {
+        $oldInstances = @(Get-Process -Name 'blobui-settings', 'settings-app' -ErrorAction SilentlyContinue)
+        $closedInstances = 0
+        foreach ($instance in $oldInstances) {
+            $instancePath = $null
+            try { $instancePath = $instance.Path } catch { }
+            if ([string]::IsNullOrWhiteSpace($instancePath)) {
+                Write-Host "Skipped Settings process $($instance.Id) because its executable path could not be verified."
+                continue
+            }
+            $resolvedInstancePath = [System.IO.Path]::GetFullPath($instancePath)
+            $workspacePrefix = $workspaceRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+            if (-not $resolvedInstancePath.StartsWith($workspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-Host "Skipped Settings process $($instance.Id) outside this workspace."
+                continue
+            }
+            Stop-Process -Id $instance.Id -Force -ErrorAction Stop
+            $instance.WaitForExit()
+            $closedInstances++
+        }
+        if ($closedInstances -gt 0) {
+            Write-Host "Closed $closedInstances existing workspace BlobUI Settings instance(s)."
+        }
+        else {
+            Write-Host 'No running workspace BlobUI Settings instance was closed.'
+        }
     }
 }
 
-& (Join-Path $PSScriptRoot 'Build-Codex.ps1')
 $nodeExecutable = Get-Command node -ErrorAction SilentlyContinue
 $npmExecutable = Get-Command npm -ErrorAction SilentlyContinue
 if ($null -eq $nodeExecutable -or $null -eq $npmExecutable) {
@@ -107,6 +117,83 @@ if ($null -ne $distributionItem -and
     throw "The settings app distribution folder is a reparse point: $distributionDirectory"
 }
 [System.IO.Directory]::CreateDirectory($distributionDirectory) | Out-Null
+
+$sourceDeveloperGuide = Join-Path $markdownDirectory 'dev-guide.md'
+$bundledDeveloperGuide = Join-Path $frontendOutputDirectory 'dev-guide.md'
+if (-not (Test-Path -LiteralPath $sourceDeveloperGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledDeveloperGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle dev-guide.md.'
+}
+$distributionDocumentationDirectory = Join-Path $distributionDirectory 'docs'
+$existingDocumentation = Get-Item -LiteralPath $distributionDocumentationDirectory -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingDocumentation) {
+    $resolvedDistribution = [System.IO.Path]::GetFullPath($distributionDirectory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $resolvedDocumentation = [System.IO.Path]::GetFullPath($distributionDocumentationDirectory)
+    if (-not $resolvedDocumentation.StartsWith($resolvedDistribution, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a documentation folder outside the app distribution: $resolvedDocumentation"
+    }
+    if (($existingDocumentation.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The obsolete Settings documentation folder is a reparse point: $distributionDocumentationDirectory"
+    }
+    $nestedReparsePoints = @(Get-ChildItem -LiteralPath $distributionDocumentationDirectory -Force -Recurse | Where-Object {
+        ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+    })
+    if ($nestedReparsePoints.Count -gt 0) {
+        throw "The obsolete Settings documentation folder contains a reparse point: $($nestedReparsePoints[0].FullName)"
+    }
+    Remove-Item -LiteralPath $distributionDocumentationDirectory -Recurse -Force
+}
+$distributionDeveloperGuide = Join-Path $distributionDirectory 'dev-guide.md'
+$existingDeveloperGuide = Get-Item -LiteralPath $distributionDeveloperGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingDeveloperGuide -and
+    (($existingDeveloperGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app Dev Guide path is a reparse point: $distributionDeveloperGuide"
+}
+Copy-Item -LiteralPath $bundledDeveloperGuide -Destination $distributionDeveloperGuide -Force
+
+$headlessGuide = Join-Path $markdownDirectory 'anyblob-guide.md'
+$bundledHeadlessGuide = Join-Path $frontendOutputDirectory 'anyblob-guide.md'
+if (-not (Test-Path -LiteralPath $headlessGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledHeadlessGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle settings-app/markdowns/anyblob-guide.md.'
+}
+$distributionHeadlessGuide = Join-Path $distributionDirectory 'anyblob-guide.md'
+$existingHeadlessGuide = Get-Item -LiteralPath $distributionHeadlessGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingHeadlessGuide -and
+    (($existingHeadlessGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app Anyblob guide path is a reparse point: $distributionHeadlessGuide"
+}
+Copy-Item -LiteralPath $bundledHeadlessGuide -Destination $distributionHeadlessGuide -Force
+
+foreach ($releaseNotesFile in @('Changelogs.md', 'md-images.yaml')) {
+    $sourceReleaseNotes = Join-Path $markdownDirectory $releaseNotesFile
+    if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
+        throw "The Settings app build is missing its release notes file: $sourceReleaseNotes"
+    }
+    $frontendReleaseNotes = Join-Path $frontendOutputDirectory $releaseNotesFile
+    Copy-Item -LiteralPath $sourceReleaseNotes -Destination $frontendReleaseNotes -Force
+    $distributionReleaseNotes = Join-Path $distributionDirectory $releaseNotesFile
+    $existingReleaseNotes = Get-Item -LiteralPath $distributionReleaseNotes -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existingReleaseNotes -and
+        (($existingReleaseNotes.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "The Settings app release notes path is a reparse point: $distributionReleaseNotes"
+    }
+    Copy-Item -LiteralPath $sourceReleaseNotes -Destination $distributionReleaseNotes -Force
+}
+
+foreach ($directory in @($frontendOutputDirectory, $distributionDirectory)) {
+    $legacyImageManifest = Join-Path $directory 'Changelogs.yaml'
+    $legacyImageManifestItem = Get-Item -LiteralPath $legacyImageManifest -Force -ErrorAction SilentlyContinue
+    if ($null -eq $legacyImageManifestItem) { continue }
+    if (($legacyImageManifestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The obsolete Settings image manifest is a reparse point: $legacyImageManifest"
+    }
+    if ($legacyImageManifestItem.PSIsContainer) {
+        throw "The obsolete Settings image manifest path is a directory: $legacyImageManifest"
+    }
+    Remove-Item -LiteralPath $legacyImageManifest -Force
+}
+
 try {
     Copy-Item -LiteralPath $releaseExecutable -Destination $distributionExecutable -Force
 }
@@ -114,6 +201,27 @@ catch [System.IO.IOException] {
     throw "The app compiled, but its distribution executable could not be replaced. Fully quit BlobUI Settings with Ctrl+Q and rerun this script. Built executable: $releaseExecutable. $($_.Exception.Message)"
 }
 Write-Host "BlobUI Settings was built at $distributionExecutable"
+
+$launcherDirectory = Join-Path $distributionDirectory 'bin'
+$launcherExecutable = Join-Path $launcherDirectory 'blob-ui.exe'
+$developerMarker = Join-Path $distributionDirectory '.blobui-dev-build'
+foreach ($path in @($launcherDirectory, $launcherExecutable, $developerMarker)) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The Settings MCP launcher path is a reparse point: $path"
+    }
+}
+[IO.Directory]::CreateDirectory($launcherDirectory) | Out-Null
+try {
+    [IO.File]::Copy($distributionExecutable, $launcherExecutable, $true)
+}
+catch [System.IO.IOException] {
+    $failure = $_.Exception.GetBaseException()
+    if (($failure.HResult -band 0xffff) -notin @(32, 1224)) { throw }
+    Write-Warning "Could not replace the existing MCP launcher at $launcherExecutable. Close the Codex sessions using it and rebuild to update it. $($_.Exception.Message)"
+}
+[IO.File]::WriteAllText($developerMarker, '')
+
 Write-Host 'Run settings-app/dist/blobui-settings.exe, or package it with scripts/Build-Installer.ps1 -PackageRelease.'
 
 if ($b -and -not $s) {

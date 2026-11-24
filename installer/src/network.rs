@@ -101,10 +101,14 @@ fn validate_tag(tag: &str) -> Result<String, String> {
     {
         return Err("The BlobUI release has an unsafe version tag.".into());
     }
-    let version = tag.strip_prefix('v').unwrap_or(tag);
-    semver::Version::parse(version)
-        .map(|version| version.to_string())
-        .map_err(|_| "The BlobUI release tag is not a supported semantic version.".into())
+    let (version, development) = if let Some(version) = tag.strip_prefix("dev-") {
+        (version, true)
+    } else {
+        (tag.strip_prefix('v').unwrap_or(tag), false)
+    };
+    let version = semver::Version::parse(version)
+        .map_err(|_| "The BlobUI release tag is not a supported semantic version.")?;
+    Ok(if development { format!("dev-{version}") } else { version.to_string() })
 }
 
 fn validate_asset_url(url: &str, tag: &str, name: &str) -> Result<(), String> {
@@ -307,6 +311,7 @@ mod tests {
     #[test]
     fn release_tags_are_semantic_versions_and_asset_urls_are_exact() {
         assert_eq!(validate_tag("v1.2.3").unwrap(), "1.2.3");
+        assert_eq!(validate_tag("dev-1.2.3").unwrap(), "dev-1.2.3");
         assert!(validate_tag("../latest").is_err());
         assert!(validate_tag("1.2").is_err());
         assert!(validate_asset_url(

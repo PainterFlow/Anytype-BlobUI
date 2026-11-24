@@ -258,6 +258,10 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         accent_color: "#27A879".into(),
         accent_mode: "custom".into(),
         accent_preset: String::new(),
+        enable_custom_themes: true,
+        based_theme: "auto".into(),
+        theme_preset: String::new(),
+        theme_color: "#191918".into(),
         include_selections: true,
         banner_image: "data:image/png;base64,iVBORw0KGgo=".into(),
         reduced_motion: false,
@@ -273,20 +277,24 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");
     let saved_data = read_json_file(&data_path).unwrap();
-    assert_eq!(saved_data["settingsV2"]["version"], 2);
-    assert_eq!(saved_data["settingsV2"]["settings"]["accentColor"], "#27A879");
-    assert_eq!(saved_data["settingsV2"]["settings"]["reducedMotion"], false);
-    assert_eq!(saved_data["settingsV2"]["settings"]["kanbanViewStyle"], "compact");
-    assert_eq!(saved_data["settingsV2"]["settings"]["collapsedCategories"], true);
+    assert!(saved_data.get("settingsV2").is_none());
+    assert_eq!(saved_data["settings"]["accentColor"], "#27A879");
+    assert_eq!(saved_data["settings"]["enableCustomThemes"], true);
+    assert_eq!(saved_data["settings"]["basedTheme"], "auto");
+    assert_eq!(saved_data["settings"]["themeColor"], "#191918");
+    assert_eq!(saved_data["settings"]["reducedMotion"], false);
+    assert_eq!(saved_data["settings"]["kanbanViewStyle"], "compact");
+    assert_eq!(saved_data["settings"]["collapsedCategories"], true);
     let restored = settings_from_data(&saved_data);
     assert_eq!(restored.kanban_view_style, "compact");
     assert!(restored.collapsed_categories);
-    assert_eq!(saved_data["settingsV2"]["settings"]["tabHoverEffect"], true);
-    assert_eq!(saved_data["settingsV2"]["settings"]["bannerImage"], draft.banner_image);
+    assert_eq!(saved_data["settings"]["tabHoverEffect"], true);
+    assert_eq!(saved_data["settings"]["bannerImage"], draft.banner_image);
     assert_eq!(saved_data["settings"]["fontFamily"], "Inter");
     assert_eq!(saved_data["calendarObjectColors"]["fixture-event"], "Green");
     let saved_css = fs::read_to_string(&css_path).unwrap();
     assert!(saved_css.contains("#27A879"));
+    assert!(saved_css.contains("--color-bg-primary: #191918;"));
     assert!(saved_css.contains("Cascadia Code"));
     assert!(saved_css.contains("url(\"data:image/png;base64,iVBORw0KGgo=\")"));
     assert!(saved_css.contains("fixture-event"));
@@ -368,6 +376,117 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
     let canonical_fixture = fixture.canonicalize().unwrap();
     assert!(canonical_fixture.starts_with(fixture_parent.canonicalize().unwrap()));
     fs::remove_dir_all(canonical_fixture).unwrap();
+}
+
+#[test]
+fn theme_reload_rebuilds_both_css_outputs_from_the_current_preset_without_changing_settings() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixture = source.join(".test-run").join(format!(
+        "theme-reload-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    let install = fixture.join("Anytype data");
+    let runtime = fixture.join("runtime");
+    let settings = install.join("Settings");
+    let theme_directory = themes::theme_directory(&settings);
+    fs::create_dir_all(install.join("blob")).unwrap();
+    fs::create_dir_all(&theme_directory).unwrap();
+    copy_tree(&source.join("Dev"), &runtime.join("Dev"));
+    copy_tree(&source.join("assets"), &runtime.join("assets"));
+    let preset = "/*\nname: Reload Fixture\nauthor: Test\n*/\nhtml.themeDark { --color-bg-primary: #101010; }";
+    fs::write(theme_directory.join("reload-fixture.css"), preset).unwrap();
+    let mut draft = SettingsDraft::default();
+    draft.enable_custom_themes = true;
+    draft.based_theme = "dark".into();
+    draft.theme_preset = "reload-fixture.css".into();
+    draft.include_selections = false;
+    let data = json!({"installDirectory": install.to_string_lossy(), "settings": draft});
+    let data_path = install.join("blob/data.json");
+    let original_data = serde_json::to_vec_pretty(&data).unwrap();
+    fs::write(&data_path, &original_data).unwrap();
+    let css_path = install.join("custom.css");
+    fs::write(&css_path, b"stale custom css").unwrap();
+    fs::write(settings.join("themes/generated.css"), b"stale generated theme css").unwrap();
+
+    let _environment_lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _environment = EnvironmentGuard::set(&[
+        ("BLOBUI_INSTALL_DIRECTORY", &install),
+        ("BLOBUI_SOURCE_DIRECTORY", &runtime),
+    ]);
+    let result = reload_custom_themes_blocking().expect("theme reload should rebuild saved CSS");
+    assert!(result.css_rebuilt, "{:?}", result.state.theme_diagnostics);
+    assert_eq!(fs::read(&data_path).unwrap(), original_data, "Reload must not rewrite settings");
+    assert!(fs::read_to_string(&css_path).unwrap().contains("--color-bg-primary: #101010"));
+    assert!(fs::read_to_string(settings.join("themes/generated.css")).unwrap().contains("--color-bg-primary: #101010"));
+    assert!(result.state.custom_themes.iter().any(|theme| theme.id == "reload-fixture.css"));
+
+    fs::remove_file(theme_directory.join("reload-fixture.css")).unwrap();
+    let deleted = reload_custom_themes_blocking().expect("deleting the selected theme should fall back to the base theme");
+    assert!(deleted.css_rebuilt, "{:?}", deleted.state.theme_diagnostics);
+    assert_eq!(deleted.state.settings.theme_preset, "");
+    assert!(deleted.state.theme_diagnostics.is_empty(), "{:?}", deleted.state.theme_diagnostics);
+    assert_eq!(fs::read(&data_path).unwrap(), original_data, "Reload must not rewrite settings");
+    let fallback_css = fs::read_to_string(&css_path).unwrap();
+    assert!(fallback_css.contains("--color-bg-primary: #191918;"));
+    assert!(!fallback_css.contains("--color-bg-primary: #101010;"));
+    assert!(fallback_css.contains("--color-control-accent: #D4D4D4;"));
+
+    let previous_css = fs::read(&css_path).unwrap();
+    let generated_path = settings.join("themes/generated.css");
+    fs::remove_file(&generated_path).unwrap();
+    fs::create_dir(&generated_path).unwrap();
+    fs::write(generated_path.join("keep.txt"), b"transaction sentinel").unwrap();
+    let failed = reload_custom_themes_blocking().expect("reload errors should be returned with diagnostics");
+    assert!(!failed.css_rebuilt);
+    assert_eq!(fs::read(&css_path).unwrap(), previous_css, "A failed two-file replacement must preserve custom.css");
+    assert_eq!(fs::read(generated_path.join("keep.txt")).unwrap(), b"transaction sentinel");
+    assert!(failed.state.theme_diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic.level, themes::ThemeDiagnosticLevel::Error)
+            && diagnostic.message.contains("Custom theme CSS could not be rebuilt.")
+    }));
+
+    drop(_environment);
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+fn app_state_reports_an_invalid_selected_theme_diagnostic_once() {
+    let _lock = ENVIRONMENT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let fixture = source.join(".test-run").join(format!(
+        "theme-diagnostic-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    let install = fixture.join("Anytype");
+    let blob = install.join("blob");
+    let theme_directory = install.join("Settings/themes/built-in-themes");
+    fs::create_dir_all(&blob).unwrap();
+    fs::create_dir_all(&theme_directory).unwrap();
+    fs::write(blob.join("data.json"), serde_json::to_vec(&json!({
+        "settings": {
+            "enableCustomThemes": true,
+            "basedTheme": "dark",
+            "themePreset": "weqlkjew.css",
+            "themeColor": "#191918"
+        }
+    })).unwrap()).unwrap();
+    fs::write(
+        theme_directory.join("weqlkjew.css"),
+        "/*\nname: Broken\nauthor: Test\nbased-theme: Dwe\n*/\n:root {}",
+    ).unwrap();
+
+    let _environment = EnvironmentGuard::set(&[("BLOBUI_INSTALL_DIRECTORY", &install)]);
+    let state = load_app_state().unwrap();
+    let based_theme_errors = state.theme_diagnostics.iter().filter(|diagnostic| {
+        diagnostic.message == "weqlkjew.css:4:14: Expected `Dark Mode` or `Light Mode` for `based-theme`."
+            && matches!(diagnostic.level, themes::ThemeDiagnosticLevel::Error)
+    }).count();
+    assert_eq!(based_theme_errors, 1, "{:?}", state.theme_diagnostics);
+
+    drop(_environment);
+    fs::remove_dir_all(fixture).unwrap();
 }
 
 #[test]
@@ -477,7 +596,7 @@ fn native_connection_uses_custom_ip_and_port_and_rolls_back_failures() {
 
     // Calendar opt-out still verifies a connection but never fetches colors.
     let mut off_data = read_json_file(&data_path).unwrap();
-    off_data["settingsV2"]["settings"]["calendarColorsEnabled"] = json!(false);
+    off_data["settings"]["calendarColorsEnabled"] = json!(false);
     fs::write(&data_path, serde_json::to_vec(&off_data).unwrap()).unwrap();
     let (port, server) = mock_api_server("127.0.0.2", "fixture-key-two", vec![(200, json!({"data": []}))]);
     let off_result = configure_connection_blocking(ConnectionDraft {

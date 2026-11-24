@@ -1,6 +1,7 @@
 //! Allowlisted v2 content operations shared by the MCP host and the BlobUI bridge.
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,10 +41,13 @@ impl ContentRequest {
         self.specification()
             .is_ok_and(|s| s["irreversible"] == true)
     }
-    /// Creation, deletion and uploads always need one-shot confirmation.
+    /// Read-only and validation-only requests never require confirmation.
     pub fn requires_confirmation(&self, approval: &str) -> bool {
-        approval == "alwaysAsk" || self.irreversible()
-            || (approval == "approveForMe" && self.capability() == "createDelete")
+        self.mutates()
+            && self.arguments["dry_run"] != true
+            && (approval == "alwaysAsk"
+                || self.irreversible()
+                || (approval == "approveForMe" && self.capability() == "createDelete"))
     }
     pub fn capability(&self) -> &str {
         fn contains_views(value: &Value) -> bool {
@@ -88,16 +92,26 @@ impl ContentRequest {
             }
         }
         validate_schema(&spec["schema"], &self.arguments, "arguments")?;
+        if matches!(
+            self.tool.as_str(),
+            "list_objects" | "get_collection_objects" | "get_query_objects"
+        )
+            && self.arguments["fields"]
+                .as_str()
+                .is_some_and(|fields| fields.split(',').any(|field| field.trim() == "markdown"))
+        {
+            return Err("fields accepts Anytype property keys, not Markdown content. Use read_object to retrieve an object's Markdown.".into());
+        }
         if let Some(destination) = self.arguments.get("destination") {
             let id = destination["id"].as_str().ok_or("Missing destination ID.")?;
             if matches!(id, "." | "..") || !id.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)) {
                 return Err("Invalid destination ID.".into());
             }
             if self.arguments["idempotency_key"].as_str().is_none() {
-                return Err("Scoped creation requires a caller-supplied idempotency_key.".into());
+                return Err("Creating in a collection or query requires a caller-supplied idempotency_key.".into());
             }
             if self.arguments["create_missing_options"] == true {
-                return Err("Scoped creation cannot create select options.".into());
+                return Err("Select options cannot be created as destination objects.".into());
             }
         }
         if self.arguments.to_string().len() > 11 * 1024 * 1024 {
@@ -180,7 +194,78 @@ impl ContentRequest {
     }
 }
 pub fn tools() -> Vec<Value> {
-    catalog().iter().map(|s| json!({"name":s["name"],"description":s["description"],"inputSchema":s["schema"],"annotations":{"readOnlyHint":s["capability"]=="read","destructiveHint":s["capability"]!="read","idempotentHint":s["method"]=="GET","openWorldHint":s["name"]=="upload_file"}})).collect()
+    catalog().iter().map(|s| json!({"name":s["name"],"description":s["description"],"inputSchema":advertised_schema(&s["schema"]),"annotations":{"readOnlyHint":s["capability"]=="read","destructiveHint":s["capability"]!="read","idempotentHint":s["method"]=="GET","openWorldHint":s["name"]=="upload_file"}})).collect()
+}
+
+// Codex budgets the full model-facing tool catalog. Keep detailed v2 schema
+// prose in the schema tools and share identical validation rules within a tool.
+fn advertised_schema(source: &Value) -> Value {
+    let mut schema = source.clone();
+    visit_schema(&mut schema, &mut |schema| {
+        if let Some(fields) = schema.as_object_mut() {
+            fields.remove("description");
+        }
+    });
+
+    let mut definitions = Map::new();
+    loop {
+        let mut repeated = BTreeMap::new();
+        let mut count = |schema: &mut Value| {
+            let encoded = schema.to_string();
+            if encoded.len() >= 100 {
+                *repeated.entry(encoded).or_insert(0usize) += 1;
+            }
+        };
+        visit_schema(&mut schema, &mut count);
+        for definition in definitions.values_mut() {
+            visit_schema(definition, &mut count);
+        }
+        let Some((encoded, _)) = repeated
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .max_by_key(|(encoded, count)| (encoded.len() - 50) * (count - 1))
+        else {
+            break;
+        };
+        let name = format!("rule{}", definitions.len() + 1);
+        let definition: Value = serde_json::from_str(&encoded).expect("serialized schema");
+        let reference = json!({"$ref": format!("#/$defs/{name}")});
+        let mut replace = |schema: &mut Value| {
+            if *schema == definition {
+                *schema = reference.clone();
+            }
+        };
+        visit_schema(&mut schema, &mut replace);
+        for definition in definitions.values_mut() {
+            visit_schema(definition, &mut replace);
+        }
+        definitions.insert(name, definition);
+    }
+    if !definitions.is_empty() {
+        schema["$defs"] = Value::Object(definitions);
+    }
+    schema
+}
+
+fn visit_schema(schema: &mut Value, visit: &mut impl FnMut(&mut Value)) {
+    visit(schema);
+    for key in ["items", "additionalProperties", "not"] {
+        if let Some(child) = schema.get_mut(key) {
+            visit_schema(child, visit);
+        }
+    }
+    for key in ["oneOf", "anyOf", "allOf"] {
+        if let Some(children) = schema.get_mut(key).and_then(Value::as_array_mut) {
+            for child in children {
+                visit_schema(child, visit);
+            }
+        }
+    }
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        for child in properties.values_mut() {
+            visit_schema(child, visit);
+        }
+    }
 }
 /// Validate structural JSON Schema rules locally. The connected server remains authoritative
 /// for semantic rules, patterns, formats and reference resolution, using dry_run before writes.
@@ -292,6 +377,27 @@ pub fn validate_schema(schema: &Value, value: &Value, path: &str) -> Result<(), 
 mod tests {
     use super::*;
     #[test]
+    fn advertised_schemas_preserve_validation_rules() {
+        for tool in catalog() {
+            let mut expected = tool["schema"].clone();
+            visit_schema(&mut expected, &mut |schema| {
+                if let Some(fields) = schema.as_object_mut() {
+                    fields.remove("description");
+                }
+            });
+            let mut advertised = advertised_schema(&tool["schema"]);
+            let definitions = advertised.as_object_mut().unwrap().remove("$defs");
+            visit_schema(&mut advertised, &mut |schema| {
+                while let Some(reference) = schema["$ref"].as_str() {
+                    let key = reference.strip_prefix("#/$defs/").unwrap();
+                    *schema = definitions.as_ref().unwrap().get(key).unwrap().clone();
+                }
+            });
+            assert_eq!(advertised, expected, "{}", tool["name"]);
+        }
+    }
+
+    #[test]
     fn pagination_schema_matches_runtime_bounds() {
         let advertised = tools();
         for spec in catalog() {
@@ -331,6 +437,31 @@ mod tests {
         assert!(error.contains("integer from 0 through 2147483647"), "{error}");
     }
     #[test]
+    fn list_objects_rejects_markdown_as_a_property_key_before_dispatch() {
+        for (tool, mut arguments) in [
+            ("list_objects", json!({"space_id":"s"})),
+            (
+                "get_collection_objects",
+                json!({"space_id":"s","collection_id":"collection"}),
+            ),
+            ("get_query_objects", json!({"space_id":"s","query_id":"query"})),
+        ] {
+            arguments["fields"] = json!("name, markdown");
+            let error = crate::operation(
+                tool,
+                arguments,
+            )
+            .unwrap_err();
+            assert!(error.contains("property keys, not Markdown content"), "{error}");
+            assert!(error.contains("read_object"), "{error}");
+        }
+        assert!(crate::operation(
+            "list_objects",
+            json!({"space_id":"s", "fields":"name,artist"}),
+        )
+        .is_ok());
+    }
+    #[test]
     fn creation_deletion_and_uploads_always_require_confirmation() {
         for spec in catalog() {
             let request = ContentRequest {
@@ -340,8 +471,11 @@ mod tests {
             assert_eq!(request.requires_confirmation("approveForMe"),
                 spec["capability"] == "createDelete" || spec["irreversible"] == true,
                 "{}", request.tool);
-            assert_eq!(request.requires_confirmation("fullAccess"), spec["irreversible"] == true);
-            assert!(request.requires_confirmation("alwaysAsk"));
+            assert_eq!(request.requires_confirmation("fullAccess"),
+                spec["capability"] != "read" && spec["irreversible"] == true,
+                "{}", request.tool);
+            assert_eq!(request.requires_confirmation("alwaysAsk"),
+                spec["capability"] != "read", "{}", request.tool);
         }
         for op in ["insert_view", "delete_view"] {
             let request = ContentRequest {
@@ -350,6 +484,32 @@ mod tests {
             };
             assert!(request.requires_confirmation("approveForMe"));
         }
+    }
+    #[test]
+    fn dry_run_content_operations_do_not_require_confirmation() {
+        let crate::Operation::Content { content: dry_run } = crate::operation(
+            "create_object",
+            json!({"space_id":"s","body":{"type":"page","name":"preview"},"dry_run":true}),
+        )
+        .unwrap() else {
+            panic!("create_object must produce a content request")
+        };
+        let crate::Operation::Content { content: mutation } = crate::operation(
+            "create_object",
+            json!({"space_id":"s","body":{"type":"page","name":"preview"}}),
+        )
+        .unwrap() else {
+            panic!("create_object must produce a content request")
+        };
+
+        for approval in ["alwaysAsk", "approveForMe", "fullAccess"] {
+            assert!(
+                !dry_run.requires_confirmation(approval),
+                "dry_run unexpectedly requested confirmation under {approval}"
+            );
+        }
+        assert!(mutation.requires_confirmation("alwaysAsk"));
+        assert!(mutation.requires_confirmation("approveForMe"));
     }
     #[test]
     fn catalog_has_no_arbitrary_routes_or_admin_tools() {

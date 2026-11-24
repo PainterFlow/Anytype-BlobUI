@@ -1,19 +1,29 @@
 import React, { useEffect, useState } from "react";
+import { FormulaPageView } from "../formula-page.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import {
   Button,
   SettingsGroup,
   SettingsHeading,
+  SettingsRow,
   SettingsSection,
   Switch,
   TextField,
 } from "../shared/settings-controls.jsx";
 import { Tabs } from "../shared/tabs.jsx";
+import { CalendarColors } from "./calendar-colors.jsx";
 
-export const preferenceLabels = ["Accent", "Kanban", "Calendar", "Typography", "Space banner"];
-const preferenceTabs = preferenceLabels.map((title, index) => ({
-  title, tabId: `preference-tab-${index}`, panelId: `preference-panel-${index}`,
-}));
+export const preferenceLabels = ["Colors", "Font", "Space Banner"];
+
+function tabItems(prefix, labels) {
+  return labels.map((title, index) => ({
+    title, tabId: `${prefix}-tab-${index}`, panelId: `${prefix}-panel-${index}`,
+  }));
+}
+
+const preferenceTabs = tabItems("preference", preferenceLabels);
+const calendarTabs = tabItems("calendar-events", ["Appearance", "Color by property"]);
+const kanbanTabs = tabItems("kanban-views", ["Appearance", "Kanban Calculations"]);
 
 function hasValue(values, key) {
   return Object.prototype.hasOwnProperty.call(values, key);
@@ -40,12 +50,70 @@ function settingSwitch(values, onChange, id, label, className, description, inpu
   return <Switch {...props} />;
 }
 
-function ColorPlane() {
-  return <div className="color-plane" id="color-plane" role="group" aria-label="Color saturation and brightness">
-    <span className="color-cursor" id="color-cursor" aria-hidden="true" />
-    <input className="sr-only" id="accent-saturation" type="range" min="0" max="100" defaultValue="64" aria-label="Color saturation" />
-    <input className="sr-only" id="accent-brightness" type="range" min="0" max="100" defaultValue="87" aria-label="Color brightness" />
+function ColorPlane({ id = "color-plane", cursorId = "color-cursor", saturationId = "accent-saturation", brightnessId = "accent-brightness", label = "Color saturation and brightness", disabled = false }) {
+  return <div className="color-plane" id={id} role="group" aria-label={label} aria-disabled={disabled}>
+    <span className="color-cursor" id={cursorId} aria-hidden="true" />
+    <input className="sr-only" id={saturationId} type="range" min="0" max="100" defaultValue="64" aria-label="Color saturation" />
+    <input className="sr-only" id={brightnessId} type="range" min="0" max="100" defaultValue="87" aria-label="Color brightness" />
   </div>;
+}
+
+const basedThemeOptions = [
+  { value: "auto", label: "Auto" },
+  { value: "light", label: "Light Mode" },
+  { value: "dark", label: "Dark Mode" },
+  { value: "inherit", label: "Don't Override" },
+];
+
+function CustomThemes({ values, onChange, themes = [], disabled = false }) {
+  const customThemesEnabled = values["enable-custom-themes"] === true;
+  const themeControlsDisabled = disabled || !customThemesEnabled;
+  const selectedTheme = values["custom-theme"] || "";
+  const hasSelectedTheme = !selectedTheme || themes.some(theme => theme.id === selectedTheme);
+  const options = [
+    { value: "", label: "None" },
+    ...themes.map(theme => ({ value: theme.id, label: theme.name })),
+    ...(!hasSelectedTheme ? [{ value: selectedTheme, label: `Missing theme (${selectedTheme})` }] : []),
+  ];
+  const inputValue = (id, fallback) => {
+    if (!Object.prototype.hasOwnProperty.call(values, id)) return fallback;
+    return { ...fallback, value: values[id], onChange: event => onChange?.(id, event.currentTarget.value, event) };
+  };
+
+  return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
+    <SettingsHeading id="custom-themes-heading" title="Custom Themes" />
+    <SettingsGroup className="settings-list custom-theme-list">
+      <Switch id="enable-custom-themes" label="Enable Custom Themes" className="kanban-setting-row native-accent-control settings-row"
+        checked={customThemesEnabled} disabled={disabled} onChange={checked => onChange?.("enable-custom-themes", checked)} />
+      <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Based Theme">
+        <SelectPicker id="based-theme" rootId="based-theme-select" menuId="based-theme-options"
+          label="Based Theme" value={values["based-theme"] || "auto"} options={basedThemeOptions} disabled={themeControlsDisabled}
+          onChange={value => onChange?.("based-theme", value)} fixed />
+      </SettingsRow>
+      <SettingsRow className="kanban-setting-row custom-theme-select-row" label="Preset Themes">
+        <SelectPicker id="custom-theme" rootId="custom-theme-select" menuId="custom-theme-options"
+          label="Preset Themes" value={selectedTheme} options={options} disabled={themeControlsDisabled}
+          emptyMessage="No theme files were found." onChange={value => onChange?.("custom-theme", value)} fixed />
+      </SettingsRow>
+      <div className="custom-theme-color-row" aria-disabled={themeControlsDisabled}>
+        <div className="kanban-setting-copy"><span className="kanban-setting-title">Main color</span></div>
+        <div id="theme-color-editor" className="color-editor custom-theme-color-editor">
+          <ColorPlane id="theme-color-plane" cursorId="theme-color-cursor" saturationId="theme-color-saturation" brightnessId="theme-color-brightness" label="Theme color saturation and brightness" disabled={themeControlsDisabled} />
+          <div className="color-controls">
+            <label className="hue-field" htmlFor="theme-color-hue">Hue</label>
+            <input id="theme-color-hue" className="hue-slider" type="range" min="0" max="359" defaultValue="12" aria-label="Theme color hue" />
+            <label className="color-value-label" htmlFor="theme-color-value">Hex color</label>
+            <div className="color-value-row">
+              <span id="theme-color-swatch" className="accent-swatch" aria-hidden="true" />
+              <input id="theme-color-value" className="color-text-input" type="text" spellCheck="false" autoComplete="off"
+                aria-describedby="theme-color-error" {...inputValue("theme-color-value", {})} />
+            </div>
+          </div>
+        </div>
+        <p className="field-error" id="theme-color-error" aria-live="polite" />
+      </div>
+    </SettingsGroup>
+  </SettingsSection>;
 }
 
 const boardLayouts = [
@@ -76,11 +144,7 @@ function SpaceBannerPreview() {
   </div>;
 }
 
-export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, onOpenCalendar, calendarLocked,
-  kanbanStyle = "default", onKanbanStyleChange, kanbanStyleDisabled, formulaController,
-}) {
-  const [formula, setFormula] = useState(() => formulaController?.getSnapshot());
-  useEffect(() => formulaController?.subscribe(setFormula), [formulaController]);
+export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, customThemes = [], customThemeDisabled = false }) {
   const inputValue = (id, fallbackProps) => {
     if (!hasValue(values, id)) return fallbackProps;
     if (onChange) return { ...fallbackProps, value: values[id], onChange: event => onChange(id, event.currentTarget.value, event) };
@@ -90,7 +154,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
   return <Tabs label="Preferences" className="advanced-tabs preference-tabs" items={preferenceTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection className="settings-group accent-group" aria-labelledby="accent-heading">
-      <SettingsHeading id="accent-heading" title="Accent color" description="Choose a color for highlights and active controls." />
+      <SettingsHeading id="accent-heading" title="Accent Color" description="Choose a color for highlights and active controls." />
       <SettingsGroup>
         {settingSwitch(values, onChange, "include-selections", "Include selections", undefined, {
           id: "include-selections-help",
@@ -111,37 +175,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
         </div>
       </SettingsGroup>
       <p className="field-error" id="accent-error" aria-live="polite" />
-    </SettingsSection>
-
-    <SettingsSection aria-labelledby="kanban-heading">
-      <SettingsHeading id="kanban-heading" title="Kanban views" description="Choose how boards are displayed." />
-      <SettingsGroup className="settings-list kanban-settings-list">
-        <div className="kanban-setting-row kanban-style-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description">Choose the spacing used on inline and full-page boards.</span></div>
-          <SelectPicker id="kanban-view-style" rootId="kanban-select" menuId="kanban-style-options"
-            label="Board layout" labelId="kanban-style-label" valueId="kanban-style-value" descriptionId="kanban-style-help"
-            options={boardLayouts} value={kanbanStyle} disabled={kanbanStyleDisabled} onChange={onKanbanStyleChange} />
-        </div>
-        <div className="kanban-setting-row formula-display-row">
-          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description">Choose where category calculation results appear.</span></div>
-          <SelectPicker id="formula-display" rootId="formula-display-select" menuId="formula-display-options"
-            label="Display formulas" labelId="formula-display-label" valueId="formula-display-value" descriptionId="formula-display-help"
-            options={formulaLayouts} value={formula?.display ?? "balanced"} disabled={formula?.locked}
-            onChange={value => formulaController?.setDisplay(value)} />
-        </div>
-        {settingSwitch(values, onChange, "collapsed-categories", "Collapsed Categories", "native-accent-control settings-row kanban-setting-row", undefined, { "aria-describedby": "kanban-collapse-help" })}
-      </SettingsGroup>
-      <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
-      <Button id="open-formulas" className="formula-button view-open-button button-label-centered">Kanban View Formulas</Button>
-    </SettingsSection>
-
-    <SettingsSection aria-labelledby="calendar-heading">
-      <SettingsHeading id="calendar-heading" title="Calendar" description="Color calendar objects by a property or their Calendar Color value." />
-      <SettingsGroup>
-        {settingSwitch(values, onChange, "calendar-colors-enabled", "Calendar Colors", undefined, undefined, { defaultChecked: true, disabled: true, "aria-describedby": "calendar-colors-help" })}
-      </SettingsGroup>
-      <Button id="open-calendar-colors" className="formula-button view-open-button" disabled={calendarLocked} onClick={onOpenCalendar}>Color by Property</Button>
-      <p id="calendar-colors-help" className="kanban-collapse-help" role="status" aria-live="polite" hidden />
+      <CustomThemes values={values} onChange={onChange} themes={customThemes} disabled={customThemeDisabled} />
     </SettingsSection>
 
     <SettingsSection className="settings-group typography-group" aria-labelledby="typography-heading">
@@ -154,7 +188,7 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
     </SettingsSection>
 
     <SettingsSection className="settings-group space-banner-group" aria-labelledby="space-banner-heading">
-      <SettingsHeading id="space-banner-heading" title="Space banner" description="Choose an image to show at the top of your Anytype sidebar." />
+      <SettingsHeading id="space-banner-heading" title="Space Banner" description="Choose an image to show at the top of your Anytype sidebar." />
       <div className="space-banner-controls">
         <div className="space-banner-actions">
           <Button id="choose-banner-image" className="banner-image-button">Choose image</Button>
@@ -165,6 +199,59 @@ export function Preferences({ values = {}, onChange, selectedTab, onSelectTab, o
         <SpaceBannerPreview />
         <p id="banner-image-status" className="space-banner-status" role="status" aria-live="polite" />
       </div>
+    </SettingsSection>
+  </Tabs>;
+}
+
+export function CalendarEvents({ values = {}, onChange, selectedTab, onSelectTab, controller }) {
+  return <Tabs label="Calendar Events" className="advanced-tabs" items={calendarTabs}
+    selected={selectedTab} onSelect={onSelectTab} useChildPanels>
+    <SettingsSection aria-labelledby="calendar-general-heading">
+      <SettingsHeading id="calendar-general-heading" title="General" />
+      <SettingsGroup>
+        {settingSwitch(values, onChange, "calendar-colors-enabled", "Calendar Colors", undefined, undefined, {
+          defaultChecked: true, disabled: true, "aria-describedby": "calendar-colors-help",
+        })}
+      </SettingsGroup>
+      <p id="calendar-colors-help" className="kanban-collapse-help" role="status" aria-live="polite" hidden />
+    </SettingsSection>
+    <SettingsSection aria-label="Color by property">
+      <CalendarColors controller={controller} />
+    </SettingsSection>
+  </Tabs>;
+}
+
+export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, kanbanStyle = "default",
+  onKanbanStyleChange, kanbanStyleDisabled, formulaController,
+}) {
+  const [formula, setFormula] = useState(() => formulaController?.getSnapshot());
+  useEffect(() => formulaController?.subscribe(setFormula), [formulaController]);
+
+  return <Tabs label="Kanban Views" className="advanced-tabs" items={kanbanTabs}
+    selected={selectedTab} onSelect={onSelectTab} useChildPanels>
+    <SettingsSection aria-labelledby="kanban-general-heading">
+      <SettingsHeading id="kanban-general-heading" title="General" />
+      <SettingsGroup className="settings-list kanban-settings-list">
+        <div className="kanban-setting-row kanban-style-row">
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Board layout</span><span id="kanban-style-help" className="kanban-setting-description settings-row-description">Choose the spacing used on inline and full-page boards.</span></div>
+          <SelectPicker id="kanban-view-style" rootId="kanban-select" menuId="kanban-style-options"
+            label="Board layout" labelId="kanban-style-label" valueId="kanban-style-value" descriptionId="kanban-style-help"
+            options={boardLayouts} value={kanbanStyle} disabled={kanbanStyleDisabled} onChange={onKanbanStyleChange} />
+        </div>
+        <div className="kanban-setting-row formula-display-row">
+          <div className="kanban-setting-copy"><span className="kanban-setting-title">Display formulas</span><span id="formula-display-help" className="kanban-setting-description settings-row-description">Choose where category calculation results appear.</span></div>
+          <SelectPicker id="formula-display" rootId="formula-display-select" menuId="formula-display-options"
+            label="Display formulas" labelId="formula-display-label" valueId="formula-display-value" descriptionId="formula-display-help"
+            options={formulaLayouts} value={formula?.display ?? "balanced"} disabled={formula?.locked}
+            onChange={value => formulaController?.setDisplay(value)} />
+        </div>
+        {settingSwitch(values, onChange, "collapsed-categories", "Collapsed Categories", "native-accent-control settings-row kanban-setting-row", undefined, { "aria-describedby": "kanban-collapse-help" })}
+      </SettingsGroup>
+      <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
+    </SettingsSection>
+    <SettingsSection className="settings-group kanban-calculations-page" aria-label="Kanban Calculations">
+      <SettingsHeading title="Kanban calculations" help="Calculations use the optional Anytype Local API v2 connection. Saved results are snapshots until you save or reload Settings and rebuild in Anytype." />
+      <FormulaPageView controller={formulaController} />
     </SettingsSection>
   </Tabs>;
 }

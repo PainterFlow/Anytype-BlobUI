@@ -35,10 +35,7 @@ fn normalized_file_type_ids_still_require_file_permission() {
         page(json!([{"key":"file","id":"file-object-id"}])),
         page(json!([])),
     ]);
-    assert!(dispatch(
-        &client,
-        "file-type",
-        &project(source("query", "createDelete")),
+    assert!(dispatch_global(&client, &configuration("createDelete"),
         &request,
         &|| Ok(()),
         &|_, _| Ok(())
@@ -63,10 +60,7 @@ fn canonical_type_changes_before_dispatch_prevent_creation() {
     renamed["type_settings"]["api_key"] = json!("renamed-task");
     responses.push(renamed);
     let (client, capture, server) = fixture(responses);
-    assert!(dispatch(
-        &client,
-        "renamed-type",
-        &project(source("query", "createDelete")),
+    assert!(dispatch_global(&client, &configuration("createDelete"),
         &captured_request(),
         &|| Ok(()),
         &|_, _| Ok(())
@@ -107,6 +101,7 @@ fn captured_request() -> ContentRequest {
 #[test]
 fn captured_v2_shape_supports_discovery_without_export_legends() {
     let mut responses = vec![
+        page(json!([{"id":"dest","type":"set","name":"Tasks"}])),
         captured_query(),
         captured_views(true),
         captured_properties(),
@@ -118,10 +113,7 @@ fn captured_v2_shape_supports_discovery_without_export_legends() {
         tool: "list_creation_targets".into(),
         arguments: json!({"space_id":"s"}),
     };
-    let answer = dispatch(
-        &client,
-        "captured-discovery",
-        &project(source("query", "createDelete")),
+    let answer = dispatch_global(&client, &configuration("createDelete"),
         &request,
         &|| Ok(()),
         &|_, _| Ok(()),
@@ -140,12 +132,15 @@ fn captured_v2_shape_supports_discovery_without_export_legends() {
         .lock()
         .unwrap()
         .iter()
-        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+        .all(|r| {
+            let request = String::from_utf8_lossy(r);
+            request.starts_with("GET ") || request.starts_with("POST /v2/spaces/s/search")
+        }));
 }
 
 #[test]
 fn captured_request_creates_once_with_canonical_type_then_uses_normal_access() {
-    let p = project(source("query", "createDelete"));
+    let p = configuration("createDelete");
     let request = captured_request();
     let mut responses = vec![captured_query(), captured_views(true)];
     responses.extend(captured_assessment());
@@ -163,16 +158,9 @@ fn captured_request_creates_once_with_canonical_type_then_uses_normal_access() {
         page(json!([{"id":"tasks"}])),
         page(json!([{"id":"created-task"}])),
     ]);
-    responses.extend(vec![
-        page(json!([{"id":"tasks"}])),
-        page(json!([{"id":"created-task"}])),
-    ]);
     responses.extend(normal_access_responses("created-task"));
     let (client, capture, server) = fixture(responses);
-    let answer = dispatch(
-        &client,
-        "captured-create",
-        &p,
+    let answer = dispatch_global(&client, &p,
         &request,
         &|| Ok(()),
         &|_, _| Ok(()),
@@ -180,8 +168,7 @@ fn captured_request_creates_once_with_canonical_type_then_uses_normal_access() {
     .unwrap();
     assert_eq!(answer["placement"]["outcome"], "confirmed");
     assert_eq!(request.arguments["body"]["type"], "task-object-id");
-    let scope = crate::anyblob_scope::Scope::load(&client, &p, &|| Ok(())).unwrap();
-    normal_read_and_edit(&client, &scope, "created-task");
+    normal_read_and_edit(&client, &p, "created-task");
     server.join().unwrap();
     let capture = capture.lock().unwrap();
     let writes = capture
@@ -213,10 +200,7 @@ fn captured_mismatches_request_values_and_type_filters_cannot_be_spoofed() {
         let mut responses = vec![captured_query(), captured_views(false)];
         responses.extend(captured_assessment());
         let (client, capture, server) = fixture(responses);
-        let answer = dispatch(
-            &client,
-            "captured-mismatch",
-            &project(source("query", "createDelete")),
+        let answer = dispatch_global(&client, &configuration("createDelete"),
             &request,
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -371,14 +355,11 @@ fn property_request() -> ContentRequest {
 #[test]
 fn requests_values_without_writes_then_creates_matching_property_query_object() {
     let request = req("query");
-    let p = project(source("query", "createDelete"));
+    let p = configuration("createDelete");
     let mut responses = vec![property_doc(json!([])), views()];
     responses.extend(assessment_reads());
     let (client, capture, server) = fixture(responses);
-    let answer = dispatch(
-        &client,
-        "guided-properties",
-        &p,
+    let answer = dispatch_global(&client, &p,
         &request,
         &|| Ok(()),
         &|_, _| panic!("no mutation approval yet"),
@@ -404,7 +385,7 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
         .unwrap()
         .iter()
         .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
-    assert!(!record_path("guided-properties", &request).unwrap().exists());
+    assert!(!record_path(&request).unwrap().exists());
 
     let mut corrected = request.clone();
     corrected.arguments["body"]["properties"] = json!({"Status":"Ready"});
@@ -424,22 +405,25 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
         views(),
         page(json!([{"id":"created-in-query"}])),
     ]);
-    responses.extend(vec![views(), page(json!([{"id":"created-in-query"}]))]);
     responses.extend(normal_access_responses("created-in-query"));
     let (client, capture, server) = fixture(responses);
-    let answer = dispatch(
-        &client,
-        "guided-properties",
-        &p,
+    let answer = dispatch_global(&client, &p,
         &corrected,
         &|| Ok(()),
         &|_, _| Ok(()),
     )
     .unwrap();
     assert_eq!(answer["placement"]["outcome"], "confirmed");
-    let scope = crate::anyblob_scope::Scope::load(&client, &p, &|| Ok(())).unwrap();
-    normal_read_and_edit(&client, &scope, "created-in-query");
-    assert!(!scope.readable("s", "unrelated"));
+    normal_read_and_edit(&client, &p, "created-in-query");
+    assert!(anyblob_content::permission(
+        &p,
+        &ContentRequest {
+            tool: "read_document".into(),
+            arguments: json!({"space_id":"s","object_id":"unrelated"}),
+        },
+        false
+    )
+    .is_ok());
     server.join().unwrap();
     let capture = capture.lock().unwrap();
     let creates = capture
@@ -454,6 +438,35 @@ fn requests_values_without_writes_then_creates_matching_property_query_object() 
 }
 
 #[test]
+fn dry_run_missing_query_inputs_skips_confirmation_and_does_not_write() {
+    let mut request = req("query");
+    request.arguments["dry_run"] = json!(true);
+    let mut p = configuration("createDelete");
+    p.spaces.get_mut("s").unwrap().approval = "alwaysAsk".into();
+    let mut responses = vec![property_doc(json!([])), views()];
+    responses.extend(assessment_reads());
+    let (client, capture, server) = fixture(responses);
+    let answer = dispatch_global(&client, &p,
+        &request,
+        &|| Ok(()),
+        &|_, _| panic!("Dry-run validation must not request confirmation"),
+    )
+    .unwrap();
+
+    assert_eq!(answer["outcome"], "needs_input");
+    assert_eq!(answer["creation"]["outcome"], "not_attempted");
+    server.join().unwrap();
+    assert!(capture
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| String::from_utf8_lossy(r).starts_with("GET ")));
+    assert!(!record_path(&request)
+        .unwrap()
+        .exists());
+}
+
+#[test]
 fn conflicting_values_return_choices_without_silent_replacement() {
     let mut request = property_request();
     request.arguments["body"]["properties"]["Status"] = json!("Blocked");
@@ -461,10 +474,7 @@ fn conflicting_values_return_choices_without_silent_replacement() {
     let mut responses = vec![property_doc(json!([])), views()];
     responses.extend(assessment_reads());
     let (client, capture, server) = fixture(responses);
-    let answer = dispatch(
-        &client,
-        "conflict-values",
-        &project(source("query", "createDelete")),
+    let answer = dispatch_global(&client, &configuration("createDelete"),
         &request,
         &|| Ok(()),
         &|_, _| Ok(()),
@@ -593,16 +603,18 @@ fn discovery_explains_property_sources_options_and_unsupported_queries() {
                 json!([{"id":"all","filters":[{"property":"status","condition":"contains","value":"Ready"}]}]),
             )
         };
-        let (client, capture, server) =
-            fixture(vec![property_doc(json!([])), view, properties(), options()]);
+        let (client, capture, server) = fixture(vec![
+            page(json!([{"id":"dest","type":"set","name":"Tasks"}])),
+            property_doc(json!([])),
+            view,
+            properties(),
+            options(),
+        ]);
         let request = ContentRequest {
             tool: "list_creation_targets".into(),
             arguments: json!({"space_id":"s"}),
         };
-        let answer = dispatch(
-            &client,
-            "targets",
-            &project(source("query", "createDelete")),
+        let answer = dispatch_global(&client, &configuration("createDelete"),
             &request,
             &|| Ok(()),
             &|_, _| Ok(()),
@@ -622,7 +634,7 @@ fn discovery_explains_property_sources_options_and_unsupported_queries() {
             "status"
         );
         server.join().unwrap();
-        assert_eq!(capture.lock().unwrap().len(), 4);
+        assert_eq!(capture.lock().unwrap().len(), 5);
     }
 }
 
@@ -660,25 +672,23 @@ fn no_input_guidance_bypasses_permissions_files_or_read_approval() {
     let request = req("query");
     let client = Client::with_connection("fixture", "127.0.0.1", 1);
     for access in ["none", "read", "readWrite"] {
-        assert!(dispatch(
+        assert!(dispatch_global(
             &client,
-            "denied",
-            &project(source("query", access)),
+            &configuration(access),
             &request,
             &|| Ok(()),
             &|_, _| panic!("denied")
         )
         .is_err());
     }
-    let mut s = source("query", "createDelete");
-    s.permission.approval = "alwaysAsk".into();
+    let mut config = configuration("createDelete");
+    config.spaces.get_mut("s").unwrap().approval = "alwaysAsk".into();
     let mut responses = vec![property_doc(json!([])), views()];
     responses.extend(assessment_reads());
     let (client, capture, server) = fixture(responses);
-    assert!(dispatch(
+    assert!(dispatch_global(
         &client,
-        "denied",
-        &project(s),
+        &config,
         &request,
         &|| Ok(()),
         &|_, _| Err("User denied requirements read".into())
@@ -713,17 +723,14 @@ fn no_input_guidance_bypasses_permissions_files_or_read_approval() {
 #[test]
 fn guided_followup_reloads_views_and_bound_keys_cannot_change_payloads() {
     let request = property_request();
-    let p = project(source("query", "createDelete"));
+    let p = configuration("createDelete");
     let changed_views = page(
         json!([{"id":"ready","filters":[{"property":"status","condition":"equal","value":"Blocked"}]}]),
     );
     let mut responses = vec![property_doc(json!([])), changed_views];
     responses.extend(assessment_reads());
     let (client, capture, server) = fixture(responses);
-    let answer = dispatch(
-        &client,
-        "changed-guidance",
-        &p,
+    let answer = dispatch_global(&client, &p,
         &request,
         &|| Ok(()),
         &|_, _| Ok(()),
@@ -736,7 +743,7 @@ fn guided_followup_reloads_views_and_bound_keys_cannot_change_payloads() {
     );
     server.join().unwrap();
     assert_eq!(capture.lock().unwrap().len(), 5);
-    let path = record_path("bound-guidance", &request).unwrap();
+    let path = record_path(&request).unwrap();
     save(
         &path,
         &json!({"state":"creating","fingerprint":"different-payload"}),
@@ -750,10 +757,7 @@ fn guided_followup_reloads_views_and_bound_keys_cannot_change_payloads() {
     ];
     responses.extend(assessment_reads());
     let (client, _, server) = fixture(responses);
-    assert!(dispatch(
-        &client,
-        "bound-guidance",
-        &p,
+    assert!(dispatch_global(&client, &p,
         &request,
         &|| Ok(()),
         &|_, _| Ok(())

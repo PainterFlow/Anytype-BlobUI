@@ -16,10 +16,17 @@ pub enum CredentialChange<'a> {
 }
 
 pub fn blob_metadata_bytes() -> Result<Vec<u8>, String> {
-    let mut bytes = serde_json::to_vec_pretty(&json!({
+    let metadata = json!({
         "formatVersion": 1,
         "blobuiVersion": env!("BLOBUI_BUILD_VERSION"),
-    }))
+    });
+    #[cfg(feature = "headless-cli")]
+    let mut metadata = metadata;
+    #[cfg(feature = "headless-cli")]
+    if crate::HEADLESS_MODE.load(std::sync::atomic::Ordering::Acquire) {
+        metadata["headlessCli"] = json!(true);
+    }
+    let mut bytes = serde_json::to_vec_pretty(&metadata)
     .map_err(|_| "Could not prepare BlobUI folder metadata.".to_string())?;
     bytes.push(b'\n');
     Ok(bytes)
@@ -139,6 +146,24 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "headless-cli")]
+pub fn write_atomic_private(path: &Path, contents: &[u8]) -> Result<(), String> {
+    reject_reparse_path(path)?;
+    let before = snapshot(path, true)?;
+    preflight(path)?;
+    let candidate = prepare_temp(path, contents, before.permissions.as_ref(), true)?;
+    let result = replace_credential(&candidate, path)
+        .map_err(|error| format!("Could not save private file {}: {error}", path.display()));
+    remove_if_exists(&candidate);
+    if let Err(error) = result {
+        return match restore(&before) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!("{error} {rollback}")),
+        };
+    }
+    Ok(())
+}
+
 pub(crate) fn snapshot(path: &Path, private: bool) -> Result<Snapshot, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -180,15 +205,24 @@ pub(crate) fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs
     fs::create_dir_all(parent).map_err(|error| format!("Could not prepare {}: {error}", parent.display()))?;
     let temp = unique_sibling(path, "tmp");
     let result = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp)
             .map_err(|error| format!("Could not create a temporary file for {}: {error}", path.display()))?;
+        if private { restrict_credential_acl(&temp)?; }
         file.write_all(contents).map_err(|error| format!("Could not write a temporary file for {}: {error}", path.display()))?;
         file.sync_all().map_err(|error| format!("Could not flush a temporary file for {}: {error}", path.display()))?;
         drop(file);
-        if private { restrict_credential_acl(&temp)?; }
-        else if let Some(permissions) = permissions {
-            fs::set_permissions(&temp, permissions.clone())
-                .map_err(|error| format!("Could not preserve permissions for {}: {error}", path.display()))?;
+        if !private {
+            if let Some(permissions) = permissions {
+                fs::set_permissions(&temp, permissions.clone())
+                    .map_err(|error| format!("Could not preserve permissions for {}: {error}", path.display()))?;
+            }
         }
         Ok(())
     })();
@@ -197,39 +231,66 @@ pub(crate) fn prepare_temp(path: &Path, contents: &[u8], permissions: Option<&fs
 }
 
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    let result = {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH};
-        let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let replaced = unsafe {
-            if destination.exists() {
-                ReplaceFileW(destination_wide.as_ptr(), source_wide.as_ptr(), std::ptr::null(), REPLACEFILE_WRITE_THROUGH, std::ptr::null(), std::ptr::null())
-            } else {
-                MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
-            }
-        };
-        if replaced == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
-    };
-    #[cfg(not(windows))]
-    let result = fs::rename(source, destination);
-    maybe_fail_after_replace(destination, result)
+    retry_replace(destination, || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH};
+            let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let replaced = unsafe {
+                if destination.exists() {
+                    ReplaceFileW(destination_wide.as_ptr(), source_wide.as_ptr(), std::ptr::null(), REPLACEFILE_WRITE_THROUGH, std::ptr::null(), std::ptr::null())
+                } else {
+                    MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+                }
+            };
+            if replaced == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(source, destination)
+        }
+    })
 }
 
 pub(crate) fn replace_credential(source: &Path, destination: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    let result = {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
-        let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let result = unsafe { MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
-        if result == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
-    };
-    #[cfg(not(windows))]
-    let result = fs::rename(source, destination);
-    maybe_fail_after_replace(destination, result)
+    retry_replace(destination, || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
+            let source_wide = source.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let destination_wide = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+            let result = unsafe { MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+            if result == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(source, destination)
+        }
+    })
+}
+
+/// A Windows replace reports a transient failure while the destination is held
+/// by an indexer, antivirus scan, or a reader in another process.
+fn retry_replace(
+    destination: &Path,
+    replace: impl Fn() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    const RETRY_LIMIT: u32 = 10;
+    for attempt in 0..=RETRY_LIMIT {
+        match maybe_fail_after_replace(destination, replace()) {
+            Err(error)
+                if attempt < RETRY_LIMIT
+                    && matches!(error.raw_os_error(), Some(2 | 3 | 5 | 32 | 33 | 1175 | 1176)) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            result => return result,
+        }
+    }
+    unreachable!()
 }
 
 fn maybe_fail_after_replace(_destination: &Path, result: std::io::Result<()>) -> std::io::Result<()> {
@@ -248,7 +309,7 @@ fn maybe_fail_after_replace(_destination: &Path, result: std::io::Result<()>) ->
 }
 
 #[cfg(windows)]
-fn restrict_credential_acl(path: &Path) -> Result<(), String> {
+pub(crate) fn restrict_credential_acl(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
@@ -268,7 +329,7 @@ fn restrict_credential_acl(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn restrict_credential_acl(_: &Path) -> Result<(), String> { Ok(()) }
+pub(crate) fn restrict_credential_acl(_: &Path) -> Result<(), String> { Ok(()) }
 
 pub(crate) fn restore(snapshot: &Snapshot) -> Result<(), String> {
     match &snapshot.bytes {
@@ -372,6 +433,20 @@ mod tests {
         assert_eq!(fs::read(&data_path).unwrap(), b"old data");
         assert!(!blob.join("blob.meta.json").exists());
         assert_eq!(fs::read(&credential_path).unwrap(), b"old protected key");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(unix, feature = "headless-cli"))]
+    #[test]
+    fn private_atomic_writes_create_owner_only_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = workspace.join(".test-run").join(format!("private-write-{}-{nonce}", std::process::id()));
+        let path = root.join("DO-NOT-SHARE/anytype-api-key.dpapi");
+        write_atomic_private(&path, b"fixture secret").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"fixture secret");
         fs::remove_dir_all(root).unwrap();
     }
 

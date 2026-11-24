@@ -1,5 +1,9 @@
 //! Private bridge credential. This module never reads an Anytype API key.
 use std::path::PathBuf;
+#[cfg(any(test, not(windows)))]
+pub(crate) const WINDOWS_HOST_REQUIRED: &str =
+    "The BlobUI Settings bridge is available on Windows. On Linux, use the `blob-ui mcp` entrypoint provided by BlobUI Headless.";
+
 pub fn path() -> Result<PathBuf, String> {
     if let Some(instance) = std::env::var_os("ANYBLOB_BRIDGE_INSTANCE") {
         if instance != "default" {
@@ -89,7 +93,12 @@ pub fn encrypt(token: &str) -> Result<Vec<u8>, String> {
     crypt(token.as_bytes(), true)
 }
 pub fn read() -> Result<String, String> {
-    read_at(&path()?)
+    #[cfg(windows)]
+    {
+        read_at(&path()?)
+    }
+    #[cfg(not(windows))]
+    Err(WINDOWS_HOST_REQUIRED.into())
 }
 pub fn read_at(path: &std::path::Path) -> Result<String, String> {
     reject_links(path)?;
@@ -101,4 +110,20 @@ pub fn read_at(path: &std::path::Path) -> Result<String, String> {
         return Err("Invalid Anyblob credential.".into());
     }
     Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn non_windows_error_points_to_the_headless_entrypoint() {
+        let error = super::WINDOWS_HOST_REQUIRED;
+        assert!(error.contains("BlobUI Headless"));
+        assert!(error.contains("blob-ui mcp"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_reads_return_the_host_guidance() {
+        assert_eq!(super::read().unwrap_err(), super::WINDOWS_HOST_REQUIRED);
+    }
 }

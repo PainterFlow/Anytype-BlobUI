@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const harness = path.join(__dirname, 'ui-state.test.cjs');
 
-for (const scenario of ['escape', 'backdrop', 'history', 'offline', 'parse-error']) {
+for (const scenario of ['escape', 'backdrop', 'history', 'offline', 'parse-error', 'slow-startup']) {
   test(`release notes ${scenario} lifecycle`, () => {
     const result = spawnSync(process.execPath, [harness, `--release-notes-scenario=${scenario}`], {
       encoding: 'utf8',
@@ -16,6 +16,8 @@ for (const scenario of ['escape', 'backdrop', 'history', 'offline', 'parse-error
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stdout, scenario === 'parse-error'
       ? /parse failures stay pending/
-      : new RegExp(`Release notes ${scenario} dismissal lifecycle passed`));
+      : scenario === 'slow-startup'
+        ? /Slow startup changelog loading does not delay Settings\./
+        : new RegExp(`Release notes ${scenario} dismissal lifecycle passed`));
   });
 }

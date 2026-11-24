@@ -28,6 +28,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const hueInput = el("accent-hue");
   const saturationInput = el("accent-saturation");
   const brightnessInput = el("accent-brightness");
+  const themePlane = el("theme-color-plane");
+  const themeHueInput = el("theme-color-hue");
+  const themeSaturationInput = el("theme-color-saturation");
+  const themeBrightnessInput = el("theme-color-brightness");
+  const themeColorSwatch = el("theme-color-swatch");
+  const themeColorValue = el("theme-color-value");
   const nativeAccent = el("native-accent");
   const swatch = el("accent-swatch");
   const accentValue = el("accent-value");
@@ -41,6 +47,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const calendarColorsEnabled = el("calendar-colors-enabled");
   let calendarApiAvailability = "checking";
   let calendarApiRequest = 0;
+  let calendarApiAvailabilityPromise = null;
   const advancedPage = el("advanced-page");
   function selectAdvancedTab(index) {
     if (index !== 0) resetAdvancedVisibility();
@@ -60,7 +67,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const createBlobBackupButton = el("create-blob-backup-button");
   const importBlobBackupButton = el("import-blob-backup-button");
   const blobBackupStatus = el("blob-backup-status");
-  const sidebarActions = el("sidebar-actions");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
   const advancedApiPort = el("advanced-api-port");
@@ -82,6 +88,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     fallbackFocus: el("page-title"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
+  let documentationPreviousFocus = null;
+  const documentationModal = window.BlobUI.createModalController({
+    backdrop: el("documentation-backdrop"),
+    dialog: el("documentation-dialog"),
+    initialFocus: el("documentation-dialog"),
+    fallbackFocus: el("help-button"),
+    inertTargets: [el("settings-shell"), el("title-drag-region")],
+    onClose: () => {
+      documentationPreviousFocus = null;
+      if (!disposed) view.update({ documentationOpened: false });
+    },
+  });
   const releaseNotesPrevious = el("release-notes-previous");
   const releaseNotesAfter = el("release-notes-after");
   let releaseNotesVersion = null;
@@ -97,6 +115,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let releaseNotesLoading = false;
   let releaseNotesLoaded = false;
   let releaseNotesFailed = false;
+  let releaseNotesManualRequest = 0;
+  let releaseNotesMediaRequest = 0;
   const releaseNotesModal = window.BlobUI.createModalController({
     backdrop: el("release-notes-backdrop"),
     dialog: el("release-notes-dialog"),
@@ -104,6 +124,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     fallbackFocus: el("help-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => {
+      releaseNotesManualRequest++;
+      releaseNotesMediaRequest++;
       if (!disposed) view.update({ releaseNotesMedia: null });
       const version = releaseNotesVersion;
       releaseNotesVersion = null;
@@ -123,7 +145,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         }
       }).catch((error) => {
         releaseNotesFailed = true;
-        setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error");
+        setStatus("BlobUI could not save the release notes status. " + (error.message || String(error)), "error", true, error);
       });
     },
   });
@@ -154,10 +176,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const logButton = el("log-button");
   const logPopup = el("log-popup");
   const logEntries = el("log-entries");
+  const logStore = window.BlobUI.LogStore.create();
+  let startupThemeDiagnosticMessages = null;
+  let copyConfirmationTimer = null;
+  let startupRefreshTimer = null;
   const pageContent = document.querySelector(".page-content");
-  const logs = [];
   const root = document.documentElement;
+  const customThemeStyle = document.createElement("style");
+  customThemeStyle.id = "custom-theme-preview";
+  document.head?.append?.(customThemeStyle);
   const toggleSettings = {
+    "enable-custom-themes": "enableCustomThemes",
     "include-selections": "includeSelections",
     "reduced-motion": "reducedMotion",
     "tab-hover-effect": "tabHoverEffect",
@@ -232,8 +261,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let connectionBusy = false;
   let simulationActive = false;
   let hsv = { h: 300, s: 64, v: 87 };
+  let themeHsv = { h: 12, s: 7, v: 10 };
   let lastCustomAccent = null;
   let lastTheme = "";
+  let lastHostTheme = "system";
+  let lastPreviewTheme = "system";
+  let lastThemeCss = "";
   let defaultBannerPreview = "";
   let bannerReadGeneration = 0;
   let bannerReadPending = false;
@@ -242,15 +275,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     restore: restoreEditSnapshot,
     equals: editSnapshotsEqual,
   });
+  const hasUnsavedChanges = () => editSession.isDirty() || window.BlobUI.AnyblobDraft.isDirty();
   let savedRefreshEpoch = 0;
+  let appStateLoadGeneration = 0;
   const refreshBlocked = () => saveBusy || blobFolderBusy || blobRestoreReloadFailed || bannerReadPending || isInstallingUpdate();
   const savedRefresh = window.BlobUI.SavedState.createRefreshController({
     isBlocked: refreshBlocked,
     refresh: refreshSavedSnapshot,
-    onError: error => addLog("Saved settings reload failed. " + String(error.message || error), "error"),
+    onError: error => addLog("Saved settings reload failed. " + String(error.message || error), "error", error),
   });
   function requestSavedRefresh() {
-    void savedRefresh.request().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error"));
+    void savedRefresh.request().catch(error => addLog("Saved settings reload failed. " + String(error.message || error), "error", error));
   }
   function refreshSavedState() { return savedRefresh.run(); }
   async function refreshSavedSnapshot({ generation, isCurrent }) {
@@ -306,6 +341,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   window.BlobUI.discardChanges = function discardChanges() {
     if (saveBusy || isInstallingUpdate() || !draft) return;
+    window.BlobUI.AnyblobDraft.discard();
     editSession.discard();
   };
 
@@ -331,7 +367,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   const nativeService = createNativeService({
     tauri,
-    onMetadataError: message => addLog(message, "error"),
+    onMetadataError: (message, error) => addLog(message, "error", error),
   });
   const invoke = nativeService.invoke;
   const metadataPending = nativeService.metadataPending;
@@ -416,6 +452,43 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     presentSettingsFields({ "native-accent": native });
     el("color-editor").classList.toggle("native-active", native);
     setAccentPreview(value);
+  }
+
+  function renderThemePicker(syncColor) {
+    if (!draft) return;
+    const color = toHexColor(draft.themeColor) || "#191918";
+    if (syncColor) themeHsv = hexToHsv(color);
+    themeHueInput.value = String(Math.round(themeHsv.h) % 360);
+    themeHueInput.setAttribute("aria-valuetext", themeHueInput.value + " degrees");
+    themeSaturationInput.value = String(Math.round(themeHsv.s));
+    themeBrightnessInput.value = String(Math.round(themeHsv.v));
+    themePlane.style.setProperty("--picker-hue", hsvToHex(themeHsv.h, 100, 100));
+    el("theme-color-cursor").style.left = themeHsv.s + "%";
+    el("theme-color-cursor").style.top = (100 - themeHsv.v) + "%";
+    themeColorSwatch.style.background = color;
+  }
+
+  function chooseThemeColor() {
+    if (!draft || !draft.enableCustomThemes || saveBusy || isInstallingUpdate()) return;
+    const value = hsvToHex(themeHsv.h, themeHsv.s, themeHsv.v);
+    draft.themeColor = value;
+    presentSettingsFields({ "theme-color-value": value });
+    themeColorValue.classList.remove("invalid");
+    el("theme-color-error").textContent = "";
+    renderThemePicker(false);
+    markDirty();
+  }
+
+  function changeThemeColorValue(value) {
+    if (!draft || !draft.enableCustomThemes || saveBusy || isInstallingUpdate()) return;
+    const raw = value.trim();
+    const color = toHexColor(raw);
+    draft.themeColor = color || raw;
+    presentSettingsFields({ "theme-color-value": value });
+    if (color) renderThemePicker(true);
+    themeColorValue.classList.remove("invalid");
+    el("theme-color-error").textContent = "";
+    markDirty();
   }
 
   function chooseCustomColor() {
@@ -515,7 +588,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+  }
+
+  function effectiveIncludeSelections(settings = draft) {
+    if (!settings) return false;
+    if (!settings.enableCustomThemes || !settings.themePreset) return settings.includeSelections;
+    const theme = view.getSnapshot().customThemes.find(item => item.id === settings.themePreset);
+    return typeof theme?.accentColorSelection === "boolean" ? theme.accentColorSelection : settings.includeSelections;
+  }
+
+  function syncIncludeSelectionsPreview() {
+    if (draft) root.dataset.includeSelections = String(effectiveIncludeSelections());
   }
 
   function updaterSettingsEqual(left, right) {
@@ -524,7 +608,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       && left.startupMode === right.startupMode
       && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
-      && left.automaticChecksEnabled === right.automaticChecksEnabled;
+      && left.automaticChecksEnabled === right.automaticChecksEnabled
+      && left.releaseChannel === right.releaseChannel;
   }
 
   function copyUpdaterSettings(settings) {
@@ -538,6 +623,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       autoplayVideos: settings?.autoplayVideos !== false,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
+      releaseChannel: ["release", "dev"].includes(settings?.releaseChannel) ? settings.releaseChannel : "release",
     };
   }
 
@@ -545,7 +631,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
-    view.update({ startupMode: updaterDraft.startupMode });
+    view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
     applyAutoplay(updaterDraft.autoplayVideos);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -580,8 +666,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       : "Check for updates";
     checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
     updateNowButton.hidden = !updateAvailable;
-    sidebarActions.classList.toggle("has-update", updateAvailable);
-    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || editSession.isDirty();
+    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges();
     updateNowButton.title = simulated ? "Preview update only" : "Update now";
     updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
     renderBlobBackupControls();
@@ -592,7 +677,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function renderBlobBackupControls() {
-    const settingsDirty = !!draft && editSession.isDirty();
+    const settingsDirty = !!draft && hasUnsavedChanges();
     const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
       && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
     const disabled = !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
@@ -612,7 +697,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       pendingAutomaticUpdate = false;
       return;
     }
-    if (!updaterState || updaterState.updateAvailable !== true || updaterState.automaticUpdateBlocked === true || editSession.isDirty()) return;
+    if (!updaterState || updaterState.updateAvailable !== true || updaterState.automaticUpdateBlocked === true || hasUnsavedChanges()) return;
     pendingAutomaticUpdate = false;
     applyUpdate(true);
   }
@@ -622,7 +707,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     renderUpdaterState();
   }
 
-  async function loadUpdaterState() {
+  async function loadUpdaterState({ commitInitialBaseline = false } = {}) {
     try {
       const state = await invoke("get_updater_state");
       assignUpdaterSettings(state || {});
@@ -635,9 +720,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
           startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
+          releaseChannel: "release",
         });
       }
       renderUpdaterState();
+    }
+    if (commitInitialBaseline && editSession.getBaseline()?.updaterSettings == null && updaterDraft) {
+      editSession.commit({ updaterSettings: { ...updaterDraft } });
+      updateSaveButton();
     }
   }
 
@@ -666,36 +756,51 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }).catch(() => {});
   }
 
-  async function renderReleaseNotes(notes, historical = false) {
+  function renderReleaseNotes(notes, historical = false) {
+    const request = ++releaseNotesMediaRequest;
     historical = historical || !notes.version.startsWith("Dev+");
     updateReleaseNotesHeading(notes.version);
     const mediaManifest = window.BlobUI.Markdown.parseMediaManifest
       ? window.BlobUI.Markdown.parseMediaManifest(notes.imageManifest)
       : { images: window.BlobUI.Markdown.parseImageManifest(notes.imageManifest), videos: {} };
-    const manifest = mediaManifest.images;
-    const entries = Object.entries(manifest);
-    const results = await Promise.allSettled(entries.map(async ([alias, image]) => {
-      const args = { source: image.src };
-      const src = historical
-        ? await invoke("get_release_note_history_image", { ...args, tag: notes.tag || notes.version })
-        : await invoke("get_release_note_image", args);
-      return [alias, { src, alt: image.alt }];
-    }));
     const images = Object.create(null);
-    for (const result of results) if (result.status === "fulfilled") images[result.value[0]] = result.value[1];
-    const videos = Object.create(null);
-    const videoResults = await Promise.allSettled(Object.entries(mediaManifest.videos).map(async ([alias, video]) => {
-      videos[alias] = { alt: video.alt };
-      const args = { source: video.src };
-      videos[alias].src = historical
-        ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })
-        : await invoke("get_release_note_video", args);
-    }));
-    if (disposed) return;
+    const videos = Object.fromEntries(Object.entries(mediaManifest.videos).map(([alias, video]) => [alias, { alt: video.alt }]));
     view.update({ releaseNotesMedia: { markdown: notes.markdown, images, videos } });
-    el("release-notes-image-warning").hidden = [...results, ...videoResults].every((result) => result.status === "fulfilled");
+    el("release-notes-status").hidden = true;
+    el("release-notes-retry").hidden = true;
+    el("release-notes-image-warning").hidden = true;
     el("release-notes-dialog").scrollTop = 0;
     updateReleaseNotesScrollbar();
+
+    const markdownText = String(notes.markdown || "");
+    const imageRequests = Object.entries(mediaManifest.images).filter(([alias]) => markdownText.includes(`@${alias}`)).map(async ([alias, image]) => {
+      const src = image.src.startsWith("./cdn/")
+        ? (await window.BlobUI.MarkdownMedia.loadImage(image.src))?.src
+        : historical
+          ? await invoke("get_release_note_history_image", { source: image.src, tag: notes.tag || notes.version })
+          : await invoke("get_release_note_image", { source: image.src });
+      if (!src) throw new Error("The Markdown image could not be loaded.");
+      return ["image", alias, { src, alt: image.alt }];
+    });
+    const videoRequests = Object.entries(mediaManifest.videos).map(async ([alias, video]) => {
+      const args = { source: video.src };
+      const src = historical
+        ? await invoke("get_release_note_history_video", { ...args, tag: notes.tag || notes.version })
+        : await invoke("get_release_note_video", args);
+      return ["video", alias, { src, alt: video.alt }];
+    });
+    Promise.allSettled([...imageRequests, ...videoRequests]).then((results) => {
+      if (disposed || request !== releaseNotesMediaRequest) return;
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const [kind, alias, media] = result.value;
+        if (kind === "image") images[alias] = media;
+        else videos[alias] = media;
+      }
+      view.update({ releaseNotesMedia: { markdown: notes.markdown, images: { ...images }, videos: { ...videos } } });
+      el("release-notes-image-warning").hidden = results.every((result) => result.status === "fulfilled");
+      updateReleaseNotesScrollbar();
+    });
   }
 
   function prefetchPreviousReleaseNotes() {
@@ -730,7 +835,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   async function displayReleaseNotes(notes, historical = false) {
-    await renderReleaseNotes(notes, historical);
+    renderReleaseNotes(notes, historical);
     displayedReleaseNotes = notes;
     prefetchPreviousReleaseNotes();
     updateReleaseNotesNavigation();
@@ -748,7 +853,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } catch (error) {
       newerReleaseNotes.pop();
       displayedReleaseNotes = newer;
-      setStatus("Could not display the previous changelog. " + (error.message || String(error)), "error");
+      setStatus("Could not display the previous changelog. " + (error.message || String(error)), "error", true, error);
     } finally {
       releaseNotesNavigationBusy = false;
       updateReleaseNotesNavigation();
@@ -766,7 +871,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } catch (error) {
       newerReleaseNotes.push(newer);
       displayedReleaseNotes = current;
-      setStatus("Could not display the newer changelog. " + (error.message || String(error)), "error");
+      setStatus("Could not display the newer changelog. " + (error.message || String(error)), "error", true, error);
     } finally {
       releaseNotesNavigationBusy = false;
       updateReleaseNotesNavigation();
@@ -784,10 +889,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   async function showReleaseNotesOrContinue() {
     if (!window.appReady || releaseNotesLoading || releaseNotesLoaded) return false;
+    const manualRequest = releaseNotesManualRequest;
     releaseNotesLoading = true;
     let continueWithAutomaticCheck = false;
     try {
       const notes = await invoke("get_release_notes");
+      if (manualRequest !== releaseNotesManualRequest) return false;
       releaseNotesLoaded = true;
       if (!notes) {
         continueWithAutomaticCheck = true;
@@ -813,7 +920,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       releaseNotesLatestVersion = null;
       releaseNotesLoaded = false;
       releaseNotesFailed = true;
-      setStatus("Could not display the release notes. " + (error.message || String(error)), "error");
+      setStatus("Could not display the release notes. " + (error.message || String(error)), "error", true, error);
       return false;
     } finally {
       releaseNotesLoading = false;
@@ -822,24 +929,45 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   async function showLatestReleaseNotes() {
+    const request = ++releaseNotesManualRequest;
+    acknowledgeReleaseNotesOnClose = false;
+    displayedReleaseNotes = null;
+    previousReleaseNotes = null;
+    newerReleaseNotes = [];
+    releaseNotesVersion = null;
+    releaseNotesCurrentVersion = String((updaterState && updaterState.currentVersion) || "");
+    releaseNotesLatestVersion = null;
+    updateReleaseNotesHeading("");
+    el("release-notes-status").textContent = "Loading the latest changelog…";
+    el("release-notes-status").hidden = false;
+    el("release-notes-retry").hidden = true;
+    el("release-notes-image-warning").hidden = true;
+    releaseNotesPrevious.disabled = true;
+    releaseNotesAfter.hidden = true;
+    view.update({ releaseNotesMedia: { markdown: "", images: {}, videos: {} } });
+    releaseNotesModal.open();
     try {
       const notes = await invoke("get_latest_release_notes");
-      if (!notes) return showHelpError("The latest changelog is unavailable.");
+      if (request !== releaseNotesManualRequest || !releaseNotesModal.isOpen()) return;
+      if (!notes) throw new Error("The latest changelog is unavailable.");
       if (typeof notes.version !== "string" || typeof notes.markdown !== "string" || typeof notes.imageManifest !== "string") {
         throw new TypeError("The latest changelog is incomplete.");
       }
       releaseNotesVersion = notes.version;
-      releaseNotesCurrentVersion = String((updaterState && updaterState.currentVersion) || "");
       releaseNotesLatestVersion = notes.version;
       newerReleaseNotes = [];
       await displayReleaseNotes(notes);
-      acknowledgeReleaseNotesOnClose = false;
-      releaseNotesModal.open();
     } catch (error) {
-      setStatus("Could not display the latest changelog. " + (error.message || String(error)), "error");
-      showHelpError("The latest changelog is unavailable.");
+      if (request !== releaseNotesManualRequest || !releaseNotesModal.isOpen()) return;
+      const message = error.message || String(error);
+      el("release-notes-status").textContent = "Could not load the latest changelog. " + message;
+      el("release-notes-status").hidden = false;
+      el("release-notes-retry").hidden = false;
+      setStatus("Could not display the latest changelog. " + message, "error", true, error);
     }
   }
+
+  listen(el("release-notes-retry"), "click", () => { void showLatestReleaseNotes(); });
 
   async function checkForUpdates(automatic = false) {
     if (automatic && (simulationActive || releaseNotesLoading || releaseNotesModal.isOpen() || releaseNotesFailed)) return;
@@ -854,7 +982,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         && state && state.updateAvailable === true && state.status !== "simulated") {
         if (state.automaticUpdateBlocked === true) {
           pendingAutomaticUpdate = false;
-        } else if (saveBusy || bannerReadPending || editSession.isDirty()) {
+        } else if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
           pendingAutomaticUpdate = true;
           mergeUpdaterState({ message: "An update is ready. Save or undo your pending settings to install it automatically." });
         } else {
@@ -863,7 +991,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
     } catch (error) {
       mergeUpdaterState({ status: "error", message: error.message || String(error) });
-      if (!automatic) setStatus("Could not check for updates. " + (error.message || String(error)), "error");
+      if (!automatic) setStatus("Could not check for updates. " + (error.message || String(error)), "error", true, error);
     } finally {
       updaterBusyOperation = "";
       renderUpdaterState();
@@ -885,7 +1013,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
     if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
-    if (saveBusy || bannerReadPending || editSession.isDirty()) {
+    if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
       if (fromAutomaticCheck) pendingAutomaticUpdate = true;
       else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
       return;
@@ -898,7 +1026,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       mergeUpdaterState(await invoke("apply_update", { automatic: fromAutomaticCheck }) || {});
     } catch (error) {
       mergeUpdaterState({ status: "error", message: error.message || String(error), updateAvailable: true });
-      setStatus("Could not install the update. " + (error.message || String(error)), "error");
+      setStatus("Could not install the update. " + (error.message || String(error)), "error", true, error);
     } finally {
       updaterBusyOperation = "";
       renderUpdaterState();
@@ -914,26 +1042,44 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       mergeUpdaterState({ ...(state || {}), status: "simulated", updateAvailable: true });
     } catch (error) {
       simulationActive = false;
-      setStatus("Could not preview an update. " + (error.message || String(error)), "error");
+      setStatus("Could not preview an update. " + (error.message || String(error)), "error", true, error);
     }
   }
 
-  function setStatus(message, kind, record = true) {
+  function setStatus(message, kind, record = true, occurrence) {
     statusMessage.textContent = message;
     if (!record) return;
-    addLog(message, kind);
+    addLog(message, kind, occurrence);
   }
 
-  function addLog(message, kind) {
-    if (disposed) return;
-    const level = kind === "error" || kind === "warning" ? kind : "info";
-    const entry = { message: String(message), level, time: new Date().toLocaleTimeString() };
-    logs.push(entry);
-    const severity = logs.some((item) => item.level === "error") ? "error"
-      : logs.some((item) => item.level === "warning") ? "warning" : "info";
-    view.update({ logRows: logs.map(item => ({ level: item.level, text: formatLog(item) })), logSeverity: severity });
+  function updateLogView() {
+    const entries = logStore.entries();
+    view.update({ logRows: entries.map(item => ({ level: item.level, text: formatLog(item) })), logSeverity: logStore.severity() });
     updateLogsScrollbar();
     logEntries.scrollTop = logEntries.scrollHeight;
+  }
+
+  function addLog(message, kind, occurrence) {
+    if (disposed) return;
+    if (!hasSavedApiKey && window.BlobUI.LogStore.isConnectionFailure(message)) return;
+    if (logStore.add(message, kind, occurrence)) updateLogView();
+  }
+
+  function reportThemeDiagnostics(diagnostics, suppressedMessages = null) {
+    for (const diagnostic of Array.isArray(diagnostics) ? diagnostics : []) {
+      const message = typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || "");
+      if (!message || suppressedMessages?.has(message)) continue;
+      const level = diagnostic && typeof diagnostic === "object"
+        && ["warning", "error"].includes(String(diagnostic.level).toLowerCase())
+        ? String(diagnostic.level).toLowerCase() : "error";
+      addLog(message, level);
+    }
+  }
+
+  function reportReloadedThemeDiagnostics(diagnostics) {
+    const startupMessages = startupThemeDiagnosticMessages;
+    startupThemeDiagnosticMessages = null;
+    reportThemeDiagnostics(diagnostics, startupMessages);
   }
 
   function formatLog(entry) {
@@ -950,11 +1096,22 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     ["openSettings", "Open Settings from Anytype"],
     ["rebuildCss", "Rebuild custom.css"],
     ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
+    ["openComponentCatalog", "Open component catalog"],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
   ];
-  let shortcutBindings = [];
+  const defaultShortcutBindings = [
+    { action: "openSettings", code: "Numpad1", ctrl: false, alt: false, shift: false, meta: false },
+    { action: "rebuildCss", code: "KeyR", ctrl: false, alt: true, shift: false, meta: false },
+    { action: "openComponentCatalog", code: "F10", ctrl: false, alt: false, shift: false, meta: false },
+    { action: "showOnboarding", code: "F8", ctrl: false, alt: false, shift: false, meta: false },
+    { action: "simulateUpdate", code: "F9", ctrl: false, alt: false, shift: false, meta: false },
+    { action: "quitSettings", code: "KeyQ", ctrl: true, alt: false, shift: false, meta: false },
+  ];
+  let shortcutBindings = defaultShortcutBindings;
+  let shortcutBindingsLoaded = false;
+  let shortcutBindingsRequest = null;
   let shortcutCaptureAction = null;
   function showHelpError(message = "This help content could not be found.") {
     el("help-error-message").textContent = message;
@@ -974,24 +1131,38 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     return modifiers.join("+");
   }
   async function loadShortcutBindings() {
-    try {
-      const loaded = await invoke("get_keyboard_shortcuts");
-      if (!Array.isArray(loaded)) throw new TypeError("Shortcut settings were invalid.");
-      shortcutBindings = loaded;
-      renderShortcutBindings();
-    } catch (error) {
-      el("keybind-status").textContent = error.message || String(error);
-      el("keybind-status").classList.add("error");
-    }
+    if (shortcutBindingsLoaded) return;
+    if (shortcutBindingsRequest) return shortcutBindingsRequest;
+    const pending = (async () => {
+      try {
+        const loaded = await invoke("get_keyboard_shortcuts");
+        if (!Array.isArray(loaded)) throw new TypeError("Shortcut settings were invalid.");
+        shortcutBindings = loaded;
+        shortcutBindingsLoaded = true;
+        renderShortcutBindings();
+        el("keybind-status").textContent = "";
+        el("keybind-status").classList.remove("error");
+      } catch (error) {
+        el("keybind-status").textContent = error.message || String(error);
+        el("keybind-status").classList.add("error");
+      }
+    })();
+    shortcutBindingsRequest = pending;
+    try { await pending; }
+    finally { if (shortcutBindingsRequest === pending) shortcutBindingsRequest = null; }
   }
   function renderShortcutBindings() {
     view.update({ shortcutRows: shortcutActions.map(([action, label, fixedBinding]) => {
       const binding = fixedBinding || shortcutBindings.find(item => item.action === action);
-      return { action, label, fixed: Boolean(fixedBinding), capturing: shortcutCaptureAction === action,
-        shortcut: binding ? formatShortcut(binding) : "" };
+      return { action, label, fixed: Boolean(fixedBinding), disabled: !fixedBinding && !shortcutBindingsLoaded,
+        capturing: shortcutCaptureAction === action, shortcut: binding ? formatShortcut(binding) : "" };
     }) });
   }
   async function beginShortcutCapture(action) {
+    if (!shortcutBindingsLoaded) {
+      el("keybind-status").textContent = "Saved keyboard shortcuts are still loading.";
+      return;
+    }
     shortcutCaptureAction = action;
     el("keybind-status").classList.remove("error");
     el("keybind-status").textContent = "Press a key combination. Press Escape to cancel.";
@@ -1111,10 +1282,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function clearValidationErrors() {
-    [fontFamily, codeFontFamily, accentValue, advancedApiKey, advancedApiIp, advancedApiPort]
+    [fontFamily, codeFontFamily, accentValue, themeColorValue, advancedApiKey, advancedApiIp, advancedApiPort]
       .forEach((input) => input.classList.remove("invalid"));
     el("font-error").textContent = "";
     el("accent-error").textContent = "";
+    el("theme-color-error").textContent = "";
     el("advanced-api-error").textContent = "";
   }
 
@@ -1126,9 +1298,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
     if (snapshot.updaterSettings) {
-      updaterDraft = { ...snapshot.updaterSettings };
+      updaterDraft = copyUpdaterSettings(snapshot.updaterSettings);
       installDirectory.value = updaterDraft.installDirectory;
-      view.update({ startupMode: updaterDraft.startupMode });
+      view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
       applyAutoplay(updaterDraft.autoplayVideos);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
@@ -1190,19 +1362,27 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   function updateSaveButton() {
     if (savedRefresh.queued && !savedRefresh.pending && !refreshBlocked()) queueMicrotask(requestSavedRefresh);
-    const dirty = editSession.isDirty();
+    const dirty = hasUnsavedChanges();
     const prototypeDirty = JSON.stringify(window.BlobUI.FormulaPage.read()) !== JSON.stringify(editSession.getBaseline().formulas);
     const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
-    const saveVisible = Boolean(draft && dirty);
+    const saveVisible = Boolean(draft && dirty && window.appReady);
     const discardDisabled = settingsLocked || bannerReadPending || !saveVisible;
     const saveDisabled = discardDisabled || (!window.appReady && !prototypeDirty);
-    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy, startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady, backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady, kanbanStyleDisabled: settingsLocked || !draft });
-    document.querySelectorAll("#preferences-page input, #accessibility-page input, #advanced-page input, #onboarding input").forEach((control) => {
+    view.update({ saveVisible, saveDisabled, discardDisabled, saveBusy,
+      customThemeDisabled: settingsLocked || !draft || !window.appReady,
+      startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      releaseChannelDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
+      kanbanStyleDisabled: settingsLocked || !draft });
+    const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
+    document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
       if (control.id === "start-on-login") return;
-      control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control));
+      control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control))
+        || (themeColorControls.includes(control) && !draft.enableCustomThemes);
     });
     window.BlobUI.FormulaPage.setLocked(settingsLocked || !draft, dirty);
     window.BlobUI.CodexPage?.setLocked(settingsLocked || !draft);
+    window.BlobUI.AnyblobDraft.setLocked(settingsLocked || !draft);
     window.BlobUI.CalendarPage?.setLocked(settingsLocked || !draft);
     window.BlobUI.AppReload?.setLocked(settingsLocked || !draft);
     calendarColorsEnabled.disabled = settingsLocked || !draft || !window.appReady || calendarApiAvailability !== "available";
@@ -1248,6 +1428,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       accentColor: accent.accentColor,
       accentMode: accent.accentMode,
       accentPreset: accent.accentPreset,
+      enableCustomThemes: settings.enableCustomThemes === true,
+      basedTheme: ["auto", "light", "dark", "inherit"].includes(settings.basedTheme) ? settings.basedTheme : "auto",
+      themePreset: String(settings.themePreset || ""),
+      themeColor: toHexColor(settings.themeColor) || "#191918",
       includeSelections: settings.includeSelections !== false,
       bannerImage: String(settings.bannerImage || ""),
       reducedMotion: settings.reducedMotion === true,
@@ -1269,51 +1453,67 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       "font-family": draft.fontFamily,
       "code-font-family": draft.codeFontFamily,
       "accent-value": draft.accentColor,
+      "based-theme": draft.basedTheme,
+      "custom-theme": draft.themePreset,
+      "theme-color-value": draft.themeColor,
       ...Object.fromEntries(Object.entries(toggleSettings).map(([id, key]) => [id, draft[key]])),
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
-    root.dataset.includeSelections = String(draft.includeSelections);
+    syncIncludeSelectionsPreview();
     view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
+    renderThemePicker(true);
     applyFontFamilies();
     syncBannerPreview();
     initialDraft = { ...draft };
     updateSaveButton();
   }
 
-  async function refreshCalendarApiAvailability() {
+  async function refreshCalendarApiAvailability(force = false) {
+    if (calendarApiAvailabilityPromise && !force) return calendarApiAvailabilityPromise;
+    if (force) {
+      calendarApiRequest++;
+      calendarApiAvailabilityPromise = null;
+    }
     const request = ++calendarApiRequest;
     calendarApiAvailability = "checking";
     const help = el("calendar-colors-help");
     help.hidden = false;
     help.textContent = "Checking the Anytype API connection...";
     updateSaveButton();
-    try {
-      const status = await invoke("get_calendar_api_availability");
-      if (request !== calendarApiRequest) return;
-      calendarApiAvailability = ["available", "missing"].includes(status) ? status : "unavailable";
-    } catch (_) {
-      if (request !== calendarApiRequest) return;
-      calendarApiAvailability = "unavailable";
-    }
-    help.textContent = calendarApiAvailability === "available"
-      ? ""
-      : calendarApiAvailability === "missing"
-        ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
-        : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
-    help.hidden = calendarApiAvailability === "available";
-    updateSaveButton();
+    const pending = (async () => {
+      try {
+        const status = await invoke("get_calendar_api_availability");
+        if (request !== calendarApiRequest) return calendarApiAvailabilityPromise ?? calendarApiAvailability;
+        calendarApiAvailability = ["available", "missing"].includes(status) ? status : "unavailable";
+      } catch (_) {
+        if (request !== calendarApiRequest) return calendarApiAvailabilityPromise ?? calendarApiAvailability;
+        calendarApiAvailability = "unavailable";
+      }
+      help.textContent = calendarApiAvailability === "available"
+        ? ""
+        : calendarApiAvailability === "missing"
+          ? "Add an Anytype API key in Advanced Settings to change Calendar Colors."
+          : "The Anytype API is unavailable. Check the connection in Advanced Settings. Your saved choice is preserved.";
+      help.hidden = calendarApiAvailability === "available";
+      updateSaveButton();
+      return calendarApiAvailability;
+    })();
+    calendarApiAvailabilityPromise = pending;
+    try { return await pending; }
+    finally { if (calendarApiAvailabilityPromise === pending) calendarApiAvailabilityPromise = null; }
   }
 
-  async function loadState({ refreshMetadata = false } = {}) {
+  async function loadState({ refreshMetadata = false, waitForUpdater = false } = {}) {
+    const loadGeneration = ++appStateLoadGeneration;
     let state = null;
     let stateError = null;
     try {
       state = await invoke("get_app_state");
-      window.appReady = !!state.ready;
-      applyTheme(state.theme);
+      applyTheme(state.theme, state.themeCss, state.previewTheme);
       defaultBannerPreview = String(state.defaultBannerPreview || "");
+      view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
       assignAdvancedConnection(state);
       void refreshCalendarApiAvailability();
       assignDraftToForm(state.settings || {});
@@ -1324,18 +1524,43 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       stateError = error;
     }
 
-    await loadUpdaterState();
+    const updaterLoad = loadUpdaterState({ commitInitialBaseline: true });
+    if (waitForUpdater) await updaterLoad;
+    else void updaterLoad;
     const refreshOnStart = refreshMetadata && state?.ready && state?.hasSavedApiKey;
-    await window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
-    await window.BlobUI.CalendarPage?.load(invoke);
-    if (!stateError) editSession.commit();
+    if (!stateError && state) {
+      reportThemeDiagnostics(state.themeDiagnostics);
+      startupThemeDiagnosticMessages = refreshOnStart
+        ? new Set((Array.isArray(state.themeDiagnostics) ? state.themeDiagnostics : [])
+          .map(diagnostic => typeof diagnostic === "string" ? diagnostic : String(diagnostic?.message || ""))
+          .filter(Boolean))
+        : null;
+    }
+    const formulaLoad = window.BlobUI.FormulaPage.load(invoke, { discover: !refreshOnStart });
+    void Promise.resolve(formulaLoad).then((loaded) => {
+      if (loaded && !stateError && loadGeneration === appStateLoadGeneration) {
+        editSession.commit({ formulas: window.BlobUI.FormulaPage.read() });
+        updateSaveButton();
+      }
+    });
+    const calendarLoad = window.BlobUI.CalendarPage?.load(invoke);
+    if (calendarLoad) void Promise.resolve(calendarLoad).then((loaded) => {
+      if (loaded && !stateError && loadGeneration === appStateLoadGeneration) {
+        editSession.commit({ calendarRules: window.BlobUI.CalendarPage.read() });
+        updateSaveButton();
+      }
+    });
+    if (!stateError) {
+      editSession.commit();
+      window.appReady = !!state.ready;
+    }
     if (stateError) {
-      setStatus(stateError.message || String(stateError), "error");
+      setStatus(stateError.message || String(stateError), "error", true, stateError);
       updateSaveButton();
       return;
     }
 
-    await loadShortcutBindings();
+    void loadShortcutBindings();
     invoke("get_anytype_version").then((version) => {
       el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
     }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
@@ -1349,8 +1574,16 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     } else {
       setStatus(state.message || "Settings loaded from this device.");
     }
-    if (refreshOnStart) await window.BlobUI.AppReload.run({ checkUpdates: false });
-    if (state.ready && !needsOnboarding) await showReleaseNotesOrContinue();
+    if (refreshOnStart) {
+      const startupDelay = ["foreground", "background"].includes(state.startupMode) ? 1600 : 0;
+      if (startupDelay) {
+        startupRefreshTimer = window.setTimeout(() => {
+          startupRefreshTimer = null;
+          if (!disposed) void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
+        }, startupDelay);
+      } else void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
+    }
+    if (state.ready && !needsOnboarding) void showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
@@ -1365,10 +1598,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       throw error;
     }
     window.appReady = !!state.ready;
-    applyTheme(state.theme);
+    applyTheme(state.theme, state.themeCss, state.previewTheme);
+    reportReloadedThemeDiagnostics(state.themeDiagnostics);
     defaultBannerPreview = String(state.defaultBannerPreview || "");
+    view.update({ customThemes: Array.isArray(state.customThemes) ? state.customThemes : [], themeDirectory: String(state.themeDirectory || "") });
     assignAdvancedConnection(state);
-    void refreshCalendarApiAvailability();
+    void refreshCalendarApiAvailability(true);
     assignDraftToForm(state.settings || {});
     if (state.apiPort) el("connection-port").value = state.apiPort === 31009 ? "" : String(state.apiPort);
     resetVisibilityField("connection-port");
@@ -1392,9 +1627,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updateSaveButton();
   }
 
-  function applyTheme(theme) {
-    const next = theme === "light" || theme === "dark" ? theme : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  function applyTheme(theme, themeCss = lastThemeCss, previewTheme = lastPreviewTheme) {
+    lastHostTheme = theme === "light" || theme === "dark" ? theme : "system";
+    if (["light", "dark", "system"].includes(previewTheme)) lastPreviewTheme = previewTheme;
+    const preferred = lastPreviewTheme === "light" || lastPreviewTheme === "dark" ? lastPreviewTheme : lastHostTheme;
+    const next = preferred === "light" || preferred === "dark"
+      ? preferred
+      : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     root.dataset.theme = next;
+    root.classList.toggle("themeDark", next === "dark");
+    root.style.colorScheme = next;
+    if (typeof themeCss === "string" && themeCss !== lastThemeCss) {
+      lastThemeCss = themeCss;
+      customThemeStyle.textContent = themeCss;
+    }
     if (next !== lastTheme) {
       lastTheme = next;
       if (draft) renderPicker(true);
@@ -1494,34 +1740,47 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     reader.readAsDataURL(file);
   }
 
+  function selectCalendarTab(index) {
+    view.update({ calendarTab: index });
+    window.BlobUI.CalendarPage?.show?.(view.getSnapshot().page === "calendar-events" && index === 1);
+  }
+
+  function selectKanbanTab(index) {
+    view.update({ kanbanTab: index });
+    if (view.getSnapshot().page === "kanban-views" && index === 1) window.BlobUI.FormulaPage.refresh();
+  }
+
   function showSettingsPage(page) {
-    const isFormulas = page === "formulas";
-    const isCalendarColors = page === "calendar-colors";
     const isCodex = page === "codex";
-    const isBrowser = isFormulas || isCalendarColors || isCodex;
     const isAccessibility = page === "accessibility";
     const isAdvanced = page === "advanced";
+    const currentView = view.getSnapshot();
     if (!isAdvanced && hasSavedApiKey && !advancedKeyEdited) {
       advancedApiKey.value = SAVED_KEY_MASK;
       resetVisibilityField("advanced-api-key");
     }
-    if (!isAccessibility && !isAdvanced && !isBrowser && draft) void refreshCalendarApiAvailability();
     view.update({ page });
     window.BlobUI.CodexPage?.show(isCodex);
     pageContent.scrollTop = 0;
     updatePageScrollbar();
-    window.BlobUI.CalendarPage?.show?.(isCalendarColors);
-    if (isFormulas) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
+    window.BlobUI.CalendarPage?.show?.(page === "calendar-events" && currentView.calendarTab === 1);
+    if (page === "kanban-views" && currentView.kanbanTab === 1) window.requestAnimationFrame(() => window.BlobUI.FormulaPage.refresh());
   }
 
   showSettingsPage("preferences");
 
   function openSection(page, index) {
+    if (page === "preferences") view.update({ preferenceTab: index });
+    else if (page === "calendar-events") selectCalendarTab(index);
+    else if (page === "kanban-views") selectKanbanTab(index);
     showSettingsPage(page);
     let panelId;
     if (page === "preferences") {
-      view.update({ preferenceTab: index });
       panelId = "preference-panel-" + index;
+    } else if (page === "calendar-events") {
+      panelId = "calendar-events-panel-" + index;
+    } else if (page === "kanban-views") {
+      panelId = "kanban-views-panel-" + index;
     } else if (page === "codex") {
       window.BlobUI.CodexPage.select(index);
       panelId = "codex-panel-" + index;
@@ -1529,7 +1788,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       selectAdvancedTab(index);
       panelId = ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
     }
-    const heading = el(panelId)?.querySelector("h2");
+    const panel = el(panelId);
+    const heading = panel?.querySelector("h2") || panel;
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
@@ -1543,8 +1803,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   async function refreshTheme() {
     try {
-      const state = await invoke("get_app_state");
-      applyTheme(state.theme);
+      const theme = await invoke("get_anytype_theme");
+      applyTheme(theme);
     } catch (_) { /* Keep the last known mode while Anytype is not readable. */ }
   }
 
@@ -1660,6 +1920,19 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     el("accent-error").textContent = !safeAccentSyntax || !supportedAccent ? "Use a 3 or 6 digit hex color, a supported rgb()/rgba() value, or an Anytype color variable. Pure white is reserved." : "";
     invalid = invalid || !safeAccentSyntax || !supportedAccent;
 
+    const themeColor = toHexColor(draft.themeColor);
+    const validBasedTheme = ["auto", "light", "dark", "inherit"].includes(draft.basedTheme);
+    const validThemePreset = !draft.themePreset || (draft.themePreset.length <= 128
+      && !draft.themePreset.startsWith(".") && draft.themePreset.endsWith(".css")
+      && /^[A-Za-z0-9_. -]+$/.test(draft.themePreset));
+    themeColorValue.classList.toggle("invalid", !themeColor);
+    el("theme-color-error").textContent = !themeColor
+      ? "Use a three or six digit hexadecimal color."
+      : !validBasedTheme ? "Choose a valid base theme."
+      : !validThemePreset ? "Choose a valid preset theme."
+      : "";
+    invalid = invalid || !themeColor || !validBasedTheme || !validThemePreset;
+
     const submittedCalendarRules = window.BlobUI.CalendarPage?.read();
     const calendarRulesChanged = JSON.stringify(submittedCalendarRules) !== JSON.stringify(editSession.getBaseline().calendarRules);
     const settingsChanged = !settingsEqual(draft, initialDraft);
@@ -1721,7 +1994,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
 
-    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !options.forceRebuild) return;
+    if (!settingsChanged && !updaterSettingsChanged && !connectionChanged && !formulasChanged && !calendarRulesChanged && !window.BlobUI.AnyblobDraft.isDirty() && !options.forceRebuild) return;
 
     const submittedSettings = { ...draft };
     const submittedUpdaterSettings = updaterSettingsChanged ? { ...updaterDraft } : null;
@@ -1748,6 +2021,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     let updaterSettingsSaved = false;
     try {
       let result = null;
+      await window.BlobUI.AnyblobDraft.save();
       if (submittedConnection) {
         result = await invoke("configure_connection", { connection: submittedConnection });
         connectionSaved = true;
@@ -1791,6 +2065,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         else mergeUpdaterState(savedUpdaterState || {});
       }
       if (settingsChanged || options.forceRebuild) {
+        if (result && typeof result.themeCss === "string") {
+          applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
+        }
         saveStatus(result || { calendarStatus: "disabled" }, !settingsChanged);
       } else if (updaterSettingsChanged && connectionChanged) {
         setStatus("App Settings and Anytype connection saved.", "info");
@@ -1807,15 +2084,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
     } catch (error) {
       const message = error.message || String(error);
-      setStatus(connectionSaved && settingsChanged
+      const status = connectionSaved && settingsChanged
         ? "Connection saved. Other settings could not be saved: " + message
         : connectionSaved || generalSettingsSaved || updaterSettingsSaved || formulasSaved || calendarRulesSaved
           ? "Some settings were saved. Other changes could not be saved: " + message
-          : message, "error");
+          : message;
+      setStatus(status, "error", true, error);
     } finally {
       saveBusy = false;
-      void refreshCalendarApiAvailability();
+      if (connectionSaved || updaterPathChanged) void refreshCalendarApiAvailability(true);
       updateSaveButton();
+      window.dispatchEvent(new Event("blobui-codex-integration-refresh"));
     }
   }
 
@@ -1823,6 +2102,40 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (isInstallingUpdate()) return;
     hsv.h = Number(hueInput.value);
     chooseCustomColor();
+  });
+  listen(themeHueInput, "input", () => {
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
+    themeHsv.h = Number(themeHueInput.value);
+    chooseThemeColor();
+  });
+  listen(themeSaturationInput, "input", () => {
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
+    themeHsv.s = Number(themeSaturationInput.value);
+    chooseThemeColor();
+  });
+  listen(themeBrightnessInput, "input", () => {
+    if (!draft?.enableCustomThemes || isInstallingUpdate()) return;
+    themeHsv.v = Number(themeBrightnessInput.value);
+    chooseThemeColor();
+  });
+  function pickThemeAtPointer(event) {
+    const bounds = themePlane.getBoundingClientRect();
+    themeHsv.s = Math.max(0, Math.min(100, (event.clientX - bounds.left) / bounds.width * 100));
+    themeHsv.v = 100 - Math.max(0, Math.min(100, (event.clientY - bounds.top) / bounds.height * 100));
+    chooseThemeColor();
+  }
+  listen(themePlane, "pointerdown", (event) => {
+    if (!draft?.enableCustomThemes || saveBusy || isInstallingUpdate() || event.button !== 0) return;
+    event.preventDefault();
+    themePlane.setPointerCapture(event.pointerId);
+    themeSaturationInput.focus({ preventScroll: true });
+    pickThemeAtPointer(event);
+  });
+  listen(themePlane, "pointermove", (event) => {
+    if (draft?.enableCustomThemes && themePlane.hasPointerCapture(event.pointerId) && !saveBusy && !isInstallingUpdate()) pickThemeAtPointer(event);
+  });
+  listen(themePlane, "pointerup", (event) => {
+    if (themePlane.hasPointerCapture(event.pointerId)) themePlane.releasePointerCapture(event.pointerId);
   });
   listen(chooseBannerImage, "click", () => {
     if (!chooseBannerImage.disabled && !isInstallingUpdate()) {
@@ -1897,7 +2210,31 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function changeSettingField(id, value) {
     if (id === "native-accent") return changeNativeAccent(value);
     if (id === "accent-value") return changeAccentValue(value);
+    if (id === "theme-color-value") return changeThemeColorValue(value);
     if (!draft || saveBusy || isInstallingUpdate()) return;
+    if (id === "based-theme") {
+      draft.basedTheme = value;
+      presentSettingsFields({ [id]: value });
+      markDirty();
+      return;
+    }
+    if (id === "custom-theme") {
+      draft.themePreset = value;
+      const selectedTheme = view.getSnapshot().customThemes.find(theme => theme.id === value);
+      const mainColor = toHexColor(selectedTheme?.mainColor);
+      const fields = { [id]: value };
+      if (mainColor) {
+        draft.themeColor = mainColor;
+        fields["theme-color-value"] = mainColor;
+        themeColorValue.classList.remove("invalid");
+        el("theme-color-error").textContent = "";
+        renderThemePicker(true);
+      }
+      presentSettingsFields(fields);
+      syncIncludeSelectionsPreview();
+      markDirty();
+      return;
+    }
     if (id === "font-family" || id === "code-font-family") {
       draft[id === "font-family" ? "fontFamily" : "codeFontFamily"] = value.trim();
       presentSettingsFields({ [id]: value });
@@ -1912,7 +2249,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
       draft[property] = value;
       presentSettingsFields({ [id]: value });
-      if (property === "reducedMotion" || property === "includeSelections") root.dataset[property] = String(value);
+      if (property === "reducedMotion") root.dataset.reducedMotion = String(value);
+      if (property === "includeSelections" || property === "enableCustomThemes") syncIncludeSelectionsPreview();
     }
     markDirty();
   }
@@ -1946,6 +2284,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   }
 
+  function changeReleaseChannel(value) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate() || !["release", "dev"].includes(value)) return;
+    updaterDraft.releaseChannel = value;
+    view.update({ releaseChannel: value });
+    markDirty();
+  }
+
   function changeBackgroundExperiment(value) {
     if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
     draft.backgroundExperiment = value;
@@ -1974,7 +2319,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (!window.appReady) {
         await invoke("recover_install_directory", { installDirectory: selected });
         initialUpdaterSettings = { ...updaterDraft };
-        await loadState();
+        await loadState({ waitForUpdater: true });
         return;
       }
       markDirty();
@@ -2020,7 +2365,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
     open: url => invoke("open_external_link", { url }),
     onError(error) {
-      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error");
+      setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error", true, error);
     },
   });
   const blobImportModal = window.BlobUI.createModalController({
@@ -2177,13 +2522,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!el("help-control").contains(event.target)) closeHelp();
   });
   listen(el("help-whats-new"), "click", () => { closeHelp(); showLatestReleaseNotes(); });
-  listen(el("help-documentation"), "click", () => { closeHelp(); showDocumentation(); });
-  listen(el("help-keybinds"), "click", async () => {
+  listen(el("help-dev-guide"), "click", () => { closeHelp(); showDocumentation(); });
+  listen(el("help-keybinds"), "click", () => {
     closeHelp();
-    el("keybind-status").textContent = "";
+    el("keybind-status").textContent = shortcutBindingsLoaded ? "" : "Loading keyboard shortcuts…";
     el("keybind-status").classList.remove("error");
-    await loadShortcutBindings();
+    renderShortcutBindings();
     keybindModal.open();
+    if (!shortcutBindingsLoaded) void loadShortcutBindings();
   });
   listen(el("help-error-close"), "click", () => helpErrorModal.close());
   listen(el("keybinds-close"), "click", () => keybindModal.close());
@@ -2195,20 +2541,37 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   listen(el("copy-logs"), "click", async () => {
     try {
-      await navigator.clipboard.writeText(logs.map(formatLog).join("\n"));
+      await navigator.clipboard.writeText(logStore.entries().map(formatLog).join("\n"));
       el("copy-status").textContent = "All logs copied.";
-      el("copy-logs").title = "All logs copied";
+      view.update({ copyLogsCopied: true });
+      if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+      copyConfirmationTimer = window.setTimeout(() => {
+        copyConfirmationTimer = null;
+        view.update({ copyLogsCopied: false });
+        el("copy-status").textContent = "";
+      }, 1400);
     } catch (error) {
-      setStatus("Could not copy logs. " + (error.message || String(error)), "error");
+      view.update({ copyLogsCopied: false });
+      setStatus("Could not copy logs. " + (error.message || String(error)), "error", true, error);
       el("copy-status").textContent = "Could not copy logs.";
     }
+  });
+  listen(el("clear-logs"), "click", () => {
+    logStore.clear();
+    if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+    copyConfirmationTimer = null;
+    view.update({ copyLogsCopied: false });
+    el("copy-status").textContent = "";
+    closeLogs();
+    updateLogView();
+    el("help-button").focus();
   });
 
   async function windowAction(command) {
     try {
       await invoke(command);
     } catch (error) {
-      setStatus(error.message || String(error), "error");
+      setStatus(error.message || String(error), "error", true, error);
     }
   }
   listen(el("window-background"), "click", () => windowAction("run_in_background"));
@@ -2221,8 +2584,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
   const onboardingApi = el("onboarding-api");
-  const documentation = el("documentation");
-  const documentationBack = el("documentation-back");
   const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
   // Add future pages here. Every page advances through the same transition;
   // reaching the end always reveals the main app.
@@ -2234,55 +2595,17 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
-  let documentationPreviousFocus = null;
-  let documentationTransition = null;
-
-  function resetDocumentationTransition() {
-    window.clearTimeout(documentationTransition);
-    documentationTransition = null;
-    documentation.classList.remove("leaving");
-    settingsShell.classList.remove("onboarding-entering");
-  }
-
-  function hideDocumentationImmediately() {
-    const previousFocus = documentationPreviousFocus;
-    resetDocumentationTransition();
-    documentation.hidden = true;
-    documentationBack.hidden = true;
-    settingsShell.inert = false;
-    documentationPreviousFocus = null;
-    return previousFocus;
-  }
+  let onboardingAfterGuideClose = false;
 
   function showDocumentation() {
-    if (connectionBusy || !onboarding.hidden || !documentation.hidden) return;
-    resetDocumentationTransition();
+    if (!onboarding.hidden || documentationModal.isOpen()) return;
     closeLogs();
     documentationPreviousFocus = document.activeElement;
-    settingsShell.inert = true;
-    documentation.hidden = false;
-    documentationBack.hidden = false;
-    documentationBack.focus();
     view.update({ documentationOpened: true });
+    documentationModal.open();
   }
 
-  function closeDocumentation() {
-    if (documentation.hidden || documentationTransition !== null) return;
-    documentation.classList.add("leaving");
-    const reducedMotion = root.dataset.reducedMotion === "true"
-      || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    documentationTransition = window.setTimeout(() => {
-      documentationTransition = null;
-      documentation.classList.remove("leaving");
-      documentation.hidden = true;
-      documentationBack.hidden = true;
-      settingsShell.inert = false;
-      if (documentationPreviousFocus) documentationPreviousFocus.focus();
-      documentationPreviousFocus = null;
-    }, reducedMotion ? 0 : 320);
-  }
-
-  listen(documentationBack, "click", closeDocumentation);
+  listen(el("documentation-close"), "click", () => documentationModal.close());
 
   function resetOnboardingTransition() {
     window.clearTimeout(onboardingTransition);
@@ -2299,10 +2622,23 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     onboardingSteps[index].focus.focus();
   }
 
-  function showOnboarding() {
+  function showOnboarding(previousFocus = null) {
     if (connectionBusy || isInstallingUpdate()) return;
-    const documentationFocus = documentation.hidden ? null : hideDocumentationImmediately();
-    if (onboarding.hidden) onboardingPreviousFocus = documentationFocus || document.activeElement;
+    if (documentationModal.isOpen()) {
+      if (onboardingAfterGuideClose) return;
+      onboardingAfterGuideClose = true;
+      const guideFocus = documentationPreviousFocus;
+      documentationModal.close({ restoreFocus: false });
+      window.setTimeout(() => {
+        onboardingAfterGuideClose = false;
+        if (!disposed && onboarding.hidden) showOnboarding(guideFocus);
+      }, 150);
+      return;
+    }
+    if (onboarding.hidden) {
+      if (!previousFocus) onboardingPreviousFocus = document.activeElement;
+      else onboardingPreviousFocus = previousFocus.closest("[hidden], [inert]") ? el("help-button") : previousFocus;
+    }
     resetOnboardingTransition();
     closeLogs();
     apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
@@ -2407,12 +2743,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (enabled) {
         el("connection-error").textContent = error.message || String(error);
       } else {
-        setStatus(error.message || String(error), "error");
+        setStatus(error.message || String(error), "error", true, error);
         el("onboarding-choice-error").textContent = "Could not apply this choice. Check your BlobUI installation and try again.";
       }
     } finally {
       setConnectionBusy(false);
-      void refreshCalendarApiAvailability();
+      void refreshCalendarApiAvailability(true);
     }
   }
 
@@ -2458,6 +2794,15 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
         && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
     };
+    if (matches("openComponentCatalog")) {
+      event.preventDefault();
+      if (!event.repeat) {
+        invoke("open_component_catalog").catch((error) => {
+          setStatus("Could not open the component catalog. " + (error.message || String(error)), "error", true, error);
+        });
+      }
+      return;
+    }
     if (matches("rebuildCss")) {
       event.preventDefault();
       if (!event.repeat) save({ forceRebuild: true });
@@ -2497,7 +2842,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (!draft || isInstallingUpdate()) return;
     updateSaveButton();
     if (!saveBusy && window.appReady) {
-      setStatus(editSession.isDirty()
+      setStatus(hasUnsavedChanges()
         ? "Unsaved changes are ready to apply."
         : "No unsaved changes.", "info", false);
     }
@@ -2517,22 +2862,25 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     return subscription.catch(error => { onError(error); return false; });
   }
   savedStateSubscription = subscribeNativeEvent("blobui-saved-state-changed", () => requestSavedRefresh(), error => {
-    addLog("Could not listen for saved settings changes. " + String(error.message || error), "error");
+    addLog("Could not listen for saved settings changes. " + String(error.message || error), "error", error);
   });
   subscribeNativeEvent("blobui-rebuild-custom-css", () => save({ forceRebuild: true }), error => {
-    setStatus(error.message || String(error), "error");
+    setStatus(error.message || String(error), "error", true, error);
   });
   const onboardingSubscription = subscribeNativeEvent("blobui-show-onboarding", () => showOnboarding(), error => {
-    setStatus(error.message || String(error), "error");
+    setStatus(error.message || String(error), "error", true, error);
   });
   const backgroundErrorSubscription = subscribeNativeEvent("blobui-background-error", event => {
     const message = String(event.payload || "Could not run BlobUI in background.");
     setStatus(message, "error");
-    addLog(message, "error");
-  }, error => addLog(String(error.message || error), "error"));
+  }, error => addLog(String(error.message || error), "error", error));
   function dispose() {
     if (disposed) return;
     disposed = true;
+    if (startupRefreshTimer !== null) window.clearTimeout(startupRefreshTimer);
+    if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
+    startupRefreshTimer = null;
+    copyConfirmationTimer = null;
     nativeEventsDisposed = true;
     nativeService.dispose();
     eventUnsubscribers.splice(0).forEach(unlisten => {
@@ -2541,14 +2889,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     removeListeners.splice(0).reverse().forEach(remove => remove());
     [themeInterval, updateInterval].forEach(timer => window.clearInterval?.(timer));
     resetOnboardingTransition();
-    resetDocumentationTransition();
     invalidateBannerRead();
     savedRefresh.invalidate();
     void savedRefresh.setReady(false);
     scrollbars.forEach(controller => controller.destroy());
     Object.values(visibilityFields).forEach(controller => controller.destroy?.());
     externalLinkController.destroy();
-    [apiKeyRemovalModal, discardConfirmationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
+    [apiKeyRemovalModal, discardConfirmationModal, documentationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
       .forEach(controller => controller.destroy?.());
     window.BlobUI.CalendarPage?.destroy?.();
     window.BlobUI.FormulaPage?.destroy?.();
@@ -2557,24 +2904,49 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   window.BlobUI.AppReload = window.BlobUI.ReloadController.create({
-    onReload: () => addLog("Reloading app metadata. Refreshing Anytype lists and pickers.", "info"),
+    onReload: ({ startup = false } = {}) => {
+      if (!startup && startupRefreshTimer !== null) {
+        window.clearTimeout(startupRefreshTimer);
+        startupRefreshTimer = null;
+      }
+      addLog("Reloading app metadata and refreshing Anytype lists and pickers.", "info");
+    },
     isCapturing: () => !!shortcutCaptureAction,
     beforeRun: async () => {
       try { await refreshSavedState(); }
-      catch (error) { addLog("Saved settings reload failed. " + String(error.message || error), "error"); }
+      catch (error) { addLog("Saved settings reload failed. " + String(error.message || error), "error", error); }
       await Promise.allSettled([...metadataPending]);
     },
-    onError: error => { setStatus(String(error.message || error), "error"); addLog(String(error.message || error), "error"); },
+    onError: error => setStatus(String(error.message || error), "error", true, error),
   });
   window.BlobUI.AppReload.register(({ checkUpdates }) => checkUpdates ? checkForUpdates(false) : undefined);
-  window.BlobUI.CodexPage.init({ invoke, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
+  window.BlobUI.AppReload.register(async () => {
+    const result = await invoke("reload_custom_themes");
+    const state = result?.state;
+    if (!state) throw new Error("Custom themes could not be reloaded.");
+    if (disposed) return;
+    applyTheme(state.theme, state.themeCss, state.previewTheme);
+    reportReloadedThemeDiagnostics(state.themeDiagnostics);
+    view.update({
+      customThemes: Array.isArray(state.customThemes) ? state.customThemes : [],
+      themeDirectory: String(state.themeDirectory || ""),
+    });
+    if (result.cssRebuilt === false) setStatus("Custom theme CSS could not be rebuilt. Check Logs.", "error", false);
+  });
+  window.BlobUI.AppReload.register(async () => {
+    const availability = await refreshCalendarApiAvailability(true);
+    if (disposed || availability !== "available") return;
+    await window.BlobUI.FormulaPage?.refreshResults?.(invoke);
+  });
+  window.BlobUI.AnyblobDraft.init({ invoke, onChange: updateSaveButton });
+  window.BlobUI.CodexPage.init({ invoke, listen: nativeService.listen, navigate: showSettingsPage, read: () => draft?.codexIntegration, readSaved: () => editSession.getBaseline()?.settings?.codexIntegration, onChange(value) { if (!draft) return; draft.codexIntegration = value; markDirty(); } });
   window.BlobUI.CalendarPage?.init({ registerReload: window.BlobUI.AppReload.register,
-    onChange: markDirty, onInfo: message => addLog(message, "info") });
-  window.BlobUI.FormulaPage.init({ navigate: showSettingsPage, onChange: markDirty, onInfo: message => addLog(message, "info"), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
+    onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error) });
+  window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
   const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
-    addLog("Settings could not be loaded. " + String(error.message || error), "error");
+    addLog("Settings could not be loaded. " + String(error.message || error), "error", error);
   }).finally(() => {
     if (disposed) return;
     void savedRefresh.setReady();
@@ -2582,12 +2954,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   });
   Promise.all([onboardingSubscription, initialStateLoaded, backgroundErrorSubscription]).then(([subscription]) => {
     if (!disposed && subscription !== false) return invoke("onboarding_ready");
-  }).catch(error => setStatus(String(error.message || error), "error"));
+  }).catch(error => setStatus(String(error.message || error), "error", true, error));
   const themeInterval = window.setInterval(refreshTheme, 2000);
   const updateInterval = window.setInterval(() => {
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeBackgroundExperiment, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, save, beginShortcutCapture,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }

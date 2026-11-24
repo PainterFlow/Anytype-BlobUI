@@ -1,13 +1,13 @@
 ## Rules:
 - Never modify files outside this workspace.
-- The custom.css is located at `C:\Users\{user}}\AppData\Roaming\anytype\custom.css` and the data is located at: `C:\Users\{user}}\AppData\Roaming\anytype\blob\*`
 - Use `scripts/Build-Installer.ps1` to build the installer and `scripts/Build-App.ps1 -s -c` to build the app.
 - When building the Settings app, always run `scripts/Build-App.ps1 -s -c`.
 - Make sure to preserve existing changes!
 - When making UI, always check `./settings-app/UI_REFERENCE.md` and make sure to follow Anytypes UI philosophy.
 - Make sure to always test and build/compile the app after you finished implementing the feature.
 - Anytypes v1 API is completely banned.
-- Never modify `Changelogs.md` unless I explicitly request it in my prompt.
+- Never modify files under `./settings-app/markdowns/*` unless I explicitly request it in my prompt.
+- When modifying Anyblob or the MCP for anyblob, bump the anyblob minor version(minor = the last version, the `x.x.THIS-ONE`) in the last edit even if I forgot to specify an exact version for anyblob(if I do specify one then bump it to that version). 
 
 ## Branch synchronization
 - Dev must contain every feature and bugfix on main, plus ongoing development work.

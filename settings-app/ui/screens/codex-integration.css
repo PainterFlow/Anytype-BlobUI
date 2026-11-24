@@ -1,0 +1,4 @@
+.anyblob-integration-settings input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

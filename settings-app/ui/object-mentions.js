@@ -10,13 +10,17 @@
     const getSnapshot=()=>snapshot;
     function publish(patch={}){snapshot={...snapshot,...patch};listeners.forEach(listener=>listener());}
     function filters(){return api?normalize(api.read()).objectMentions:{spaces:{all:true,items:[]},types:{all:true,items:[]},filterIncompleteTasks:false};}
+    function readable(id){const permission=api?normalize(api.read()).spaces[id]:null;return permission?permission.access!=='none':false;}
     function options(kind){
       const saved=filters(),selected=saved[kind],entries=new Map();
-      const active=sid=>saved.spaces.all||saved.spaces.items.some(space=>space.id===sid);
-      const available=kind==='spaces'?spaces:types.filter(type=>active(type.spaceId)&&spaces.some(space=>space.id===type.spaceId));
+      const active=sid=>readable(sid)&&(saved.spaces.all||saved.spaces.items.some(space=>space.id===sid));
+      const available=kind==='spaces'?spaces.filter(space=>readable(space.id)):types.filter(type=>active(type.spaceId)&&spaces.some(space=>space.id===type.spaceId));
       for(const row of available)entries.set(key(kind,row),{row,available:true});
       for(const row of selected.items)if(!entries.has(key(kind,row)))entries.set(key(kind,row),{row,available:false});
-      return [{value:'*',label:'All'},...[...entries].map(([value,{row,available}])=>({value,row,label:kind==='spaces'?row.name:row.name+' · '+row.space,description:kind==='types'&&!active(row.spaceId)?'Inactive outside filtered spaces':available?'':'Unavailable saved selection'})).sort((a,b)=>a.label.localeCompare(b.label)||a.value.localeCompare(b.value))];
+      return [{value:'*',label:'All'},...[...entries].map(([value,{row,available}])=>{
+        const sid=kind==='spaces'?row.id:row.spaceId;
+        return {value,row,label:kind==='spaces'?row.name:row.name+' · '+row.space,description:!readable(sid)?'Inactive without read permission':kind==='types'&&!active(sid)?'Inactive outside filtered spaces':available?'':'Unavailable saved selection'};
+      }).sort((a,b)=>a.label.localeCompare(b.label)||a.value.localeCompare(b.value))];
     }
     function change(kind,values){
       if(!api)return;
@@ -27,7 +31,7 @@
     function setIncompleteTasks(checked){if(!api)return;const next=normalize(api.read());next.objectMentions.filterIncompleteTasks=checked===true;api.onChange(next);refresh();}
     function refresh(){const selected=filters();publish({spaces:options('spaces'),types:options('types'),selections:selected,filterIncompleteTasks:selected.filterIncompleteTasks});}
     async function discoverTypes(forceRefresh=false){
-      const current=++epoch,saved=filters(),ids=spaces.filter(space=>forceRefresh||saved.spaces.all||saved.spaces.items.some(value=>value.id===space.id)).map(space=>space.id);
+      const current=++epoch,saved=filters(),ids=spaces.filter(space=>readable(space.id)&&(forceRefresh||saved.spaces.all||saved.spaces.items.some(value=>value.id===space.id))).map(space=>space.id);
       if(!ids.length){status='';publish({status});refresh();return;}
       status='Loading object types…';publish({status});
       try{const result=await api.invoke('discover_anyblob_types',{spaceIds:ids,forceRefresh});if(current!==epoch)return;if(!Array.isArray(result?.types)||!Array.isArray(result?.errors))throw Error('Type discovery returned an invalid response.');const failed=new Set(result.errors.map(error=>error.spaceId));types=types.filter(type=>!ids.includes(type.spaceId)||failed.has(type.spaceId));const merged=new Map(types.map(type=>[key('types',type),type]));for(const type of result.types)merged.set(key('types',type),type);types=[...merged.values()];status=result.errors.map(error=>error.error).join(' ');}

@@ -253,7 +253,7 @@ pub fn snapshot(key: &str, ip: &str, port: u16, config: &Configuration) -> Resul
 #[tauri::command]
 pub fn load_calendar_rules() -> Result<Value, String> {
     let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-    let config=configuration(&crate::read_json_file(&install.join("blob/data.json"))?)?;
+    let config=configuration(&crate::load_settings_data(&install)?)?;
     let mut value=json!(config);value["revision"]=json!(crate::anyblob_blobui::revision(&json!(config)));Ok(value)
 }
 #[tauri::command]
@@ -264,11 +264,10 @@ pub async fn discover_calendar_colors(force_refresh: Option<bool>) -> Result<Val
 #[tauri::command]
 pub async fn save_calendar_rules(configuration: Configuration, settings: Option<crate::SettingsDraft>, revision: Option<String>) -> Result<Value, String> {
     configuration.validate()?;
-    let guard = crate::acquire_save_guard("Wait for the current settings save to finish.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
+        let _guard = crate::wait_save_guard("Wait for the current settings save to finish.")?;
         let install = crate::resolve_install_directory(&crate::app_data_directory())?;
-        let data = crate::read_json_file(&install.join("blob/data.json"))?;
+        let data = crate::load_settings_data(&install)?;
         if revision.as_deref()!=Some(crate::anyblob_blobui::calendar_revision(&data)?.as_str()) {return Err("Saved calendar rules changed. Reload Settings before saving your draft.".into());}
         let revision=crate::anyblob_blobui::revision(&json!(configuration));
         let result=crate::save_settings_with_calendar_rules(settings.unwrap_or_else(|| crate::settings_from_data(&data)), Some(configuration))?;
@@ -362,7 +361,15 @@ mod tests {
         let server = std::thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(30);
             while !done.load(Ordering::Relaxed) && Instant::now() < deadline {
-                let Ok((mut stream, _)) = listener.accept() else { std::thread::sleep(Duration::from_millis(1)); continue; };
+                let (mut stream, _) = match listener.accept() {
+                    Ok(accepted) => accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(error) => panic!("fixture accept failed: {error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                 let mut bytes = Vec::new(); let mut buffer = [0;4096];
                 loop {
