@@ -114,8 +114,10 @@ jobs:
           )
           foreach ($filter in $filters) {
             Write-Host "Generating frontend CSS fixtures with $filter"
-            & cargo test --locked --release --manifest-path $manifestPath --bin blobui-settings $filter -- --test-threads=1
+            $output = & cargo test --locked --release --manifest-path $manifestPath --lib $filter -- --test-threads=1 2>&1 | Out-String
+            Write-Host $output
             if ($LASTEXITCODE -ne 0) { throw "CSS fixture generation failed for Rust test filter $filter." }
+            if ($output -match '0 passed; 0 failed') { throw "Rust test filter $filter did not match any tests." }
           }
 
       - name: Validate the bundled Settings frontend
