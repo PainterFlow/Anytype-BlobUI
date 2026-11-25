@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { SelectPicker, SelectorOptionIcon } from "../shared/select-picker.jsx";
-import { ExpandableSearch } from "../shared/search.jsx";
-import { FilterIcon, ReloadIcon } from "../shared/catalog-icons.jsx";
-import { CatalogList, CatalogListRow, groupIntoSections } from "../shared/catalog-list.jsx";
+import { SelectPicker } from "../shared/select-picker.jsx";
+import { CatalogList, CatalogListRow, CatalogListToolbar, groupIntoSections } from "../shared/catalog-list.jsx";
 import { DeleteIcon, SettingsHeading } from "../shared/settings-controls.jsx";
 
 const UI = () => window.BlobUI;
@@ -15,16 +13,10 @@ function Toolbar({ prefix, label, records, spaceCatalog = [], onReload, locked, 
     return [...new Map(records.map(item => [item.spaceId, item.space || "Unnamed space"])).entries()]
       .sort((a,b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
   }, [records, spaceCatalog]);
-  const selectedSpaceIcon = spaces.find(([id]) => id === selectedSpace)?.[2];
   const filterOptions = [{ value: "", label: "All spaces" }, ...spaces.map(([value, label, icon]) => ({ value, label, icon }))];
-  return <div className={"formula-toolbar" + (prefix === "calendar-override" ? " calendar-sticky-toolbar" : "")}>
-    <ExpandableSearch id={`${prefix}-search`} label={label} placeholder={label} disabled={locked} value={query} onChange={setQuery} />
-    <button id={`${prefix}-reload`} type="button" className="neutral-icon-button" aria-label="Reload list" title="Reload list" disabled={locked || busy} aria-busy={String(busy)} onClick={onReload}><ReloadIcon /></button>
-    {showFilter && <SelectPicker id={`${prefix}-filter`} rootId={`${prefix}-filter-control`} menuId={`${prefix}-filter-options`}
-      rootClassName="formula-filter-control" icon={selectedSpaceIcon ? <span className="selector-trigger-icon"><SelectorOptionIcon icon={selectedSpaceIcon} /></span> : <FilterIcon />} label="Filter by space"
-      title={selectedSpace ? `Filtered to ${selectedSpace}` : "Filter by space"} pressed={Boolean(selectedSpace)}
-      disabled={locked || busy} options={filterOptions} value={selectedSpace} onChange={setSelectedSpace} />}
-  </div>;
+  return <CatalogListToolbar prefix={prefix} className={prefix === "calendar-override" ? "calendar-sticky-toolbar" : ""}
+    searchLabel={label} query={query} onQueryChange={setQuery} reloadLabel="Reload list" onReload={onReload} locked={locked} busy={busy}
+    filterLabel="Filter by space" filterOptions={filterOptions} filterValue={selectedSpace} onFilterChange={setSelectedSpace} showFilter={showFilter} />;
 }
 
 function RuleRow({ controller, label, override, onRemove, disabled, dialogRef }) {

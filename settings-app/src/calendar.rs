@@ -133,16 +133,18 @@ pub fn discover(client: &Client) -> Result<Value, String> {
         }) {
             let (row, result) = result;
             let (key, document) = result?;
+            let mut type_icon = row["icon"].clone();
             let eligible = match document {
                 Ok(mut document) => {
                     if document["name"].as_str().is_none() { document["name"] = json!(name(row)); }
+                    if type_icon.is_null() { type_icon = document["icon"].clone(); }
                     views.extend(calendar_views(Some(client), &sid, name(&space), &document));
                     type_properties(&document, &properties)
                 }
                 Err(error) => { info.push(format!("Could not read type '{}'. {error}", name(row))); Vec::new() }
             };
             let mut type_row = json!({"spaceId":sid,"space":name(&space),"key":key,"name":name(row),"properties":eligible});
-            if let Some(icon) = crate::codex::icon_value(client, &sid, &row["icon"]) { type_row["icon"] = icon; }
+            if let Some(icon) = crate::codex::icon_value(client, &sid, &type_icon) { type_row["icon"] = icon; }
             types.push(type_row);
         }
         let rows = client.pages("POST", &format!("/v2/spaces/{}/search?ids=full", enc(&sid)), Some(&json!({})))?;

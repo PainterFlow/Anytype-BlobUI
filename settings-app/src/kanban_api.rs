@@ -293,7 +293,7 @@ impl Client {
             .and_then(Value::as_str)
             .unwrap_or("Untitled")
             .to_string();
-        let source_icon = crate::codex::icon_value(self, space_id, &row["icon"]);
+        let source_icon = crate::codex::icon_value(self, space_id, if row["icon"].is_null() { &document["icon"] } else { &row["icon"] });
         let mut candidates = Vec::new();
         let mut unreadable = 0;
         let mut exposed_by_block = BTreeMap::new();

@@ -3194,8 +3194,8 @@ pub fn app_main() {
                     let width = low_level.get("windowWidth").and_then(Value::as_f64).unwrap_or(960.0);
                     let height = low_level.get("windowHeight").and_then(Value::as_f64).unwrap_or(740.0);
                     let _ = main_window.set_size(tauri::LogicalSize::new(width, height));
-                    let settings_json = std::fs::read_to_string(settings_data_path(install).unwrap_or_default()).ok()
-                        .and_then(|text| serde_json::from_str::<Value>(&text).ok()).unwrap_or_default();
+                    let settings_json = settings_root_for_install(install).ok()
+                        .and_then(|root| settings_store::load(&root).ok()).unwrap_or_default();
                     let experiment = settings_json.pointer("/settings/fullscreenExperiment").and_then(Value::as_str).unwrap_or("");
                     let always = settings_json.pointer("/settings/alwaysStartFullscreen").and_then(Value::as_bool).unwrap_or(false);
                     let was_fullscreen = low_level.get("fullscreen").and_then(Value::as_bool).unwrap_or(false);

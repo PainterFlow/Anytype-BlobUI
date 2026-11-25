@@ -1,7 +1,34 @@
 import React, { useState } from "react";
-import { SelectorOptionIcon } from "./select-picker.jsx";
+import { SelectPicker, SelectorOptionIcon } from "./select-picker.jsx";
+import { ExpandableSearch } from "./search.jsx";
+import { FilterIcon, ReloadIcon } from "./catalog-icons.jsx";
+import { IconButton } from "./settings-controls.jsx";
 
-export function CatalogList({ sections = [], renderItem, emptyMessage = "", className = "", collapsible = true }) {
+function flatFilterOptions(options) {
+  return (Array.isArray(options) ? options : []).flatMap(option => Array.isArray(option?.options) ? option.options : [option]);
+}
+
+export function CatalogListToolbar({
+  prefix, searchLabel, query, onQueryChange, reloadLabel = "Reload list", onReload, locked = false, busy = false,
+  filterOptions = [], filterValue, onFilterChange = () => {}, filterMultiple = false, filterLabel = "Filter",
+  filterCloseOnSelect, showFilter = true, className = "", portalRef,
+}) {
+  const flatOptions = flatFilterOptions(filterOptions);
+  const selectedValues = filterMultiple ? (Array.isArray(filterValue) ? filterValue : []) : [filterValue];
+  const selectedOption = !filterMultiple && selectedValues.length === 1 ? flatOptions.find(option => option.value === filterValue) : null;
+  const active = filterMultiple ? selectedValues.length > 0 : Boolean(filterValue);
+  return <div className={["formula-toolbar", className].filter(Boolean).join(" ")}>
+    <ExpandableSearch id={prefix + "-search"} label={searchLabel} placeholder={searchLabel} value={query} onChange={onQueryChange} disabled={locked} />
+    <IconButton id={prefix + "-reload"} aria-label={reloadLabel} title={reloadLabel} disabled={locked || busy} aria-busy={String(busy)} onClick={onReload}><ReloadIcon /></IconButton>
+    {showFilter && <SelectPicker id={prefix + "-filter"} rootId={prefix + "-filter-control"} menuId={prefix + "-filter-options"}
+      rootClassName="formula-filter-control" label={filterLabel} title={active && selectedOption ? filterLabel + ": " + selectedOption.label : filterLabel}
+      icon={selectedOption?.icon ? <SelectorOptionIcon icon={selectedOption.icon} /> : <FilterIcon />} pressed={active}
+      triggerClassName={active ? "is-filtered" : ""} disabled={locked || busy} options={filterOptions} value={filterValue}
+      multiple={filterMultiple} closeOnSelect={filterCloseOnSelect} onChange={onFilterChange} portalRef={portalRef} />}
+  </div>;
+}
+
+export function CatalogList({ sections = [], renderItem, emptyMessage = "", emptyClassName = "", className = "", collapsible = true }) {
   const [collapsedSections, setCollapsedSections] = useState(() => new Set());
   const visible = sections.filter(section => section.items?.length);
   function toggle(id) {
@@ -25,8 +52,12 @@ export function CatalogList({ sections = [], renderItem, emptyMessage = "", clas
         <div className="catalog-list-items-wrap"><div className="catalog-list-items">{(section.items || []).map((item, itemIndex) => renderItem(item, itemIndex, section))}</div></div>
       </section>;
     })}
-    {!visible.some(section => section.items?.length) && emptyMessage && <p className="input-hint catalog-list-empty formula-empty-message">{emptyMessage}</p>}
+    {!visible.some(section => section.items?.length) && emptyMessage && <p className={`input-hint catalog-list-empty ${emptyClassName}`.trim()}>{emptyMessage}</p>}
   </div>;
+}
+
+export function CatalogListCustomRow({ children, className = "" }) {
+  return <section className={`catalog-list-row catalog-list-custom-row ${className}`.trim()}>{children}</section>;
 }
 
 export function CatalogListRow({

@@ -21,7 +21,7 @@ import { AdvancedSelector, SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 import { FilterIcon, ReloadIcon, SearchIcon } from "../shared/catalog-icons.jsx";
 import { HelpTooltip } from "../shared/help-tooltip.jsx";
-import { CatalogList, CatalogListRow } from "../shared/catalog-list.jsx";
+import { CatalogList, CatalogListRow, CatalogListToolbar } from "../shared/catalog-list.jsx";
 import { Sidebar } from "./shell.jsx";
 
 const pickerOptions = [
@@ -38,11 +38,11 @@ const sourceOptions = [
 
 const listSections = [
   { id: "personal", label: "Personal space", icon: "🙂", items: [
-    { id: "tasks", title: "Tasks", description: "Privat", icon: "✅" },
-    { id: "notes", title: "Notes", description: "Privat", icon: "📝" },
+    { id: "tasks", title: "Tasks", meta: "Private", icon: "✅" },
+    { id: "notes", title: "Notes", meta: "Private" },
   ]},
   { id: "work", label: "Work space", icon: "💼", items: [
-    { id: "projects", title: "Projects", description: "Work", icon: "📁" },
+    { id: "projects", title: "Projects", meta: "Work", icon: "📁" },
   ]},
 ];
 
@@ -168,8 +168,15 @@ export function ComponentCatalog({ onClose }) {
   const [selectedTypes, setSelectedTypes] = useState(["personal-task"]);
   const [enabled, setEnabled] = useState(true);
   const [search, setSearch] = useState("");
+  const [listQuery, setListQuery] = useState("");
+  const [listFilter, setListFilter] = useState([]);
   const [expanded, setExpanded] = useState(true);
   const [message, setMessage] = useState("Controls below use the same components as Settings.");
+  const visibleListSections = listSections.map(section => ({ ...section, items: section.items.filter(item => {
+    const matchesQuery = item.title.toLocaleLowerCase().includes(listQuery.trim().toLocaleLowerCase());
+    const matchesFilter = !listFilter.length || (listFilter.includes("icons") && item.icon) || (listFilter.includes("no-icons") && !item.icon);
+    return matchesQuery && matchesFilter;
+  }) })).filter(section => section.items.length);
   const disclosureToggle = useRef(null);
   const scrollContainer = useRef(null);
   const pickerSurface = useRef(null);
@@ -282,8 +289,11 @@ export function ComponentCatalog({ onClose }) {
           </CatalogSection>
 
           <CatalogSection title="Catalog lists" description="Grouped rows support space and item icons, secondary text, and keyboard-safe hover styling.">
-            <CatalogList sections={listSections} renderItem={item => <CatalogListRow key={item.id} icon={item.icon} title={item.title}
-              description={item.description} onClick={() => setMessage(`${item.title} row selected.`)} />} />
+            <CatalogListToolbar prefix="catalog-list-demo" searchLabel="Search catalog rows" query={listQuery} onQueryChange={setListQuery}
+              reloadLabel="Reload catalog rows" onReload={() => {}} filterLabel="Filter catalog rows" filterMultiple filterCloseOnSelect={false}
+              filterValue={listFilter} onFilterChange={setListFilter} filterOptions={[{ value: "icons", label: "With icons" }, { value: "no-icons", label: "Without icons" }]} />
+            <CatalogList sections={visibleListSections} emptyMessage="No catalog rows match." renderItem={item => <CatalogListRow key={item.id} icon={item.icon} title={item.title}
+              meta={item.meta} onClick={() => setMessage(`${item.title} row selected.`)} />} />
           </CatalogSection>
 
           <CatalogSection title="Tabs" description="Keyboard navigation, selection, and the animated indicator.">

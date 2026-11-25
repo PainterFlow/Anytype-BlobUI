@@ -154,7 +154,7 @@ export function createCalendarController() {
     removeType(type) { state.types = state.types.filter(saved => key(saved) !== key(type)); changed(); },
     removeOverride(override) { const saved = entry(active); if (saved) saved.overrides = saved.overrides.filter(item => item !== override); changed(); },
     addOverride(view) { entry(active, true).overrides.push({ target: copy(view.target), rule: { mode: "inherit" } }); screen = "type"; changed(); },
-    views() { const saved = entry(active); return catalog.views.filter(view => view.target.spaceId === active?.spaceId && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)))
+    views() { if (!active) return []; const saved = entry(active); return catalog.views.filter(view => view.target?.spaceId === active?.spaceId && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)))
       .sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source)); },
     viewFor(target) { return window.BlobUI.ViewCatalog.findViewForTarget(catalog.views, target); },
   };

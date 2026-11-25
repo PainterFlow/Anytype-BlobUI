@@ -32,6 +32,16 @@ test('canonical query replaces its semantically matching inline alias while reta
   assert.deepEqual(input, [inline, canonical], 'deduplication leaves API records untouched');
 });
 
+test('canonical rows reuse a matching alias icon when the canonical object has none', () => {
+  const inline = { ...view({ objectId: 'parent-doc', blockId: 'embed-block', kind: 'Inline / type view', sourceSignature: 'source-hash-a' }), icon: { emoji: '✅' } };
+  const canonical = view({ objectId: 'query-a', blockId: 'query-block', kind: 'Query', sourceSignature: 'source-hash-a' });
+
+  const [representative] = ViewCatalog.dedupeViews([inline, canonical]).views;
+
+  assert.equal(representative.kind, 'Query');
+  assert.deepEqual(representative.icon, { emoji: '✅' });
+});
+
 test('views without signatures only merge by exact target, regardless of display name', () => {
   const views = [
     view({ objectId: 'query-a', blockId: 'block-a', kind: 'Query' }),

@@ -283,7 +283,7 @@ const status = () => element('status-message').textContent;
 const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
 for (const shortcut of ['openSettings', 'rebuildCss', 'openComponentCatalog', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
 assert.match(settingsCss, /\.space-preview-row[^}]*font-family:\s*var\(--font-interface\)/);
-assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
+assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*min\(54%, 420px\)/);
 assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field:focus-within \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field\[data-filled="true"\] \.visibility-toggle/);
