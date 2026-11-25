@@ -372,10 +372,13 @@ export function AdvancedSelector({
   const normalizedSections = useMemo(() => normalizeSections(options, sectionInput, query), [options, sectionInput, query]);
   const allOptions = useMemo(() => flattenSections(allSections), [allSections]);
   const flatOptions = useMemo(() => flattenSections(normalizedSections), [normalizedSections]);
-  const selectedLabels = allOptions.filter(option => selected.includes(option.value)).map(option => option.label);
+  const selectedOptions = allOptions.filter(option => selected.includes(option.value));
+  const selectedLabels = selectedOptions.map(option => option.label);
   const display = caption ?? (multiple
     ? selected.length ? selectedLabels.join(", ").length <= 44 ? selectedLabels.join(", ") : `${selected.length} selected` : "None"
     : selectedLabels[0] ?? "");
+  const joinedSelectedLabels = selectedLabels.join(", ");
+  const useRichDisplay = !open && display === joinedSelectedLabels && selectedOptions.some(option => option.icon);
   const keyboard = useSelectionKeyboard({ options: flatOptions, open, openMenu, close, menu, trigger });
 
   useLayoutEffect(() => {
@@ -400,7 +403,7 @@ export function AdvancedSelector({
   }
 
   return <div ref={root} id={rootId} className={`advanced-selector ${limitWidth ? "selector-width-limited " : ""}${rootClassName}`} data-selector-root={generatedId} onKeyDown={handleKey}>
-    <div className="advanced-selector-field">
+    <div className={`advanced-selector-field${useRichDisplay ? " has-rich-display" : ""}`}>
       <input ref={trigger} id={id} type="text" role="combobox" aria-label={label} aria-expanded={open} aria-controls={listId}
         aria-haspopup="listbox" autoComplete="off" spellCheck={false} placeholder={placeholder} disabled={disabled}
         value={open ? query : display} readOnly={inactive}
@@ -419,6 +422,10 @@ export function AdvancedSelector({
           setQuery(event.currentTarget.value);
           if (!open) openMenu();
         }} />
+      {useRichDisplay && <span className="advanced-selector-rich-display" aria-hidden="true">{selectedOptions.map((option,index)=><React.Fragment key={index}>
+        {index > 0 && <span className="advanced-selector-separator">, </span>}
+        <span className="advanced-selector-token">{option.icon && <span className="selector-option-icon"><SelectorOptionIcon icon={option.icon} /></span>}<span className="advanced-selector-token-label">{option.label}</span></span>
+      </React.Fragment>)}</span>}
       <svg className="selector-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>
     </div>
     <SelectorMenu menuRef={menu} listId={listId} label={label} multiple={multiple} state={state} sections={normalizedSections}

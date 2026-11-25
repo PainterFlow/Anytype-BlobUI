@@ -5,15 +5,19 @@
 .permission-picker .kanban-select-trigger:disabled { color: #666; background: #202020; }
 .codex-space:hover { background: var(--hover); }
 .codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.codex-space-bottom { display: grid; grid-template-columns: max-content minmax(0, 1fr) minmax(104px, 168px) minmax(104px, 168px); align-items: center; gap: 8px 12px; margin-top: 6px; }
+.codex-space-bottom { display: grid; grid-template-columns: max-content minmax(0, 1fr) 40px minmax(104px, 168px) minmax(104px, 168px); align-items: center; gap: 8px 12px; margin-top: 6px; }
 .codex-space-top .formula-view-name { flex: 1 1 140px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .codex-space-bottom .settings-row { position: relative; width: max-content; min-height: 24px; padding: 0; border: 0; gap: 0; flex: none; white-space: nowrap; }
 .codex-space-bottom .settings-row > span:first-child { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: nowrap; }
 .codex-space-bottom .settings-row input { right: 0; }
 .codex-space-bottom .settings-row .switch-track { margin-left: 8px; }
+.codex-files-label { grid-column: 1; align-self: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.codex-files-switch { grid-column: 3; width: 40px; }
+.codex-files-switch > span:first-child { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip-path: inset(50%) !important; }
+.codex-files-switch .switch-track { margin-left: 0 !important; }
 .codex-space-bottom .permission-picker { width: 100%; min-width: 0; }
-.codex-space-bottom .permission-picker:nth-of-type(1) { grid-column: 3; }
-.codex-space-bottom .permission-picker:nth-of-type(2) { grid-column: 4; }
+.codex-space-bottom .permission-picker:nth-of-type(1) { grid-column: 4; }
+.codex-space-bottom .permission-picker:nth-of-type(2) { grid-column: 5; }
 .codex-space-bottom .permission-picker .kanban-select-trigger { width: 100%; max-width: 168px; }
 #codex-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 #codex-nav .nav-icon svg { width: 20px; height: 20px; }

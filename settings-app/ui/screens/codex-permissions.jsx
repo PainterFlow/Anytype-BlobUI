@@ -14,7 +14,8 @@ function SpaceRow({space,permission,disabled,onChange}) {
   return <CatalogListCustomRow className="codex-space">
     <div className="codex-space-top">{space.icon&&<span className="catalog-list-icon" aria-hidden="true"><SelectorOptionIcon icon={space.icon} /></span>}<span className="formula-view-name" title={description}>{space.name}</span></div>
     <div className="codex-space-bottom">
-      <Switch id={`codex-files-${space.id}`} label="Upload/delete files" className="native-accent-control settings-row" inputAttributes={{"aria-label":`Upload/delete files for ${description}`}} checked={value.filesEnabled} disabled={disabled} onChange={checked=>onChange({...value,filesEnabled:checked})} />
+      <label className="codex-files-label" htmlFor={`codex-files-${space.id}`}>Upload/delete files</label>
+      <Switch id={`codex-files-${space.id}`} label="Upload/delete files" className="native-accent-control settings-row codex-files-switch" inputAttributes={{"aria-label":`Upload/delete files for ${description}`}} checked={value.filesEnabled} disabled={disabled} onChange={checked=>onChange({...value,filesEnabled:checked})} />
       <PermissionPicker id={description} label="Access" options={access} value={value.access} disabled={disabled} onChange= {next=>onChange({...value,access:next})} />
       <PermissionPicker id={description} label="Approval" options={approval} value={value.approval} disabled={disabled} onChange={next=>onChange({...value,approval:next})} />
     </div>

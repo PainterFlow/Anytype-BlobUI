@@ -1003,6 +1003,11 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
   color: var(--text);
   text-overflow: ellipsis;
 }
+.advanced-selector-field input { font-family: var(--font-interface); font-size: 16px; line-height: 24px; letter-spacing: -.12px; }
+.advanced-selector-field.has-rich-display input { color: transparent; }
+.advanced-selector-rich-display { position: absolute; inset: 0 34px 0 14px; overflow: hidden; color: var(--text); font-size: 16px; line-height: 48px; letter-spacing: -.12px; white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
+.advanced-selector-token { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+.advanced-selector-token .selector-option-icon { flex: 0 0 auto; width: 18px; height: 18px; font-size: 16px; }
 .advanced-selector-field input:focus { outline: none; }
 .advanced-selector-field input::placeholder { color: var(--text-muted); }
 .advanced-selector-field > svg {

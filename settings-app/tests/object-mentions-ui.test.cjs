@@ -53,6 +53,7 @@ test('unified object mention type filter preserves drafts, icons, sections, and 
     await menu.getByRole('option',{name:'Task',exact:true}).last().click();
     await page.keyboard.press('Escape');
     assert.equal(await input.inputValue(),'Task, Task');
+    assert.equal(await page.locator('.mention-picker .advanced-selector-rich-display .selector-option-icon').count(),2,'Selected type icons appear inline in the closed picker');
     await incomplete.check();
     await page.locator('#save-button').click();
     await page.waitForFunction(()=>window.saved?.codexIntegration?.objectMentions?.types?.items?.length===2);

@@ -145,7 +145,7 @@ export function Advanced({
           </SettingsRow>
         </SettingsGroup>
         <SettingsGroup className="settings-list app-uninstall-box">
-          <SettingsRow className="settings-row app-backup-row" label="Uninstall BlobUI" description="Remove BlobUI and its stylesheet from this Anytype installation.">
+          <SettingsRow className="settings-row app-backup-row" label="Uninstall BlobUI">
             <Button id="uninstall-button" className="banner-image-button danger-button uninstall-button">Uninstall</Button>
           </SettingsRow>
         </SettingsGroup>
