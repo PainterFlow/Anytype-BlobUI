@@ -339,7 +339,7 @@ pub(crate) fn execute_at(
                     enc(space),
                     enc(id)
                 ))?;
-                views.extend(crate::calendar::calendar_views(space, space, &doc));
+                views.extend(crate::calendar::calendar_views(None, space, space, &doc));
             }
             let types = client.pages(
                 "GET",
@@ -355,7 +355,7 @@ pub(crate) fn execute_at(
                     if permission(config, space, false).is_ok()
                         && object.is_none_or(|selected| selected == id)
                     {
-                        views.extend(crate::calendar::calendar_views(space, space, &doc));
+                        views.extend(crate::calendar::calendar_views(None, space, space, &doc));
                     }
                 }
                 targets.push(json!({"type_key":key,"name":doc["name"],"properties":properties,"default_requires_space_read_write":true}));

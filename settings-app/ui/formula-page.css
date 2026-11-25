@@ -134,3 +134,7 @@
 
 :root[data-reduced-motion="true"] .calendar-modal-content { transition: none; }
 @media (prefers-reduced-motion: reduce) { .calendar-modal-content { transition: none; } }
+
+#formula-filter.is-filtered, #formula-filter[aria-pressed="true"], #calendar-filter.is-filtered, #calendar-override-filter.is-filtered { color: var(--text-secondary); }
+#formula-filter.is-filtered:hover, #formula-filter.is-filtered[aria-expanded="true"], #formula-filter[aria-pressed="true"]:hover, #formula-filter[aria-pressed="true"][aria-expanded="true"] { background: var(--hover); color: var(--text); }
+#formula-filter .selector-trigger-icon svg, #calendar-filter .selector-trigger-icon svg, #calendar-override-filter .selector-trigger-icon svg { width: 19px; height: 19px; }

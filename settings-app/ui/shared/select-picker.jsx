@@ -289,8 +289,8 @@ function useSelectionKeyboard({ options, open, openMenu, close, menu, trigger })
 
 export function BasicSelector({
   id, rootId, menuId, label, labelId, valueId, descriptionId, options = [], sections: sectionInput, value, caption,
-  onChange, multiple = false, selectionLimit = Infinity, closeOnSelect = !multiple, disabled = false, inactive = false, emptyMessage,
-  icon, pressed, title, portalRef, fixed = false, rootClassName = "", menuClassName = "",
+  onChange, multiple = false, selectionLimit = Infinity, closeOnSelect, disabled = false, inactive = false, emptyMessage,
+  icon, pressed, title, portalRef, fixed = false, limitWidth = false, rootClassName = "", menuClassName = "",
   triggerClassName = "", preservePointerFocus = false, restoreFocusOnSelect = true,
 }) {
   const generatedId = useId().replace(/[^A-Za-z0-9_-]/g, "");
@@ -324,7 +324,7 @@ export function BasicSelector({
     } else {
       next = option.value;
     }
-    const shouldClose = onChange?.(next) !== false && closeOnSelect;
+    const shouldClose = onChange?.(next) !== false && (closeOnSelect ?? (!multiple || selectionLimit === 1));
     if (shouldClose) close(restoreFocusOnSelect);
   }
 
@@ -333,7 +333,7 @@ export function BasicSelector({
     keyboard.handleKey(event);
   }
 
-  return <div ref={root} id={rootId} className={`kanban-select selector-root ${rootClassName}`} data-selector-root={generatedId} onKeyDown={handleKey}>
+  return <div ref={root} id={rootId} className={`kanban-select selector-root ${limitWidth ? "selector-width-limited " : ""}${rootClassName}`} data-selector-root={generatedId} onKeyDown={handleKey}>
     <button ref={trigger} id={id} type="button"
       className={`${icon ? "neutral-icon-button" : "kanban-select-trigger"} ${triggerClassName}`}
       aria-label={labelId ? undefined : label} aria-labelledby={labelId ? `${labelId} ${valueId}` : undefined}
@@ -342,9 +342,9 @@ export function BasicSelector({
       disabled={disabled} value={multiple ? undefined : value}
       onMouseDown={preservePointerFocus ? event => event.preventDefault() : undefined}
       onClick={() => open ? flushSync(() => close()) : openMenu()}>
-      {icon ?? <>{labelId && <span id={labelId} className="sr-only">{label}</span>}
+      {icon ? <span className="selector-trigger-icon" aria-hidden="true">{icon}</span> : <>{labelId && <span id={labelId} className="sr-only">{label}</span>}
         <span id={valueId} className="kanban-trigger-value">{display}</span>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></>}
+        <svg className="selector-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg></>}
     </button>
     <SelectorMenu menuRef={menu} listId={listId} label={label} multiple={multiple} state={state} sections={normalizedSections}
       selected={selected} onChoose={choose} onKeyDown={handleKey} emptyMessage={emptyMessage} menuClassName={menuClassName}
@@ -355,8 +355,8 @@ export function BasicSelector({
 
 export function AdvancedSelector({
   id, rootId, menuId, label, options = [], sections: sectionInput, value, caption, onChange,
-  multiple = false, selectionLimit = Infinity, closeOnSelect = !multiple, disabled = false, inactive = false,
-  emptyMessage = "No matching options.", placeholder = "Search options", portalRef, rootClassName = "", menuClassName = "",
+  multiple = false, selectionLimit = Infinity, closeOnSelect, disabled = false, inactive = false,
+  emptyMessage = "No matching options.", placeholder = "Search options", portalRef, limitWidth = true, rootClassName = "", menuClassName = "",
   inputAttributes = {}, restoreFocusOnSelect = true,
 }) {
   const generatedId = useId().replace(/[^A-Za-z0-9_-]/g, "");
@@ -390,7 +390,7 @@ export function AdvancedSelector({
     } else {
       next = option.value;
     }
-    const shouldClose = onChange?.(next) !== false && closeOnSelect;
+    const shouldClose = onChange?.(next) !== false && (closeOnSelect ?? (!multiple || selectionLimit === 1));
     if (shouldClose) close(restoreFocusOnSelect);
   }
 
@@ -399,7 +399,7 @@ export function AdvancedSelector({
     keyboard.handleKey(event);
   }
 
-  return <div ref={root} id={rootId} className={`advanced-selector ${rootClassName}`} data-selector-root={generatedId} onKeyDown={handleKey}>
+  return <div ref={root} id={rootId} className={`advanced-selector ${limitWidth ? "selector-width-limited " : ""}${rootClassName}`} data-selector-root={generatedId} onKeyDown={handleKey}>
     <div className="advanced-selector-field">
       <input ref={trigger} id={id} type="text" role="combobox" aria-label={label} aria-expanded={open} aria-controls={listId}
         aria-haspopup="listbox" autoComplete="off" spellCheck={false} placeholder={placeholder} disabled={disabled}
@@ -419,7 +419,7 @@ export function AdvancedSelector({
           setQuery(event.currentTarget.value);
           if (!open) openMenu();
         }} />
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+      <svg className="selector-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>
     </div>
     <SelectorMenu menuRef={menu} listId={listId} label={label} multiple={multiple} state={state} sections={normalizedSections}
       selected={selected} onChoose={choose} onKeyDown={handleKey} emptyMessage={emptyMessage} menuClassName={menuClassName}

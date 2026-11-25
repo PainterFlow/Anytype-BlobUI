@@ -2427,6 +2427,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     updateSaveButton();
     try {
       await invoke("clear_cache");
+      window.BlobUI.SpaceCatalog?.invalidate();
+      window.BlobUI.ObjectMentions?.discoverTypes?.(true).catch(() => {});
       addLog("Cache cleared.", "info");
       setStatus("Cache cleared.", "info", false);
     } catch (error) {

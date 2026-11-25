@@ -3,12 +3,13 @@ import { createPortal } from "react-dom";
 import { SelectPicker, SelectorOptionIcon } from "../shared/select-picker.jsx";
 import { ExpandableSearch } from "../shared/search.jsx";
 import { FilterIcon, ReloadIcon } from "../shared/catalog-icons.jsx";
+import { CatalogList, CatalogListRow, groupIntoSections } from "../shared/catalog-list.jsx";
 import { DeleteIcon, SettingsHeading } from "../shared/settings-controls.jsx";
 
 const UI = () => window.BlobUI;
 
 
-function Toolbar({ prefix, label, records, spaceCatalog = [], onReload, locked, busy, selectedSpace, setSelectedSpace, query, setQuery }) {
+function Toolbar({ prefix, label, records, spaceCatalog = [], onReload, locked, busy, selectedSpace, setSelectedSpace, query, setQuery, showFilter = true }) {
   const spaces = useMemo(() => {
     if (spaceCatalog.length) return spaceCatalog.map(row => [row.id, row.name || "Unnamed space", row.icon]);
     return [...new Map(records.map(item => [item.spaceId, item.space || "Unnamed space"])).entries()]
@@ -19,10 +20,10 @@ function Toolbar({ prefix, label, records, spaceCatalog = [], onReload, locked, 
   return <div className={"formula-toolbar" + (prefix === "calendar-override" ? " calendar-sticky-toolbar" : "")}>
     <ExpandableSearch id={`${prefix}-search`} label={label} placeholder={label} disabled={locked} value={query} onChange={setQuery} />
     <button id={`${prefix}-reload`} type="button" className="neutral-icon-button" aria-label="Reload list" title="Reload list" disabled={locked || busy} aria-busy={String(busy)} onClick={onReload}><ReloadIcon /></button>
-    <SelectPicker id={`${prefix}-filter`} rootId={`${prefix}-filter-control`} menuId={`${prefix}-filter-options`}
-      rootClassName="formula-filter-control" icon={selectedSpaceIcon ? <SelectorOptionIcon icon={selectedSpaceIcon} /> : <FilterIcon />} label="Filter by space"
+    {showFilter && <SelectPicker id={`${prefix}-filter`} rootId={`${prefix}-filter-control`} menuId={`${prefix}-filter-options`}
+      rootClassName="formula-filter-control" icon={selectedSpaceIcon ? <span className="selector-trigger-icon"><SelectorOptionIcon icon={selectedSpaceIcon} /></span> : <FilterIcon />} label="Filter by space"
       title={selectedSpace ? `Filtered to ${selectedSpace}` : "Filter by space"} pressed={Boolean(selectedSpace)}
-      disabled={locked || busy} options={filterOptions} value={selectedSpace} onChange={setSelectedSpace} />
+      disabled={locked || busy} options={filterOptions} value={selectedSpace} onChange={setSelectedSpace} />}
   </div>;
 }
 
@@ -43,7 +44,11 @@ export function CalendarColors({ controller }) {
   const [overrideQuery, setOverrideQuery] = useState("");
   const dialogRef = useRef(null), backdropRef = useRef(null), closeRef = useRef(null), activeRow = useRef(null), modalRef = useRef(null);
   const types = controller.getTypes();
-  const visibleTypes = types.filter(type => (!space || type.spaceId === space) && `${type.name} ${type.space}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const visibleTypes = types.filter(type => `${type.name} ${type.space}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const spaceEntries = (snapshot.spaceCatalog || []).map(row => ({ id: row.id, name: row.name || "Unnamed space", icon: row.icon }));
+  const typeSections = groupIntoSections(visibleTypes, spaceEntries, type => type.spaceId);
+  const visibleCalendarViews = controller.views().filter(view => `${view.name} ${view.space} ${view.source}`.toLocaleLowerCase().includes(overrideQuery.trim().toLocaleLowerCase()));
+  const calendarViewSections = groupIntoSections(visibleCalendarViews, spaceEntries, view => view.target?.spaceId);
 
   useEffect(() => {
     if (!backdropRef.current || !dialogRef.current) return undefined;
@@ -84,19 +89,20 @@ export function CalendarColors({ controller }) {
           <button type="button" className="formula-button" disabled={snapshot.locked || snapshot.loading || !snapshot.discovered} onClick={() => controller.setScreen("calendars")}>Add override</button>
           {!(snapshot.active.properties || []).length && <p className="input-hint">This type has no available select or checkbox properties.</p>}
         </>}
-        {snapshot.screen === "calendars" && <div className="calendar-view-results">{controller.views().filter(view => `${view.name} ${view.space} ${view.source}`.toLocaleLowerCase().includes(overrideQuery.trim().toLocaleLowerCase())).map(view => <section className="formula-view" key={JSON.stringify(view.target)}><button type="button" className="formula-view-row" onClick={() => controller.addOverride(view)}><span className="formula-view-name">{view.name}</span><span className="formula-source">{view.source} · {view.space}</span></button></section>)}{!controller.views().length && <p className="input-hint">No more accessible calendar views in this space.</p>}</div>}
+        {snapshot.screen === "calendars" && <div className="calendar-view-results"><CatalogList sections={calendarViewSections} emptyMessage="No more accessible calendar views in this space." renderItem={view => <CatalogListRow key={JSON.stringify(view.target)} icon={view.icon} title={view.name} meta={view.source} onClick={() => controller.addOverride(view)} />} /></div>}
       </div>
     </section>
   </div>, document.body);
 
   return <>
     <SettingsHeading title="Color by property" help="Rules use the optional Anytype Local API v2 connection. Calendar popups without a matching view use the type default or legacy Calendar Color." />
-    <Toolbar prefix="calendar" label="Search object types" records={types.map(type => ({ spaceId: type.spaceId, space: type.space }))} spaceCatalog={snapshot.spaceCatalog || []} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading || snapshot.loadFailed} busy={snapshot.discovering} selectedSpace={space} setSelectedSpace={setSpace} query={query} setQuery={setQuery} />
+    <Toolbar prefix="calendar" label="Search object types" records={types.map(type => ({ spaceId: type.spaceId, space: type.space }))} spaceCatalog={snapshot.spaceCatalog || []} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading || snapshot.loadFailed} busy={snapshot.discovering} selectedSpace={space} setSelectedSpace={setSpace} query={query} setQuery={setQuery} showFilter={false} />
     <p className="field-error" id="calendar-rules-message" role="status" aria-live="polite" data-status={snapshot.status.includes("saved") ? "success" : "error"}>{snapshot.status}</p>
-    <div id="calendar-type-list">{visibleTypes.map(type => <section className="formula-view" key={`${type.spaceId}/${type.key}`}><button type="button" className="formula-view-row" disabled={snapshot.locked || snapshot.loading} onClick={event => { activeRow.current = event.currentTarget; controller.open(type); }}><span className="formula-view-name">{type.name}</span><span className="formula-source">{type.space}</span>{type.unavailable && <span className="formula-view-warning">Saved rules are retained until you remove them.</span>}</button>{type.unavailable && <button type="button" className="formula-button" onClick={() => controller.removeType(type)}>Remove saved rules</button>}</section>)}
-      {!types.length && <p className="input-hint">{snapshot.loading || snapshot.discovering ? "Loading object types…" : snapshot.loadFailed ? "Calendar rules could not be loaded." : snapshot.discoveryError ? "Could not load object types. Reload to retry." : "No accessible object types found."}</p>}
-      {types.length > 0 && !visibleTypes.length && <p className="input-hint">No matching results.</p>}
-    </div>
+    <div id="calendar-type-list"><CatalogList sections={typeSections} emptyMessage={!types.length ? snapshot.loading || snapshot.discovering ? "Loading object types…" : snapshot.loadFailed ? "Calendar rules could not be loaded." : snapshot.discoveryError ? "Could not load object types. Reload to retry." : "No accessible object types found." : "No matching results."}
+      renderItem={type => <React.Fragment key={`${type.spaceId}/${type.key}`}><CatalogListRow icon={type.icon} title={type.name} disabled={snapshot.locked || snapshot.loading}
+        warning={type.unavailable ? "Saved rules are retained until you remove them." : ""}
+        onClick={event => { activeRow.current = event.currentTarget; controller.open(type); }} />
+        {type.unavailable && <button type="button" className="formula-button" onClick={() => controller.removeType(type)}>Remove saved rules</button>}</React.Fragment>} /></div>
     {portal}
   </>;
 }

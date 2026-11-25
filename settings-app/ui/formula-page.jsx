@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { SelectPicker, SelectorOptionIcon } from "./shared/select-picker.jsx";
+import { SelectPicker } from "./shared/select-picker.jsx";
+import { CatalogList, CatalogListRow, groupIntoSections } from "./shared/catalog-list.jsx";
 import { FilterIcon } from "./shared/catalog-icons.jsx";
 
 const searchPath = "M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9869 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z";
@@ -23,7 +24,7 @@ export function FormulaPageView({
   const selectView = controller ? (view, row) => controller.selectView(view.target, row) : onSelect;
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
-  const [space, setSpace] = useState("");
+  const [kindFilters, setKindFilters] = useState([]);
   const searchInput = useRef(null);
   const searchToggle = useRef(null);
   const spaces = useMemo(() => {
@@ -31,9 +32,11 @@ export function FormulaPageView({
     return [...new Map(data.views.map(view => [view.target?.spaceId, view.space || "Unnamed space"]))]
       .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
   }, [data.views, data.spaceCatalog]);
-  const selectedSpaceIcon = spaces.find(([id]) => id === space)?.[2];
-  const matching = data.views.filter(view => (!space || view.target?.spaceId === space)
+  const spaceEntries = useMemo(() => spaces.map(([id, name, icon]) => ({ id, name, icon })), [spaces]);
+  const kindOf = view => view.kind === "Query" ? "query" : view.kind === "Collection" ? "collection" : "objectType";
+  const matching = data.views.filter(view => (!kindFilters.length || kindFilters.includes(kindOf(view)))
     && [view.name, view.space, view.source, view.kind].filter(Boolean).join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const sections = useMemo(() => groupIntoSections(matching, spaceEntries, view => view.target?.spaceId), [matching, spaceEntries]);
 
   useEffect(() => { if (!expanded) setQuery(""); }, [expanded]);
   return <>
@@ -59,22 +62,17 @@ export function FormulaPageView({
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" /></svg>
       </IconButton>
       <SelectPicker id="formula-filter" rootId="formula-filter-control" menuId="formula-filter-options"
-        label="Filter by space" title="Filter by space" icon={selectedSpaceIcon ? <SelectorOptionIcon icon={selectedSpaceIcon} /> : <FilterIcon />} pressed={Boolean(space)}
-        triggerClassName={space ? "is-filtered" : ""} disabled={data.locked || data.discovering}
-        options={[{ value: "", label: "All spaces" }, ...spaces.map(([value, label, icon]) => ({ value, label, icon }))]}
-        value={space} onChange={setSpace} closeOnSelect={false} />
+        label="Filter by view type" title="Filter by view type" icon={<FilterIcon />} pressed={kindFilters.length > 0}
+        triggerClassName={kindFilters.length ? "is-filtered" : ""} disabled={data.locked || data.discovering}
+        multiple closeOnSelect={false} options={[{ value: "objectType", label: "Object type" }, { value: "query", label: "Query" }, { value: "collection", label: "Collection" }]}
+        value={kindFilters} onChange={setKindFilters} />
     </div>
     <p id="formula-storage-message" className="field-error" role="status" aria-live="polite" data-status={data.success ? "success" : "error"}>{data.message}</p>
     <fieldset id="formula-fields" aria-label="Kanban formulas" disabled={data.locked}>
       <div id="formula-contents">
-        {matching.map((view, index) => <section className="formula-view" key={JSON.stringify(view.target || index)}>
-          <button type="button" className="formula-view-row" data-active={String(!!view.active)} aria-pressed={!!view.active} onClick={event => selectView(view, event.currentTarget)}>
-            <span className="formula-view-name">{view.name}</span>
-            <span className="formula-source">{[view.space, view.source, view.kind].filter(Boolean).join(" · ")}</span>
-            {view.unsupported && <span className="formula-view-warning">{view.unsupported}</span>}
-          </button>
-        </section>)}
-        {!matching.length && <p className="input-hint formula-empty-message">{query || space ? "No matching Kanban views." : data.loading || data.discovering ? "Loading Kanban views…" : "No accessible Kanban views found."}</p>}
+        <CatalogList sections={sections} emptyMessage={query || kindFilters.length ? "No matching Kanban views." : data.loading || data.discovering ? "Loading Kanban views…" : "No accessible Kanban views found."}
+          renderItem={(view, index) => <CatalogListRow key={JSON.stringify(view.target || index)} icon={view.icon} title={view.name} meta={view.source}
+            warning={view.unsupported} active={!!view.active} onClick={event => selectView(view, event.currentTarget)} />} />
       </div>
     </fieldset>
   </>;

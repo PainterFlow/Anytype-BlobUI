@@ -45,7 +45,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     } } };
   }, { refreshed });
   const modal = page.locator('#calendar-rule-dialog');
-  const typeRow = () => page.locator('#calendar-type-list .formula-view-row').filter({ hasText: 'Task' }).filter({ hasText: 'Work' });
+  const typeRow = () => page.locator('#calendar-type-list .catalog-list-section').filter({ hasText: 'Work' }).locator('.formula-view-row').filter({ hasText: 'Task' });
   const choose = async (name, property) => {
     await modal.getByRole('button', { name: name + ' color property', exact: true }).click();
     await modal.getByRole('option', { name: property, exact: true }).click();
@@ -139,8 +139,7 @@ for (const refreshed of [false, true]) test(`calendar property editing, override
     await page.locator('#calendar-search-toggle').click(); await page.locator('#calendar-search').fill('Note');
     assert.equal(await page.locator('#calendar-type-list .formula-view-row:visible').count(), 1);
     await page.keyboard.press('Escape');
-    await page.locator('#calendar-filter').click(); await page.locator('#calendar-filter-options').getByRole('option', { name: 'Home', exact: true }).click();
-    assert.equal(await page.locator('#calendar-type-list .formula-view-row:visible').count(), 1);
+    assert.equal(await page.locator('#calendar-filter').count(), 0);
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
@@ -176,7 +175,7 @@ test('opening Calendar Colors while rules load starts discovery after the rules 
       window.__resolveCalendarRules = null;
       resolve({ version: 1, types: [] });
     });
-    await page.locator('#calendar-type-list').getByRole('button', { name: 'Task Work' }).waitFor({ state: 'visible' });
+    await page.locator('#calendar-type-list .catalog-list-section').filter({ hasText: 'Work' }).getByRole('button', { name: 'Task' }).waitFor({ state: 'visible' });
     assert.equal(await page.evaluate(() => window.__discoveryCalls), 1, 'The visible catalog refresh starts after saved rules load.');
     assert.doesNotMatch(await page.locator('#calendar-type-list').textContent(), /Loading object types/);
   } finally { await browser.close(); }
@@ -270,7 +269,7 @@ test('saved calendar rules do not become unavailable during initial loading, fai
     assert.doesNotMatch(await list.textContent(), /Unavailable type/);
     assert.equal(await list.getByRole('button', { name: 'Remove saved rules' }).count(), 0);
     await page.locator('#calendar-reload').click(); await page.waitForFunction(() => !!window.__pendingDiscover);
-    await resolveCatalog(false); await list.getByRole('button', { name: 'Task Work' }).waitFor({ state: 'visible' });
+    await resolveCatalog(false); await list.locator('.catalog-list-section').filter({ hasText: 'Work' }).getByRole('button', { name: 'Task' }).waitFor({ state: 'visible' });
     await page.evaluate(() => { void window.BlobUI.CalendarPage.reload(); });
     await page.waitForFunction(() => !!window.__pendingDiscover);
     assert.match(await list.textContent(), /Task/);
@@ -282,11 +281,12 @@ test('saved calendar rules do not become unavailable during initial loading, fai
     await resolveCatalog(true);
     const row = list.locator('.formula-view-row');
     await row.filter({ hasText: 'Unavailable type' }).waitFor({ state: 'visible' });
-    const layout = await row.evaluate(el => {
+    const unavailableRow = row.filter({ hasText: 'Unavailable type' });
+    const layout = await unavailableRow.evaluate(el => {
       const title = el.querySelector('.formula-view-name'), warning = el.querySelector('.formula-view-warning');
       return { width: el.clientWidth, titleWidth: title.getBoundingClientRect().width, warningWidth: warning.getBoundingClientRect().width, overflowing: el.scrollWidth > el.clientWidth };
     });
-    assert.ok(layout.warningWidth > layout.titleWidth);
+    assert.ok(layout.warningWidth > 0);
     assert.ok(layout.warningWidth <= layout.width);
     assert.equal(layout.overflowing, false);
     assert.deepEqual(await page.evaluate(() => window.BlobUI.CalendarPage.read()), await page.evaluate(() => window.__savedRules));

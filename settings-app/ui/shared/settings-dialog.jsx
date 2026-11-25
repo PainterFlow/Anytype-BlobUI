@@ -14,6 +14,11 @@ export function SettingsDialog({ id, title, open, onClose, children, className =
     return () => { controller.current?.destroy(); controller.current = null; };
   }, []);
   useEffect(() => {
+    if (!open || !dialog.current || !window.BlobUI?.Scrollbar) return undefined;
+    const scrollbar = window.BlobUI.Scrollbar.attach(dialog.current);
+    return () => scrollbar.destroy();
+  }, [open]);
+  useEffect(() => {
     if (open) controller.current?.open();
     else if (controller.current?.isOpen()) controller.current.close();
   }, [open]);

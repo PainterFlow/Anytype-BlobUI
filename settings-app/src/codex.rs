@@ -39,7 +39,7 @@ fn valid_file_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 256 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
 }
 
-fn image_icon(client: &crate::kanban_api::Client, space_id: &str, file_id: &str) -> Option<Value> {
+pub(crate) fn image_icon(client: &crate::kanban_api::Client, space_id: &str, file_id: &str) -> Option<Value> {
     if !valid_file_id(space_id) || !valid_file_id(file_id) { return None; }
     let path = format!("/v2/spaces/{}/files/{}/content?width=32", crate::api::encode_segment(space_id), crate::api::encode_segment(file_id));
     let (content_type, bytes) = client.binary(&path).ok()?;
@@ -48,7 +48,7 @@ fn image_icon(client: &crate::kanban_api::Client, space_id: &str, file_id: &str)
     Some(serde_json::json!({"src": format!("data:{};base64,{}", content_type.split(';').next().unwrap_or("image/png"), base64::engine::general_purpose::STANDARD.encode(bytes))}))
 }
 
-fn icon_value(client: &crate::kanban_api::Client, space_id: &str, icon: &Value) -> Option<Value> {
+pub(crate) fn icon_value(client: &crate::kanban_api::Client, space_id: &str, icon: &Value) -> Option<Value> {
     if let Some(text) = icon.as_str().filter(|text| !text.trim().is_empty()) {
         return Some(serde_json::json!({"emoji": text}));
     }

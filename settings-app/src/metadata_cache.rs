@@ -18,6 +18,7 @@ struct Entry {
     completed: Option<Instant>,
     result: Option<Result<Value, String>>,
 }
+const VERSION: u32 = 2;
 static FLIGHTS: OnceLock<Mutex<BTreeMap<String, Arc<Mutex<Entry>>>>> = OnceLock::new();
 static DISK: Mutex<()> = Mutex::new(());
 fn path() -> PathBuf {
@@ -56,9 +57,9 @@ fn read(path: &Path) -> File {
     std::fs::read(path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<File>(&bytes).ok())
-        .filter(|file| file.version == 1)
+        .filter(|file| file.version == VERSION)
         .unwrap_or_else(|| File {
-            version: 1,
+            version: VERSION,
             ..File::default()
         })
 }

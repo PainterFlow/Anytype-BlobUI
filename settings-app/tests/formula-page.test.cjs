@@ -80,12 +80,12 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(rows[0].font,rows[1].font);assert.notEqual(rows[0].radius,'0px');
     assert.equal(await page.locator('.formula-view').first().evaluate(n=>getComputedStyle(n).borderTopWidth),'0px');
     await page.locator('#formula-filter').click();
-    await page.locator('#formula-filter-options [data-value="spc001"]').click();
+    await page.locator('#formula-filter-options [data-value="query"]').click();
     assert.equal(await page.locator('#formula-filter').getAttribute('aria-expanded'),'true');
-    await page.locator('#formula-filter-options [data-value="spc002"]').click();
-    assert.equal(await page.locator('#formula-filter-options [data-value="spc001"]').getAttribute('aria-selected'),'false');
+    
+    
     assert.equal(await page.locator('.formula-view-row:visible').count(),1);
-    await page.locator('#formula-filter-options [data-value=""]').click();
+    await page.locator('#formula-filter-options [data-value="query"]').click();
     await page.keyboard.press('Escape');
     await page.locator('#formula-search-toggle').click();await page.locator('#formula-search').fill('Launch');
     assert.equal(await page.locator('.formula-view-row:visible').count(),1);

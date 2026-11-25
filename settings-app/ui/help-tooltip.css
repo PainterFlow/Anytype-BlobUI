@@ -18,7 +18,7 @@
 .help-tooltip-warning .help-tooltip-trigger { color: #e7c315; }
 .help-tooltip-trigger:hover, .help-tooltip-trigger:focus-visible { background: var(--active); color: var(--text); }
 .help-tooltip-warning .help-tooltip-trigger:hover, .help-tooltip-warning .help-tooltip-trigger:focus-visible { color: #ffd84d; }
-.help-tooltip-trigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, var(--text)); outline-offset: 2px; }
+.help-tooltip-trigger:focus-visible { outline: none; }
 .help-tooltip-popover {
   position: fixed;
   z-index: 120;

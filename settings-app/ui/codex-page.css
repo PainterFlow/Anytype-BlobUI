@@ -3,14 +3,21 @@
 .mention-picker, .permission-picker { flex: 0 1 auto; min-width: 0; }
 .mention-picker-menu, .permission-picker-menu { z-index: 30; }
 .permission-picker .kanban-select-trigger:disabled { color: #666; background: #202020; }
-.codex-space:hover { background: var(--active); }
+.codex-space:hover { background: var(--hover); }
 .codex-space-top, .codex-space-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.codex-space-bottom { margin-top: 6px; }
+.codex-space-bottom { display: grid; grid-template-columns: max-content minmax(132px, 168px) minmax(132px, 168px); justify-content: end; align-items: center; gap: 8px 12px; margin-top: 6px; }
 .codex-space-top .formula-view-name { flex: 1 1 140px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.codex-space-bottom .settings-row { padding: 0; border: 0; gap: 12px; flex: 1 1 140px; }
+.codex-space-bottom .settings-row { position: relative; width: max-content; min-height: 24px; padding: 0; border: 0; gap: 0; flex: none; white-space: nowrap; }
+.codex-space-bottom .settings-row > span:first-child { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: nowrap; }
+.codex-space-bottom .settings-row input { position: static; transform: none; margin-left: 8px; }
+.codex-space-bottom .permission-picker { width: 100%; min-width: 0; }
+.codex-space-bottom .permission-picker .kanban-select-trigger { width: 100%; max-width: 168px; }
 #codex-reload svg { stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 #codex-nav .nav-icon svg { width: 20px; height: 20px; }
 #sidebar-nav > .nav-group-label:not(:first-child) { margin-top: 24px; }
 .anyblob-version { display: block; color: var(--text-secondary); font-size: 11px; line-height: 14px; margin-top: 3px; }
 .anyblob-version-available { color: var(--color-green); }
 .anyblob-version[hidden] { display: none; }
+
+.codex-space-bottom .kanban-select-trigger svg { margin-left: 4px; }
+.codex-space-bottom .kanban-trigger-value { flex: 0 1 auto; }

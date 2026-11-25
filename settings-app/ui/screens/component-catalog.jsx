@@ -21,6 +21,7 @@ import { AdvancedSelector, SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 import { FilterIcon, ReloadIcon, SearchIcon } from "../shared/catalog-icons.jsx";
 import { HelpTooltip } from "../shared/help-tooltip.jsx";
+import { CatalogList, CatalogListRow } from "../shared/catalog-list.jsx";
 import { Sidebar } from "./shell.jsx";
 
 const pickerOptions = [
@@ -33,6 +34,16 @@ const sourceOptions = [
   { value: "types", label: "Object types", icon: "📄" },
   { value: "collections", label: "Collections", icon: "🗂️" },
   { value: "queries", label: "Queries", icon: "🔎" },
+];
+
+const listSections = [
+  { id: "personal", label: "Personal space", icon: "🙂", items: [
+    { id: "tasks", title: "Tasks", description: "Privat", icon: "✅" },
+    { id: "notes", title: "Notes", description: "Privat", icon: "📝" },
+  ]},
+  { id: "work", label: "Work space", icon: "💼", items: [
+    { id: "projects", title: "Projects", description: "Work", icon: "📁" },
+  ]},
 ];
 
 const typeSections = [
@@ -268,6 +279,11 @@ export function ComponentCatalog({ onClose }) {
                 </div>
               </SettingsGroup>
             </div>
+          </CatalogSection>
+
+          <CatalogSection title="Catalog lists" description="Grouped rows support space and item icons, secondary text, and keyboard-safe hover styling.">
+            <CatalogList sections={listSections} renderItem={item => <CatalogListRow key={item.id} icon={item.icon} title={item.title}
+              description={item.description} onClick={() => setMessage(`${item.title} row selected.`)} />} />
           </CatalogSection>
 
           <CatalogSection title="Tabs" description="Keyboard navigation, selection, and the animated indicator.">
