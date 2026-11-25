@@ -12,7 +12,10 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
     const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
+      window.__lowLevel = JSON.parse(sessionStorage.getItem('lowLevel') || '{"sidebarWidth":280,"sidebarCollapsed":false,"fullscreen":false,"uiScale":1,"windowWidth":960,"windowHeight":740}');
       window.__TAURI__ = { core: { invoke: async (command, args) => {
+        if (command === 'get_low_level_settings') return { ...window.__lowLevel };
+        if (command === 'update_low_level_settings') { Object.assign(window.__lowLevel, args.patch || {}); sessionStorage.setItem('lowLevel', JSON.stringify(window.__lowLevel)); return { ...window.__lowLevel }; }
         if (command === 'get_app_state') return { ready: true, onboardingComplete: true, theme: 'dark', settings: JSON.parse(sessionStorage.getItem('saved') || '{}'), hasSavedApiKey: true, apiIp: '127.0.0.1', apiPort: 31009 };
         if (command === 'get_updater_state') return { automaticChecksEnabled: false };
         if (command === 'get_calendar_api_availability') return 'available';
@@ -29,7 +32,7 @@ test('sidebar resizing shares geometry, persists, cancels and preserves navigati
     const width = () => page.locator('.sidebar').evaluate(n => n.getBoundingClientRect().width);
     assert.equal(await page.locator('#sidebar-resize-mode').count(), 0);
     assert.equal(await handle.isVisible(), true);
-    assert.equal(await width(), 256);
+    assert.equal(await width(), 280);
     await handle.focus(); await page.keyboard.press('Home'); assert.equal(await width(), 160);
     await page.locator('#advanced-nav').hover();
     assert.equal(await page.locator('#advanced-nav').getAttribute('title'), 'Advanced Settings');
@@ -68,7 +71,7 @@ test('corrupt or unavailable geometry storage keeps resizing usable', async () =
       await page.evaluate(value => Object.defineProperty(window, 'localStorage', { value: value === null ? { getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); } } : { getItem() { return value; }, setItem() {} } }), stored);
       await page.addScriptTag({ path: path.join(source, 'sidebar-resize.js') });
       await page.evaluate(() => window.BlobUI.SidebarResize.setMode('standard'));
-      assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), stored?.includes('9999') ? '320' : '256');
+      assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), stored?.includes('9999') ? '320' : '280');
       if (stored?.includes('9999')) {
         await page.evaluate(() => window.BlobUI.SidebarResize.setMode('pro'));
         assert.equal(await page.locator('.sidebar-resizer').first().getAttribute('aria-valuenow'), '320');

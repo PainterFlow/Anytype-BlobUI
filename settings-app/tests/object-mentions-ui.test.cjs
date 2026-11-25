@@ -52,7 +52,7 @@ test('unified object mention type filter preserves drafts, icons, sections, and 
     await menu.getByRole('option',{name:'Task',exact:true}).first().click();
     await menu.getByRole('option',{name:'Task',exact:true}).last().click();
     await page.keyboard.press('Escape');
-    assert.equal(await input.inputValue(),'2 selected');
+    assert.equal(await input.inputValue(),'Task, Task');
     await incomplete.check();
     await page.locator('#save-button').click();
     await page.waitForFunction(()=>window.saved?.codexIntegration?.objectMentions?.types?.items?.length===2);
@@ -64,7 +64,7 @@ test('unified object mention type filter preserves drafts, icons, sections, and 
     await incomplete.uncheck();
     await page.evaluate(()=>window.BlobUI.discardChanges());
     assert.equal(await incomplete.isChecked(),true);
-    assert.equal(await input.inputValue(),'2 selected');
+    assert.equal(await input.inputValue(),'Task, Task');
 
     await input.click();
     await input.fill('personal');

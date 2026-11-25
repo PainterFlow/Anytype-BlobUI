@@ -133,7 +133,7 @@ test('startup and Ctrl+R refresh hidden catalogs and theme CSS without changing 
     await page.locator('#codex-nav').click();await page.locator('#codex-tab-1').click();await page.locator('#codex-tab-0').click();
     assert.equal(await page.evaluate(()=>window.network),requests,'Navigation uses cached catalogs');
     const types=page.getByRole('combobox',{name:'Filtered Types',exact:true});
-    assert.equal(await types.inputValue(),'1 selected');
+    assert.equal(await types.inputValue(),'Task');
     await types.click();
     assert.equal(await page.getByRole('option',{name:'Task',exact:true}).count(),1,'Unavailable saved type selections stay visible');
     await page.keyboard.press('Escape');

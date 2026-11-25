@@ -10,6 +10,33 @@ function asArray(value, multiple) {
   return multiple ? (Array.isArray(value) ? value : []) : [value];
 }
 
+let anytypeIconMarkup = null;
+let anytypeIconRequest = null;
+function loadAnytypeIconMarkup() {
+  anytypeIconRequest ||= import("../anytype-icons.js").then(module => {
+    anytypeIconMarkup = module.default || {};
+    return anytypeIconMarkup;
+  }).catch(() => ({}));
+  return anytypeIconRequest;
+}
+
+function NamedTypeIcon({ name, color }) {
+  const key = String(name || "").toLowerCase();
+  const colorMap = { grey: "#8f8f8f", yellow: "#ecd91a", orange: "#f0a820", red: "#f25040", pink: "#f040a0", purple: "#c870e8", blue: "#6878ee", ice: "#40b8f5", teal: "#20c8b8", lime: "#4ecc4e" };
+  const fill = colorMap[color] || "currentColor";
+  const [markup, setMarkup] = useState(() => anytypeIconMarkup?.[key] || "");
+  useEffect(() => {
+    if (markup) return undefined;
+    let active = true;
+    loadAnytypeIconMarkup().then(icons => {
+      if (active) setMarkup(icons[key] || "");
+    });
+    return () => { active = false; };
+  }, [key, markup]);
+  if (!markup) return <svg viewBox="0 0 512 512" aria-hidden="true" fill={fill}><path d="M256 48a208 208 0 1 0 0 416 208 208 0 0 0 0-416Zm0 352a144 144 0 1 1 0-288 144 144 0 0 1 0 288Z" /></svg>;
+  return <svg viewBox="0 0 512 512" aria-hidden="true" fill={fill} dangerouslySetInnerHTML={{ __html: markup }} />;
+}
+
 export function SelectorOptionIcon({ icon }) {
   if (!icon) return null;
   if (React.isValidElement(icon)) return icon;
@@ -22,7 +49,7 @@ export function SelectorOptionIcon({ icon }) {
   const emoji = icon.emoji || (icon.format === "emoji" ? icon.value : "");
   if (emoji) return <span className="selector-option-emoji">{emoji}</span>;
   const name = icon.name || icon.value || "";
-  if (name) return <span className="selector-option-built-in" data-icon-name={name}>{String(name).slice(0, 1).toUpperCase()}</span>;
+  if (name) return <NamedTypeIcon name={name} color={icon.color} />;
   return null;
 }
 
@@ -97,8 +124,8 @@ function placeMenu(triggerElement, menuElement, portalElement) {
   const below = viewportBottom - trigger.bottom - gap - margin;
   const above = trigger.top - viewportTop - gap - margin;
   const preferredBelow = Math.min(naturalHeight, 420);
-  const openUp = below < preferredBelow && above > below;
-  const available = Math.max(openUp ? above : below, 88);
+  const openUp = false;
+  const available = Math.max(below, 88);
   const maxHeight = Math.min(420, available);
   menuElement.style.maxHeight = `${maxHeight}px`;
   const height = Math.min(naturalHeight, maxHeight);
@@ -200,7 +227,6 @@ function useMenuLifecycle({ disabled, inactive, trigger, menu, portalRef, onClos
 }
 
 function SelectorMenu({ menuRef, listId, label, multiple, state, sections, selected, onChoose, onKeyDown, emptyMessage, menuClassName = "", portalTarget, selectorId }) {
-  const hasIcons = sections.some(section => section.options.some(option => option.icon));
   const menu = <div ref={menuRef} id={listId} className={`kanban-select-menu selector-menu app-scrollbar ${menuClassName}`}
     role="listbox" aria-label={label} aria-multiselectable={multiple || undefined}
     data-state={state} data-selector-id={selectorId} hidden={state === "closed"} inert={state !== "opening" && state !== "open"}
@@ -210,7 +236,7 @@ function SelectorMenu({ menuRef, listId, label, multiple, state, sections, selec
       {section.options.map(option => <button key={String(option.value)} type="button" className="kanban-select-option selector-option"
         role="option" tabIndex={-1} data-value={option.value} aria-label={option.label}
         aria-selected={selected.includes(option.value)} disabled={option.disabled === true} onClick={() => onChoose(option)}>
-        {hasIcons && <span className="selector-option-icon" aria-hidden="true"><SelectorOptionIcon icon={option.icon} /></span>}
+        {option.icon && <span className="selector-option-icon" aria-hidden="true"><SelectorOptionIcon icon={option.icon} /></span>}
         <span className="kanban-option-copy selector-option-copy"><span className="kanban-option-label selector-option-label">{option.label}</span></span>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8 3 3 6-6" /></svg>
       </button>)}
@@ -232,8 +258,8 @@ function useSelectionKeyboard({ options, open, openMenu, close, menu, trigger })
     item.focus({ preventScroll: true });
     const bounds = menu.current.getBoundingClientRect();
     const rect = item.getBoundingClientRect();
-    if (rect.top < bounds.top) menu.current.scrollTop -= bounds.top - rect.top;
-    if (rect.bottom > bounds.bottom) menu.current.scrollTop += rect.bottom - bounds.bottom;
+    if (rect.top < bounds.top + 8) menu.current.scrollTop -= bounds.top + 8 - rect.top;
+    if (rect.bottom > bounds.bottom - 8) menu.current.scrollTop += rect.bottom - bounds.bottom + 8;
   }
 
   function handleKey(event) {
@@ -279,7 +305,7 @@ export function BasicSelector({
   const flatOptions = useMemo(() => flattenSections(normalizedSections), [normalizedSections]);
   const selectedLabels = flatOptions.filter(option => selected.includes(option.value)).map(option => option.label);
   const display = caption ?? (multiple
-    ? selected.length ? `${selected.length} selected` : "None"
+    ? selected.length ? selectedLabels.join(", ").length <= 44 ? selectedLabels.join(", ") : `${selected.length} selected` : "None"
     : selectedLabels[0] ?? "");
   const keyboard = useSelectionKeyboard({ options: flatOptions, open, openMenu, close, menu, trigger });
 
@@ -348,7 +374,7 @@ export function AdvancedSelector({
   const flatOptions = useMemo(() => flattenSections(normalizedSections), [normalizedSections]);
   const selectedLabels = allOptions.filter(option => selected.includes(option.value)).map(option => option.label);
   const display = caption ?? (multiple
-    ? selected.length ? `${selected.length} selected` : "None"
+    ? selected.length ? selectedLabels.join(", ").length <= 44 ? selectedLabels.join(", ") : `${selected.length} selected` : "None"
     : selectedLabels[0] ?? "");
   const keyboard = useSelectionKeyboard({ options: flatOptions, open, openMenu, close, menu, trigger });
 

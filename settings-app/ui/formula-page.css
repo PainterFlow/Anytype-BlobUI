@@ -1,5 +1,5 @@
 /* Shared Anytype settings tokens. Toolbar uses 20px icons inside 32px circular controls. */
-#kanban-views-panel-1 { max-width: 640px; }
+#kanban-views-panel-1 { max-width: none; }
 #formula-storage-message[data-status="success"] { color: var(--color-teal); }
 #kanban-views-panel-1, #formula-calculator-dialog, #formula-calculator-dialog button, #formula-calculator-dialog input, #formula-calculator-dialog textarea { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 #formula-fields, .formula-calculator { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -22,10 +22,10 @@
 .expandable-search[data-expanded="false"] input { visibility: hidden; padding: 0; }
 .expandable-search input::placeholder { color: var(--text-secondary); }
 .formula-view { border: 0; border-radius: 0; background: transparent; margin: 0; }
-.formula-view-row { display: grid; align-items: center; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; min-height: 56px; padding: 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; color: var(--text); font-family: inherit; line-height: 22px; cursor: pointer; }
+.formula-view-row { display: grid; align-items: center; width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; min-height: 56px; padding: 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; color: var(--text); font-family: inherit; line-height: 22px; cursor: pointer; }
 .formula-view-row:hover { background: var(--hover); }
 .formula-view-name { font-size: 16px; font-weight: 400; overflow-wrap: anywhere; }
-.formula-source { color: var(--text-secondary); font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+.formula-source { justify-self: end; text-align: right; color: var(--text-secondary); font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
 .formula-view-warning { grid-column: 1 / -1; min-width: 0; color: var(--text-secondary); font-size: 14px; overflow-wrap: anywhere; }
 .confirm-dialog.formula-calculator-dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; user-select: none; -webkit-user-select: none; }
 .formula-calculator-heading { padding-right: 26px; }
@@ -93,7 +93,7 @@
 .formula-keypad-modes [aria-pressed="true"] { background: var(--active); color: var(--text); }
 
 /* Catalog controls share the Kanban browser's measurements and tokens. */
-#calendar-events-panel-1 { max-width: 640px; }
+#calendar-events-panel-1 { max-width: none; }
 #calendar-events-panel-1, .calendar-rule-dialog { font-family: var(--font-interface), "Segoe UI", sans-serif; }
 .confirm-dialog.calendar-rule-dialog { display: flex; flex-direction: column; width: min(580px, calc(100vw - 24px)); max-height: calc(100vh - 32px); padding: 16px; box-shadow: none; }
 .calendar-modal-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }

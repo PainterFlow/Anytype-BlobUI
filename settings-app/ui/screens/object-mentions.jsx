@@ -7,9 +7,9 @@ const UI=()=>window.BlobUI;
 function FilteredTypesPicker({controller,state}) {
   const selection=state.selections;
   const value=controller.selectedValues(selection);
-  const wildcardCount=selection.types.all&&!selection.spaces.all?selection.spaces.items.length:0;
-  const selectedCount=selection.types.all?wildcardCount:selection.types.items.length;
-  const caption=selection.types.all&&selection.spaces.all?"All":selectedCount?`${selectedCount} selected`:"None";
+  const selectedLabels=state.sections.flatMap(section=>section.options).filter(option=>value.includes(option.value)).map(option=>option.label);
+  const joined=selectedLabels.join(", ");
+  const caption=selection.types.all&&selection.spaces.all?"All":joined.length<=44?joined||"None":`${selectedLabels.length} selected`;
   return <AdvancedSelector label="Filtered Types" sections={state.sections} value={value} caption={caption}
     rootClassName="mention-picker" menuClassName="mention-picker-menu" multiple closeOnSelect={false}
     placeholder="Search object types" emptyMessage="No object types match the search."

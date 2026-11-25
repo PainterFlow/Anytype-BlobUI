@@ -286,8 +286,8 @@ test('saved calendar rules do not become unavailable during initial loading, fai
       const title = el.querySelector('.formula-view-name'), warning = el.querySelector('.formula-view-warning');
       return { width: el.clientWidth, titleWidth: title.getBoundingClientRect().width, warningWidth: warning.getBoundingClientRect().width, overflowing: el.scrollWidth > el.clientWidth };
     });
-    assert.ok(layout.titleWidth > layout.width * 0.35);
-    assert.ok(layout.warningWidth > layout.width * 0.8);
+    assert.ok(layout.warningWidth > layout.titleWidth);
+    assert.ok(layout.warningWidth <= layout.width);
     assert.equal(layout.overflowing, false);
     assert.deepEqual(await page.evaluate(() => window.BlobUI.CalendarPage.read()), await page.evaluate(() => window.__savedRules));
     await list.screenshot({ path: path.join(root, 'unavailable-row-dark.png') });

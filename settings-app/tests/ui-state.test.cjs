@@ -151,7 +151,7 @@ const context = {
       return id;
     },
     clearTimeout(id) { timers.delete(id); },
-    addEventListener(name, handler) { this.handlers[name] = handler; },
+    addEventListener(name, handler) { const previous = this.handlers[name]; this.handlers[name] = previous ? (...args) => { previous(...args); handler(...args); } : handler; },
     dispatchEvent(event) { this.handlers[event.type]?.(event); return true; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: {
@@ -602,7 +602,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", startupModeNormal: "off", startupModeExperiment: "background", autoplayVideos: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -624,7 +624,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('discard-confirmation-undo').handlers.click();
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
-  assert.equal(element('startup-mode').value, 'background', 'Undo restores the startup preference.');
+  assert.equal(element('startup-mode').value, 'off', 'Undo restores the startup preference for the active experiment context.');
   context.testApp.changeReleaseChannel('release');
   assert.equal(viewState.releaseChannel, 'release', 'Changing Release Channel edits the updater draft.');
   context.window.BlobUI.discardChanges();

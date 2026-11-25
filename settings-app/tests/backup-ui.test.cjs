@@ -103,7 +103,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#advanced-experiments-tab').click();
     await chooseExperiment('Background Button');
     await page.locator('#advanced-app-tab').click();
-    assert.equal(await page.locator('#start-on-login').isChecked(), true);
+    assert.equal(await page.locator('#start-on-login').isChecked(), false, 'The normal startup variant uses its own saved value.');
     await page.locator('#advanced-experiments-tab').click();
     await chooseExperiment('Autostart in Background');
     await page.locator('#advanced-app-tab').click();
@@ -116,7 +116,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
 
     assert.equal(await page.locator('#advanced-app-panel > section').count(), 3);
     assert.equal(await page.locator('#advanced-app-panel > section').first().getAttribute('aria-labelledby'), 'updates-heading');
-    assert.equal(await page.locator('.app-backup-row').count(), 2);
+    assert.equal(await page.locator('.app-backup-row').count(), 3);
     assert.equal(await page.locator('.app-backup-row .app-backup-description').count(), 1);
     assert.equal(await page.locator('.app-general-settings .settings-list').count(), 0);
     assert.equal(await page.locator('#blob-backup-status').count(), 1);

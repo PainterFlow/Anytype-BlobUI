@@ -11,6 +11,7 @@ import {
 } from "../shared/settings-controls.jsx";
 import { SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
+import { HelpTooltip } from "../shared/help-tooltip.jsx";
 
 const advancedTabs = [
   { title: "API Key", tabId: "advanced-api-tab", panelId: "advanced-api-panel" },
@@ -23,6 +24,7 @@ export function Advanced({
   releaseChannel = "release", releaseChannelDisabled = true, onReleaseChannelChange,
   backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange,
   fullscreenExperiment = "disabled", fullscreenExperimentDisabled = true, onFullscreenExperimentChange,
+  alwaysStartFullscreen = false, alwaysStartFullscreenDisabled = true, onAlwaysStartFullscreenChange,
 }) {
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
@@ -134,8 +136,17 @@ export function Advanced({
               onChange={onStartupModeChange} />
           </SettingsRow> : <Switch id="start-on-login" label="Launch at startup" className="native-accent-control settings-row accessibility-row"
             checked={startupMode !== "off"} disabled={startupModeDisabled} onChange={checked => onStartupModeChange?.(checked ? "foreground" : "off")} />}
+          {fullscreenExperiment === "enable-full-screen" && <SettingsRow className="native-accent-control settings-row accessibility-row">
+            <span className="experiment-label-copy"><span>Always start in fullscreen</span><HelpTooltip variant="warning" label="Always start in fullscreen warning" text="Experimental option, when enabled it always starts the app in windowed mode. Expect bugs, but it should cause no actual issues." /></span>
+            <Switch id="always-start-fullscreen" label="Always start in fullscreen" className="native-accent-control settings-row compact-switch-row" inputAttributes={{"aria-label":"Always start in fullscreen"}} checked={alwaysStartFullscreen} disabled={alwaysStartFullscreenDisabled} onChange={checked => onAlwaysStartFullscreenChange?.(checked)} />
+          </SettingsRow>}
           <SettingsRow className="native-accent-control settings-row accessibility-row" label="Clear Cache">
             <Button id="clear-cache-button" className="banner-image-button clear-cache-button" disabled>Clear Cache</Button>
+          </SettingsRow>
+        </SettingsGroup>
+        <SettingsGroup className="settings-list app-uninstall-box">
+          <SettingsRow className="settings-row app-backup-row" label="Uninstall BlobUI" description="Remove BlobUI and its stylesheet from this Anytype installation.">
+            <Button id="uninstall-button" className="banner-image-button danger-button uninstall-button">Uninstall</Button>
           </SettingsRow>
         </SettingsGroup>
         <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
@@ -153,7 +164,7 @@ export function Advanced({
       </div>
       <SettingsGroup>
         <SettingsRow className="native-accent-control settings-row accessibility-row">
-          <span>Run in background</span>
+          <span className="experiment-label-copy"><span>Run in background</span><HelpTooltip label="Run in background help" text="Allows the app to run in the background to save performance and remove rarely used windows. Should have 0 risk using, variant 2 integrates it with autostarting." /></span>
           <SelectPicker id="background-experiment" label="Run in background" value={backgroundExperiment}
             disabled={backgroundExperimentDisabled} descriptionId="experiments-warning" onChange={onBackgroundExperimentChange}
             options={[
@@ -163,7 +174,7 @@ export function Advanced({
             ]} />
         </SettingsRow>
         <SettingsRow className="native-accent-control settings-row accessibility-row">
-          <span>Re-introduce Fullscreen</span>
+          <span className="experiment-label-copy"><span>Re-introduce Fullscreen</span><HelpTooltip label="Re-introduce Fullscreen help" text="Fixes a few bugs with UI rescale in variant 1, variant 2 goes further and allows using re-introduces full windowed mode. Low risk using, expect UI bugs though." /></span>
           <SelectPicker id="fullscreen-experiment" label="Re-introduce Fullscreen" value={fullscreenExperiment}
             disabled={fullscreenExperimentDisabled} descriptionId="experiments-warning" onChange={onFullscreenExperimentChange}
             options={[

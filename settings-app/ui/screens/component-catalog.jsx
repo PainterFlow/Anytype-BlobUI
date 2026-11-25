@@ -315,6 +315,7 @@ export function ComponentCatalog({ onClose }) {
             <div className="component-catalog-help-preview">
               <span className="kanban-setting-title">Color by property</span>
               <HelpTooltip label="About color rules" text="Rules use the optional Anytype Local API v2 connection." />
+              <HelpTooltip variant="warning" label="Experimental option warning" text="Experimental option. Expect interface bugs, but it should cause no data loss." />
             </div>
           </CatalogSection>
 

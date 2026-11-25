@@ -141,7 +141,7 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
           height: rect.height, overflow: button.scrollWidth > button.clientWidth, reachable: Boolean(hit && button.contains(hit)) };
       });
       assert.equal(geometry.descriptions, 0, 'Selector options no longer render gray descriptions');
-      assert.equal(geometry.height, 36);
+      assert.equal(geometry.height, 40);
       assert.equal(geometry.overflow, false);
       assert.equal(geometry.reachable, true, 'Each dropdown option must remain visible outside the settings group.');
     }
