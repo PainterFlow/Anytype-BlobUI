@@ -127,25 +127,21 @@ test('standard settings uses Docs disclosures, section icons and full-width tabs
       return document.getElementById(trigger?.getAttribute('aria-controls'))?.dataset.state === 'open';
     });
     await page.setViewportSize({ width: 801, height: 651 });
-    await page.getByRole('option', { name: 'Disabled', exact: true }).waitFor({ state: 'hidden', timeout: 1000 });
+    assert.equal(await page.getByRole('option', { name: 'Disabled', exact: true }).isVisible(), true, 'Resize repositions the open selector instead of clipping it');
+    const resized = await page.getByRole('listbox').evaluate(menu => ({ rect: menu.getBoundingClientRect(), width: innerWidth, height: innerHeight }));
+    assert.ok(resized.rect.left >= 0 && resized.rect.right <= resized.width && resized.rect.bottom <= resized.height);
     await page.setViewportSize({ width: 800, height: 650 });
-    await page.locator('#background-experiment').focus();
-    await page.keyboard.press('Enter');
-    for (const [label, prefix] of [['Disabled', 'Use standard Settings controls.'], ['Variant 1', 'Normal.'], ['Variant 2', 'Autostart Background.']]) {
+    for (const label of ['Disabled', 'Background Button', 'Autostart in Background']) {
       const option = page.getByRole('option', { name: label, exact: true });
       assert.equal(await option.isVisible(), true);
       const geometry = await option.evaluate(button => {
-        const copy = button.querySelector('.kanban-select-option-description');
-        const title = button.querySelector('.kanban-option-label');
         const rect = button.getBoundingClientRect();
         const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        return { text: copy.textContent, below: copy.getBoundingClientRect().top >= title.getBoundingClientRect().bottom,
-          color: getComputedStyle(copy).color, titleColor: getComputedStyle(title).color, size: parseFloat(getComputedStyle(copy).fontSize), titleSize: parseFloat(getComputedStyle(title).fontSize), overflow: button.scrollWidth > button.clientWidth, reachable: Boolean(hit && button.contains(hit)) };
+        return { descriptions: button.querySelectorAll('.kanban-select-option-description').length,
+          height: rect.height, overflow: button.scrollWidth > button.clientWidth, reachable: Boolean(hit && button.contains(hit)) };
       });
-      assert.ok(geometry.text.startsWith(prefix));
-      assert.equal(geometry.below, true);
-      assert.notEqual(geometry.color, geometry.titleColor);
-      assert.ok(geometry.size < geometry.titleSize);
+      assert.equal(geometry.descriptions, 0, 'Selector options no longer render gray descriptions');
+      assert.equal(geometry.height, 36);
       assert.equal(geometry.overflow, false);
       assert.equal(geometry.reachable, true, 'Each dropdown option must remain visible outside the settings group.');
     }

@@ -10,13 +10,13 @@ export function createCalendarController() {
   let locked = false, discovering = false, discovered = false, hasCatalog = false;
   let discoveryError = false, discoveryRequested = false, discoveryForceRequested = false;
   let generation = 0, status = "", modal = false;
-  let screen = "type", active = null, shown = false, loadEpoch = 0, disposed = false, unregisterReload;
+  let screen = "type", active = null, shown = false, loadEpoch = 0, disposed = false, unregisterReload, spaceCatalog = [];
   const listeners = new Set();
   let snapshot;
 
   function publish() {
     snapshot = { state, catalog, loading, loadFailed, locked, discovering, discovered,
-      hasCatalog, discoveryError, status, modal, screen, active };
+      hasCatalog, discoveryError, status, modal, screen, active, spaceCatalog };
     listeners.forEach(listener => listener());
   }
   function entry(type, create = false) {
@@ -63,6 +63,7 @@ export function createCalendarController() {
     discovering = true; discoveryError = false; publish();
     try {
       const result = await invoke("discover_calendar_colors", { forceRefresh });
+      spaceCatalog = await window.BlobUI.SpaceCatalog.load(invoke, false).catch(() => spaceCatalog);
       if (request !== generation) return;
       if (!result || !Array.isArray(result.types) || !Array.isArray(result.views)) throw Error("No calendar catalog was returned.");
       catalog = result; discovered = true; hasCatalog = true; status = "";

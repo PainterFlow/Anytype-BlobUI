@@ -78,7 +78,7 @@ test('Kanban picker uses themed options with keyboard navigation, Save, and Undo
       assert.equal(await menu.getByRole('option', { name: /Compact/ }).getAttribute('aria-selected'), 'true');
       assert.equal(await menu.locator('.kanban-option-description').count(), 0);
       const selected = menu.getByRole('option', { name: 'Compact', exact: true });
-      assert.equal(await selected.evaluate(el => el.getBoundingClientRect().height), 34);
+      assert.equal(await selected.evaluate(el => el.getBoundingClientRect().height), 36);
       const selectedBackground = await selected.evaluate(el => getComputedStyle(el).backgroundColor);
       const otherOption = menu.getByRole('option', { name: 'Balanced', exact: true });
       await otherOption.hover();

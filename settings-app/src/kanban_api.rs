@@ -82,6 +82,10 @@ impl Client {
             port,
         })
     }
+    pub(crate) fn binary(&self, path: &str) -> Result<(String, Vec<u8>), String> {
+        api::request_binary(&self.key, &self.ip, self.port, path)
+    }
+
     pub(crate) fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
         let response = api::request(&self.key, &self.ip, self.port, method, path, body)?;
         let explicit_view = path.split_once('?').is_some_and(|(_, query)|

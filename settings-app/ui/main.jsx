@@ -13,6 +13,7 @@ import "./external-links.js";
 import "./calculator-math.js";
 import "./view-catalog.js";
 import "./reload-controller.js";
+import "./space-catalog.js";
 import "./formula-page.js";
 import "./object-mentions.js";
 import "./codex-page.js";
@@ -42,11 +43,11 @@ let app;
 
 function SettingsScreens() {
   const { page, preferenceTab, calendarTab, kanbanTab, advancedTab, settingsFields, customThemes, themeDirectory, customThemeDisabled, saveVisible, saveDisabled, discardDisabled, saveBusy,
-    documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, releaseChannel = "release", releaseChannelDisabled = true, backgroundExperiment, backgroundExperimentDisabled } =
+    documentationOpened, releaseNotesMedia, logRows, logSeverity, copyLogsCopied, shortcutRows, kanbanStyle, kanbanStyleDisabled, startupMode, startupModeDisabled, releaseChannel = "release", releaseChannelDisabled = true, backgroundExperiment, backgroundExperimentDisabled, fullscreenExperiment, fullscreenExperimentDisabled } =
     useSyncExternalStore(view.subscribe, view.getSnapshot);
   const settingsProps = { values: settingsFields, onChange: (id, value) => app?.changeSettingField(id, value) };
   return <>
-    <Titlebar backgroundExperiment={backgroundExperiment} />
+    <Titlebar backgroundExperiment={backgroundExperiment} fullscreenExperiment={fullscreenExperiment} />
     <Onboarding />
     <div className="app-shell" id="settings-shell">
       <Sidebar navigation={<SettingsNavigation page={page} onNavigate={name => app?.showSettingsPage(name)}
@@ -71,7 +72,7 @@ function SettingsScreens() {
                 kanbanStyle={kanbanStyle} kanbanStyleDisabled={kanbanStyleDisabled || page !== "kanban-views" || kanbanTab !== 0}
                 onKanbanStyleChange={value => app?.changeKanbanStyle(value)} formulaController={window.BlobUI.FormulaPage} />
             </div>
-            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced startupMode={startupMode} startupModeDisabled={startupModeDisabled} onStartupModeChange={value => app?.changeStartupMode(value)} releaseChannel={releaseChannel} releaseChannelDisabled={releaseChannelDisabled} onReleaseChannelChange={value => app?.changeReleaseChannel(value)} backgroundExperiment={backgroundExperiment} backgroundExperimentDisabled={backgroundExperimentDisabled} onBackgroundExperimentChange={value => app?.changeBackgroundExperiment(value)} selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
+            <div id="advanced-page" className="settings-page" hidden={page !== "advanced"}><Advanced startupMode={startupMode} startupModeDisabled={startupModeDisabled} onStartupModeChange={value => app?.changeStartupMode(value)} releaseChannel={releaseChannel} releaseChannelDisabled={releaseChannelDisabled} onReleaseChannelChange={value => app?.changeReleaseChannel(value)} backgroundExperiment={backgroundExperiment} backgroundExperimentDisabled={backgroundExperimentDisabled} onBackgroundExperimentChange={value => app?.changeBackgroundExperiment(value)} fullscreenExperiment={fullscreenExperiment} fullscreenExperimentDisabled={fullscreenExperimentDisabled} onFullscreenExperimentChange={value => app?.changeFullscreenExperiment(value)} selectedTab={advancedTab} onSelectTab={index => app?.selectAdvancedTab(index)} /></div>
             <div id="codex-page" className="settings-page" hidden={page !== "codex"}><CodexPage /></div>
           </div>
         </section>

@@ -882,3 +882,143 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
 .experiments-warning svg { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 
 #advanced-experiments-panel .settings-list { overflow: visible; }
+
+/* Shared selector menu. JavaScript sets width, placement and maximum height. */
+.kanban-select-menu.selector-menu {
+  z-index: 80;
+  min-width: 0;
+  padding: 6px;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+.selector-menu-section {
+  padding: 8px 10px 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.selector-menu-section:first-child { padding-top: 4px; }
+.selector-option {
+  gap: 8px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+}
+.selector-option:focus-visible { outline: none; }
+.selector-option-copy {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selector-option-label {
+  display: block;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selector-option-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 20px;
+}
+.selector-option-icon img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.selector-option-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.selector-option-emoji { font-size: 15px; line-height: 20px; }
+.selector-option-built-in {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--active);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.selector-menu-empty, .selector-menu-empty-section {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+.selector-menu-empty-section { padding-block: 4px 8px; }
+
+/* The advanced selector uses the same shape, height and color as text inputs. */
+.advanced-selector { min-width: 0; }
+.advanced-row .advanced-selector, .advanced-selector-field { width: 54%; }
+.advanced-selector-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  border-radius: 18px;
+  background: var(--input-bg);
+}
+.advanced-selector-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 34px 0 14px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+.advanced-selector-field input:focus { outline: none; }
+.advanced-selector-field input::placeholder { color: var(--text-muted); }
+.advanced-selector-field > svg {
+  position: absolute;
+  right: 13px;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* The fullscreen resizing experiment makes the content width respond to the window. */
+:root[data-fullscreen-experiment="fix-resizing"] .settings-content,
+:root[data-fullscreen-experiment="enable-full-screen"] .settings-content {
+  width: calc(100% - clamp(32px, 7vw, 144px));
+  max-width: 1040px;
+}
+:root[data-fullscreen-experiment="fix-resizing"] .settings-content .settings-list,
+:root[data-fullscreen-experiment="enable-full-screen"] .settings-content .settings-list {
+  width: 100%;
+}
+@media (min-width: 1500px) {
+  :root[data-fullscreen-experiment="enable-full-screen"] .settings-content { max-width: 1180px; }
+}
+
+.update-current-box { overflow: visible; }
+.update-current-box .update-check-row { margin-top: 0; padding: 14px 16px; }
+.update-settings-heading { margin: 14px 0; }
+.installation-settings-box .installation-folder-row { align-items: center; }
+.installation-settings-box .installation-folder-row .color-text-input { width: 54%; cursor: pointer; }
+.installation-settings-box .clear-cache-button { min-height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; line-height: 20px; }

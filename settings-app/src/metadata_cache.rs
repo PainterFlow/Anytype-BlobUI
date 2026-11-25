@@ -62,13 +62,38 @@ fn read(path: &Path) -> File {
             ..File::default()
         })
 }
+pub fn clear() -> Result<(), String> {
+    let path = path();
+    if let Ok(mut flights) = FLIGHTS.get_or_init(Default::default).lock() { flights.clear(); }
+    let _disk = DISK.lock().map_err(|_| "Metadata file lock failed.")?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("The metadata cache could not be cleared.".into()),
+    }
+}
+
+fn stale<T: DeserializeOwned>(path: &Path, catalog: &str, args: &Value) -> Option<T> {
+    read(path).entries.iter().find_map(|(key, value)| {
+        let key = serde_json::from_str::<Value>(key).ok()?;
+        if key.get(1)?.as_str()? != catalog || key.get(2)? != args { return None; }
+        serde_json::from_value::<T>(value.clone()).ok()
+    })
+}
+
 pub fn get<T: Serialize + DeserializeOwned>(
     catalog: &str,
     args: Value,
     force: bool,
     fetch: impl FnOnce(&crate::kanban_api::Client) -> Result<T, String>,
 ) -> Result<T, String> {
-    let client = crate::kanban_api::Client::connect()?;
+    let client = match crate::kanban_api::Client::connect() {
+        Ok(client) => client,
+        Err(error) => {
+            let cache = path();
+            return stale(&cache, catalog, &args).ok_or(error);
+        }
+    };
     let scope = client.metadata_scope();
     get_at(
         &path(),

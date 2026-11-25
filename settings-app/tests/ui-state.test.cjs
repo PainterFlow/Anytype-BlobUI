@@ -443,20 +443,17 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
   const releaseNotesButtons = ['release-notes-previous', 'release-notes-after'];
-  [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
+  [...apiModalButtons, ...discardModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
   element('api-key-removal-dialog').hidden = false;
   element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
   element('discard-confirmation-dialog').hidden = false;
   element('discard-confirmation-dialog').children.push(...discardModalButtons.map(element));
-  element('uninstall-button').hidden = false;
-  element('uninstall-dialog').hidden = false;
-  element('uninstall-dialog').children.push(...uninstallModalButtons.map(element));
   element('release-notes-dialog').hidden = false;
   element('release-notes-dialog').children.push(...releaseNotesButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
-  for (let turn = 0; turn < 10 && element('autoplay-videos').disabled; turn += 1) await flush();
-  assert.equal(element('autoplay-videos').disabled, false, 'Updater controls unlock after saved App Settings load.');
+  for (let turn = 0; turn < 10 && element('automatic-updates-enabled').disabled; turn += 1) await flush();
+  assert.equal(element('automatic-updates-enabled').disabled, false, 'Updater controls unlock after saved App Settings load.');
   if (startupModeScenario) {
     for (let turn = 0; turn < 10 && ![...timers.values()].some(timer => timer.delay === 1600); turn += 1) await flush();
     assert([...timers.values()].some(timer => timer.delay === 1600), 'Autostart delays the initial metadata refresh by 1.6 seconds.');
@@ -569,30 +566,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('advanced-nav').handlers.click();
   assert.equal(element('advanced-page').hidden, false, 'Advanced Settings shows all controls on one page.');
   assert.equal(element('page-title').textContent, 'Advanced Settings');
-  const uninstallCallsBeforeCancel = calls.filter(name => name === 'uninstall_blobui').length;
-  element('uninstall-button').focus();
-  element('uninstall-button').handlers.click();
-  assert.equal(element('uninstall-backdrop').hidden, false, 'Uninstall opens its confirmation dialog.');
-  assert.equal(activeElement, element('uninstall-cancel'), 'The confirmation opens with Cancel focused.');
-  element('uninstall-cancel').handlers.click();
-  finishRemovalTransition();
-  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel closes the uninstall dialog.');
-  assert.equal(calls.filter(name => name === 'uninstall_blobui').length, uninstallCallsBeforeCancel, 'Cancel never invokes the native uninstaller.');
-  element('uninstall-error').textContent = 'stale error';
-  element('uninstall-button').handlers.click();
-  assert.equal(element('uninstall-error').textContent, '', 'Opening the dialog clears an earlier failure.');
-  await element('uninstall-confirm').handlers.click();
-  assert.equal(calls.at(-1), 'uninstall_blobui', 'Confirm invokes the native uninstaller.');
-  assert.match(element('uninstall-error').textContent, /Uninstall fixture failed/, 'A native uninstall error stays visible in the dialog.');
-  assert.equal(element('uninstall-confirm').disabled, false, 'The confirmation button is restored after a failed or returned invocation.');
-  element('uninstall-cancel').handlers.click();
-  finishRemovalTransition();
-  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel remains available after a native failure.');
-  assert.equal(element('autoplay-videos').checked, true, 'Missing autoplay preference defaults on.');
-  await changeToggle('autoplay-videos', false);
-  assert.equal(element('save-button').hidden, false);
-  context.window.BlobUI.discardChanges();
-  assert.equal(element('autoplay-videos').checked, true, 'Undo restores autoplay.');
   const initialFolder = element('install-directory').value;
   await element('install-directory').handlers.click();
   assert.equal(element('install-directory').value, initialFolder, 'Canceling the folder picker preserves the selected folder.');
@@ -621,7 +594,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const generalSavesBeforeUpdaterSave = savedSettings.length;
   await input('install-directory', 'C:\\BlobUI\\AnytypeData');
   context.testApp.changeStartupMode('background');
-  await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
   context.testApp.changeReleaseChannel('dev');
@@ -630,7 +602,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);

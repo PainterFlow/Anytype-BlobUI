@@ -256,6 +256,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let blobFolderBusy = false;
   let blobRestoreReloadFailed = false;
   let uninstallBusy = false;
+  let clearCacheBusy = false;
   let selectedBlobBackupDirectory = null;
   let pendingAutomaticUpdate = false;
   let connectionBusy = false;
@@ -588,7 +589,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && left.fullscreenExperiment === right.fullscreenExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function effectiveIncludeSelections(settings = draft) {
@@ -620,7 +621,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     return {
       installDirectory: displayDirectory,
       startupMode: ["off", "foreground", "background"].includes(settings?.startupMode) ? settings.startupMode : settings?.startOnLogin ? "foreground" : "off",
-      autoplayVideos: settings?.autoplayVideos !== false,
+      autoplayVideos: true,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
       releaseChannel: ["release", "dev"].includes(settings?.releaseChannel) ? settings.releaseChannel : "release",
@@ -632,7 +633,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     initialUpdaterSettings = { ...updaterDraft };
     installDirectory.value = updaterDraft.installDirectory;
     view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
-    applyAutoplay(updaterDraft.autoplayVideos);
+    applyAutoplay(true);
     automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
     automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     updaterSettingsLoaded = true;
@@ -684,7 +685,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
     createBlobBackupButton.disabled = disabled;
     importBlobBackupButton.disabled = disabled;
-    el("uninstall-button").disabled = !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy;
   }
 
   function maybeApplyPendingAutomaticUpdate() {
@@ -1106,6 +1106,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
+    ["toggleFullscreen", "Toggle full screen"],
   ];
   const defaultShortcutBindings = [
     { action: "openSettings", code: "Numpad1", ctrl: false, alt: false, shift: false, meta: false },
@@ -1114,6 +1115,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     { action: "showOnboarding", code: "F8", ctrl: false, alt: false, shift: false, meta: false },
     { action: "simulateUpdate", code: "F9", ctrl: false, alt: false, shift: false, meta: false },
     { action: "quitSettings", code: "KeyQ", ctrl: true, alt: false, shift: false, meta: false },
+    { action: "toggleFullscreen", code: "F11", ctrl: false, alt: false, shift: false, meta: false },
   ];
   let shortcutBindings = defaultShortcutBindings;
   let shortcutBindingsLoaded = false;
@@ -1158,7 +1160,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     finally { if (shortcutBindingsRequest === pending) shortcutBindingsRequest = null; }
   }
   function renderShortcutBindings() {
-    view.update({ shortcutRows: shortcutActions.map(([action, label, fixedBinding]) => {
+    view.update({ shortcutRows: shortcutActions.filter(([action]) => action !== "toggleFullscreen" || draft?.fullscreenExperiment === "enable-full-screen").map(([action, label, fixedBinding]) => {
       const binding = fixedBinding || shortcutBindings.find(item => item.action === action);
       return { action, label, fixed: Boolean(fixedBinding), disabled: !fixedBinding && !shortcutBindingsLoaded,
         capturing: shortcutCaptureAction === action, shortcut: binding ? formatShortcut(binding) : "" };
@@ -1307,7 +1309,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       updaterDraft = copyUpdaterSettings(snapshot.updaterSettings);
       installDirectory.value = updaterDraft.installDirectory;
       view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
-      applyAutoplay(updaterDraft.autoplayVideos);
+      applyAutoplay(true);
       automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
       automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     }
@@ -1379,7 +1381,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       releaseChannelDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
+      fullscreenExperimentDisabled: settingsLocked || !draft || !window.appReady,
       kanbanStyleDisabled: settingsLocked || !draft });
+    const clearCacheButton = el("clear-cache-button");
+    if (clearCacheButton) clearCacheButton.disabled = settingsLocked || !draft || !window.appReady || clearCacheBusy;
     const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
       if (control.id === "start-on-login") return;
@@ -1396,7 +1401,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
+    [installDirectory, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
       control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
     });
     installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
@@ -1449,10 +1454,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       sidebarResizeMode: "standard",
       backgroundExperiment: ["normal", "autostart-background"].includes(settings.backgroundExperiment) ? settings.backgroundExperiment : "disabled",
+      fullscreenExperiment: ["fix-resizing", "enable-full-screen"].includes(settings.fullscreenExperiment) ? settings.fullscreenExperiment : "disabled",
     };
   }
 
   function assignDraftToForm(settings) {
+    const previousFullscreenExperiment = draft?.fullscreenExperiment;
     draft = normalizedSettings(settings);
     window.BlobUI.CodexPage?.render();
     presentSettingsFields({
@@ -1466,6 +1473,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
     syncIncludeSelectionsPreview();
+    syncFullscreenExperiment(previousFullscreenExperiment);
     view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
@@ -1992,7 +2000,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
 
-    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment }, initialDraft);
+    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment, fullscreenExperiment: initialDraft.fullscreenExperiment }, initialDraft);
     const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && nonExperimentSettingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
@@ -2297,6 +2305,24 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   }
 
+  function syncFullscreenExperiment(previousExperiment) {
+    if (!draft) return;
+    root.dataset.fullscreenExperiment = draft.fullscreenExperiment;
+    view.update({ fullscreenExperiment: draft.fullscreenExperiment });
+    renderShortcutBindings();
+    if (previousExperiment === "enable-full-screen" && draft.fullscreenExperiment !== "enable-full-screen") {
+      invoke("set_window_fullscreen", { fullscreen: false }).catch(() => {});
+    }
+  }
+
+  function changeFullscreenExperiment(value) {
+    if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "fix-resizing", "enable-full-screen"].includes(value)) return;
+    const previousExperiment = draft.fullscreenExperiment;
+    draft.fullscreenExperiment = value;
+    syncFullscreenExperiment(previousExperiment);
+    markDirty();
+  }
+
   function changeBackgroundExperiment(value) {
     if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
     draft.backgroundExperiment = value;
@@ -2351,18 +2377,31 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   });
   for (const [control, property] of [
-
-    [autoplayVideos, "autoplayVideos"],
     [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
     [automaticChecksEnabled, "automaticChecksEnabled"],
   ]) {
     listen(control, "change", () => {
       if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
       updaterDraft[property] = control.checked;
-      if (property === "autoplayVideos") applyAutoplay(control.checked);
       markDirty();
     });
   }
+  listen(el("clear-cache-button"), "click", async () => {
+    if (clearCacheBusy || saveBusy || isInstallingUpdate() || !window.appReady) return;
+    clearCacheBusy = true;
+    updateSaveButton();
+    try {
+      await invoke("clear_cache");
+      addLog("Cache cleared.", "info");
+      setStatus("Cache cleared.", "info", false);
+    } catch (error) {
+      addLog("Cache could not be cleared. " + String(error.message || error), "error", error);
+      setStatus("Cache could not be cleared. Check Logs.", "error", false);
+    } finally {
+      clearCacheBusy = false;
+      updateSaveButton();
+    }
+  });
   listen(checkUpdatesButton, "click", () => {
     if (updaterState && updaterState.updateAvailable === true) applyUpdate();
     else checkForUpdates(false);
@@ -2379,33 +2418,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     initialFocus: el("blob-import-cancel"), fallbackFocus: el("import-blob-backup-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
     onClose: () => { selectedBlobBackupDirectory = null; },
-  });
-  const uninstallModal = window.BlobUI.createModalController({
-    backdrop: el("uninstall-backdrop"), dialog: el("uninstall-dialog"),
-    initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
-    inertTargets: [el("settings-shell"), el("title-drag-region")],
-  });
-  listen(el("uninstall-button"), "click", () => {
-    if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy || !window.appReady) return;
-    el("uninstall-error").textContent = "";
-    uninstallModal.open();
-  });
-  ["uninstall-close", "uninstall-cancel"].forEach((id) => listen(el(id), "click", () => uninstallModal.close()));
-  listen(el("uninstall-confirm"), "click", async () => {
-    if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy) return;
-    uninstallBusy = true;
-    renderBlobBackupControls();
-    const button = el("uninstall-confirm");
-    button.disabled = true;
-    ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = true; });
-    try { await invoke("uninstall_blobui"); }
-    catch (error) { el("uninstall-error").textContent = String(error); }
-    finally {
-      uninstallBusy = false;
-      renderBlobBackupControls();
-      button.disabled = false;
-      ["uninstall-close", "uninstall-cancel"].forEach((id) => { el(id).disabled = false; });
-    }
   });
   function setBlobBackupStatus(message, isError = false) {
     blobBackupStatus.textContent = message;
@@ -2582,6 +2594,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
   listen(el("window-background"), "click", () => windowAction("run_in_background"));
   listen(el("window-minimize"), "click", () => windowAction("minimize_window"));
+  listen(el("window-fullscreen"), "click", () => windowAction("toggle_window_fullscreen"));
   listen(el("window-close"), "click", () => windowAction(
     ["normal", "autostart-background"].includes(draft?.backgroundExperiment) ? "quit_app" : "hide_window"
   ));
@@ -2800,6 +2813,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
         && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
     };
+    if (matches("toggleFullscreen") && draft?.fullscreenExperiment === "enable-full-screen") {
+      event.preventDefault();
+      if (!event.repeat) windowAction("toggle_window_fullscreen");
+      return;
+    }
     if (matches("openComponentCatalog")) {
       event.preventDefault();
       if (!event.repeat) {
@@ -2901,7 +2919,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     scrollbars.forEach(controller => controller.destroy());
     Object.values(visibilityFields).forEach(controller => controller.destroy?.());
     externalLinkController.destroy();
-    [apiKeyRemovalModal, discardConfirmationModal, documentationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
+    [apiKeyRemovalModal, discardConfirmationModal, documentationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal]
       .forEach(controller => controller.destroy?.());
     window.BlobUI.CalendarPage?.destroy?.();
     window.BlobUI.FormulaPage?.destroy?.();
@@ -2966,6 +2984,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, changeFullscreenExperiment, save, beginShortcutCapture,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }

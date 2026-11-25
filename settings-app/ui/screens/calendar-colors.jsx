@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { SelectPicker } from "../shared/select-picker.jsx";
+import { SelectPicker, SelectorOptionIcon } from "../shared/select-picker.jsx";
 import { ExpandableSearch } from "../shared/search.jsx";
 import { FilterIcon, ReloadIcon } from "../shared/catalog-icons.jsx";
 import { DeleteIcon, SettingsHeading } from "../shared/settings-controls.jsx";
@@ -8,15 +8,19 @@ import { DeleteIcon, SettingsHeading } from "../shared/settings-controls.jsx";
 const UI = () => window.BlobUI;
 
 
-function Toolbar({ prefix, label, records, onReload, locked, busy, selectedSpace, setSelectedSpace, query, setQuery }) {
-  const spaces = useMemo(() => [...new Map(records.map(item => [item.spaceId, item.space || "Unnamed space"])).entries()]
-    .sort((a,b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0])), [records]);
-  const filterOptions = [{ value: "", label: "All spaces" }, ...spaces.map(([value, label]) => ({ value, label }))];
+function Toolbar({ prefix, label, records, spaceCatalog = [], onReload, locked, busy, selectedSpace, setSelectedSpace, query, setQuery }) {
+  const spaces = useMemo(() => {
+    if (spaceCatalog.length) return spaceCatalog.map(row => [row.id, row.name || "Unnamed space", row.icon]);
+    return [...new Map(records.map(item => [item.spaceId, item.space || "Unnamed space"])).entries()]
+      .sort((a,b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+  }, [records, spaceCatalog]);
+  const selectedSpaceIcon = spaces.find(([id]) => id === selectedSpace)?.[2];
+  const filterOptions = [{ value: "", label: "All spaces" }, ...spaces.map(([value, label, icon]) => ({ value, label, icon }))];
   return <div className={"formula-toolbar" + (prefix === "calendar-override" ? " calendar-sticky-toolbar" : "")}>
     <ExpandableSearch id={`${prefix}-search`} label={label} placeholder={label} disabled={locked} value={query} onChange={setQuery} />
     <button id={`${prefix}-reload`} type="button" className="neutral-icon-button" aria-label="Reload list" title="Reload list" disabled={locked || busy} aria-busy={String(busy)} onClick={onReload}><ReloadIcon /></button>
     <SelectPicker id={`${prefix}-filter`} rootId={`${prefix}-filter-control`} menuId={`${prefix}-filter-options`}
-      rootClassName="formula-filter-control" icon={<FilterIcon />} label="Filter by space"
+      rootClassName="formula-filter-control" icon={selectedSpaceIcon ? <SelectorOptionIcon icon={selectedSpaceIcon} /> : <FilterIcon />} label="Filter by space"
       title={selectedSpace ? `Filtered to ${selectedSpace}` : "Filter by space"} pressed={Boolean(selectedSpace)}
       disabled={locked || busy} options={filterOptions} value={selectedSpace} onChange={setSelectedSpace} />
   </div>;
@@ -69,7 +73,7 @@ export function CalendarColors({ controller }) {
   const portal = createPortal(<div id="calendar-rule-backdrop" className="confirm-backdrop" hidden ref={backdropRef}>
     <section id="calendar-rule-dialog" className="confirm-dialog calendar-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-rule-title" tabIndex={-1} ref={dialogRef} data-screen={snapshot.screen}>
       <header className="calendar-modal-header"><h2 id="calendar-rule-title">{snapshot.screen === "calendars" ? "Choose calendar view" : snapshot.active?.name || "Color rules"}</h2><button ref={closeRef} type="button" className="neutral-icon-button calendar-modal-close" aria-label="Close color rules" onClick={() => modalRef.current?.close()}>×</button></header>
-      <div className="calendar-modal-controls">{snapshot.screen === "calendars" && <Toolbar prefix="calendar-override" label="Search calendar views" records={controller.views().map(view => ({ spaceId: view.target.spaceId, space: view.space }))} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading} busy={snapshot.discovering} selectedSpace="" setSelectedSpace={() => {}} query={overrideQuery} setQuery={setOverrideQuery} />}</div>
+      <div className="calendar-modal-controls">{snapshot.screen === "calendars" && <Toolbar prefix="calendar-override" label="Search calendar views" records={controller.views().map(view => ({ spaceId: view.target.spaceId, space: view.space }))} spaceCatalog={snapshot.spaceCatalog || []} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading} busy={snapshot.discovering} selectedSpace="" setSelectedSpace={() => {}} query={overrideQuery} setQuery={setOverrideQuery} />}</div>
       <div className="calendar-modal-content">
         {snapshot.screen === "type" && snapshot.active && <>
           <RuleRow dialogRef={dialogRef} controller={controller} label="Default" disabled={snapshot.locked || snapshot.loading || snapshot.loadFailed} />
@@ -87,7 +91,7 @@ export function CalendarColors({ controller }) {
 
   return <>
     <SettingsHeading title="Color by property" help="Rules use the optional Anytype Local API v2 connection. Calendar popups without a matching view use the type default or legacy Calendar Color." />
-    <Toolbar prefix="calendar" label="Search object types" records={types.map(type => ({ spaceId: type.spaceId, space: type.space }))} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading || snapshot.loadFailed} busy={snapshot.discovering} selectedSpace={space} setSelectedSpace={setSpace} query={query} setQuery={setQuery} />
+    <Toolbar prefix="calendar" label="Search object types" records={types.map(type => ({ spaceId: type.spaceId, space: type.space }))} spaceCatalog={snapshot.spaceCatalog || []} onReload={() => controller.refresh()} locked={snapshot.locked || snapshot.loading || snapshot.loadFailed} busy={snapshot.discovering} selectedSpace={space} setSelectedSpace={setSpace} query={query} setQuery={setQuery} />
     <p className="field-error" id="calendar-rules-message" role="status" aria-live="polite" data-status={snapshot.status.includes("saved") ? "success" : "error"}>{snapshot.status}</p>
     <div id="calendar-type-list">{visibleTypes.map(type => <section className="formula-view" key={`${type.spaceId}/${type.key}`}><button type="button" className="formula-view-row" disabled={snapshot.locked || snapshot.loading} onClick={event => { activeRow.current = event.currentTarget; controller.open(type); }}><span className="formula-view-name">{type.name}</span><span className="formula-source">{type.space}</span>{type.unavailable && <span className="formula-view-warning">Saved rules are retained until you remove them.</span>}</button>{type.unavailable && <button type="button" className="formula-button" onClick={() => controller.removeType(type)}>Remove saved rules</button>}</section>)}
       {!types.length && <p className="input-hint">{snapshot.loading || snapshot.discovering ? "Loading object types…" : snapshot.loadFailed ? "Calendar rules could not be loaded." : snapshot.discoveryError ? "Could not load object types. Reload to retry." : "No accessible object types found."}</p>}

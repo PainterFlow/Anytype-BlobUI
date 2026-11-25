@@ -140,7 +140,8 @@ fn search_with(
         let space_name = text(&space, "name")?;
         let base=format!("/v2/spaces/{}",crate::api::encode_segment(sid));
         let mut type_keys=std::collections::BTreeSet::new();
-        if !filters.types.all {
+        let all_types_in_space=filters.types.items.iter().any(|t|t.space_id==sid&&t.id=="*");
+        if !filters.types.all && !all_types_in_space {
             for mut object_type in pages("GET",&format!("{base}/types?ids=full"),None,check,&mut request)? {
                 let key=text(&object_type,"key")?.to_string();
                 if object_type["id"].as_str().filter(|s|!s.is_empty()).is_none() {
@@ -165,7 +166,7 @@ fn search_with(
             let oid = text(&row, "id")?;
             valid_id(oid)?;
             if filters.filter_incomplete_tasks && completed(&row)? {continue;}
-            if !filters.types.all {
+            if !filters.types.all && !all_types_in_space {
                 // v2 search rows use type keys; stored filters retain full, space-scoped IDs.
                 let selected=if let Some(type_key)=row["type"].as_str() {type_keys.contains(type_key)}
                 else if let Some(id)=row.pointer("/type/id").and_then(Value::as_str) {

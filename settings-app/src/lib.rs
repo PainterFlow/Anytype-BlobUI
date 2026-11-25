@@ -189,6 +189,8 @@ struct SettingsDraft {
     sidebar_resize_mode: SidebarResizeMode,
     #[serde(default)]
     background_experiment: BackgroundExperiment,
+    #[serde(default)]
+    fullscreen_experiment: FullscreenExperiment,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -198,6 +200,15 @@ enum BackgroundExperiment {
     Disabled,
     Normal,
     AutostartBackground,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum FullscreenExperiment {
+    #[default]
+    Disabled,
+    FixResizing,
+    EnableFullScreen,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -1315,6 +1326,23 @@ fn run_in_background(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn toggle_window_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let fullscreen = !window.is_fullscreen().map_err(|error| error.to_string())?;
+    window.set_fullscreen(fullscreen).map_err(|error| error.to_string())?;
+    Ok(fullscreen)
+}
+
+#[tauri::command]
+fn set_window_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    window.set_fullscreen(fullscreen).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_cache() -> Result<(), String> {
+    crate::metadata_cache::clear()
+}
+
+#[tauri::command]
 fn minimize_window(window: tauri::WebviewWindow) -> Result<(), String> {
     window.minimize().map_err(|error| error.to_string())
 }
@@ -1999,6 +2027,7 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
         "backgroundExperiment": settings.background_experiment,
+        "fullscreenExperiment": settings.fullscreen_experiment,
     });
     let mut codex_values = json!(settings.codex_integration);
     if let Some(mut previous) = data
@@ -2504,6 +2533,14 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
             Some("normal") => BackgroundExperiment::Normal,
             Some("autostart-background") => BackgroundExperiment::AutostartBackground,
             _ => BackgroundExperiment::Disabled,
+        },
+        fullscreen_experiment: match read_string(local, "fullscreenExperiment")
+            .or_else(|| read_string(Some(normalized), "fullscreenExperiment"))
+            .as_deref()
+        {
+            Some("fix-resizing") => FullscreenExperiment::FixResizing,
+            Some("enable-full-screen") => FullscreenExperiment::EnableFullScreen,
+            _ => FullscreenExperiment::Disabled,
         },
         sidebar_resize_mode: match read_string(local, "sidebarResizeMode")
             .or_else(|| read_string(Some(normalized), "sidebarResizeMode"))
@@ -3014,6 +3051,9 @@ pub fn app_main() {
             simulate_update,
             uninstall_blobui,
             minimize_window,
+            toggle_window_fullscreen,
+            set_window_fullscreen,
+            clear_cache,
             open_component_catalog,
             hide_window,
             run_in_background,
@@ -3133,6 +3173,7 @@ impl Default for SettingsDraft {
             calendar_colors_enabled: true,
             sidebar_resize_mode: SidebarResizeMode::Off,
             background_experiment: BackgroundExperiment::Disabled,
+            fullscreen_experiment: FullscreenExperiment::Disabled,
         }
     }
 }

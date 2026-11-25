@@ -48,7 +48,7 @@ test('Codex permissions preserve drafts, save and undo in the standard layout', 
     assert.equal(await page.getByText('Enable content changes',{exact:true}).count(),0);
     await access.focus();await page.keyboard.press('ArrowDown');await page.keyboard.press('End');await page.keyboard.press('Enter');
     assert.equal(await access.innerText(),'Create-Delete');
-    await approval.click();await row.getByRole('option',{name:'Always Ask',exact:true}).click();
+    await approval.click();await page.getByRole('option',{name:'Always Ask',exact:true}).click();
     await page.locator('#codex-search-toggle').click();await page.locator('#codex-search').fill('no results');
     assert.equal(await page.locator('.codex-space:visible').count(),0);
     await page.locator('#codex-search').fill('Work');assert.equal(await page.locator('.codex-space:visible').count(),2);
@@ -63,7 +63,7 @@ test('Codex permissions preserve drafts, save and undo in the standard layout', 
     await page.locator('#save-button').click();await page.waitForFunction(()=>window.saved?.codexIntegration.spaces['full-space-one']?.approval==='alwaysAsk');
     assert.deepEqual(await page.evaluate(()=>window.saved.codexIntegration.spaces.absent),{access:'read',filesEnabled:true,approval:'fullAccess'});
     await row.locator('input[aria-label^="Upload/delete"]').uncheck();await page.evaluate(()=>window.BlobUI.discardChanges());assert.equal(await row.locator('input[aria-label^="Upload/delete"]').isChecked(),true);
-    await approval.click();await row.getByRole('option',{name:'Never Ask',exact:true}).click();
+    await approval.click();await page.getByRole('option',{name:'Never Ask',exact:true}).click();
 
     if(await page.locator('#codex-nav').getAttribute('aria-expanded')!=='true')await page.locator('#codex-nav').click();await page.locator('#codex-section-links .v21-section-link').nth(1).click();
     assert.equal(await access.innerText(),'Create-Delete');

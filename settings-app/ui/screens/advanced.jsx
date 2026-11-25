@@ -18,7 +18,12 @@ const advancedTabs = [
   { title: "Experiments", tabId: "advanced-experiments-tab", panelId: "advanced-experiments-panel" },
 ];
 
-export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange, releaseChannel = "release", releaseChannelDisabled = true, onReleaseChannelChange, backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange }) {
+export function Advanced({
+  selectedTab, onSelectTab, startupMode = "off", startupModeDisabled = true, onStartupModeChange,
+  releaseChannel = "release", releaseChannelDisabled = true, onReleaseChannelChange,
+  backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange,
+  fullscreenExperiment = "disabled", fullscreenExperimentDisabled = true, onFullscreenExperimentChange,
+}) {
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
@@ -79,29 +84,20 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
     </SettingsSection>
 
     <SettingsSection>
-      <SettingsSection aria-labelledby="app-general-heading">
-        <SettingsHeading id="app-general-heading" title="General" />
-        <section className="app-general-settings">
-          {backgroundExperiment === "autostart-background" ? <SettingsRow className="native-accent-control settings-row accessibility-row" label="Launch at startup">
-            <SelectPicker id="startup-mode" label="Launch at startup" value={startupMode} disabled={startupModeDisabled}
-              options={[{ value: "off", label: "Don't autostart" }, { value: "foreground", label: "Autostart" }, { value: "background", label: "Autostart in background" }]}
-              onChange={onStartupModeChange} />
-          </SettingsRow> : <Switch id="start-on-login" label="Launch at startup" className="native-accent-control settings-row accessibility-row"
-            checked={startupMode !== "off"} disabled={startupModeDisabled} onChange={checked => onStartupModeChange?.(checked ? "foreground" : "off")} />}
-          <Switch id="autoplay-videos" label="Autoplay videos" className="native-accent-control settings-row accessibility-row" />
-        </section>
-      </SettingsSection>
-
-      <SettingsSection aria-labelledby="anytype-installation-heading">
-        <SettingsHeading id="anytype-installation-heading" title="Anytype Folder" description="Choose the Anytype data folder that contains custom.css." />
-        <div className="app-install-directory-row">
-          <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
-        </div>
-        <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
-      </SettingsSection>
-
       <SettingsSection aria-labelledby="updates-heading">
-        <SettingsHeading id="updates-heading" title="Updates" description="Choose how BlobUI checks for and installs updates." />
+        <div className="section-heading">
+          <div className="section-heading-title"><h2 id="updates-heading">Updates</h2></div>
+        </div>
+        <SettingsGroup className="settings-list update-current-box">
+          <div className="update-check-row">
+            <div>
+              <p id="update-version" className="update-version" />
+              <p id="update-status" className="update-status" role="status" aria-live="polite">Loading update settings…</p>
+            </div>
+            <Button id="check-updates-button" className="banner-image-button update-check-button" disabled>Check for updates</Button>
+          </div>
+        </SettingsGroup>
+        <div className="section-heading update-settings-heading"><p>Choose how BlobUI checks for and installs updates.</p></div>
         <SettingsGroup>
           <Switch id="automatic-updates-enabled" label="Install updates automatically" className="native-accent-control settings-row accessibility-row" />
           <Switch id="automatic-checks-enabled" label="Check for updates automatically" className="native-accent-control settings-row accessibility-row" />
@@ -111,13 +107,6 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
               onChange={onReleaseChannelChange} fixed />
           </SettingsRow>
         </SettingsGroup>
-        <div className="update-check-row">
-          <div>
-            <p id="update-version" className="update-version" />
-            <p id="update-status" className="update-status" role="status" aria-live="polite">Loading update settings…</p>
-          </div>
-          <Button id="check-updates-button" className="banner-image-button update-check-button" disabled>Check for updates</Button>
-        </div>
       </SettingsSection>
 
       <SettingsSection aria-labelledby="backup-heading">
@@ -126,19 +115,34 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
           <SettingsRow className="settings-row app-backup-row" label="Export settings" description="Create a dated copy of the complete BlobUI folder, including settings and calculations." descriptionAttributes={{ className: "app-backup-description" }}>
             <Button id="create-blob-backup-button" className="banner-image-button blob-backup-button" disabled>Export</Button>
           </SettingsRow>
-          <SettingsRow className="settings-row app-backup-row" label="Import settings" description="Replace the current BlobUI folder with an exported backup." descriptionAttributes={{ className: "app-backup-description" }}>
+          <SettingsRow className="settings-row app-backup-row" label="Import settings">
             <Button id="import-blob-backup-button" className="banner-image-button blob-backup-button" disabled>Import</Button>
           </SettingsRow>
         </SettingsGroup>
         <p id="blob-backup-status" className="update-status blob-backup-status" role="status" aria-live="polite" />
       </SettingsSection>
 
-      <SettingsSection aria-labelledby="app-uninstall-heading">
-        <SettingsHeading id="app-uninstall-heading" title="Uninstall" />
-        <Button id="uninstall-button" className="banner-image-button danger-button">Uninstall BlobUI</Button>
+      <SettingsSection aria-labelledby="installation-heading">
+        <SettingsHeading id="installation-heading" title="Instillation" />
+        <SettingsGroup className="settings-list installation-settings-box">
+          <SettingsRow className="native-accent-control settings-row installation-folder-row" label="Anytype Folder" description="Choose the Anytype data folder that contains custom.css.">
+            <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+          </SettingsRow>
+          {backgroundExperiment === "autostart-background" ? <SettingsRow className="native-accent-control settings-row accessibility-row" label="Launch at startup">
+            <SelectPicker id="startup-mode" label="Launch at startup" value={startupMode} disabled={startupModeDisabled}
+              options={[{ value: "off", label: "Don't autostart" }, { value: "foreground", label: "Autostart" }, { value: "background", label: "Autostart in background" }]}
+              onChange={onStartupModeChange} />
+          </SettingsRow> : <Switch id="start-on-login" label="Launch at startup" className="native-accent-control settings-row accessibility-row"
+            checked={startupMode !== "off"} disabled={startupModeDisabled} onChange={checked => onStartupModeChange?.(checked ? "foreground" : "off")} />}
+          <SettingsRow className="native-accent-control settings-row accessibility-row" label="Clear Cache">
+            <Button id="clear-cache-button" className="banner-image-button clear-cache-button" disabled>Clear Cache</Button>
+          </SettingsRow>
+        </SettingsGroup>
+        <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
       </SettingsSection>
     </SettingsSection>
     <SettingsSection aria-labelledby="experiments-heading">
+
       <div className="section-heading">
         <h2 id="experiments-heading">Experiments</h2>
         <p>Experimental features may change while they are in development.</p>
@@ -153,9 +157,19 @@ export function Advanced({ selectedTab, onSelectTab, startupMode = "off", startu
           <SelectPicker id="background-experiment" label="Run in background" value={backgroundExperiment}
             disabled={backgroundExperimentDisabled} descriptionId="experiments-warning" onChange={onBackgroundExperimentChange}
             options={[
-              { value: "disabled", label: "Disabled", description: "Use standard Settings controls." },
-              { value: "normal", label: "Variant 1", description: "Normal. Adds the title-bar background button." },
-              { value: "autostart-background", label: "Variant 2", description: "Autostart Background. Also enables background startup." },
+              { value: "disabled", label: "Disabled" },
+              { value: "normal", label: "Background Button" },
+              { value: "autostart-background", label: "Autostart in Background" },
+            ]} />
+        </SettingsRow>
+        <SettingsRow className="native-accent-control settings-row accessibility-row">
+          <span>Re-introduce Fullscreen</span>
+          <SelectPicker id="fullscreen-experiment" label="Re-introduce Fullscreen" value={fullscreenExperiment}
+            disabled={fullscreenExperimentDisabled} descriptionId="experiments-warning" onChange={onFullscreenExperimentChange}
+            options={[
+              { value: "disabled", label: "Disabled" },
+              { value: "fix-resizing", label: "Fix Resizing" },
+              { value: "enable-full-screen", label: "Enable Full Screen" },
             ]} />
         </SettingsRow>
       </SettingsGroup>

@@ -35,7 +35,7 @@
   async function reload(forceRefresh = false) {
     if (busy) return; busy = true;publishPermissions({busy:true,locked,message:'Loading spaces…'});
     try {
-      const spaces = await api.invoke('discover_codex_spaces',{forceRefresh});
+      const spaces = await UI.SpaceCatalog.load(api.invoke,forceRefresh);
       if (!Array.isArray(spaces)) throw new Error('Space discovery returned an invalid response.');
       records = spaces.map(space=>({...space,target:{spaceId:space.id}})); loaded = true;
       permissionSnapshot.message=spaces.length?'':'No accessible spaces found.';render();

@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { SelectPicker } from "./shared/select-picker.jsx";
+import { SelectPicker, SelectorOptionIcon } from "./shared/select-picker.jsx";
 import { FilterIcon } from "./shared/catalog-icons.jsx";
 
 const searchPath = "M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9869 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z";
@@ -26,8 +26,12 @@ export function FormulaPageView({
   const [space, setSpace] = useState("");
   const searchInput = useRef(null);
   const searchToggle = useRef(null);
-  const spaces = useMemo(() => [...new Map(data.views.map(view => [view.target?.spaceId, view.space || "Unnamed space"]))]
-    .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0])), [data.views]);
+  const spaces = useMemo(() => {
+    if (Array.isArray(data.spaceCatalog) && data.spaceCatalog.length) return data.spaceCatalog.map(row => [row.id, row.name || "Unnamed space", row.icon]);
+    return [...new Map(data.views.map(view => [view.target?.spaceId, view.space || "Unnamed space"]))]
+      .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+  }, [data.views, data.spaceCatalog]);
+  const selectedSpaceIcon = spaces.find(([id]) => id === space)?.[2];
   const matching = data.views.filter(view => (!space || view.target?.spaceId === space)
     && [view.name, view.space, view.source, view.kind].filter(Boolean).join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
@@ -55,9 +59,9 @@ export function FormulaPageView({
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" /></svg>
       </IconButton>
       <SelectPicker id="formula-filter" rootId="formula-filter-control" menuId="formula-filter-options"
-        label="Filter by space" title="Filter by space" icon={<FilterIcon />} pressed={Boolean(space)}
+        label="Filter by space" title="Filter by space" icon={selectedSpaceIcon ? <SelectorOptionIcon icon={selectedSpaceIcon} /> : <FilterIcon />} pressed={Boolean(space)}
         triggerClassName={space ? "is-filtered" : ""} disabled={data.locked || data.discovering}
-        options={[{ value: "", label: "All spaces" }, ...spaces.map(([value, label]) => ({ value, label }))]}
+        options={[{ value: "", label: "All spaces" }, ...spaces.map(([value, label, icon]) => ({ value, label, icon }))]}
         value={space} onChange={setSpace} closeOnSelect={false} />
     </div>
     <p id="formula-storage-message" className="field-error" role="status" aria-live="polite" data-status={data.success ? "success" : "error"}>{data.message}</p>

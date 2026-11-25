@@ -35,10 +35,44 @@ pub fn normalize(value: &Value) -> Configuration {
 pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Configuration, D::Error> {
     Ok(normalize(&Value::deserialize(deserializer)?))
 }
+fn valid_file_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 256 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+}
+
+fn image_icon(client: &crate::kanban_api::Client, space_id: &str, file_id: &str) -> Option<Value> {
+    if !valid_file_id(space_id) || !valid_file_id(file_id) { return None; }
+    let path = format!("/v2/spaces/{}/files/{}/content?width=32", crate::api::encode_segment(space_id), crate::api::encode_segment(file_id));
+    let (content_type, bytes) = client.binary(&path).ok()?;
+    if bytes.is_empty() || bytes.len() > 256 * 1024 { return None; }
+    use base64::Engine;
+    Some(serde_json::json!({"src": format!("data:{};base64,{}", content_type.split(';').next().unwrap_or("image/png"), base64::engine::general_purpose::STANDARD.encode(bytes))}))
+}
+
+fn icon_value(client: &crate::kanban_api::Client, space_id: &str, icon: &Value) -> Option<Value> {
+    if let Some(text) = icon.as_str().filter(|text| !text.trim().is_empty()) {
+        return Some(serde_json::json!({"emoji": text}));
+    }
+    let format = icon["format"].as_str().unwrap_or_default();
+    match format {
+        "emoji" => icon["emoji"].as_str().or_else(|| icon["value"].as_str()).or_else(|| icon["name"].as_str())
+            .filter(|text| !text.trim().is_empty()).map(|text| serde_json::json!({"emoji": text})),
+        "file" => icon["file"].as_str().or_else(|| icon["fileId"].as_str()).or_else(|| icon["file_id"].as_str())
+            .and_then(|file_id| image_icon(client, space_id, file_id)),
+        "icon" => icon["name"].as_str().or_else(|| icon["value"].as_str())
+            .filter(|text| !text.trim().is_empty())
+            .map(|name| serde_json::json!({"name": name, "color": icon["color"].as_str().unwrap_or_default()})),
+        _ => icon["file"].as_str().and_then(|file_id| image_icon(client, space_id, file_id)),
+    }
+}
+
 fn discover(client: &crate::kanban_api::Client) -> Result<Vec<Value>, String> {
     client.pages("GET", "/v2/spaces?ids=full", None)?.iter().map(|space| {
         let id = space["id"].as_str().filter(|id| !id.is_empty()).ok_or("Space discovery returned a missing ID.")?;
-        Ok(serde_json::json!({"id": id, "name": space["name"].as_str().filter(|s| !s.trim().is_empty()).unwrap_or("Unnamed space")}))
+        let mut output = serde_json::json!({"id": id, "name": space["name"].as_str().filter(|s| !s.trim().is_empty()).unwrap_or("Unnamed space")});
+        if let Some(file_id) = space["icon_image"].as_str().or_else(|| space["iconImage"].as_str()).filter(|value| !value.is_empty()) {
+            if let Some(icon) = image_icon(client, id, file_id) { output["icon"] = icon; }
+        }
+        Ok(output)
     }).collect()
 }
 #[tauri::command]
@@ -60,7 +94,11 @@ pub async fn discover_anyblob_types(space_ids: Vec<String>, force_refresh: Optio
                 };
                 let base = format!("/v2/spaces/{}", crate::api::encode_segment(&sid));
                 let rows = source_types(client, &base)?;
-                let types: Vec<_> = rows.into_iter().map(|row| serde_json::json!({"spaceId":sid,"space":space["name"],"id":row["id"],"name":row["name"].as_str().unwrap_or("Unnamed type")})).collect();
+                let types: Vec<_> = rows.into_iter().map(|row| {
+                    let mut output = serde_json::json!({"spaceId":sid,"space":space["name"],"id":row["id"],"name":row["name"].as_str().unwrap_or("Unnamed type")});
+                    if let Some(icon) = icon_value(client, &sid, &row["icon"]) { output["icon"] = icon; }
+                    output
+                }).collect();
                 Ok(serde_json::json!({"types":types,"errors":[]}))
             }).unwrap_or_else(|error| serde_json::json!({"types":[],"errors":[{"spaceId":sid,"error":error}]}));
             types.extend(result["types"].as_array().into_iter().flatten().cloned());
@@ -109,6 +147,7 @@ pub(crate) fn source_types(client: &crate::kanban_api::Client, base: &str) -> Re
             let id = document["id"].as_str().filter(|id| !id.is_empty())
                 .ok_or("Type discovery returned a missing full ID.")?;
             row["id"] = Value::String(id.into());
+            if !document["icon"].is_null() { row["icon"] = document["icon"].clone(); }
         }
         Ok(row)
     }).collect()

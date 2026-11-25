@@ -23,6 +23,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         ("showOnboarding", "F8", false, false, false, false),
         ("simulateUpdate", "F9", false, false, false, false),
         ("quitSettings", "KeyQ", true, false, false, false),
+        ("toggleFullscreen", "F11", false, false, false, false),
     ].into_iter().map(|(action, code, ctrl, alt, shift, meta)| Shortcut {
         action: action.into(), code: code.into(), ctrl, alt, shift, meta,
     }).collect()
@@ -76,33 +77,42 @@ fn load_shortcuts(path: &Path) -> Result<Vec<Shortcut>, String> {
     }
 }
 
-pub(crate) fn normalize_shortcuts(mut shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
-    if shortcuts.len() == 5 && !shortcuts.iter().any(|shortcut| shortcut.action == "openComponentCatalog") {
-        let mut catalog = default_shortcuts().into_iter()
-            .find(|shortcut| shortcut.action == "openComponentCatalog")
-            .expect("the default component catalog shortcut exists");
-        if shortcuts.iter().any(|shortcut| same_chord(shortcut, &catalog)) {
-            let candidates = [
-                ("F10", false, false, false, false), ("F11", false, false, false, false), ("F12", false, false, false, false),
-                ("F10", true, false, false, false), ("F11", true, false, false, false), ("F12", true, false, false, false),
-                ("F10", false, true, false, false), ("F11", false, true, false, false), ("F12", false, true, false, false),
-                ("F10", false, false, true, false), ("F11", false, false, true, false), ("F12", false, false, true, false),
-                ("F10", false, false, false, true), ("F11", false, false, false, true), ("F12", false, false, false, true),
-            ];
-            let (code, ctrl, alt, shift, meta) = candidates.into_iter()
+fn chord_candidates(preferred: &Shortcut) -> Vec<(String, bool, bool, bool, bool)> {
+    let mut candidates = vec![(preferred.code.clone(), preferred.ctrl, preferred.alt, preferred.shift, preferred.meta)];
+    for function_key in 1..=12 {
+        for (ctrl, alt, shift, meta) in [
+            (false, false, false, false), (true, false, false, false), (false, true, false, false),
+            (false, false, true, false), (false, false, false, true),
+        ] {
+            candidates.push((format!("F{function_key}"), ctrl, alt, shift, meta));
+        }
+    }
+    candidates
+}
+
+fn add_missing_defaults(mut shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
+    for default in default_shortcuts() {
+        if shortcuts.iter().any(|shortcut| shortcut.action == default.action) { continue; }
+        let mut added = default.clone();
+        if shortcuts.iter().any(|shortcut| same_chord(shortcut, &added)) {
+            let Some((code, ctrl, alt, shift, meta)) = chord_candidates(&default).into_iter()
                 .find(|(code, ctrl, alt, shift, meta)| !shortcuts.iter().any(|shortcut| {
                     shortcut.code == *code && shortcut.ctrl == *ctrl && shortcut.alt == *alt
                         && shortcut.shift == *shift && shortcut.meta == *meta
-                }))
-                .ok_or_else(|| "A free default keyboard shortcut could not be added.".to_string())?;
-            catalog.code = code.into();
-            catalog.ctrl = ctrl;
-            catalog.alt = alt;
-            catalog.shift = shift;
-            catalog.meta = meta;
+                })) else { return Err("A free default keyboard shortcut could not be added.".into()); };
+            added.code = code;
+            added.ctrl = ctrl;
+            added.alt = alt;
+            added.shift = shift;
+            added.meta = meta;
         }
-        shortcuts.push(catalog);
+        shortcuts.push(added);
     }
+    Ok(shortcuts)
+}
+
+pub(crate) fn normalize_shortcuts(shortcuts: Vec<Shortcut>) -> Result<Vec<Shortcut>, String> {
+    let shortcuts = add_missing_defaults(shortcuts)?;
     validate_shortcuts(&shortcuts)?;
     Ok(shortcuts)
 }
@@ -114,20 +124,18 @@ pub(crate) fn normalize_shortcut_value(value: &serde_json::Value) -> Result<serd
     if normalized.len() == shortcuts.len() {
         return Ok(value.clone());
     }
-    let added = normalized.into_iter()
-        .find(|candidate| !shortcuts.iter().any(|shortcut| shortcut.action == candidate.action))
-        .ok_or_else(|| "A default keyboard shortcut could not be added.".to_string())?;
     let mut value = value.clone();
-    value.as_array_mut()
-        .ok_or_else(|| "The saved keyboard shortcuts are invalid.".to_string())?
-        .push(serde_json::to_value(added).map_err(|_| "A default keyboard shortcut could not be encoded.".to_string())?);
+    let rows = value.as_array_mut()
+        .ok_or_else(|| "The saved keyboard shortcuts are invalid.".to_string())?;
+    for added in normalized.into_iter().filter(|candidate| !shortcuts.iter().any(|shortcut| shortcut.action == candidate.action)) {
+        rows.push(serde_json::to_value(added).map_err(|_| "A default keyboard shortcut could not be encoded.".to_string())?);
+    }
     Ok(value)
 }
-
 pub(crate) fn validate_shortcuts(shortcuts: &[Shortcut]) -> Result<(), String> {
-    let expected = ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings"];
+    let expected = ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings", "toggleFullscreen"];
     if shortcuts.len() != expected.len() {
-        return Err("All six BlobUI keyboard shortcuts must be provided.".into());
+        return Err("All seven BlobUI keyboard shortcuts must be provided.".into());
     }
     for (index, shortcut) in shortcuts.iter().enumerate() {
         if !expected.contains(&shortcut.action.as_str())
@@ -186,9 +194,9 @@ mod tests {
     #[test]
     fn defaults_cover_every_blobui_shortcut_and_are_unique() {
         let shortcuts = default_shortcuts();
-        assert_eq!(shortcuts.len(), 6);
+        assert_eq!(shortcuts.len(), 7);
         validate_shortcuts(&shortcuts).unwrap();
-        for action in ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings"] {
+        for action in ["openSettings", "rebuildCss", "openComponentCatalog", "showOnboarding", "simulateUpdate", "quitSettings", "toggleFullscreen"] {
             assert!(shortcuts.iter().any(|shortcut| shortcut.action == action));
         }
     }
@@ -220,7 +228,7 @@ mod tests {
         value[0]["futureShortcutField"] = serde_json::json!({"keep": true});
         let normalized = super::normalize_shortcut_value(&value).unwrap();
         assert_eq!(normalized[0]["futureShortcutField"], serde_json::json!({"keep": true}));
-        assert_eq!(normalized.as_array().unwrap().len(), 6);
+        assert_eq!(normalized.as_array().unwrap().len(), 7);
     }
 
     #[test]
@@ -244,7 +252,7 @@ mod tests {
         let root = workspace.join(".test-run").join(format!("shortcuts-{}-{nonce}", std::process::id()));
         let path = root.join("BlobUI/shortcuts.json");
         let mut shortcuts = default_shortcuts();
-        shortcuts[2].code = "F11".into();
+        shortcuts[2].code = "F12".into();
         assert_eq!(save_shortcuts(&path, shortcuts.clone()).unwrap(), shortcuts);
         assert_eq!(get_shortcuts(), shortcuts);
         assert_eq!(load_shortcuts(&path).unwrap(), shortcuts);
