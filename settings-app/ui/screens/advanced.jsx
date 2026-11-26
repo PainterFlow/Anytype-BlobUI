@@ -25,7 +25,21 @@ export function Advanced({
   backgroundExperiment = "disabled", backgroundExperimentDisabled = true, onBackgroundExperimentChange,
   fullscreenExperiment = "disabled", fullscreenExperimentDisabled = true, onFullscreenExperimentChange,
   alwaysStartFullscreen = false, alwaysStartFullscreenDisabled = true, onAlwaysStartFullscreenChange,
+  appSettings = {}, appSettingsActions = {},
 }) {
+  const {
+    updateVersionText = "", updateStatusText = "Loading update settings…", updateStatusError = false,
+    checkUpdatesLabel = "Check for updates", checkUpdatesDisabled = true,
+    updaterControlsDisabled = false, automaticUpdatesChecked = false, automaticChecksChecked = false,
+    backupActionsDisabled = true, blobBackupStatusText = "", blobBackupStatusError = false,
+    installDirectoryValue = "", installDirectoryDisabled = false, installDirectoryInvalid = false, installDirectoryBusy = false,
+    clearCacheDisabled = true, uninstallDisabled = false, updaterSettingsError = "",
+  } = appSettings;
+  const {
+    onCheckUpdates, onAutomaticUpdatesChange, onAutomaticChecksChange,
+    onCreateBlobBackup, onImportBlobBackup, onSelectAnytypeFolder, onInstallDirectoryInput,
+    onClearCache, onUninstall,
+  } = appSettingsActions;
   return <Tabs id="advanced-tabs" label="Advanced settings" items={advancedTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
     <SettingsSection>
@@ -93,16 +107,18 @@ export function Advanced({
         <SettingsGroup className="settings-list update-current-box">
           <div className="update-check-row">
             <div>
-              <p id="update-version" className="update-version" />
-              <p id="update-status" className="update-status" role="status" aria-live="polite">Loading update settings…</p>
+              <p id="update-version" className="update-version">{updateVersionText}</p>
+              <p id="update-status" className={updateStatusError ? "update-status error" : "update-status"} role="status" aria-live="polite">{updateStatusText}</p>
             </div>
-            <Button id="check-updates-button" className="banner-image-button update-check-button" disabled>Check for updates</Button>
+            <Button id="check-updates-button" className="banner-image-button update-check-button" disabled={checkUpdatesDisabled} onClick={onCheckUpdates}>{checkUpdatesLabel}</Button>
           </div>
         </SettingsGroup>
         <div className="section-heading update-settings-heading"><p>Choose how BlobUI checks for and installs updates.</p></div>
         <SettingsGroup>
-          <Switch id="automatic-updates-enabled" label="Install updates automatically" className="native-accent-control settings-row accessibility-row" />
-          <Switch id="automatic-checks-enabled" label="Check for updates automatically" className="native-accent-control settings-row accessibility-row" />
+          <Switch id="automatic-updates-enabled" label="Install updates automatically" className="native-accent-control settings-row accessibility-row"
+            checked={automaticUpdatesChecked} disabled={updaterControlsDisabled} onChange={onAutomaticUpdatesChange} />
+          <Switch id="automatic-checks-enabled" label="Check for updates automatically" className="native-accent-control settings-row accessibility-row"
+            checked={automaticChecksChecked} disabled={updaterControlsDisabled} onChange={onAutomaticChecksChange} />
           <SettingsRow className="native-accent-control settings-row accessibility-row" label="Release Channel">
             <SelectPicker id="release-channel" label="Release Channel" value={releaseChannel} disabled={releaseChannelDisabled}
               options={[{ value: "release", label: "Release" }, { value: "dev", label: "Dev Builds" }]}
@@ -115,20 +131,28 @@ export function Advanced({
         <SettingsHeading id="backup-heading" title="Backup and import" />
         <SettingsGroup className="settings-list app-backup-box">
           <SettingsRow className="settings-row app-backup-row" label="Export settings" description="Create a dated copy of the complete BlobUI folder, including settings and calculations." descriptionAttributes={{ className: "app-backup-description" }}>
-            <Button id="create-blob-backup-button" className="banner-image-button blob-backup-button" disabled>Export</Button>
+            <Button id="create-blob-backup-button" className="banner-image-button blob-backup-button" disabled={backupActionsDisabled} onClick={onCreateBlobBackup}>Export</Button>
           </SettingsRow>
           <SettingsRow className="settings-row app-backup-row" label="Import settings">
-            <Button id="import-blob-backup-button" className="banner-image-button blob-backup-button" disabled>Import</Button>
+            <Button id="import-blob-backup-button" className="banner-image-button blob-backup-button" disabled={backupActionsDisabled} onClick={onImportBlobBackup}>Import</Button>
           </SettingsRow>
         </SettingsGroup>
-        <p id="blob-backup-status" className="update-status blob-backup-status" role="status" aria-live="polite" />
+        <p id="blob-backup-status" className={blobBackupStatusError ? "update-status blob-backup-status error" : "update-status blob-backup-status"} role="status" aria-live="polite">{blobBackupStatusText}</p>
       </SettingsSection>
 
       <SettingsSection aria-labelledby="installation-heading">
         <SettingsHeading id="installation-heading" title="Instillation" />
         <SettingsGroup className="settings-list installation-settings-box">
           <SettingsRow className="native-accent-control settings-row installation-folder-row" label="Anytype Folder" description="Choose the Anytype data folder that contains custom.css.">
-            <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error" />
+            <FolderPathInput id="install-directory" aria-label="Anytype Folder" placeholder="Select Anytype Folder" aria-describedby="updater-settings-error"
+              value={installDirectoryValue} disabled={installDirectoryDisabled} className={installDirectoryInvalid ? "invalid" : ""}
+              aria-busy={installDirectoryBusy ? "true" : undefined} onClick={() => onSelectAnytypeFolder?.()}
+              onKeyDown={event => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onSelectAnytypeFolder?.();
+              }}
+              onChange={event => onInstallDirectoryInput?.(event.currentTarget.value)} />
           </SettingsRow>
           {backgroundExperiment === "autostart-background" ? <SettingsRow className="native-accent-control settings-row accessibility-row" label="Launch at startup">
             <SelectPicker id="startup-mode" label="Launch at startup" value={startupMode} disabled={startupModeDisabled}
@@ -141,15 +165,15 @@ export function Advanced({
             <Switch id="always-start-fullscreen" label="Always start in fullscreen" className="native-accent-control settings-row compact-switch-row" inputAttributes={{"aria-label":"Always start in fullscreen"}} checked={alwaysStartFullscreen} disabled={alwaysStartFullscreenDisabled} onChange={checked => onAlwaysStartFullscreenChange?.(checked)} />
           </SettingsRow>}
           <SettingsRow className="native-accent-control settings-row accessibility-row" label="Clear Cache">
-            <Button id="clear-cache-button" className="banner-image-button clear-cache-button" disabled>Clear Cache</Button>
+            <Button id="clear-cache-button" className="banner-image-button clear-cache-button" disabled={clearCacheDisabled} onClick={onClearCache}>Clear Cache</Button>
           </SettingsRow>
         </SettingsGroup>
         <SettingsGroup className="settings-list app-uninstall-box">
           <SettingsRow className="settings-row app-backup-row" label="Uninstall BlobUI">
-            <Button id="uninstall-button" className="banner-image-button danger-button uninstall-button">Uninstall</Button>
+            <Button id="uninstall-button" className="banner-image-button danger-button uninstall-button" disabled={uninstallDisabled} onClick={onUninstall}>Uninstall</Button>
           </SettingsRow>
         </SettingsGroup>
-        <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite" />
+        <p id="updater-settings-error" className="field-error" role="alert" aria-live="polite">{updaterSettingsError}</p>
       </SettingsSection>
     </SettingsSection>
     <SettingsSection aria-labelledby="experiments-heading">

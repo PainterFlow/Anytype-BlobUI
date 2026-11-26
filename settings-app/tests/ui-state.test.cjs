@@ -419,6 +419,41 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
           return row;
         }));
       }
+      if ('blobuiVersionLabel' in patch) element('blobui-version').textContent = patch.blobuiVersionLabel;
+      if ('anytypeVersionLabel' in patch) element('anytype-version').textContent = patch.anytypeVersionLabel;
+      if ('updateVersionText' in patch) element('update-version').textContent = patch.updateVersionText;
+      if ('updateStatusText' in patch) element('update-status').textContent = patch.updateStatusText;
+      if ('updateStatusError' in patch) element('update-status').classList.toggle('error', patch.updateStatusError);
+      if ('checkUpdatesLabel' in patch) element('check-updates-button').textContent = patch.checkUpdatesLabel;
+      if ('checkUpdatesDisabled' in patch) element('check-updates-button').disabled = patch.checkUpdatesDisabled;
+      if ('updateNowVisible' in patch) element('update-now-button').hidden = !patch.updateNowVisible;
+      if ('updateNowDisabled' in patch) element('update-now-button').disabled = patch.updateNowDisabled;
+      if ('updateNowTitle' in patch) {
+        element('update-now-button').title = patch.updateNowTitle;
+        element('update-now-button').setAttribute('aria-label', patch.updateNowTitle);
+      }
+      if ('updaterControlsDisabled' in patch) {
+        element('automatic-updates-enabled').disabled = patch.updaterControlsDisabled;
+        element('automatic-checks-enabled').disabled = patch.updaterControlsDisabled;
+      }
+      if ('automaticUpdatesChecked' in patch) element('automatic-updates-enabled').checked = patch.automaticUpdatesChecked;
+      if ('automaticChecksChecked' in patch) element('automatic-checks-enabled').checked = patch.automaticChecksChecked;
+      if ('backupActionsDisabled' in patch) {
+        element('create-blob-backup-button').disabled = patch.backupActionsDisabled;
+        element('import-blob-backup-button').disabled = patch.backupActionsDisabled;
+      }
+      if ('blobBackupStatusText' in patch) element('blob-backup-status').textContent = patch.blobBackupStatusText;
+      if ('blobBackupStatusError' in patch) element('blob-backup-status').classList.toggle('error', patch.blobBackupStatusError);
+      if ('installDirectoryValue' in patch) element('install-directory').value = patch.installDirectoryValue;
+      if ('installDirectoryDisabled' in patch) element('install-directory').disabled = patch.installDirectoryDisabled;
+      if ('installDirectoryInvalid' in patch) element('install-directory').classList.toggle('invalid', patch.installDirectoryInvalid);
+      if ('installDirectoryBusy' in patch) {
+        if (patch.installDirectoryBusy) element('install-directory').setAttribute('aria-busy', 'true');
+        else element('install-directory').removeAttribute('aria-busy');
+      }
+      if ('clearCacheDisabled' in patch) element('clear-cache-button').disabled = patch.clearCacheDisabled;
+      if ('uninstallDisabled' in patch) element('uninstall-button').disabled = patch.uninstallDisabled;
+      if ('updaterSettingsError' in patch) element('updater-settings-error').textContent = patch.updaterSettingsError;
       if ('releaseNotesMedia' in patch) {
         element('release-notes-content').innerHTML = patch.releaseNotesMedia
           ? context.window.BlobUI.Markdown.render(patch.releaseNotesMedia.markdown, patch.releaseNotesMedia) : '';
@@ -439,6 +474,16 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('save-button').handlers.click = () => context.testApp.save();
   element('kanban-view-style').handlers.change = () => context.testApp.changeKanbanStyle(element('kanban-view-style').value);
   element('discard-button').handlers.click = () => context.testApp.openDiscardConfirmation();
+  element('install-directory').handlers.click = () => context.testApp.selectAnytypeFolder();
+  element('install-directory').handlers.input = () => context.testApp.changeInstallDirectory(element('install-directory').value);
+  element('automatic-updates-enabled').handlers.change = () => context.testApp.changeUpdaterSetting('automaticUpdatesEnabled', element('automatic-updates-enabled').checked);
+  element('automatic-checks-enabled').handlers.change = () => context.testApp.changeUpdaterSetting('automaticChecksEnabled', element('automatic-checks-enabled').checked);
+  element('clear-cache-button').handlers.click = () => context.testApp.clearCache();
+  element('check-updates-button').handlers.click = () => context.testApp.checkUpdatesAction();
+  element('update-now-button').handlers.click = () => context.testApp.applyUpdate();
+  element('create-blob-backup-button').handlers.click = () => context.testApp.createBlobBackup();
+  element('import-blob-backup-button').handlers.click = () => context.testApp.importBlobBackup();
+  element('uninstall-button').handlers.click = () => context.testApp.openUninstallConfirmation();
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];

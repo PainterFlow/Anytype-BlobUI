@@ -53,20 +53,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (index !== 0) resetAdvancedVisibility();
     view.update({ advancedTab: index });
   }
-  const installDirectory = el("install-directory");
-
   const autoplayVideos = el("autoplay-videos");
   function applyAutoplay(value) {
     if (autoplayVideos) autoplayVideos.checked = value !== false;
     window.BlobUI.VideoPlayer?.setAutoplay(value !== false);
   }
-  const automaticUpdatesEnabled = el("automatic-updates-enabled");
-  const automaticChecksEnabled = el("automatic-checks-enabled");
-  const checkUpdatesButton = el("check-updates-button");
-  const updateNowButton = el("update-now-button");
-  const createBlobBackupButton = el("create-blob-backup-button");
-  const importBlobBackupButton = el("import-blob-backup-button");
-  const blobBackupStatus = el("blob-backup-status");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
   const advancedApiPort = el("advanced-api-port");
@@ -254,6 +245,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let updaterState = null;
   let updaterSettingsLoaded = false;
   let updaterBusyOperation = "";
+  let updateStatusTransientMessage = "";
   let blobFolderBusy = false;
   let blobRestoreReloadFailed = false;
   let uninstallBusy = false;
@@ -659,26 +651,27 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function assignUpdaterSettings(settings) {
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
-    installDirectory.value = updaterDraft.installDirectory;
     syncUpdaterStartupControl();
     view.update({ releaseChannel: updaterDraft.releaseChannel });
     applyAutoplay(true);
-    automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
-    automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     updaterSettingsLoaded = true;
     updateSaveButton();
   }
 
-  function renderUpdaterState() {
+  function backupActionsDisabled() {
+    const settingsDirty = !!draft && hasUnsavedChanges();
+    const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
+      && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
+    return !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
+      || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
+  }
+
+  function syncAdvancedControls() {
     const state = updaterState || {};
     const updateAvailable = state.updateAvailable === true;
     const simulated = state.status === "simulated";
     const currentVersion = String(state.currentVersion || "");
     const latestVersion = String(state.latestVersion || "");
-    el("blobui-version").textContent = currentVersion ? "BlobUI " + currentVersion : "BlobUI version unavailable";
-    el("update-version").textContent = currentVersion
-      ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
-      : "";
     const fallbackMessage = state.status === "checking" ? "Checking for updates…"
       : state.status === "updating" ? "Downloading the update. Settings will close and reopen automatically."
       : simulated ? "Preview update available. No files have been changed."
@@ -687,19 +680,36 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       : state.status === "updated" ? "Update completed."
       : state.status === "error" ? "Could not check for updates."
       : "Check for updates to see if a newer version is available.";
-    el("update-status").textContent = String(state.message || fallbackMessage);
-    el("update-status").classList.toggle("error", state.status === "error");
-    checkUpdatesButton.textContent = updaterBusyOperation === "checking" ? "Checking…"
-      : updaterBusyOperation === "updating" ? "Updating…"
-      : updateAvailable ? "Update now"
-      : state.status === "current" || state.status === "updated" ? "You're up to date"
-      : "Check for updates";
-    checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
-    updateNowButton.hidden = !updateAvailable;
-    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges();
-    updateNowButton.title = simulated ? "Preview update only" : "Update now";
-    updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
-    renderBlobBackupControls();
+    const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
+    view.update({
+      blobuiVersionLabel: currentVersion ? "BlobUI " + currentVersion : "BlobUI version unavailable",
+      updateVersionText: currentVersion
+        ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
+        : "",
+      updateStatusText: updateStatusTransientMessage || String(state.message || fallbackMessage),
+      updateStatusError: state.status === "error",
+      checkUpdatesLabel: updaterBusyOperation === "checking" ? "Checking…"
+        : updaterBusyOperation === "updating" ? "Updating…"
+        : updateAvailable ? "Update now"
+        : state.status === "current" || state.status === "updated" ? "You're up to date"
+        : "Check for updates",
+      checkUpdatesDisabled: !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed,
+      updateNowVisible: updateAvailable,
+      updateNowDisabled: !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges(),
+      updateNowTitle: simulated ? "Preview update only" : "Update now",
+      backupActionsDisabled: backupActionsDisabled(),
+      updaterControlsDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      automaticUpdatesChecked: updaterDraft?.automaticUpdatesEnabled === true,
+      automaticChecksChecked: updaterDraft?.automaticChecksEnabled === true,
+      installDirectoryValue: updaterDraft ? String(updaterDraft.installDirectory || "") : "",
+      installDirectoryDisabled: settingsLocked || !updaterSettingsLoaded,
+      clearCacheDisabled: settingsLocked || !draft || !window.appReady || clearCacheBusy,
+      uninstallDisabled: !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy,
+    });
+  }
+
+  function renderUpdaterState() {
+    syncAdvancedControls();
   }
 
   function isInstallingUpdate() {
@@ -707,13 +717,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function renderBlobBackupControls() {
-    const settingsDirty = !!draft && hasUnsavedChanges();
-    const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
-      && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
-    const disabled = !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
-      || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
-    createBlobBackupButton.disabled = disabled;
-    importBlobBackupButton.disabled = disabled;
+    syncAdvancedControls();
   }
 
   function maybeApplyPendingAutomaticUpdate() {
@@ -732,6 +736,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function mergeUpdaterState(state) {
+    updateStatusTransientMessage = "";
     if (state && typeof state === "object") updaterState = { ...(updaterState || {}), ...state };
     renderUpdaterState();
   }
@@ -745,7 +750,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       updaterState = { status: "error", message: error.message || String(error) };
       if (!updaterSettingsLoaded) {
         assignUpdaterSettings({
-          installDirectory: installDirectory.value || "",
+          installDirectory: updaterDraft?.installDirectory || "",
           startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
@@ -1050,7 +1055,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
     if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
       if (fromAutomaticCheck) pendingAutomaticUpdate = true;
-      else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
+      else {
+        updateStatusTransientMessage = "Save or undo your pending settings before installing the update.";
+        renderUpdaterState();
+      }
       return;
     }
     updaterBusyOperation = "updating";
@@ -1336,11 +1344,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     assignDraftToForm(snapshot.settings);
     if (snapshot.updaterSettings) {
       updaterDraft = { ...snapshot.updaterSettings };
-      installDirectory.value = updaterDraft.installDirectory;
       view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
       applyAutoplay(true);
-      automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
-      automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
     }
     lastCustomAccent = snapshot.settings.accentMode === "native" ? null : {
       accentMode: snapshot.settings.accentMode,
@@ -1412,11 +1417,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
       fullscreenExperimentDisabled: settingsLocked || !draft || !window.appReady,
       kanbanStyleDisabled: settingsLocked || !draft });
-    const clearCacheButton = el("clear-cache-button");
-    if (clearCacheButton) clearCacheButton.disabled = settingsLocked || !draft || !window.appReady || clearCacheBusy;
     const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
-      if (control.id === "start-on-login") return;
+      if (["start-on-login", "install-directory", "automatic-updates-enabled", "automatic-checks-enabled"].includes(control.id)) return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control))
         || (themeColorControls.includes(control) && !draft.enableCustomThemes);
     });
@@ -1430,11 +1433,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
-      control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
-    });
-    installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
-    el("uninstall-button").disabled = !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy;
     Object.keys(visibilityFields).forEach((inputId) => {
       visibilityFields[inputId].button.disabled = settingsLocked || !draft;
     });
@@ -1445,8 +1443,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     apiKeyRemovalSave.disabled = settingsLocked;
     apiKeyRemovalUndo.disabled = settingsLocked;
     apiKeyRemovalClose.disabled = settingsLocked;
-    renderUpdaterState();
-    renderBlobBackupControls();
+    syncAdvancedControls();
     maybeApplyPendingAutomaticUpdate();
   }
 
@@ -1607,8 +1604,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
     void loadShortcutBindings();
     invoke("get_anytype_version").then((version) => {
-      el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
-    }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
+      view.update({ anytypeVersionLabel: typeof version === "string" && version.trim() ? version : "Anytype unknown" });
+    }).catch(() => { view.update({ anytypeVersionLabel: "Anytype unknown" }); });
     updateSaveButton();
     const needsOnboarding = state.ready && state.onboardingComplete === false;
     if (needsOnboarding) showOnboarding();
@@ -1987,13 +1984,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (updaterSettingsChanged) {
       const directory = updaterDraft.installDirectory.trim();
       const validDirectory = directory.length > 0 && directory.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(directory);
-      installDirectory.classList.toggle("invalid", !validDirectory);
-      el("updater-settings-error").textContent = validDirectory ? "" : "Enter a valid Anytype data folder.";
+      view.update({
+        installDirectoryInvalid: !validDirectory,
+        updaterSettingsError: validDirectory ? "" : "Enter a valid Anytype data folder.",
+      });
       if (!validDirectory) invalid = true;
       else updaterDraft.installDirectory = directory;
     } else {
-      installDirectory.classList.remove("invalid");
-      el("updater-settings-error").textContent = "";
+      view.update({ installDirectoryInvalid: false, updaterSettingsError: "" });
     }
     const connectionChanged = connectionHasChanges();
     const updaterPathChanged = updaterSettingsChanged
@@ -2104,7 +2102,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         updaterSettingsSaved = true;
         updaterDraft = { ...submittedUpdaterSettings };
         initialUpdaterSettings = { ...submittedUpdaterSettings };
-        installDirectory.value = updaterDraft.installDirectory;
+        view.update({ installDirectoryValue: updaterDraft.installDirectory });
         editSession.commit({ updaterSettings: { ...initialUpdaterSettings } });
         if (updaterPathChanged) await reloadTargetAppState();
         else mergeUpdaterState(savedUpdaterState || {});
@@ -2375,14 +2373,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
-    installDirectory.setAttribute("aria-busy", "true");
+    view.update({ installDirectoryBusy: true });
     try {
       const selected = await invoke("select_anytype_folder", { currentDirectory: updaterDraft.installDirectory });
       if (!selected || saveBusy || isInstallingUpdate()) return;
-      installDirectory.value = selected;
       updaterDraft.installDirectory = selected;
-      installDirectory.classList.remove("invalid");
-      el("updater-settings-error").textContent = "";
+      view.update({ installDirectoryValue: selected, installDirectoryInvalid: false, updaterSettingsError: "" });
       if (!window.appReady) {
         await invoke("recover_install_directory", { installDirectory: selected });
         initialUpdaterSettings = { ...updaterDraft };
@@ -2391,37 +2387,28 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
       markDirty();
     } catch (error) {
-      el("updater-settings-error").textContent = error.message || String(error);
+      view.update({ updaterSettingsError: error.message || String(error) });
     } finally {
       folderPickerBusy = false;
-      installDirectory.removeAttribute("aria-busy");
+      view.update({ installDirectoryBusy: false });
     }
   }
-  listen(installDirectory, "click", selectAnytypeFolder);
-  listen(installDirectory, "keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      selectAnytypeFolder();
-    }
-  });
-  listen(installDirectory, "input", () => {
+
+  function changeInstallDirectory(value) {
     if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
-    updaterDraft.installDirectory = installDirectory.value;
-    installDirectory.classList.remove("invalid");
-    el("updater-settings-error").textContent = "";
+    updaterDraft.installDirectory = String(value ?? "");
+    view.update({ installDirectoryValue: updaterDraft.installDirectory, installDirectoryInvalid: false, updaterSettingsError: "" });
     markDirty();
-  });
-  for (const [control, property] of [
-    [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
-    [automaticChecksEnabled, "automaticChecksEnabled"],
-  ]) {
-    listen(control, "change", () => {
-      if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
-      updaterDraft[property] = control.checked;
-      markDirty();
-    });
   }
-  listen(el("clear-cache-button"), "click", async () => {
+
+  function changeUpdaterSetting(property, checked) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
+    if (!["automaticUpdatesEnabled", "automaticChecksEnabled"].includes(property)) return;
+    updaterDraft[property] = checked === true;
+    markDirty();
+  }
+
+  async function clearCache() {
     if (clearCacheBusy || saveBusy || isInstallingUpdate() || !window.appReady) return;
     clearCacheBusy = true;
     updateSaveButton();
@@ -2438,12 +2425,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       clearCacheBusy = false;
       updateSaveButton();
     }
-  });
-  listen(checkUpdatesButton, "click", () => {
+  }
+
+  function checkUpdatesAction() {
     if (updaterState && updaterState.updateAvailable === true) applyUpdate();
     else checkForUpdates(false);
-  });
-  listen(updateNowButton, "click", () => applyUpdate());
+  }
   const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
     open: url => invoke("open_external_link", { url }),
     onError(error) {
@@ -2461,11 +2448,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  listen(el("uninstall-button"), "click", () => {
+  function openUninstallConfirmation() {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy || !window.appReady) return;
     el("uninstall-error").textContent = "";
     uninstallModal.open();
-  });
+  }
   ["uninstall-close", "uninstall-cancel"].forEach((id) => listen(el(id), "click", () => uninstallModal.close()));
   listen(el("uninstall-confirm"), "click", async () => {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy) return;
@@ -2484,16 +2471,16 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
   });
   function setBlobBackupStatus(message, isError = false) {
-    blobBackupStatus.textContent = message;
-    blobBackupStatus.classList.toggle("error", isError);
+    view.update({ blobBackupStatusText: message, blobBackupStatusError: isError });
   }
-  listen(createBlobBackupButton, "click", async () => {
-    if (createBlobBackupButton.disabled) return;
+
+  async function createBlobBackup() {
+    if (backupActionsDisabled()) return;
     blobFolderBusy = true;
     updateSaveButton();
     try {
       const destination = await invoke("select_blob_backup_destination", {
-        currentDirectory: installDirectory.value || null,
+        currentDirectory: updaterDraft?.installDirectory || null,
       });
       if (!destination) return;
       const backup = await invoke("create_blob_backup", { destinationDirectory: destination });
@@ -2504,14 +2491,15 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       blobFolderBusy = false;
       updateSaveButton();
     }
-  });
-  listen(importBlobBackupButton, "click", async () => {
-    if (importBlobBackupButton.disabled) return;
+  }
+
+  async function importBlobBackup() {
+    if (backupActionsDisabled()) return;
     blobFolderBusy = true;
     updateSaveButton();
     try {
       const backup = await invoke("select_blob_backup_folder", {
-        currentDirectory: installDirectory.value || null,
+        currentDirectory: updaterDraft?.installDirectory || null,
       });
       if (!backup) return;
       selectedBlobBackupDirectory = backup;
@@ -2524,7 +2512,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       blobFolderBusy = false;
       updateSaveButton();
     }
-  });
+  }
   ["blob-import-close", "blob-import-cancel"].forEach((id) => {
     listen(el(id), "click", () => blobImportModal.close());
   });
@@ -3105,5 +3093,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
   return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, changeFullscreenExperiment, save, beginShortcutCapture,
+    changeUpdaterSetting, changeInstallDirectory, selectAnytypeFolder, clearCache, checkUpdatesAction, applyUpdate, createBlobBackup, importBlobBackup, openUninstallConfirmation,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }
