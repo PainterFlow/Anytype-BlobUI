@@ -86,6 +86,19 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
       assert.ok(guideText.includes(expected),`The Kanban calculation guide includes ${expected}.`);
     }
     assert.equal(await guideDialog.locator('a[href="https://katex.org/docs/supported.html"]').count(),1);
+    const guideTable=await page.evaluate(()=>{
+      const dialog=document.getElementById('kanban-calc-guide-dialog');
+      const content=dialog.querySelector('.markdown-content');
+      const table=content.querySelector('table');
+      const longest=[...table.querySelectorAll('td code')].reduce((a,b)=>b.textContent.length>a.textContent.length?b:a);
+      return {dialogOverflow:dialog.scrollWidth-dialog.clientWidth,contentOverflow:content.scrollWidth-content.clientWidth,
+        tableRightOverflow:table.getBoundingClientRect().right-content.getBoundingClientRect().right,
+        wrappedLines:longest.getClientRects().length};
+    });
+    assert.ok(guideTable.dialogOverflow<=1,'The guide dialog has no horizontal overflow.');
+    assert.ok(guideTable.contentOverflow<=1,'The markdown content does not overflow horizontally.');
+    assert.ok(guideTable.tableRightOverflow<=1,'The markdown table stays inside the content width.');
+    assert.ok(guideTable.wrappedLines>1,'Long table code wraps across lines instead of widening the table.');
     assert.equal(await page.evaluate(()=>document.getElementById('settings-shell').inert),true);
     await page.keyboard.press('Escape');
     await guideDialog.waitFor({state:'hidden'});

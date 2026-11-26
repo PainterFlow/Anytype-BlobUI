@@ -466,8 +466,8 @@ button.keybind-button:hover .keybind-keycap { background: #442544; }
 .markdown-content pre::-webkit-scrollbar-track, .markdown-content pre::-webkit-scrollbar-corner { background: transparent; }
 .markdown-content pre::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; }
 .markdown-content pre::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-.markdown-content table { width: max-content; min-width: 100%; overflow: hidden; border: 1px solid var(--line); border-collapse: separate; border-spacing: 0; border-radius: 5px; font-size: 13px; }
-.markdown-content th, .markdown-content td { padding: 8px 10px; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown-content table { width: 100%; overflow: hidden; border: 1px solid var(--line); border-collapse: separate; border-spacing: 0; border-radius: 5px; font-size: 13px; }
+.markdown-content th, .markdown-content td { padding: 8px 10px; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; text-align: left; vertical-align: top; }
 .markdown-content tr > :last-child { border-right: 0; }
 .markdown-content tr:last-child > * { border-bottom: 0; }
 .markdown-content th { background: var(--input-bg); font-weight: 600; }
