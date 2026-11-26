@@ -64,5 +64,18 @@ test('mounted screens retain accessible controls, ordering and initial state', a
     });
     assert.deepEqual(result.problems, [], 'ARIA references must resolve in the mounted DOM');
     for (const [name, value] of Object.entries(result)) if (name !== 'problems') assert.equal(value, true, name);
+
+    await page.locator('#advanced-nav').click();
+    await page.locator('#advanced-app-tab').click();
+    await page.waitForFunction(() => !document.getElementById('advanced-app-panel').hidden);
+    const folderVisibility = await page.locator('#install-directory').evaluate(input => {
+      const style = getComputedStyle(input);
+      const rect = input.getBoundingClientRect();
+      return { opacity: style.opacity, position: style.position, width: rect.width, height: rect.height };
+    });
+    assert.notEqual(folderVisibility.opacity, '0', 'Anytype Folder input must not use hidden switch styling');
+    assert.notEqual(folderVisibility.position, 'absolute', 'Anytype Folder input must stay in the row layout');
+    assert.ok(folderVisibility.width > 200, `Anytype Folder input width was ${folderVisibility.width}`);
+    assert.ok(folderVisibility.height >= 48, `Anytype Folder input height was ${folderVisibility.height}`);
   } finally { await browser.close(); }
 });
