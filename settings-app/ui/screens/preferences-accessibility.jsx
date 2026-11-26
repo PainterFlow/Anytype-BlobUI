@@ -11,7 +11,9 @@ import {
   TextField,
 } from "../shared/settings-controls.jsx";
 import { Tabs } from "../shared/tabs.jsx";
+import { SettingsDialog } from "../shared/settings-dialog.jsx";
 import { CalendarColors } from "./calendar-colors.jsx";
+import { loadMarkdownFile, MarkdownView } from "./documentation.jsx";
 
 export const preferenceLabels = ["Colors", "Font", "Space Banner"];
 
@@ -225,7 +227,18 @@ export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, k
   onKanbanStyleChange, kanbanStyleDisabled, formulaController,
 }) {
   const [formula, setFormula] = useState(() => formulaController?.getSnapshot());
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guide, setGuide] = useState(null);
+  const [guideError, setGuideError] = useState(false);
   useEffect(() => formulaController?.subscribe(setFormula), [formulaController]);
+  useEffect(() => {
+    if (!guideOpen || guide) return undefined;
+    let active = true;
+    loadMarkdownFile("./kanban-calc-guide.md")
+      .then(result => { if (active) setGuide(result); })
+      .catch(() => { if (active) setGuideError(true); });
+    return () => { active = false; };
+  }, [guideOpen, guide]);
 
   return <Tabs label="Kanban Views" className="advanced-tabs" items={kanbanTabs}
     selected={selectedTab} onSelect={onSelectTab} useChildPanels>
@@ -250,8 +263,14 @@ export function KanbanViews({ values = {}, onChange, selectedTab, onSelectTab, k
       <p id="kanban-collapse-help" className="kanban-collapse-help">Show category headers; cards appear on hover or keyboard focus. Touch devices keep cards visible.</p>
     </SettingsSection>
     <SettingsSection className="settings-group kanban-calculations-page" aria-label="Kanban Calculations">
-      <SettingsHeading title="Kanban calculations" help="Calculations use the optional Anytype Local API v2 connection. Saved results are snapshots until you save or reload Settings and rebuild in Anytype." />
+      <SettingsHeading title="Kanban calculations" helpDialogId="kanban-calc-guide-dialog"
+        onHelpClick={() => { setGuideError(false); setGuideOpen(true); }} />
       <FormulaPageView controller={formulaController} />
+      <SettingsDialog id="kanban-calc-guide-dialog" title="Kanban calculation guide" open={guideOpen}
+        onClose={() => setGuideOpen(false)} className="release-notes-dialog">
+        {guide ? <MarkdownView {...guide} className="release-notes-content markdown-content" />
+          : <p role="status">{guideError ? "Could not load the Kanban calculation guide." : "Loading the calculation guide…"}</p>}
+      </SettingsDialog>
     </SettingsSection>
   </Tabs>;
 }

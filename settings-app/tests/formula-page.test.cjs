@@ -74,6 +74,22 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
     assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Unlock retries queued discovery while the calculation tab is hidden.');
     await openFormulas(page);await page.locator('.formula-view-row').first().waitFor();
+    const guideTrigger=page.getByRole('button',{name:'Kanban calculations help',exact:true});
+    assert.equal(await guideTrigger.getAttribute('aria-haspopup'),'dialog');
+    assert.equal(await guideTrigger.getAttribute('aria-controls'),'kanban-calc-guide-dialog');
+    await guideTrigger.click();
+    const guideDialog=page.locator('#kanban-calc-guide-dialog');
+    await guideDialog.waitFor({state:'visible'});
+    await page.waitForFunction(()=>document.querySelector('#kanban-calc-guide-dialog .markdown-content')?.textContent.includes('Create a calculation'));
+    const guideText=await guideDialog.locator('.markdown-content').textContent();
+    for (const expected of ['\\property{"Estimate"}{"sum"}','\\sqrt[degree]{body}','$configure-kanban-calculations']) {
+      assert.ok(guideText.includes(expected),`The Kanban calculation guide includes ${expected}.`);
+    }
+    assert.equal(await guideDialog.locator('a[href="https://katex.org/docs/supported.html"]').count(),1);
+    assert.equal(await page.evaluate(()=>document.getElementById('settings-shell').inert),true);
+    await page.keyboard.press('Escape');
+    await guideDialog.waitFor({state:'hidden'});
+    assert.equal(await page.evaluate(()=>document.getElementById('settings-shell').inert),false);
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);
     const rows=await page.locator('.formula-view-row').evaluateAll(nodes=>nodes.map(n=>({font:getComputedStyle(n.querySelector('.formula-view-name')).fontSize,radius:getComputedStyle(n).borderRadius})));

@@ -11,6 +11,7 @@ cp "$workspaceRoot/scripts/Build-App.sh" "$workspaceRoot/scripts/Restore-Process
 echo fixture > "$fixture/settings-app/Cargo.toml"
 echo guide > "$fixture/settings-app/markdowns/dev-guide.md"
 echo headless guide > "$fixture/settings-app/markdowns/anyblob-guide.md"
+echo kanban guide > "$fixture/settings-app/markdowns/kanban-calc-guide.md"
 echo notes > "$fixture/settings-app/markdowns/Changelogs.md"
 echo 'images: []' > "$fixture/settings-app/markdowns/md-images.yaml"
 
@@ -37,6 +38,7 @@ if [[ $1 == run && $2 == build ]]; then
     mkdir -p frontend-dist
     cp "$BLOBUI_TEST_ROOT/settings-app/markdowns/dev-guide.md" frontend-dist/dev-guide.md
     cp "$BLOBUI_TEST_ROOT/settings-app/markdowns/anyblob-guide.md" frontend-dist/anyblob-guide.md
+    cp "$BLOBUI_TEST_ROOT/settings-app/markdowns/kanban-calc-guide.md" frontend-dist/kanban-calc-guide.md
 fi
 SH
 cat > "$fixture/bin/cargo" <<'SH'
@@ -60,6 +62,7 @@ run_build() { "$fixture/scripts/Build-App.sh" "$@" >/dev/null; }
 
 run_build --silent
 [[ -f $fixture/settings-app/dist/.blobui-background-next && ! -e $BLOBUI_LAUNCH_LOG ]] || { echo '--silent did not queue background mode without launching.' >&2; exit 1; }
+[[ $(cat "$fixture/settings-app/dist/kanban-calc-guide.md") == 'kanban guide' ]] || { echo 'The Kanban calculation guide was not copied beside the Settings executable.' >&2; exit 1; }
 run_build -n
 [[ -f $fixture/settings-app/dist/.blobui-onboarding-next ]] || { echo '-n did not queue onboarding.' >&2; exit 1; }
 run_build -b -n

@@ -165,6 +165,20 @@ if ($null -ne $existingHeadlessGuide -and
 }
 Copy-Item -LiteralPath $bundledHeadlessGuide -Destination $distributionHeadlessGuide -Force
 
+$kanbanGuide = Join-Path $markdownDirectory 'kanban-calc-guide.md'
+$bundledKanbanGuide = Join-Path $frontendOutputDirectory 'kanban-calc-guide.md'
+if (-not (Test-Path -LiteralPath $kanbanGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledKanbanGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle settings-app/markdowns/kanban-calc-guide.md.'
+}
+$distributionKanbanGuide = Join-Path $distributionDirectory 'kanban-calc-guide.md'
+$existingKanbanGuide = Get-Item -LiteralPath $distributionKanbanGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingKanbanGuide -and
+    (($existingKanbanGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app Kanban calculation guide path is a reparse point: $distributionKanbanGuide"
+}
+Copy-Item -LiteralPath $bundledKanbanGuide -Destination $distributionKanbanGuide -Force
+
 foreach ($releaseNotesFile in @('Changelogs.md', 'md-images.yaml')) {
     $sourceReleaseNotes = Join-Path $markdownDirectory $releaseNotesFile
     if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
