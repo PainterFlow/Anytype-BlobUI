@@ -20,7 +20,7 @@ Advanced Settings uses API key, App settings and Experiments tabs. App settings 
 
 The JavaScript and JSX entry in `ui/main.jsx` renders one React root. Put feature views in `ui/screens` and shared controls in `ui/shared`. Keep draft and save behavior in application state. Pass values and actions to controls through props and route native calls and event subscriptions through `ui/native-service.js`.
 
-Use `SettingsSection`, `SettingsHeading`, `SettingsGroup`, `SettingsRow`, `Switch`, `TextField`, `Button`, and `IconButton` to preserve the current spacing, labels, and button sizes. Keep keys stable when a list or field rerenders. Use the existing sanitized Markdown renderer for Markdown content.
+Use `SettingsSection`, `SettingsHeading`, `SettingsGroup`, `SettingsRow`, `Switch`, `TextField`, `Button`, and `IconButton` to preserve the current spacing, labels, and button sizes. Keep keys stable when a list or field rerenders. Use the existing sanitized Markdown renderer for Markdown content. The Custom Themes heading has a clickable ? that opens a shared SettingsDialog rendering `settings-app/markdowns/custom-themes-guide.md`.
 
 `Tabs` keeps panels mounted to preserve drafts and stable inputs. It handles arrow keys, Home and End, the animated indicator, and horizontal scrolling inside the tab strip. A panel change resets the settings scroll area to the top. Measuring after a resize or a font load preserves its scroll position.
 

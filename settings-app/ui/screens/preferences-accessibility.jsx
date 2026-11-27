@@ -68,6 +68,9 @@ const basedThemeOptions = [
 ];
 
 function CustomThemes({ values, onChange, themes = [], disabled = false }) {
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guide, setGuide] = useState(null);
+  const [guideError, setGuideError] = useState(false);
   const customThemesEnabled = values["enable-custom-themes"] === true;
   const themeControlsDisabled = disabled || !customThemesEnabled;
   const selectedTheme = values["custom-theme"] || "";
@@ -82,8 +85,18 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
     return { ...fallback, value: values[id], onChange: event => onChange?.(id, event.currentTarget.value, event) };
   };
 
+  useEffect(() => {
+    if (!guideOpen || guide) return undefined;
+    let active = true;
+    loadMarkdownFile("./custom-themes-guide.md")
+      .then(result => { if (active) setGuide(result); })
+      .catch(() => { if (active) setGuideError(true); });
+    return () => { active = false; };
+  }, [guideOpen, guide]);
+
   return <SettingsSection className="settings-group custom-themes-group" aria-labelledby="custom-themes-heading">
-    <SettingsHeading id="custom-themes-heading" title="Custom Themes" />
+    <SettingsHeading id="custom-themes-heading" title="Custom Themes" helpDialogId="custom-themes-guide-dialog"
+      onHelpClick={() => { setGuideError(false); setGuideOpen(true); }} />
     <SettingsGroup className="settings-list custom-theme-list">
       <Switch id="enable-custom-themes" label="Enable Custom Themes" className="kanban-setting-row native-accent-control settings-row"
         checked={customThemesEnabled} disabled={disabled} onChange={checked => onChange?.("enable-custom-themes", checked)} />
@@ -115,6 +128,11 @@ function CustomThemes({ values, onChange, themes = [], disabled = false }) {
         <p className="field-error" id="theme-color-error" aria-live="polite" />
       </div>
     </SettingsGroup>
+    <SettingsDialog id="custom-themes-guide-dialog" title="Custom themes guide" open={guideOpen}
+      onClose={() => setGuideOpen(false)} className="release-notes-dialog">
+      {guide ? <MarkdownView {...guide} className="release-notes-content markdown-content" />
+        : <p role="status">{guideError ? "Could not load the custom themes guide." : "Loading the custom themes guide…"}</p>}
+    </SettingsDialog>
   </SettingsSection>;
 }
 

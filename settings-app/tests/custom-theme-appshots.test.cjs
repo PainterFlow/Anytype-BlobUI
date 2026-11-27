@@ -83,6 +83,22 @@ test('custom theme previews update BlobUI Settings and save with dark appshots',
     await page.locator('#preference-tab-0').click();
     await page.locator('#custom-themes-heading').waitFor({ state: 'visible' });
 
+    const guideTrigger = page.getByRole('button', { name: 'Custom Themes help', exact: true });
+    assert.equal(await guideTrigger.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(await guideTrigger.getAttribute('aria-controls'), 'custom-themes-guide-dialog');
+    await guideTrigger.click();
+    const guideDialog = page.locator('#custom-themes-guide-dialog');
+    await guideDialog.waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#custom-themes-guide-dialog .markdown-content')?.textContent.includes('Create a theme file'));
+    const guideText = await guideDialog.locator('.markdown-content').textContent();
+    for (const expected of ['Settings/themes/built-in-themes', 'accent-color-selection', 'generated.css', 'Ctrl+R']) {
+      assert.ok(guideText.includes(expected), `The custom themes guide includes ${expected}.`);
+    }
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), true);
+    await page.keyboard.press('Escape');
+    await guideDialog.waitFor({ state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.getElementById('settings-shell').inert), false);
+
     const darkPreview = await page.evaluate(() => ({
       background: getComputedStyle(document.body).backgroundColor,
       titlebar: getComputedStyle(document.querySelector('.window-titlebar')).backgroundColor,

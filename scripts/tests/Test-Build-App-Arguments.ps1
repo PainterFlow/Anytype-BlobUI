@@ -67,12 +67,13 @@ try {
     [IO.Directory]::CreateDirectory($markdownDirectory) | Out-Null
     [IO.Directory]::CreateDirectory($frontendDirectory) | Out-Null
     [IO.File]::WriteAllText((Join-Path $projectDirectory 'Cargo.toml'), '[package]')
-    foreach ($name in @('dev-guide.md', 'anyblob-guide.md', 'kanban-calc-guide.md', 'Changelogs.md', 'md-images.yaml')) {
+    foreach ($name in @('dev-guide.md', 'anyblob-guide.md', 'kanban-calc-guide.md', 'custom-themes-guide.md', 'Changelogs.md', 'md-images.yaml')) {
         [IO.File]::WriteAllText((Join-Path $markdownDirectory $name), "fixture $name")
     }
     [IO.File]::WriteAllText((Join-Path $frontendDirectory 'dev-guide.md'), 'bundled dev guide')
     [IO.File]::WriteAllText((Join-Path $frontendDirectory 'anyblob-guide.md'), 'bundled Anyblob guide')
     [IO.File]::WriteAllText((Join-Path $frontendDirectory 'kanban-calc-guide.md'), 'bundled Kanban calculation guide')
+    [IO.File]::WriteAllText((Join-Path $frontendDirectory 'custom-themes-guide.md'), 'bundled custom themes guide')
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Build-App.ps1') -Destination $fixtureScriptPath
     Copy-Item -LiteralPath (Join-Path $workspaceRoot 'scripts/Restore-ProcessEnvironment.ps1') -Destination (Join-Path $scriptDirectory 'Restore-ProcessEnvironment.ps1')
     [IO.File]::WriteAllText((Join-Path $scriptDirectory 'Rust-Toolchain.ps1'), '')
@@ -87,6 +88,7 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $projectDirectory 'dist/.blobui-dev-build') -PathType Leaf) 'The developer build must identify its MCP launcher to Settings.'
     Assert ((Get-Content -LiteralPath (Join-Path $projectDirectory 'dist/anyblob-guide.md') -Raw) -ceq 'bundled Anyblob guide') 'The Anyblob guide must be copied beside the Settings executable.'
     Assert ((Get-Content -LiteralPath (Join-Path $projectDirectory 'dist/kanban-calc-guide.md') -Raw) -ceq 'bundled Kanban calculation guide') 'The Kanban calculation guide must be copied beside the Settings executable.'
+    Assert ((Get-Content -LiteralPath (Join-Path $projectDirectory 'dist/custom-themes-guide.md') -Raw) -ceq 'bundled custom themes guide') 'The custom themes guide must be copied beside the Settings executable.'
     Assert (Test-Path -LiteralPath $backgroundRequestPath -PathType Leaf) '-b without -s must queue background mode beside the distribution executable.'
     Assert ($global:BlobUIBuildAppTestLaunches.Count -eq 0) '-b without -s must not launch the Settings app.'
     Assert (-not (Test-Path -LiteralPath $onboardingRequestPath)) '-b alone must not queue onboarding.'

@@ -179,6 +179,20 @@ if ($null -ne $existingKanbanGuide -and
 }
 Copy-Item -LiteralPath $bundledKanbanGuide -Destination $distributionKanbanGuide -Force
 
+$customThemesGuide = Join-Path $markdownDirectory 'custom-themes-guide.md'
+$bundledCustomThemesGuide = Join-Path $frontendOutputDirectory 'custom-themes-guide.md'
+if (-not (Test-Path -LiteralPath $customThemesGuide -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $bundledCustomThemesGuide -PathType Leaf)) {
+    throw 'The Settings frontend did not bundle settings-app/markdowns/custom-themes-guide.md.'
+}
+$distributionCustomThemesGuide = Join-Path $distributionDirectory 'custom-themes-guide.md'
+$existingCustomThemesGuide = Get-Item -LiteralPath $distributionCustomThemesGuide -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingCustomThemesGuide -and
+    (($existingCustomThemesGuide.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    throw "The Settings app custom themes guide path is a reparse point: $distributionCustomThemesGuide"
+}
+Copy-Item -LiteralPath $bundledCustomThemesGuide -Destination $distributionCustomThemesGuide -Force
+
 foreach ($releaseNotesFile in @('Changelogs.md', 'md-images.yaml')) {
     $sourceReleaseNotes = Join-Path $markdownDirectory $releaseNotesFile
     if (-not (Test-Path -LiteralPath $sourceReleaseNotes -PathType Leaf)) {
