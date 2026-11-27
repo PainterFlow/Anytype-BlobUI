@@ -1,10 +1,37 @@
-import React, { useEffect, useState } from "react";
-import { Button, Checkbox, CopyIcon, CopySuccessIcon } from "../shared/settings-controls.jsx";
-import { HelpTooltip } from "../shared/help-tooltip.jsx";
-import { loadMarkdownFile, MarkdownView } from "./documentation.jsx";
+import React from "react";
+import { Button, CopyIcon, CopySuccessIcon } from "../shared/settings-controls.jsx";
 
 function CloseIcon() {
   return <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8" /></svg>;
+}
+
+function Features({ useApi }) {
+  const labels = [
+    "Custom Accent Color", "Custom Themes", "Custom Space Banner", "Animated Text Effects", "UI fixes", "Custom Font", "Codex Integration",
+    "Colored Calendar Events", "Read and use your data for BlobUI features", "Corrupt your Data", "Sell/Collect your Data",
+  ];
+  return <span className="onboarding-features" role="list">
+    {labels.map((label, index) => {
+      const included = index < (useApi ? 9 : 6);
+      return <span className="onboarding-feature" role="listitem" key={label}>
+        <span>{label}</span>
+        <svg className={`feature-mark ${included ? "available" : "unavailable"}`} viewBox={included ? "0 0 20 20" : "0 0 12 12"} aria-hidden="true">
+          <path d={included ? "m4 10 4 4 8-8" : "m2 2 8 8m0-8-8 8"} />
+        </svg>
+        <span className="sr-only">{included ? "Included" : "Not included"}</span>
+      </span>;
+    })}
+  </span>;
+}
+
+function Choice({ id, title, useApi, recommended = false }) {
+  const card = <>
+    <span className="onboarding-option-title">{title}</span>
+    <Features useApi={useApi} />
+  </>;
+  return <Button id={id} className={`onboarding-option${recommended ? " recommended-option" : ""}`} aria-pressed="false" data-api={String(useApi)}>
+    {recommended ? <><span className="recommended-label">Recommended</span><span className="recommended-panel">{card}</span></> : card}
+  </Button>;
 }
 
 export function Titlebar({ backgroundExperiment = "disabled", fullscreenExperiment = "disabled" }) {
@@ -19,150 +46,23 @@ export function Titlebar({ backgroundExperiment = "disabled", fullscreenExperime
   </header>;
 }
 
-function OnboardingChoice({ id, inputId, title, description }) {
-  return <label id={id} className="onboarding-choice" htmlFor={inputId}>
-    <Checkbox id={inputId} shape="squircle" />
-    <span className="onboarding-choice-copy">
-      <span className="onboarding-choice-title">{title}</span>
-      <span className="onboarding-choice-description">{description}</span>
-    </span>
-  </label>;
-}
-
-function PreviewArtwork({ kind }) {
-  const accent = kind === "interface" ? "#de50de" : kind === "codex" ? "#40b8f5" : kind === "notion" ? "#4ecc4e" : "#a3a3a3";
-  return <svg className="onboarding-preview-art" viewBox="0 0 320 150" role="img" aria-label="Feature preview">
-    <rect width="320" height="150" rx="14" fill="#171717" />
-    <rect x="18" y="18" width="284" height="114" rx="10" fill="#202020" />
-    <rect x="30" y="30" width="72" height="90" rx="8" fill="#252525" />
-    <rect x="114" y="30" width="176" height="14" rx="7" fill="#303030" />
-    <rect x="114" y="55" width="128" height="10" rx="5" fill="#2a2a2a" />
-    <rect x="114" y="75" width="150" height="10" rx="5" fill="#2a2a2a" />
-    {kind === "interface" && <>
-      <rect x="114" y="99" width="74" height="18" rx="9" fill={accent} />
-      <circle cx="276" cy="108" r="10" fill={accent} />
-    </>}
-    {kind === "annoying" && <>
-      <rect x="202" y="88" width="86" height="28" rx="8" fill="#2c2c2c" opacity=".45" />
-      <path d="m208 94 74 16m0-16-74 16" stroke="#737373" strokeWidth="4" strokeLinecap="round" />
-      <rect x="114" y="99" width="70" height="12" rx="6" fill="#343434" />
-    </>}
-    {kind === "codex" && <>
-      <path d="M125 103h36l18-18m0 36-18-18" fill="none" stroke={accent} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="204" y="95" width="82" height="20" rx="10" fill="#263949" />
-      <path d="m216 105 10 5 18-12" fill="none" stroke={accent} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-    </>}
-    {kind === "notion" && <>
-      {[0, 1, 2].map(row => <g key={row}>
-        <rect x={114 + row * 58} y="94" width="48" height="28" rx="6" fill="#292929" />
-        <rect x={120 + row * 58} y={101 + row * 3} width="26" height="6" rx="3" fill={row === 1 ? accent : "#686868"} />
-      </g>)}
-    </>}
-  </svg>;
-}
-
-const onboardingPreviews = [
-  {
-    key: "interface",
-    title: "Customize the interface",
-    body: "BlobUI enables Dark Mode+, applies the Blob Pink accent, and leaves selections on the system color. Your fonts, banner, and other appearance choices stay unchanged.",
-  },
-  {
-    key: "annoying",
-    title: "A quieter Anytype",
-    body: "Hover previews for tabs, links, and object mentions stay hidden. Kanban boards use balanced spacing, while your category collapse choice stays unchanged.",
-  },
-  {
-    key: "codex",
-    title: "Connect Codex through Anyblob",
-    body: "BlobUI enables Anyblob, object mentions, and the AGENTS.md guide page. Codex still follows the permissions you save for each space.",
-  },
-  {
-    key: "notion",
-    title: "Data-powered Notion-style features",
-    body: "Calendar Colors and data-powered Kanban features can use your Anytype API connection. BlobUI only reads the spaces allowed by your API key.",
-  },
-];
-
-function OnboardingPreview() {
-  return <aside className="onboarding-preview" aria-label="Feature preview">
-    {onboardingPreviews.map((preview, index) => <div key={preview.key} id={"onboarding-preview-" + preview.key} className="onboarding-preview-page" hidden={index !== 0}>
-      <div className="onboarding-preview-media"><PreviewArtwork kind={preview.key} /></div>
-      <div className="onboarding-preview-text">
-        <h2>{preview.title}</h2>
-        <p>{preview.body}</p>
-      </div>
-    </div>)}
-  </aside>;
-}
-
-function OnboardingGuideReader() {
-  const [requested, setRequested] = useState(false);
-  const [payload, setPayload] = useState(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    const open = () => setRequested(true);
-    window.addEventListener("blobui-onboarding-guide-open", open);
-    return () => window.removeEventListener("blobui-onboarding-guide-open", open);
-  }, []);
-  useEffect(() => {
-    if (!requested || payload) return undefined;
-    let active = true;
-    loadMarkdownFile("./anyblob-guide.md").then(result => {
-      if (!active) return;
-      setPayload(result);
-      setFailed(false);
-    }).catch(() => {
-      if (active) setFailed(true);
-    });
-    return () => { active = false; };
-  }, [requested, payload]);
-  if (!requested) return <p className="onboarding-guide-status" role="status">Loading the Anyblob guide…</p>;
-  if (failed) return <p className="onboarding-guide-status" role="alert">Could not load the Anyblob guide.</p>;
-  if (!payload) return <p className="onboarding-guide-status" role="status">Loading the Anyblob guide…</p>;
-  return <MarkdownView id="onboarding-guide-content" className="documentation-article markdown-content" aria-label="Anyblob setup guide"
-    markdown={payload.markdown} images={payload.images} videos={payload.videos} />;
-}
-
-function ArrowIcon({ direction }) {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d={direction === "back" ? "M12 4 6 10l6 6M7 10h9" : "M8 4l6 6-6 6M4 10h9"} /></svg>;
-}
-
 export function Onboarding() {
   return <section id="onboarding" className="onboarding" aria-label="BlobUI onboarding" hidden>
-    <Button id="onboarding-skip" variant="text" className="onboarding-skip">Skip</Button>
     <Button id="onboarding-welcome" className="onboarding-welcome" aria-labelledby="onboarding-title" aria-describedby="onboarding-hint">
       <span className="onboarding-copy">
         <span id="onboarding-title" className="onboarding-title"><span className="onboarding-title-glitch">Welcome to BlobUI</span></span>
         <span id="onboarding-hint" className="onboarding-hint">Click anywhere to continue.</span>
       </span>
     </Button>
-    <section id="onboarding-preferences" className="onboarding-api" aria-labelledby="onboarding-preferences-title" hidden>
+    <section id="onboarding-api" className="onboarding-api" aria-labelledby="onboarding-api-title" hidden>
       <div className="onboarding-scroll" id="onboarding-scroll">
-        <header className="onboarding-api-heading onboarding-question-heading">
-          <div className="onboarding-title-row">
-            <h1 id="onboarding-preferences-title" tabIndex={-1}>How would you like to use BlobUI?</h1>
-            <span id="onboarding-warning-write" className="onboarding-requirement" aria-hidden="true">
-              <HelpTooltip label="Anyblob API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with likely read-write access to at least 1 space!" />
-            </span>
-            <span id="onboarding-warning-read" className="onboarding-requirement" aria-hidden="true">
-              <HelpTooltip label="Anytype API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with read access to at least 1 space!" />
-            </span>
-          </div>
-          <p>Choose every goal that applies. Nothing is saved until onboarding finishes.</p>
+        <header className="onboarding-api-heading">
+          <h1 id="onboarding-api-title" tabIndex={-1}>Would you like to use an API key?</h1>
+          <p>Choose how you want to use BlobUI.</p>
         </header>
-        <div className="onboarding-questions-layout">
-          <div className="onboarding-choice-list" role="group" aria-label="BlobUI setup choices">
-            <OnboardingChoice id="onboarding-choice-interface" inputId="onboarding-option-interface" title="I want to customise my UI interface"
-              description="Dark Mode+, the Blob Pink accent, and system-colored selections." />
-            <OnboardingChoice id="onboarding-choice-annoying" inputId="onboarding-option-annoying" title="I want to make Anytype less annoying"
-              description="Hide hover previews and use balanced Kanban spacing." />
-            <OnboardingChoice id="onboarding-choice-codex" inputId="onboarding-option-codex" title="I want to connect Anytype with Codex"
-              description="Enable Anyblob, object mentions, and the AGENTS.md page." />
-            <OnboardingChoice id="onboarding-choice-notion" inputId="onboarding-option-notion" title="I want to have more Notion features in Anytype"
-              description="Connect the API features used by calendars and Kanban boards." />
-          </div>
-          <OnboardingPreview />
+        <div className="onboarding-options" role="group" aria-label="API key preference">
+          <Choice id="onboarding-no-api-option" title="No API Key" useApi={false} />
+          <Choice id="onboarding-api-option" title="Use API Key" useApi recommended />
         </div>
         <p id="onboarding-choice-error" className="field-error" role="alert" />
       </div>
@@ -172,7 +72,7 @@ export function Onboarding() {
         <div className="connection-content">
           <header className="onboarding-api-heading">
             <h1 id="connection-title" tabIndex={-1}>Connect to Anytype</h1>
-            <p id="connection-intro">Add your read-only API key to enable Calendar Colors and data-powered features.</p>
+            <p>Add your read-only API key to enable Calendar Colors and data-powered features.</p>
           </header>
           <form id="connection-form" className="connection-form" noValidate>
             <div className="font-fields">
@@ -195,7 +95,7 @@ export function Onboarding() {
                 </div>
               </div>
             </div>
-            <p id="connection-port-hint" className="input-hint">Leave the port blank to use 31009. Leave the key blank to use the key already saved in BlobUI.</p>
+            <p id="connection-port-hint" className="input-hint">Leave the port blank to use 31009.</p>
             <section className="connection-guide" aria-labelledby="connection-guide-title">
               <h2 id="connection-guide-title">Create an API key</h2>
               <ol>
@@ -203,28 +103,20 @@ export function Onboarding() {
                 <li>Turn on <strong>Enabled</strong>. Keep the port at <strong>31009</strong>, or enter your custom port above.</li>
                 <li>Click <strong>Create new</strong> and name the app <strong>BlobUI</strong>.</li>
                 <li>Choose the spaces BlobUI can read. Select <strong>Allow access to all spaces</strong> for features across your workspace.</li>
-                <li>Set <strong>Access</strong> to <strong id="connection-access-level">Read only</strong> and <strong>Expires</strong> to <strong>Never</strong>.</li>
+                <li>Set <strong>Access</strong> to <strong>Read only</strong> and <strong>Expires</strong> to <strong>Never</strong>.</li>
                 <li>Click <strong>Create key</strong>, copy the API v2 key, and paste it above.</li>
               </ol>
-              <p id="connection-key-note">Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.</p>
+              <p>Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.</p>
             </section>
             <p id="connection-error" className="field-error" role="alert" />
+            <div className="connection-actions">
+              <Button id="connection-back" className="connection-back">Back</Button>
+              <Button id="connection-confirm" className="connection-confirm" type="submit">Confirm</Button>
+            </div>
           </form>
         </div>
       </div>
     </section>
-    <section id="onboarding-guide" className="onboarding-api onboarding-guide-page" aria-labelledby="onboarding-guide-title" hidden>
-      <div className="onboarding-scroll onboarding-guide-scroll" id="onboarding-guide-scroll">
-        <header className="onboarding-api-heading">
-          <h1 id="onboarding-guide-title" tabIndex={-1}>Anyblob setup guide</h1>
-        </header>
-        <OnboardingGuideReader />
-      </div>
-    </section>
-    <div className="onboarding-navigation" aria-label="Onboarding navigation">
-      <Button id="onboarding-back" variant="icon" aria-label="Back" title="Back" disabled><ArrowIcon direction="back" /></Button>
-      <Button id="onboarding-forward" variant="icon" aria-label="Continue" title="Continue"><ArrowIcon direction="forward" /></Button>
-    </div>
   </section>;
 }
 
