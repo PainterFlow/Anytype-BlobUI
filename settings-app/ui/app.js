@@ -2726,7 +2726,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
-  let onboardingAfterGuideClose = false;
+  let onboardingAfterModalClose = false;
   let onboardingCompletionPending = false;
 
   function showDocumentation() {
@@ -2822,26 +2822,29 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     onboardingSteps[index].focus.focus();
   }
 
+  function closeModalsForOnboarding() {
+    return window.BlobUI.closeOpenModals?.({ restoreFocus: false }) === true;
+  }
+
   function showOnboarding(previousFocus = null) {
     if (connectionBusy || isInstallingUpdate()) return;
     if (!onboarding.hidden) {
       onboardingSteps[onboardingStep].focus.focus();
       return;
     }
-    if (documentationModal.isOpen()) {
-      if (onboardingAfterGuideClose) return;
-      onboardingAfterGuideClose = true;
-      const guideFocus = documentationPreviousFocus;
-      documentationModal.close({ restoreFocus: false });
+    if (onboardingAfterModalClose) return;
+    if (closeModalsForOnboarding()) {
+      onboardingAfterModalClose = true;
+      const returnFocus = previousFocus || (documentationModal.isOpen() ? documentationPreviousFocus : document.activeElement);
       window.setTimeout(() => {
-        onboardingAfterGuideClose = false;
-        if (!disposed && onboarding.hidden) showOnboarding(guideFocus);
+        onboardingAfterModalClose = false;
+        if (!disposed && onboarding.hidden) showOnboarding(returnFocus);
       }, 150);
       return;
     }
     if (onboarding.hidden) {
-      if (!previousFocus) onboardingPreviousFocus = document.activeElement;
-      else onboardingPreviousFocus = previousFocus.closest("[hidden], [inert]") ? el("help-button") : previousFocus;
+      const focusCandidate = previousFocus || document.activeElement;
+      onboardingPreviousFocus = focusCandidate?.closest?.("[hidden], [inert]") ? el("help-button") : focusCandidate;
     }
     resetOnboardingTransition();
     closeLogs();
@@ -3085,8 +3088,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   listen(document, "keydown", (event) => {
     if (event.defaultPrevented) return;
-    if (blobFolderBusy || blobRestoreReloadFailed || blobImportModal.isOpen()
-      || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
+    const matches = (action) => {
+      const binding = shortcutBindings.find((item) => item.action === action);
+      return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
+        && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
+    };
+    if (blobFolderBusy || blobRestoreReloadFailed) return;
+    if (matches("showOnboarding") && !shortcutCaptureAction) {
+      event.preventDefault();
+      if (!event.repeat) showOnboarding();
+      return;
+    }
+    if (blobImportModal.isOpen() || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && draft?.fullscreenExperiment === "enable-full-screen") {
       const zoomIn = ["Equal", "NumpadAdd"].includes(event.code) || event.key === "+";
       const zoomOut = ["Minus", "NumpadSubtract"].includes(event.code) || event.key === "-";
@@ -3096,11 +3109,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         return;
       }
     }
-    const matches = (action) => {
-      const binding = shortcutBindings.find((item) => item.action === action);
-      return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
-        && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
-    };
     if (matches("toggleFullscreen") && draft?.fullscreenExperiment === "enable-full-screen") {
       event.preventDefault();
       if (!event.repeat) el("window-fullscreen").click();
@@ -3118,11 +3126,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (matches("rebuildCss")) {
       event.preventDefault();
       if (!event.repeat) save({ forceRebuild: true });
-      return;
-    }
-    if (matches("showOnboarding")) {
-      event.preventDefault();
-      if (!event.repeat) showOnboarding();
       return;
     }
     if (matches("simulateUpdate")) {

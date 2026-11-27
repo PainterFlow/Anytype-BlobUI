@@ -2,6 +2,22 @@
   "use strict";
 
   const BlobUI = window.BlobUI = window.BlobUI || {};
+  const openModals = [];
+
+  function trackModalOpen(controller) {
+    if (!openModals.includes(controller)) openModals.push(controller);
+  }
+
+  function trackModalClosed(controller) {
+    const index = openModals.indexOf(controller);
+    if (index >= 0) openModals.splice(index, 1);
+  }
+
+  BlobUI.closeOpenModals = function closeOpenModals({ restoreFocus = true } = {}) {
+    const closing = openModals.slice().reverse().filter(controller => controller.isOpen());
+    closing.forEach(controller => controller.close({ restoreFocus }));
+    return closing.length > 0;
+  };
 
   BlobUI.createModalController = function createModalController({
     backdrop,
@@ -48,6 +64,7 @@
     function finishClose(restoreFocus) {
       backdrop.hidden = true;
       backdrop.classList.remove("is-closing");
+      trackModalClosed(controller);
       restoreBackground();
       if (restoreFocus && !focus(returnFocus)) focus(resolveElement(fallbackFocus));
       returnFocus = null;
@@ -57,6 +74,7 @@
 
     function open() {
       if (destroyed) return;
+      trackModalOpen(controller);
       if (closeTimer !== null) {
         window.clearTimeout(closeTimer);
         closeTimer = null;
@@ -113,7 +131,7 @@
     backdrop.addEventListener("pointerdown", handleBackdrop);
     document.addEventListener("keydown", handleKeydown);
 
-    return {
+    const controller = {
       open,
       close,
       isOpen: () => !backdrop.hidden,
@@ -122,10 +140,12 @@
         destroyed = true;
         if (closeTimer !== null) window.clearTimeout(closeTimer);
         closeTimer = null;
+        trackModalClosed(controller);
         if (!backdrop.hidden) finishClose(true);
         backdrop.removeEventListener("pointerdown", handleBackdrop);
         document.removeEventListener("keydown", handleKeydown);
       },
     };
+    return controller;
   };
 })();

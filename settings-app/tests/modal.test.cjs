@@ -166,4 +166,18 @@ backdropHarness.controller.open();
 backdropHarness.backdrop.handlers.pointerdown({ target: backdropHarness.backdrop });
 assert.equal(backdropHarness.backdrop.classList.contains('is-closing'), true, 'Backdrop click dismisses the modal.');
 
+const closeAllHarness = createModalHarness();
+const sharedShell = new closeAllHarness.FakeElement();
+const firstModal = closeAllHarness.createController({ inertTargets: [sharedShell] });
+const secondModal = closeAllHarness.createController({ inertTargets: [sharedShell] });
+firstModal.controller.open();
+secondModal.controller.open();
+assert.equal(sharedShell.inert, true);
+assert.equal(closeAllHarness.context.window.BlobUI.closeOpenModals({ restoreFocus: false }), true);
+closeAllHarness.flushTimers();
+assert.equal(firstModal.backdrop.hidden, true, 'The shared close control closes the first modal.');
+assert.equal(secondModal.backdrop.hidden, true, 'The shared close control closes the nested modal.');
+assert.equal(sharedShell.inert, false, 'Nested modals close in reverse order and restore the shell.');
+assert.equal(closeAllHarness.context.window.BlobUI.closeOpenModals({ restoreFocus: false }), false, 'No modal remains open after the shared close.');
+
 console.log('modal lifecycle tests passed');

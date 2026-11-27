@@ -1107,7 +1107,17 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(onboarding.hidden, true, 'Key repeat must not open onboarding.');
   context.document.handlers.keydown({ ...debugKey, metaKey: true });
   assert.equal(onboarding.hidden, true, 'Modified shortcuts must not open onboarding.');
+  element('help-keybinds').handlers.click();
+  assert.equal(element('keybinds-backdrop').hidden, false);
   context.document.handlers.keydown(debugKey);
+  assert.equal(onboarding.hidden, true, 'Onboarding waits for the open modal to close.');
+  assert.equal(element('keybinds-backdrop').hidden, false, 'The modal close animation starts before onboarding opens.');
+  finishRemovalTransition();
+  assert.equal(element('keybinds-backdrop').hidden, true, 'Onboarding closes the open modal.');
+  const onboardingDelay = [...timers.entries()].find(([, timer]) => timer.delay === 150);
+  assert(onboardingDelay, 'Onboarding waits for modal teardown.');
+  timers.delete(onboardingDelay[0]);
+  onboardingDelay[1].callback();
   assert.equal(onboarding.hidden, false);
   assert.equal(welcome.hidden, false);
   assert.equal(shell.inert, true);

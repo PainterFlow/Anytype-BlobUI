@@ -64,30 +64,72 @@ function PreviewArtwork({ kind }) {
 const onboardingPreviews = [
   {
     key: "interface",
+    media: [{ type: "artwork" }],
     title: "Customize the interface",
     body: "BlobUI enables Dark Mode+, applies the Blob Pink accent, and leaves selections on the system color. Your fonts, banner, and other appearance choices stay unchanged.",
   },
   {
     key: "annoying",
+    media: [{ type: "artwork" }],
     title: "A quieter Anytype",
     body: "Hover previews for tabs, links, and object mentions stay hidden. Kanban boards use balanced spacing, while your category collapse choice stays unchanged.",
   },
   {
     key: "codex",
+    media: [{ type: "artwork" }],
     title: "Connect Codex through Anyblob",
     body: "BlobUI enables Anyblob, object mentions, and the AGENTS.md guide page. Codex still follows the permissions you save for each space.",
   },
   {
     key: "notion",
+    media: [{ type: "artwork" }],
     title: "Data-powered Notion-style features",
     body: "Calendar Colors and data-powered Kanban features can use your Anytype API connection. BlobUI only reads the spaces allowed by your API key.",
   },
 ];
 
+function OnboardingMediaItem({ item, fallbackKind }) {
+  if (item.type === "video") {
+    return <video className="onboarding-preview-video" src={item.src} autoPlay muted loop playsInline preload="metadata" aria-label={item.alt || "Feature preview video"} />;
+  }
+  if (item.type === "image") {
+    return <img className="onboarding-preview-image" src={item.src} alt={item.alt || "Feature preview"} />;
+  }
+  return <PreviewArtwork kind={item.kind || fallbackKind} />;
+}
+
+export function OnboardingPreviewMedia({ preview }) {
+  const configuredMedia = Array.isArray(preview.media) && preview.media.length
+    ? preview.media
+    : [{ type: "artwork", kind: preview.key }];
+  const video = configuredMedia.find(item => item.type === "video");
+  const slides = video ? [video] : configuredMedia;
+  const [activeSlide, setActiveSlide] = useState(0);
+  useEffect(() => {
+    setActiveSlide(0);
+    if (slides.length < 2) return undefined;
+    const reduced = document.documentElement.dataset.reducedMotion === "true"
+      || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveSlide(current => (current + 1) % slides.length);
+    }, 3200);
+    return () => window.clearInterval(timer);
+  }, [preview.key, slides.length]);
+  if (video) return <OnboardingMediaItem item={video} fallbackKind={preview.key} />;
+  return <div className="onboarding-preview-slideshow">
+    {slides.map((item, index) => <div key={(item.src || item.kind || "slide") + "-" + index}
+      className={"onboarding-preview-slide" + (index === activeSlide ? " active" : "")}
+      aria-hidden={index === activeSlide ? undefined : "true"}>
+      <OnboardingMediaItem item={item} fallbackKind={preview.key} />
+    </div>)}
+  </div>;
+}
+
 function OnboardingPreview() {
   return <aside className="onboarding-preview" aria-label="Feature preview">
     {onboardingPreviews.map((preview, index) => <div key={preview.key} id={"onboarding-preview-" + preview.key} className="onboarding-preview-page" hidden={index !== 0}>
-      <div className="onboarding-preview-media"><PreviewArtwork kind={preview.key} /></div>
+      <div className="onboarding-preview-media"><OnboardingPreviewMedia preview={preview} /></div>
       <div className="onboarding-preview-text">
         <h2>{preview.title}</h2>
         <p>{preview.body}</p>
@@ -141,13 +183,15 @@ export function Onboarding() {
       <div className="onboarding-scroll" id="onboarding-scroll">
         <header className="onboarding-api-heading onboarding-question-heading">
           <div className="onboarding-title-row">
-            <h1 id="onboarding-preferences-title" tabIndex={-1}>How would you like to use BlobUI?</h1>
-            <span id="onboarding-warning-write" className="onboarding-requirement" aria-hidden="true">
-              <HelpTooltip label="Anyblob API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with likely read-write access to at least 1 space!" />
-            </span>
-            <span id="onboarding-warning-read" className="onboarding-requirement" aria-hidden="true">
-              <HelpTooltip label="Anytype API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with read access to at least 1 space!" />
-            </span>
+            <div className="onboarding-title-anchor">
+              <h1 id="onboarding-preferences-title" tabIndex={-1}>How would you like to use BlobUI?</h1>
+              <span id="onboarding-warning-write" className="onboarding-requirement" aria-hidden="true">
+                <HelpTooltip label="Anyblob API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with likely read-write access to at least 1 space!" />
+              </span>
+              <span id="onboarding-warning-read" className="onboarding-requirement" aria-hidden="true">
+                <HelpTooltip label="Anytype API requirement" variant="warning" size="large" text="Requires an Anytype API v2 key with read access to at least 1 space!" />
+              </span>
+            </div>
           </div>
           <p>Choose every goal that applies. Nothing is saved until onboarding finishes.</p>
         </header>
