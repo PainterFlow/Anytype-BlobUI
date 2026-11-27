@@ -1146,7 +1146,7 @@ html[data-reduced-motion="true"] .markdown-video-controls, html[data-reduced-mot
   width: min(100%, 1040px);
   margin: 0 auto;
 }
-.onboarding-choice-list { display: grid; gap: 16px; min-width: 0; }
+.onboarding-choice-list { display: grid; gap: 16px; min-width: 0; align-self: stretch; align-content: space-between; }
 .onboarding-choice {
   display: flex;
   align-items: flex-start;
