@@ -13,7 +13,7 @@ In addition to that I have remade big parts of the UI with windowed mode being e
 ### UI & Documentation Improvements
 
 - Added documentation for kanban view calculations in the kanban view calculation child tab.
-- The onboarding experience and UI has now been remade.
+- The onboarding experience and UI have now been remade.
 - Massive parts of the UI have been remade.
 
 ## Anyblob (v1.3.0 -> v1.4.0)
@@ -34,7 +34,7 @@ In addition to that I have remade big parts of the UI with windowed mode being e
 - Added re-usable checkmark type.
 - Added new button style that has no button shape until hovered, with the disabled variant just having darker text/icons.
 - Added new re-usable preview card UI element that is only used in onboarding right now.
-- List views are now generalised and detached from kanban views.
+- List views are now generalized and detached from kanban views.
 - List views have a lot more capabilities.
 - Selections have been remade in the backend.
 - Added Icons to a variety of elements.
@@ -43,6 +43,7 @@ In addition to that I have remade big parts of the UI with windowed mode being e
 
 ## Bugfixes
 
+- Undocumented: `Alt+r` does not recalculate kanban calculation view results.
 - Issue#124: Random warning in v1.5.0 changelogs.
 
 ---
