@@ -195,7 +195,7 @@ const context = {
       if (name === 'get_app_state') {
         if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
         return {
-        ready: true, theme: 'dark',
+        ready: true, theme: 'dark', onboardingComplete: true,
         apiPort: 31009, apiIp: '', hasSavedApiKey: true, startupMode: startupModeScenario || 'off',
         defaultBannerPreview: 'data:image/png;base64,default-preview',
         settings: {
@@ -1089,10 +1089,11 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(calls.length, count, 'Window control clicks must not start a drag.');
   const welcome = element('onboarding-welcome');
   const onboarding = element('onboarding');
-  const api = element('onboarding-api');
+  const preferences = element('onboarding-preferences');
+  const connection = element('onboarding-connection');
+  const guide = element('onboarding-guide');
   const shell = element('settings-shell');
   context.document.activeElement = element('font-family');
-  const beforeOnboarding = calls.length;
   const unsavedFont = element('font-family').value;
   const debugKey = {
     key: 'z', code: 'KeyZ', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false, repeat: false,
@@ -1108,7 +1109,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(shell.inert, true);
   assert(element('root').classList.contains('onboarding-active'));
   welcome.handlers.click();
-  assert.equal(api.hidden, true, 'Welcome fades out before the choice screen opens.');
+  assert.equal(preferences.hidden, true, 'Welcome fades out before the questions open.');
   function finishOnboardingTransition() {
     const pending = [...timers.entries()].filter(([, timer]) => timer.delay === 320).at(-1);
     assert(pending, 'Onboarding must schedule a transition.');
@@ -1117,78 +1118,90 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
   finishOnboardingTransition();
   assert.equal(welcome.hidden, true);
-  assert.equal(api.hidden, false);
-  assert(element('onboarding-api-title').focused);
-  element('onboarding-api-option').handlers.click();
-  assert.equal(onboarding.dataset.apiChoice, 'api');
-  element('onboarding-no-api-option').handlers.click();
-  assert.equal(onboarding.dataset.apiChoice, 'api', 'Ignore repeated selections during transition.');
+  assert.equal(preferences.hidden, false);
+  assert(element('onboarding-preferences-title').focused);
+  assert.equal(element('onboarding-preview-interface').hidden, false, 'The first preview is the default.');
+  element('onboarding-choice-codex').handlers.pointerenter();
+  assert.equal(element('onboarding-preview-codex').hidden, false, 'Hovering a choice updates the preview.');
+  assert.equal(element('onboarding-preview-interface').hidden, true);
+
+  await changeToggle('onboarding-option-annoying', true);
+  assert.equal(element('onboarding-warning-write').classList.contains('visible'), false);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), false);
+  await changeToggle('onboarding-option-notion', true);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), true, 'Notion-style API features need read access.');
+  await changeToggle('onboarding-option-codex', true);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), false);
+  assert.equal(element('onboarding-warning-write').classList.contains('visible'), true, 'Anyblob needs read-write access.');
+  assert.equal(element('connection-access-level').textContent, 'Read-write');
+
+  element('onboarding-forward').handlers.click();
   finishOnboardingTransition();
-  assert.equal(element('onboarding-connection').hidden, false, 'API choice must open connection setup.');
-  assert.equal(element('connection-key').type, 'password', 'Onboarding keys start concealed.');
-  assert.equal(element('connection-port').type, 'text', 'Onboarding ports start readable.');
-  element('connection-key-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-key').type, 'text');
-  element('connection-port-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-port').type, 'password');
-  element('connection-port-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-port').type, 'text');
+  assert.equal(connection.hidden, false, 'API-dependent choices open the connection page.');
+  element('onboarding-back').handlers.click();
+  finishOnboardingTransition();
+  assert.equal(preferences.hidden, false);
+  assert.equal(element('onboarding-option-annoying').checked, true, 'Choices persist while moving backward.');
+  assert.equal(element('onboarding-option-codex').checked, true);
+  assert.equal(element('onboarding-preview-interface').hidden, false, 'Re-entering the questions resets the preview.');
+  element('onboarding-forward').handlers.click();
+  finishOnboardingTransition();
+  assert.equal(connection.hidden, false);
+
   const beforeInvalidConnection = connectionRequests.length;
   const submit = () => element('connection-form').handlers.submit({ preventDefault() {} });
-  submit();
-  assert.match(element('connection-error').textContent, /Enter your Anytype/);
   element('connection-key').value = 'test-key';
   await element('connection-key').handlers.input();
   element('connection-port').value = '65536';
   await element('connection-port').handlers.input();
-  assert.equal(element('connection-key-field').dataset.filled, 'true');
-  assert.equal(element('connection-port-field').dataset.filled, 'true');
   submit();
   assert.match(element('connection-error').textContent, /Port must/);
   assert.equal(connectionRequests.length, beforeInvalidConnection, 'Invalid onboarding values must not start a connection request.');
-  element('connection-port').value = '';
-  await element('connection-port').handlers.input();
-  connectionError = 'Could not connect to Anytype.';
-  submit();
-  await flush();
-  assert.match(element('connection-error').textContent, /Could not connect/);
-  assert.equal(onboarding.hidden, false, 'Failure must keep the setup page open.');
-  assert.equal(connectionRequests.at(-1).port, null, 'Blank port uses the backend default.');
-  connectionError = null;
+  assert.equal(connection.hidden, false, 'Invalid connection values keep the user on the connection page.');
   element('connection-port').value = '31010';
   await element('connection-port').handlers.input();
+  assert.equal(element('connection-key-field').dataset.filled, 'true');
+  assert.equal(element('connection-port-field').dataset.filled, 'true');
+  element('connection-error').textContent = '';
   submit();
-  assert.equal(element('connection-confirm').disabled, true);
-  assert.equal(element('connection-key-visibility').disabled, true, 'Connection visibility controls disable while saving.');
-  await flush();
-  assert.equal(connectionRequests.at(-1).port, 31010);
+  finishOnboardingTransition();
+  assert.equal(guide.hidden, false, 'The Anyblob choice opens the guide after the API page.');
+
+  const savesBeforeFinish = savedSettings.length;
+  element('onboarding-forward').handlers.click();
+  assert.equal(element('onboarding-forward').disabled, true, 'Navigation locks while onboarding finishes.');
+  for (let turn = 0; turn < 6; turn += 1) await flush();
+  assert.equal(savedSettings.length, savesBeforeFinish + 1, 'Choices apply only when onboarding finishes.');
+  const onboardingSettings = savedSettings.at(-1);
+  assert.equal(onboardingSettings.tabHoverEffect, false);
+  assert.equal(onboardingSettings.linkHoverEffect, false);
+  assert.equal(onboardingSettings.objectMentionHoverEffect, false);
+  assert.equal(onboardingSettings.kanbanViewStyle, 'balanced');
+  assert.equal(onboardingSettings.calendarColorsEnabled, true);
+  assert.equal(onboardingSettings.codexIntegration.objectMentions.spaces.all, true);
   assert.equal(connectionRequests.at(-1).apiKey, 'test-key');
-  assert.equal(element('connection-key').value, '', 'Clear the key after saving.');
-  assert.equal(element('connection-key').type, 'password', 'Clearing a submitted key resets it to concealed.');
-  assert.equal(element('connection-key-visibility').attributes['aria-pressed'], 'false');
-  assert.equal(element('connection-key-field').dataset.filled, 'false');
+  assert.equal(connectionRequests.at(-1).port, 31010);
+  assert(calls.includes('configure_anyblob'), 'The Anyblob choice enables Anyblob.');
+  assert(calls.includes('configure_anyblob_agents_guide'), 'The Anyblob choice enables the AGENTS.md page.');
   finishOnboardingTransition();
   assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);
   assert(shell.classList.contains('onboarding-entering'));
+  assert.equal(element('connection-key').value, '', 'The submitted key is cleared from temporary onboarding state.');
+
+  const savedAfterFinish = savedSettings.length;
+  const connectionsAfterFinish = connectionRequests.length;
   context.document.handlers.keydown(debugKey);
   welcome.handlers.click();
   finishOnboardingTransition();
-  element('onboarding-no-api-option').handlers.click();
-  await flush();
-  assert.equal(connectionRequests.at(-1).enabled, false);
-  assert.equal(connectionRequests.at(-1).apiKey, '');
-  assert.equal(onboarding.dataset.apiChoice, 'no-api');
-  finishOnboardingTransition();
-  assert.equal(onboarding.hidden, true, 'No API mode skips connection setup.');
-  context.document.handlers.keydown(debugKey);
-  welcome.handlers.click();
-  const pendingTimerIds = [...timers.keys()];
+  await changeToggle('onboarding-option-interface', true);
   context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
-  assert(pendingTimerIds.some(id => !timers.has(id)), 'Exit cancels the pending transition.');
-  assert.equal(onboarding.hidden, true);
-  assert.equal(shell.inert, false);
+  assert.equal(onboarding.hidden, true, 'Escape closes onboarding.');
+  assert.equal(savedSettings.length, savedAfterFinish, 'Escape discards temporary onboarding settings.');
+  assert.equal(connectionRequests.length, connectionsAfterFinish, 'Escape discards temporary onboarding connection edits.');
+  assert.equal(element('onboarding-option-interface').checked, false, 'Discarded choices reset for the next opening.');
   assert.equal(element('font-family').value, unsavedFont);
+
   element('advanced-nav').handlers.click();
   await input('advanced-api-key', 'replacement-test-key');
   await input('advanced-api-port', '31011');

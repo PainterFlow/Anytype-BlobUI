@@ -353,12 +353,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
   const updateReleaseNotesScrollbar = setupScrollbar(el("release-notes-dialog"), "#release-notes-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
-  const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
+  const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-questions-layout");
+  const updateOnboardingGuideScrollbar = setupScrollbar(el("onboarding-guide-scroll"), "#onboarding-guide-content");
   const updateLogsScrollbar = setupScrollbar(logEntries, ".log-entry");
   listen(window, "resize", () => {
     updatePageScrollbar();
     updateOnboardingScrollbar();
     updateConnectionScrollbar();
+    updateOnboardingGuideScrollbar();
   });
 
   const nativeService = createNativeService({
@@ -1438,8 +1440,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     ["discard-confirmation-close", "discard-confirmation-undo", "api-key-removal-close", "api-key-removal-undo", "api-key-removal-save"]
       .forEach((id) => { el(id).disabled = settingsLocked; });
-    ["onboarding-welcome", "onboarding-no-api-option", "onboarding-api-option", "connection-key-visibility", "connection-port-visibility", "connection-back", "connection-confirm"]
+    ["onboarding-welcome", "onboarding-skip", "onboarding-back", "onboarding-forward", "onboarding-option-interface", "onboarding-option-annoying", "onboarding-option-codex", "onboarding-option-notion", "connection-key-visibility", "connection-port-visibility"]
       .forEach((id) => { el(id).disabled = isInstallingUpdate() || connectionBusy; });
+    updateOnboardingNavigation();
     apiKeyRemovalSave.disabled = settingsLocked;
     apiKeyRemovalUndo.disabled = settingsLocked;
     apiKeyRemovalClose.disabled = settingsLocked;
@@ -1607,8 +1610,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       view.update({ anytypeVersionLabel: typeof version === "string" && version.trim() ? version : "Anytype unknown" });
     }).catch(() => { view.update({ anytypeVersionLabel: "Anytype unknown" }); });
     updateSaveButton();
-    const needsOnboarding = state.ready && state.onboardingComplete === false;
-    if (needsOnboarding) showOnboarding();
+    onboardingCompletionPending = state.ready && state.onboardingComplete === false;
+    if (onboardingCompletionPending) showOnboarding();
     if (!state.ready) {
       setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
     } else if (state.hotkeyError) {
@@ -1625,7 +1628,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         }, startupDelay);
       } else void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
     }
-    if (state.ready && !needsOnboarding) void showReleaseNotesOrContinue();
+    if (state.ready && !onboardingCompletionPending) void showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
@@ -2694,19 +2697,37 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   listen(el("open-repository"), "click", () => windowAction("open_project_repository"));
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
-  const onboardingApi = el("onboarding-api");
-  const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
-  // Add future pages here. Every page advances through the same transition;
-  // reaching the end always reveals the main app.
+  const onboardingPreferences = el("onboarding-preferences");
+  const onboardingConnection = el("onboarding-connection");
+  const onboardingGuide = el("onboarding-guide");
+  const onboardingOptionInputs = {
+    interface: el("onboarding-option-interface"),
+    annoying: el("onboarding-option-annoying"),
+    codex: el("onboarding-option-codex"),
+    notion: el("onboarding-option-notion"),
+  };
+  const onboardingChoiceRows = {
+    interface: el("onboarding-choice-interface"),
+    annoying: el("onboarding-choice-annoying"),
+    codex: el("onboarding-choice-codex"),
+    notion: el("onboarding-choice-notion"),
+  };
+  const onboardingPreviewKeys = ["interface", "annoying", "codex", "notion"];
+  const emptyOnboardingSelections = () => ({ interface: false, annoying: false, codex: false, notion: false });
+  let onboardingSelections = emptyOnboardingSelections();
+  const requiresOnboardingApi = () => onboardingSelections.codex || onboardingSelections.notion;
+  const requiresOnboardingGuide = () => onboardingSelections.codex;
   const onboardingSteps = [
     { page: onboardingWelcome, focus: onboardingWelcome },
-    { page: onboardingApi, focus: el("onboarding-api-title") },
-    { page: el("onboarding-connection"), focus: el("connection-title"), when: () => onboarding.dataset.apiChoice === "api" },
+    { page: onboardingPreferences, focus: el("onboarding-preferences-title") },
+    { page: onboardingConnection, focus: el("connection-title"), when: requiresOnboardingApi },
+    { page: onboardingGuide, focus: el("onboarding-guide-title"), when: requiresOnboardingGuide },
   ];
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
   let onboardingAfterGuideClose = false;
+  let onboardingCompletionPending = false;
 
   function showDocumentation() {
     if (!onboarding.hidden || documentationModal.isOpen()) return;
@@ -2725,11 +2746,79 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     settingsShell.classList.remove("onboarding-entering");
   }
 
+  function onboardingStepVisible(step) {
+    return !step.when || step.when();
+  }
+
+  function visibleOnboardingIndexes() {
+    return onboardingSteps.map((step, index) => onboardingStepVisible(step) ? index : -1).filter(index => index >= 0);
+  }
+
+  function setOnboardingPreview(key) {
+    onboardingPreviewKeys.forEach(name => {
+      el("onboarding-preview-" + name).hidden = name !== key;
+    });
+  }
+
+  function setRequirementTooltip(element, visible) {
+    element.classList.toggle("visible", visible);
+    element.setAttribute("aria-hidden", String(!visible));
+    const button = element.querySelector("button");
+    if (button) button.disabled = !visible;
+  }
+
+  function updateOnboardingRequirements() {
+    setRequirementTooltip(el("onboarding-warning-write"), onboardingSelections.codex);
+    setRequirementTooltip(el("onboarding-warning-read"), onboardingSelections.notion && !onboardingSelections.codex);
+    const write = onboardingSelections.codex;
+    el("connection-intro").textContent = write
+      ? "Add a read-write API key to enable Anyblob and Codex integration."
+      : "Add your read-only API key to enable Calendar Colors and data-powered features.";
+    el("connection-access-level").textContent = write ? "Read-write" : "Read only";
+    el("connection-key-note").textContent = write
+      ? "Your key stays on this computer, encrypted for your Windows account. Anyblob can only use the spaces and actions your key and BlobUI permissions allow."
+      : "Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.";
+    updateOnboardingNavigation();
+  }
+
+  function resetOnboardingDraft() {
+    onboardingSelections = emptyOnboardingSelections();
+    Object.entries(onboardingOptionInputs).forEach(([key, input]) => {
+      input.checked = false;
+      onboardingSelections[key] = false;
+    });
+    el("connection-key").value = "";
+    el("connection-port").value = currentApiPort === 31009 ? "" : String(currentApiPort);
+    resetVisibilityField("connection-key");
+    resetVisibilityField("connection-port");
+    el("connection-error").textContent = "";
+    el("onboarding-choice-error").textContent = "";
+    setOnboardingPreview("interface");
+    updateOnboardingRequirements();
+  }
+
+  function updateOnboardingNavigation() {
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    const last = position === visible.length - 1;
+    const connectionReady = !requiresOnboardingApi() || el("connection-key").value.trim() || hasSavedApiKey;
+    const controlsBusy = connectionBusy || isInstallingUpdate();
+    el("onboarding-back").disabled = controlsBusy || position <= 0;
+    el("onboarding-forward").disabled = controlsBusy || (onboardingSteps[onboardingStep].page === onboardingConnection && !connectionReady);
+    el("onboarding-forward").setAttribute("aria-label", last ? "Finish onboarding" : "Continue");
+    el("onboarding-forward").title = last ? "Finish onboarding" : "Continue";
+    el("onboarding-skip").disabled = controlsBusy;
+  }
+
   function showOnboardingStep(index) {
     onboardingStep = index;
     onboardingSteps.forEach(({ page }, position) => { page.hidden = position !== index; });
+    if (onboardingSteps[index].page === onboardingPreferences) setOnboardingPreview("interface");
+    if (onboardingSteps[index].page === onboardingGuide) window.dispatchEvent(new Event("blobui-onboarding-guide-open"));
     updateOnboardingScrollbar();
     updateConnectionScrollbar();
+    updateOnboardingGuideScrollbar();
+    updateOnboardingNavigation();
     onboardingSteps[index].focus.focus();
   }
 
@@ -2752,13 +2841,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     resetOnboardingTransition();
     closeLogs();
-    apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
-    delete onboarding.dataset.apiChoice;
-    el("connection-key").value = "";
-    resetVisibilityField("connection-key");
-    resetVisibilityField("connection-port");
-    el("connection-error").textContent = "";
-    el("onboarding-choice-error").textContent = "";
+    resetOnboardingDraft();
     settingsShell.inert = true;
     root.classList.add("onboarding-active");
     onboarding.hidden = false;
@@ -2766,134 +2849,233 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function closeOnboarding() {
-    if (connectionBusy || isInstallingUpdate()) return;
-    el("connection-key").value = "";
-    resetVisibilityField("connection-key");
     resetOnboardingTransition();
     onboarding.hidden = true;
     settingsShell.inert = false;
     root.classList.remove("onboarding-active");
     settingsShell.classList.add("onboarding-entering");
+    resetOnboardingDraft();
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
     showReleaseNotesOrContinue();
   }
 
-  function advanceOnboarding() {
-    if (isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
+  async function markOnboardingComplete() {
+    if (!onboardingCompletionPending) return;
+    await invoke("complete_onboarding");
+    onboardingCompletionPending = false;
+  }
+
+  function cancelOnboarding() {
+    if (connectionBusy || isInstallingUpdate()) return;
+    closeOnboarding();
+    markOnboardingComplete().catch(error => {
+      onboardingCompletionPending = true;
+      addLog("Onboarding completion could not be saved. " + String(error.message || error), "error", error);
+    });
+  }
+
+  function transitionOnboardingStep(index) {
+    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
     const current = onboardingSteps[onboardingStep].page;
     current.classList.add("leaving");
     onboardingTransition = window.setTimeout(() => {
       onboardingTransition = null;
       current.classList.remove("leaving");
-      let next = onboardingStep + 1;
-      while (next < onboardingSteps.length && onboardingSteps[next].when && !onboardingSteps[next].when()) next += 1;
-      if (next < onboardingSteps.length) {
-        showOnboardingStep(next);
-      } else {
-        closeOnboarding();
-      }
+      showOnboardingStep(index);
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   }
 
-  listen(onboardingWelcome, "click", advanceOnboarding);
-  function setConnectionBusy(busy) {
-    connectionBusy = busy;
-    apiOptions.forEach((option) => { option.disabled = busy; });
-    el("connection-confirm").disabled = busy;
-    el("connection-back").disabled = busy;
-    el("connection-key").disabled = busy;
-    el("connection-port").disabled = busy;
-    el("connection-key-visibility").disabled = busy;
-    el("connection-port-visibility").disabled = busy;
-    el("connection-confirm").textContent = busy ? "Connecting…" : "Confirm";
+  function moveOnboarding(offset) {
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    const nextPosition = position + offset;
+    if (position < 0 || nextPosition < 0 || nextPosition >= visible.length) return;
+    transitionOnboardingStep(visible[nextPosition]);
   }
 
-  async function applyConnection(enabled, apiKey = "", port = null) {
-    if (isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
+  function finishOnboardingTransition() {
+    if (onboardingTransition !== null) return;
+    const current = onboardingSteps[onboardingStep].page;
+    current.classList.add("leaving");
+    onboardingTransition = window.setTimeout(() => {
+      onboardingTransition = null;
+      current.classList.remove("leaving");
+      closeOnboarding();
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
+  }
+
+  function copySettings(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function applyOnboardingChoices(settings) {
+    const next = copySettings(settings);
+    if (onboardingSelections.interface) {
+      next.enableCustomThemes = true;
+      next.themePreset = "dark-mode-plus.css";
+      next.accentMode = "custom";
+      next.accentPreset = "";
+      next.accentColor = "#de50de";
+      next.includeSelections = false;
+    }
+    if (onboardingSelections.annoying) {
+      next.tabHoverEffect = false;
+      next.linkHoverEffect = false;
+      next.objectMentionHoverEffect = false;
+      next.kanbanViewStyle = "balanced";
+    }
+    if (onboardingSelections.codex) {
+      next.codexIntegration = window.BlobUI.CodexPage.normalize(next.codexIntegration);
+      next.codexIntegration.objectMentions = next.codexIntegration.objectMentions || {};
+      next.codexIntegration.objectMentions.spaces = { all: true, items: [] };
+      next.codexIntegration.objectMentions.types = { all: true, items: [] };
+    }
+    if (onboardingSelections.notion) {
+      next.calendarColorsEnabled = true;
+    }
+    return next;
+  }
+
+  function acceptOnboardingConnection(connection) {
     const advancedWasDirty = connectionHasChanges();
-    const appliedPort = port || 31009;
+    const appliedPort = connection.port || 31009;
+    currentApiPort = appliedPort;
+    hasSavedApiKey = true;
+    if (!advancedWasDirty) {
+      assignAdvancedConnection({ apiIp: currentApiIp, apiPort: currentApiPort, hasSavedApiKey });
+    } else {
+      initialApiDraft = {
+        ip: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
+        port: currentApiPort === 31009 ? "" : String(currentApiPort),
+      };
+      if (!advancedKeyEdited) {
+        advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+        advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+      }
+      el("advanced-api-key-hint").textContent = hasSavedApiKey
+        ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+        : "Enter a new read-only Anytype API v2 key.";
+    }
+    resetAdvancedVisibility();
+    editSession.commit({ connection: readConnectionBaseline() });
+  }
+
+  function applyOnboardingSettingsResult(savedSettings, localSettings, result) {
+    assignDraftToForm(localSettings);
+    initialDraft = copySettings(savedSettings);
+    editSession.commit({ settings: copySettings(savedSettings) });
+    if (result && typeof result.themeCss === "string") applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
+    updateSaveButton();
+  }
+
+  function validateOnboardingConnection() {
+    if (!requiresOnboardingApi()) return true;
+    const key = el("connection-key").value.trim();
+    const portText = el("connection-port").value.trim();
+    if (!key && !hasSavedApiKey) {
+      el("connection-error").textContent = "Enter your Anytype API v2 key, or save one in Advanced Settings first.";
+      el("connection-key").focus();
+      return false;
+    }
+    if (key && (key.length > 4096 || /[\x00-\x1f\x7f]/.test(key))) {
+      el("connection-error").textContent = "Enter your Anytype API v2 key.";
+      el("connection-key").focus();
+      return false;
+    }
+    if (portText && (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535)) {
+      el("connection-error").textContent = "Port must be a whole number from 1 to 65535.";
+      el("connection-port").focus();
+      return false;
+    }
+    return true;
+  }
+
+  async function finishOnboarding() {
+    if (connectionBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed || !draft) return;
+    if (!validateOnboardingConnection()) return;
+    const key = el("connection-key").value.trim();
+    const portText = el("connection-port").value.trim();
+    const baselineSettings = copySettings(editSession.getBaseline().settings || draft);
+    const savedSettings = applyOnboardingChoices(baselineSettings);
+    const localSettings = applyOnboardingChoices(draft);
+    const settingsChanged = !settingsEqual(savedSettings, baselineSettings);
+    const connection = requiresOnboardingApi() ? {
+      enabled: true,
+      apiKey: key,
+      keepExistingKey: !key && hasSavedApiKey,
+      ip: currentApiIp || null,
+      port: portText ? Number(portText) : null,
+    } : null;
     setConnectionBusy(true);
     el("connection-error").textContent = "";
+    el("onboarding-choice-error").textContent = "";
+    let result = null;
     try {
-      const result = await invoke("configure_connection", { connection: {
-        enabled,
-        apiKey,
-        keepExistingKey: false,
-        ip: currentApiIp || null,
-        port,
-      } });
-      window.appReady = true;
-      currentApiPort = appliedPort;
-      hasSavedApiKey = enabled;
-      if (!advancedWasDirty) {
-        assignAdvancedConnection({ apiIp: currentApiIp, apiPort: currentApiPort, hasSavedApiKey });
-      } else {
-        initialApiDraft = {
-          ip: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
-          port: currentApiPort === 31009 ? "" : String(currentApiPort),
-        };
-        if (!advancedKeyEdited) {
-          advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
-          advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
-        }
-        el("advanced-api-key-hint").textContent = hasSavedApiKey
-          ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
-          : "Enter a new read-only Anytype API v2 key.";
+      if (connection) {
+        await invoke("configure_connection", { connection });
+        window.appReady = true;
+        acceptOnboardingConnection(connection);
+        window.BlobUI.FormulaPage.reload();
+        window.BlobUI.CalendarPage?.reload();
       }
-      resetAdvancedVisibility();
-      editSession.commit({ connection: readConnectionBaseline() });
-      updateSaveButton();
-      const calendarPending = enabled && result && result.calendarStatus === "cached";
-      setStatus(calendarPending
-        ? "Anytype connected. Calendar data could not refresh yet; try saving again later."
-        : enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", "info");
-      el("connection-key").value = "";
-      resetVisibilityField("connection-key");
-      advanceOnboarding();
+      if (settingsChanged) result = await invoke("save_settings", { settings: savedSettings });
+      if (onboardingSelections.codex) {
+        const anyblob = await invoke("anyblob_status");
+        if (anyblob?.enabled !== true) await invoke("configure_anyblob", { enabled: true });
+        if (anyblob?.agentsGuide !== true) await invoke("configure_anyblob_agents_guide", { agentsGuide: true });
+        window.BlobUI.AnyblobDraft.commit({ enabled: true, agentsGuide: true });
+      }
+      await markOnboardingComplete();
+      applyOnboardingSettingsResult(savedSettings, localSettings, result);
+      setStatus("Onboarding finished. Press Ctrl+R in Anytype to apply.", "info");
+      finishOnboardingTransition();
     } catch (error) {
-      if (enabled) {
-        el("connection-error").textContent = error.message || String(error);
-      } else {
-        setStatus(error.message || String(error), "error", true, error);
-        el("onboarding-choice-error").textContent = "Could not apply this choice. Check your BlobUI installation and try again.";
-      }
+      const message = error.message || String(error);
+      if (requiresOnboardingApi()) el("connection-error").textContent = message;
+      else el("onboarding-choice-error").textContent = message;
+      setStatus(message, "error", true, error);
     } finally {
       setConnectionBusy(false);
       void refreshCalendarApiAvailability(true);
     }
   }
 
-  apiOptions.forEach((option) => listen(option, "click", () => {
-    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
-    apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
-    el("onboarding-choice-error").textContent = "";
-    const enabled = option === apiOptions[1];
-    onboarding.dataset.apiChoice = enabled ? "api" : "no-api";
-    if (enabled) advanceOnboarding();
-    else applyConnection(false, "", currentApiPort);
-  }));
+  function advanceOnboarding() {
+    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
+    if (onboardingSteps[onboardingStep].page === onboardingConnection && !validateOnboardingConnection()) return;
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    if (position >= 0 && position === visible.length - 1) void finishOnboarding();
+    else moveOnboarding(1);
+  }
 
-  listen(el("connection-back"), "click", () => {
-    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null) return;
-    resetOnboardingTransition();
-    showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
+  function setConnectionBusy(busy) {
+    connectionBusy = busy;
+    Object.values(onboardingOptionInputs).forEach(input => { input.disabled = busy; });
+    el("connection-key").disabled = busy;
+    el("connection-port").disabled = busy;
+    el("connection-key-visibility").disabled = busy;
+    el("connection-port-visibility").disabled = busy;
+    updateOnboardingNavigation();
+  }
+
+  Object.entries(onboardingOptionInputs).forEach(([key, input]) => listen(input, "change", () => {
+    onboardingSelections[key] = input.checked === true;
+    updateOnboardingRequirements();
+  }));
+  Object.entries(onboardingChoiceRows).forEach(([key, row]) => {
+    listen(row, "pointerenter", () => setOnboardingPreview(key));
+    listen(row, "focusin", () => setOnboardingPreview(key));
   });
+  listen(el("connection-key"), "input", updateOnboardingNavigation);
+  listen(el("connection-port"), "input", updateOnboardingNavigation);
+  listen(onboardingWelcome, "click", advanceOnboarding);
+  listen(el("onboarding-forward"), "click", advanceOnboarding);
+  listen(el("onboarding-back"), "click", () => moveOnboarding(-1));
+  listen(el("onboarding-skip"), "click", cancelOnboarding);
   listen(el("connection-form"), "submit", (event) => {
     event.preventDefault();
-    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null || onboarding.hidden) return;
-    const key = el("connection-key").value.trim();
-    const portText = el("connection-port").value.trim();
-    if (!key || key.length > 4096 || /[\x00-\x1f\x7f]/.test(key)) {
-      el("connection-error").textContent = "Enter your Anytype API v2 key.";
-      el("connection-key").focus();
-      return;
-    }
-    if (portText && (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535)) {
-      el("connection-error").textContent = "Port must be a whole number from 1 to 65535.";
-      el("connection-port").focus();
-      return;
-    }
-    applyConnection(true, key, portText ? Number(portText) : null);
+    advanceOnboarding();
   });
 
   listen(document, "keydown", (event) => {
@@ -2945,7 +3127,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     if (event.key === "Escape" && !onboarding.hidden) {
       event.preventDefault();
-      closeOnboarding();
+      cancelOnboarding();
       return;
     }
     if (event.key === "Escape" && !logPopup.hidden) {
