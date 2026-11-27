@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { HelpTooltip } from "./help-tooltip.jsx";
 
-export function Button({ type = "button", children, ...attributes }) {
-  return <button type={type} {...attributes}>{children}</button>;
+export function Button({ type = "button", variant, className, children, ...attributes }) {
+  const classes = [variant && `button-${variant}`, className].filter(Boolean).join(" ");
+  return <button type={type} className={classes || undefined} {...attributes}>{children}</button>;
+}
+
+export function Checkbox({ id, shape = "round", className, ...attributes }) {
+  const classes = ["checkbox-input", `checkbox-${shape}`, className].filter(Boolean).join(" ");
+  return <input id={id} type="checkbox" className={classes} {...attributes} />;
 }
 
 export function IconButton({ className = "neutral-icon-button", ...props }) {

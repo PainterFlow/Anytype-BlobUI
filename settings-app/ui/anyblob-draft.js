@@ -11,6 +11,7 @@ export function createAnyblobDraft() {
     getSnapshot: () => snapshot,
     init(options) { api = options; },
     isDirty: dirty,
+    commit(patch) { if (baseline) commit(patch); },
     setLocked(locked) { if (snapshot.locked !== locked) publish({ locked }); },
     change(patch) {
       if (!snapshot.loaded || snapshot.locked) return;

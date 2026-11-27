@@ -599,6 +599,33 @@ async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult,
 }
 
 #[tauri::command]
+async fn complete_onboarding() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let _guard = wait_save_guard("Wait for the current save to finish.")?;
+        complete_onboarding_blocking()
+    })
+    .await
+    .map_err(|_| "The onboarding task stopped unexpectedly.".to_string())?
+}
+
+fn complete_onboarding_blocking() -> Result<(), String> {
+    let install = resolve_install_directory(&app_data_directory())?;
+    let mut data = load_settings_data(&install)?;
+    if !data.is_object() {
+        return Err("BlobUI data.json must contain a JSON object.".into());
+    }
+    data["onboardingComplete"] = json!(true);
+    #[cfg(test)]
+    {
+        let (_, data_path, _, _) = save_paths(&install)?;
+        storage::write_atomic(&data_path, &serialize_data(&data)?)?;
+    }
+    #[cfg(not(test))]
+    persist_split_settings(&install, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_updater_state() -> Result<updater::UpdaterState, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let app_data = app_data_directory();
@@ -1508,7 +1535,12 @@ fn load_app_state() -> Result<AppState, String> {
         let configured_api_state = data
             .pointer("/apiConnection/enabled")
             .and_then(Value::as_bool);
-        onboarding_complete = configured_api_state.is_some() || credential_exists;
+        onboarding_complete = data
+            .get("onboardingComplete")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || configured_api_state.is_some()
+            || credential_exists;
         api_port = api_connection
             .and_then(|connection| connection.get("port"))
             .and_then(Value::as_u64)
@@ -3073,6 +3105,7 @@ pub fn app_main() {
             reveal_api_key,
             get_calendar_api_availability,
             configure_connection,
+            complete_onboarding,
             get_app_state,
             reload_custom_themes,
             get_anytype_theme,
