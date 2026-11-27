@@ -2824,6 +2824,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   function showOnboarding(previousFocus = null) {
     if (connectionBusy || isInstallingUpdate()) return;
+    if (!onboarding.hidden) {
+      onboardingSteps[onboardingStep].focus.focus();
+      return;
+    }
     if (documentationModal.isOpen()) {
       if (onboardingAfterGuideClose) return;
       onboardingAfterGuideClose = true;
@@ -2926,9 +2930,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     if (onboardingSelections.codex) {
       next.codexIntegration = window.BlobUI.CodexPage.normalize(next.codexIntegration);
-      next.codexIntegration.objectMentions = next.codexIntegration.objectMentions || {};
-      next.codexIntegration.objectMentions.spaces = { all: true, items: [] };
-      next.codexIntegration.objectMentions.types = { all: true, items: [] };
+      const mentions = next.codexIntegration.objectMentions;
+      const selectionEnabled = selection => selection?.all === true || (Array.isArray(selection?.items) && selection.items.length > 0);
+      if (!selectionEnabled(mentions.spaces)) mentions.spaces = { all: true, items: [] };
+      if (!selectionEnabled(mentions.types)) mentions.types = { all: true, items: [] };
     }
     if (onboardingSelections.notion) {
       next.calendarColorsEnabled = true;

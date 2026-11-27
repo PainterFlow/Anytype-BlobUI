@@ -202,6 +202,10 @@ const context = {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
           bannerImage: '',
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
+          codexIntegration: { objectMentions: {
+            spaces: { all: false, items: [] },
+            types: { all: false, items: [{ spaceId: 'space-1', id: 'task', name: 'Task', space: 'Workspace' }] },
+          } },
         },
         };
       }
@@ -1178,7 +1182,14 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(onboardingSettings.objectMentionHoverEffect, false);
   assert.equal(onboardingSettings.kanbanViewStyle, 'balanced');
   assert.equal(onboardingSettings.calendarColorsEnabled, true);
-  assert.equal(onboardingSettings.codexIntegration.objectMentions.spaces.all, true);
+  assert.equal(onboardingSettings.codexIntegration.objectMentions.spaces.all, true, 'Disabled mention spaces are enabled.');
+  const mentionTypes = onboardingSettings.codexIntegration.objectMentions.types;
+  assert.equal(mentionTypes.all, false, 'Existing object mention type filters are preserved.');
+  assert.equal(mentionTypes.items.length, 1);
+  assert.equal(mentionTypes.items[0].spaceId, 'space-1');
+  assert.equal(mentionTypes.items[0].id, 'task');
+  assert.equal(mentionTypes.items[0].name, 'Task');
+  assert.equal(mentionTypes.items[0].space, 'Workspace');
   assert.equal(connectionRequests.at(-1).apiKey, 'test-key');
   assert.equal(connectionRequests.at(-1).port, 31010);
   assert(calls.includes('configure_anyblob'), 'The Anyblob choice enables Anyblob.');
@@ -1195,6 +1206,8 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   welcome.handlers.click();
   finishOnboardingTransition();
   await changeToggle('onboarding-option-interface', true);
+  context.document.handlers.keydown(debugKey);
+  assert.equal(element('onboarding-option-interface').checked, true, 'Repeating the onboarding shortcut keeps the temporary choice.');
   context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
   assert.equal(onboarding.hidden, true, 'Escape closes onboarding.');
   assert.equal(savedSettings.length, savedAfterFinish, 'Escape discards temporary onboarding settings.');
