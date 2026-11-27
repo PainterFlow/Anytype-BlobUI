@@ -1811,90 +1811,31 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   showSettingsPage("preferences");
 
-  function settingsPanelId(page, index) {
-    if (page === "preferences") return "preference-panel-" + index;
-    if (page === "calendar-events") return "calendar-events-panel-" + index;
-    if (page === "kanban-views") return "kanban-views-panel-" + index;
-    if (page === "codex") return "codex-panel-" + index;
-    return ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
-  }
-
-  function selectSettingsSection(page, index) {
+  function openSection(page, index) {
     if (page === "preferences") view.update({ preferenceTab: index });
     else if (page === "calendar-events") selectCalendarTab(index);
     else if (page === "kanban-views") selectKanbanTab(index);
     showSettingsPage(page);
-    if (page === "codex") window.BlobUI.CodexPage.select(index);
-    else if (page === "advanced") selectAdvancedTab(index);
-    return el(settingsPanelId(page, index));
-  }
-
-  function openSection(page, index) {
-    const panel = selectSettingsSection(page, index);
+    let panelId;
+    if (page === "preferences") {
+      panelId = "preference-panel-" + index;
+    } else if (page === "calendar-events") {
+      panelId = "calendar-events-panel-" + index;
+    } else if (page === "kanban-views") {
+      panelId = "kanban-views-panel-" + index;
+    } else if (page === "codex") {
+      window.BlobUI.CodexPage.select(index);
+      panelId = "codex-panel-" + index;
+    } else {
+      selectAdvancedTab(index);
+      panelId = ["advanced-api-panel", "advanced-app-panel", "advanced-experiments-panel"][index];
+    }
+    const panel = el(panelId);
     const heading = panel?.querySelector("h2") || panel;
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
     }
-  }
-
-  let settingsLinkTimer = null;
-  let settingsLinkNavigation = 0;
-
-  function closeTransientPopups() {
-    closeLogs();
-    closeHelp();
-    window.BlobUI.CalendarPage?.close?.();
-    return window.BlobUI.closeOpenModals?.({ restoreFocus: false }) === true;
-  }
-
-  function findSettingsLinkSection(container, target) {
-    if (!container) return null;
-    const headings = [...container.querySelectorAll("h2")];
-    const fallback = headings[0] || container;
-    if (!target.section || target.section === target.child || target.section === target.page) return fallback;
-    const slug = window.BlobUI.SettingsLinks.slug;
-    return headings.find(heading => slug(heading.textContent) === target.section
-      || slug(heading.id) === target.section
-      || slug(String(heading.id || "").replace(/-heading$/, "")) === target.section) || fallback;
-  }
-
-  function revealSettingsLinkTarget(target, request) {
-    let container;
-    if (target.page === "accessibility") {
-      showSettingsPage("accessibility");
-      container = el("accessibility-page");
-    } else {
-      container = selectSettingsSection(target.page, target.childIndex);
-    }
-    if (!container) return;
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      if (disposed || request !== settingsLinkNavigation) return;
-      const heading = findSettingsLinkSection(container, target);
-      if (!heading) return;
-      heading.tabIndex = -1;
-      heading.focus({ preventScroll: true });
-      if (!target.section) return;
-      const containerRect = pageContent.getBoundingClientRect();
-      const headingRect = heading.getBoundingClientRect();
-      if (!headingRect.width && !headingRect.height) return;
-      pageContent.scrollTop = Math.max(0, pageContent.scrollTop + headingRect.top - containerRect.top - 12);
-      updatePageScrollbar();
-    }));
-  }
-
-  function openSettingsLinkTarget(target) {
-    const hadModal = closeTransientPopups();
-    const request = ++settingsLinkNavigation;
-    if (settingsLinkTimer !== null) window.clearTimeout(settingsLinkTimer);
-    const openTarget = () => {
-      settingsLinkTimer = null;
-      if (!disposed && request === settingsLinkNavigation) revealSettingsLinkTarget(target, request);
-    };
-    const reduced = document.documentElement.dataset.reducedMotion === "true"
-      || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (hadModal && !reduced) settingsLinkTimer = window.setTimeout(openTarget, 150);
-    else openTarget();
   }
 
   function openFeature(page) {
@@ -2496,12 +2437,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       setStatus("Could not open the link in your default browser. " + (error.message || String(error)), "error", true, error);
     },
   });
-  const settingsLinkController = window.BlobUI.SettingsLinks.attach(document, {
-    open: openSettingsLinkTarget,
-    onError(error) {
-      setStatus(error.message || String(error), "error", true, error);
-    },
-  });
   const blobImportModal = window.BlobUI.createModalController({
     backdrop: el("blob-import-backdrop"), dialog: el("blob-import-dialog"),
     initialFocus: el("blob-import-cancel"), fallbackFocus: el("import-blob-backup-button"),
@@ -3069,11 +3004,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     disposed = true;
     if (startupRefreshTimer !== null) window.clearTimeout(startupRefreshTimer);
     if (copyConfirmationTimer !== null) window.clearTimeout(copyConfirmationTimer);
-    if (settingsLinkTimer !== null) window.clearTimeout(settingsLinkTimer);
     startupRefreshTimer = null;
     copyConfirmationTimer = null;
-    settingsLinkTimer = null;
-    settingsLinkNavigation++;
     nativeEventsDisposed = true;
     nativeService.dispose();
     eventUnsubscribers.splice(0).forEach(unlisten => {
@@ -3088,7 +3020,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     scrollbars.forEach(controller => controller.destroy());
     Object.values(visibilityFields).forEach(controller => controller.destroy?.());
     externalLinkController.destroy();
-    settingsLinkController.destroy();
     [apiKeyRemovalModal, discardConfirmationModal, documentationModal, releaseNotesModal, helpErrorModal, keybindModal, blobImportModal, uninstallModal]
       .forEach(controller => controller.destroy?.());
     window.BlobUI.CalendarPage?.destroy?.();

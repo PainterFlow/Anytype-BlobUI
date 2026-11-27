@@ -146,8 +146,7 @@
 
   function safeLink(value) {
     const href = String(value || "").trim();
-    if (/^(?:https?:\/\/|#[A-Za-z0-9_-]+)/i.test(href)) return href;
-    return BlobUI.SettingsLinks?.parse(href) ? href : "";
+    return /^(?:https?:\/\/|#[A-Za-z0-9_-]+)/i.test(href) ? href : "";
   }
 
   function renderImage(image, title) {
