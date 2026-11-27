@@ -166,4 +166,18 @@ backdropHarness.controller.open();
 backdropHarness.backdrop.handlers.pointerdown({ target: backdropHarness.backdrop });
 assert.equal(backdropHarness.backdrop.classList.contains('is-closing'), true, 'Backdrop click dismisses the modal.');
 
+assert.equal(window.BlobUI.closeOpenModals({ restoreFocus: false }), true, 'The shared closer dismisses registered modals.');
+flushTimers();
+shell.inert = false;
+const topHarness = createController({ target: opener, inertTargets: [shell] });
+const bottomHarness = createController({ target: opener, inertTargets: [shell] });
+bottomHarness.controller.open();
+topHarness.controller.open();
+assert.equal(shell.inert, true);
+window.BlobUI.closeOpenModals({ restoreFocus: false });
+flushTimers();
+assert.equal(bottomHarness.backdrop.hidden, true);
+assert.equal(topHarness.backdrop.hidden, true);
+assert.equal(shell.inert, false, 'Closing newest-first preserves the bottom modal\'s original inert state.');
+
 console.log('modal lifecycle tests passed');

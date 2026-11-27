@@ -2,6 +2,17 @@
   "use strict";
 
   const BlobUI = window.BlobUI = window.BlobUI || {};
+  const openModalControllers = [];
+
+  BlobUI.closeOpenModals = function closeOpenModals(options = {}) {
+    let closed = false;
+    for (const controller of [...openModalControllers].reverse()) {
+      if (!controller.isOpen()) continue;
+      controller.close(options);
+      closed = true;
+    }
+    return closed;
+  };
 
   BlobUI.createModalController = function createModalController({
     backdrop,
@@ -45,9 +56,15 @@
       savedInert = [];
     }
 
+    function forgetOpenController() {
+      const index = openModalControllers.indexOf(controller);
+      if (index !== -1) openModalControllers.splice(index, 1);
+    }
+
     function finishClose(restoreFocus) {
       backdrop.hidden = true;
       backdrop.classList.remove("is-closing");
+      forgetOpenController();
       restoreBackground();
       if (restoreFocus && !focus(returnFocus)) focus(resolveElement(fallbackFocus));
       returnFocus = null;
@@ -67,6 +84,7 @@
         savedInert = inertTargets.map((element) => ({ element, inert: element.inert }));
         inertTargets.forEach((element) => { element.inert = true; });
         backdrop.hidden = false;
+        if (!openModalControllers.includes(controller)) openModalControllers.push(controller);
       }
       const requested = resolveElement(initialFocus);
       if (!focus(requested)) focus(getFocusable()[0]) || dialog.focus();
@@ -113,7 +131,7 @@
     backdrop.addEventListener("pointerdown", handleBackdrop);
     document.addEventListener("keydown", handleKeydown);
 
-    return {
+    const controller = {
       open,
       close,
       isOpen: () => !backdrop.hidden,
@@ -127,5 +145,6 @@
         document.removeEventListener("keydown", handleKeydown);
       },
     };
+    return controller;
   };
 })();

@@ -2,6 +2,7 @@ import { createAnyblobDraft } from "./anyblob-draft.js";
 import marked from "./vendor/marked.umd.js";
 import "./visibility-field.js";
 import "./modal.js";
+import "./settings-links.js";
 import "./saved-state.js";
 import "./edit-session.js";
 import "./video-player.js";
