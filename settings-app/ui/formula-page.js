@@ -96,6 +96,14 @@
     const formatted = timestamp && !Number.isNaN(timestamp.valueOf()) ? timestamp.toLocaleString() : "Not calculated yet";
     target.textContent = "Last calculated: " + formatted + ". Saved calculations are applied after you press Ctrl+R in Anytype.";
   }
+  function acceptRefreshResult(result) {
+    if (!result) return;
+    (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+    configurationRevision = result.revision || configurationRevision;
+    calculatedAt = result.calculatedAt || calculatedAt;
+    updateTimestamp();
+    publish();
+  }
   function parseFraction(tokens) {
     if (!Array.isArray(tokens) || tokens.length < 7 || tokens[0].kind !== "open") return null;
     let depth = 0, numeratorEnd = -1;
@@ -673,6 +681,7 @@
       calculatedAt = result.calculatedAt || "";
       loadError = ""; setMessage(""); updateTimestamp();
     },
+    acceptRefresh: acceptRefreshResult,
     isPersisted: () => JSON.stringify(state) === JSON.stringify(persistedState),
     restore(value) {
       draftGeneration++;
@@ -752,10 +761,7 @@
       try {
         const result = await bridge("refresh_kanban_results");
         if (!result) return null;
-        (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
-        configurationRevision = result.revision || configurationRevision;
-        calculatedAt = result.calculatedAt || calculatedAt;
-        updateTimestamp();
+        acceptRefreshResult(result);
         setMessage("Results refreshed. Press Ctrl+R in Anytype to apply.", true);
         return result;
       } catch (error) {

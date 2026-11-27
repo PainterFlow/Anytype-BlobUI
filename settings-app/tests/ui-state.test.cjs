@@ -103,7 +103,9 @@ const intervals = [];
 let nextTimerId = 1;
 let saveError = null;
 let connectionError = null;
+let kanbanRefreshError = null;
 const connectionRequests = [];
+const acceptedKanbanRefreshes = [];
 const fileReaders = [];
 let delayFileRead = false;
 let copiedLogs = '';
@@ -264,6 +266,10 @@ const context = {
         if (deferGeneralSave) return new Promise(resolve => { pendingGeneralSaveResolve = resolve; });
         return { calendarStatus: 'cached' };
       }
+      if (name === 'refresh_kanban_results') {
+        if (kanbanRefreshError) throw new Error(kanbanRefreshError);
+        return { revision: 'kanban-refresh-revision', calculatedAt: '2026-11-27T12:00:00Z', categories: 1, info: [] };
+      }
     } } },
   },
 };
@@ -347,6 +353,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   };
   context.window.BlobUI.FormulaPage = {
     read: () => ({ version: 2, display: 'balanced', definitions: [] }),
+    acceptRefresh(result) { acceptedKanbanRefreshes.push(result); },
     restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},
   };
   // Use the real shared picker; browser coverage verifies its layout and keyboard behavior.
@@ -1013,6 +1020,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
 
   let altRPrevented = false;
   const saveCallsBeforeAltR = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeAltR = calls.filter(name => name === 'refresh_kanban_results').length;
+  const acceptedRefreshesBeforeAltR = acceptedKanbanRefreshes.length;
+  assert.equal(refreshCallsBeforeAltR, 0, 'Ordinary saves must not recalculate Kanban results.');
   await context.document.handlers.keydown({
     key: 'r', code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
     preventDefault() { altRPrevented = true; },
@@ -1020,9 +1030,23 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert(altRPrevented, 'Alt+R must stay out of the focused input.');
   await flush();
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeAltR + 1, 'The in-window shortcut must use the existing save/rebuild action.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeAltR + 1, 'Alt+R must recalculate saved Kanban results.');
+  assert(calls.lastIndexOf('refresh_kanban_results') > calls.lastIndexOf('save_settings'), 'Kanban results refresh after custom.css is rebuilt.');
+  assert.equal(acceptedKanbanRefreshes.length, acceptedRefreshesBeforeAltR + 1, 'The calculation page receives the refreshed timestamp.');
+  assert.equal(acceptedKanbanRefreshes.at(-1).calculatedAt, '2026-11-27T12:00:00Z');
   const saveCallsBeforeGlobalEvent = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeGlobalEvent = calls.filter(name => name === 'refresh_kanban_results').length;
   await Promise.all([rebuildListener(), rebuildListener()]);
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeGlobalEvent + 1, 'A background hotkey event must start only one rebuild.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeGlobalEvent + 1, 'A background hotkey event must start only one Kanban recalculation.');
+  kanbanRefreshError = 'Anytype API unavailable.';
+  const saveCallsBeforeFailedRefresh = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeFailedRefresh = calls.filter(name => name === 'refresh_kanban_results').length;
+  await rebuildListener();
+  assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeFailedRefresh + 1, 'A Kanban refresh failure does not block the custom.css rebuild.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeFailedRefresh + 1);
+  assert.equal(status(), 'custom.css was rebuilt, but Kanban calculations could not be refreshed. Anytype API unavailable.');
+  kanbanRefreshError = null;
 
   element('log-button').handlers.click();
   assert.equal(element('log-popup').hidden, false);

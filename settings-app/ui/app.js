@@ -1139,7 +1139,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
-    ["rebuildCss", "Rebuild custom.css"],
+    ["rebuildCss", "Rebuild custom.css and calculations"],
     ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
     ["openComponentCatalog", "Open component catalog"],
     ["showOnboarding", "Show setup guide"],
@@ -2065,6 +2065,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     let formulasSaved = false;
     let calendarRulesSaved = false;
     let updaterSettingsSaved = false;
+    let kanbanRefreshError = null;
     try {
       let result = null;
       await window.BlobUI.AnyblobDraft.save();
@@ -2110,7 +2111,20 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         if (updaterPathChanged) await reloadTargetAppState();
         else mergeUpdaterState(savedUpdaterState || {});
       }
-      if (settingsChanged || options.forceRebuild) {
+      if (options.forceRebuild && !formulasChanged) {
+        try {
+          const refreshed = await invoke("refresh_kanban_results");
+          window.BlobUI.FormulaPage.acceptRefresh?.(refreshed);
+        } catch (error) {
+          kanbanRefreshError = error;
+        }
+      }
+      if (kanbanRefreshError) {
+        const reason = kanbanRefreshError.message || String(kanbanRefreshError);
+        setStatus(settingsChanged || connectionChanged || formulasChanged || calendarRulesChanged || updaterSettingsChanged
+          ? "Changes were saved and custom.css was rebuilt, but Kanban calculations could not be refreshed. " + reason
+          : "custom.css was rebuilt, but Kanban calculations could not be refreshed. " + reason, "error", true, kanbanRefreshError);
+      } else if (settingsChanged || options.forceRebuild) {
         if (result && typeof result.themeCss === "string") {
           applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
         }
