@@ -79,11 +79,17 @@ fn load_shortcuts(path: &Path) -> Result<Vec<Shortcut>, String> {
 
 fn chord_candidates(preferred: &Shortcut) -> Vec<(String, bool, bool, bool, bool)> {
     let mut candidates = vec![(preferred.code.clone(), preferred.ctrl, preferred.alt, preferred.shift, preferred.meta)];
-    for function_key in 1..=12 {
-        for (ctrl, alt, shift, meta) in [
-            (false, false, false, false), (true, false, false, false), (false, true, false, false),
-            (false, false, true, false), (false, false, false, true),
-        ] {
+    let modifiers = [
+        (false, false, false, false), (true, false, false, false), (false, true, false, false),
+        (false, false, true, false), (false, false, false, true),
+    ];
+    for (ctrl, alt, shift, meta) in modifiers {
+        for function_key in [10, 11, 12] {
+            candidates.push((format!("F{function_key}"), ctrl, alt, shift, meta));
+        }
+    }
+    for (ctrl, alt, shift, meta) in modifiers {
+        for function_key in 1..=9 {
             candidates.push((format!("F{function_key}"), ctrl, alt, shift, meta));
         }
     }
@@ -188,8 +194,14 @@ impl KeyGate {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_shortcuts, get_shortcuts, load_shortcuts, normalize_shortcuts, save_shortcuts, validate_shortcuts, KeyGate};
+    use super::{default_shortcuts, get_shortcuts, load_shortcuts, normalize_shortcuts, save_shortcuts, validate_shortcuts, KeyGate, Shortcut};
     use std::{fs, path::Path};
+
+    fn legacy_shortcuts() -> Vec<Shortcut> {
+        default_shortcuts().into_iter()
+            .filter(|shortcut| !matches!(shortcut.action.as_str(), "openComponentCatalog" | "toggleFullscreen"))
+            .collect()
+    }
 
     #[test]
     fn defaults_cover_every_blobui_shortcut_and_are_unique() {
@@ -203,11 +215,12 @@ mod tests {
 
     #[test]
     fn old_shortcut_lists_gain_an_editable_catalog_binding_without_changing_existing_bindings() {
-        let mut old = default_shortcuts();
-        old.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        let mut old = legacy_shortcuts();
         let normalized = normalize_shortcuts(old.clone()).unwrap();
         assert_eq!(&normalized[..old.len()], old.as_slice());
+        assert_eq!(normalized.len(), old.len() + 2);
         assert_eq!(normalized.iter().find(|shortcut| shortcut.action == "openComponentCatalog").unwrap().code, "F10");
+        assert_eq!(normalized.iter().find(|shortcut| shortcut.action == "toggleFullscreen").unwrap().code, "F11");
 
         old[0].code = "F10".into();
         old[1].code = "F11".into();
@@ -218,12 +231,14 @@ mod tests {
         let catalog = normalized.iter().find(|shortcut| shortcut.action == "openComponentCatalog").unwrap();
         assert_eq!(catalog.code, "F10");
         assert!(catalog.ctrl);
+        let fullscreen = normalized.iter().find(|shortcut| shortcut.action == "toggleFullscreen").unwrap();
+        assert_eq!(fullscreen.code, "F11");
+        assert!(fullscreen.ctrl);
     }
 
     #[test]
     fn normalizing_imported_shortcuts_preserves_unrecognized_fields_on_existing_rows() {
-        let mut old = default_shortcuts();
-        old.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        let old = legacy_shortcuts();
         let mut value = serde_json::to_value(old).unwrap();
         value[0]["futureShortcutField"] = serde_json::json!({"keep": true});
         let normalized = super::normalize_shortcut_value(&value).unwrap();

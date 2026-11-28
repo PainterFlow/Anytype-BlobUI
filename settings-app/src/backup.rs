@@ -561,7 +561,7 @@ mod tests {
         fs::create_dir_all(&current_anytype).unwrap();
         fs::create_dir_all(&destination).unwrap();
         let mut old_shortcuts = crate::hotkey::default_shortcuts();
-        old_shortcuts.retain(|shortcut| shortcut.action != "openComponentCatalog");
+        old_shortcuts.retain(|shortcut| !matches!(shortcut.action.as_str(), "openComponentCatalog" | "toggleFullscreen"));
         let mut old_shortcuts = serde_json::to_value(old_shortcuts).unwrap();
         old_shortcuts[0]["futureShortcutField"] = json!({"keep": true});
         crate::settings_store::save(&source_app, &json!({
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(loaded["legacySettingsMetadata"]["futureEnvelope"]["keep"], true);
         assert_eq!(loaded["settings"]["futureSetting"]["preserve"], "yes");
         assert_eq!(loaded["settings"]["codexIntegration"]["spaces"]["space-id"]["future"], true);
-        assert_eq!(loaded["keybinds"].as_array().unwrap().len(), 6);
+        assert_eq!(loaded["keybinds"].as_array().unwrap().len(), 7);
         assert_eq!(loaded["keybinds"][0]["futureShortcutField"]["keep"], true);
         assert_eq!(fs::read(current_app.join(SETTINGS_DIR).join("user-state.bin")).unwrap(), [0x10, 0x20]);
         assert_ne!(fs::read(current_anytype.join("custom.css")).unwrap(), b"old stylesheet");
