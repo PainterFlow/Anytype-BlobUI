@@ -28,6 +28,7 @@ In addition to that I have remade big parts of the UI with windowed mode being e
 
 - Added MacOS versions of all scripts & test scripts.
 - Added dev docs for making your own custom theme in the section for custom themes under the preferences tab.
+- You can now clear the cache in Advanced Settings -> App Settings.
 
 ### UI Improvements
 
@@ -40,10 +41,17 @@ In addition to that I have remade big parts of the UI with windowed mode being e
 - Added Icons to a variety of elements.
 - New Advanced Selector UI element.  
 - Moved more UI to ReactJS.
+- Improved tab navigation in some places.
+- Remade App Settings tab UI and brought it in line with the rest of the UI.
+
+### Experimental: Re-introduce Fullscreen
+
+- Variant 1: Fixes resizing bugs with the UI.
+- Variant 2: Adds the fullscreen button back alongside with F11 and a setting to start the app in windowed mode.
 
 ## Bugfixes
 
-- Undocumented: `Alt+r` does not recalculate kanban calculation view results.
+- N/A: `Alt+r` does not recalculate kanban calculation view results.
 - Issue#124: Random warning in v1.5.0 changelogs.
 
 ---
