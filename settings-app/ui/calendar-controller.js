@@ -10,13 +10,13 @@ export function createCalendarController() {
   let locked = false, discovering = false, discovered = false, hasCatalog = false;
   let discoveryError = false, discoveryRequested = false, discoveryForceRequested = false;
   let generation = 0, status = "", modal = false;
-  let screen = "type", active = null, shown = false, loadEpoch = 0, disposed = false, unregisterReload;
+  let screen = "type", active = null, shown = false, loadEpoch = 0, disposed = false, unregisterReload, spaceCatalog = [];
   const listeners = new Set();
   let snapshot;
 
   function publish() {
     snapshot = { state, catalog, loading, loadFailed, locked, discovering, discovered,
-      hasCatalog, discoveryError, status, modal, screen, active };
+      hasCatalog, discoveryError, status, modal, screen, active, spaceCatalog };
     listeners.forEach(listener => listener());
   }
   function entry(type, create = false) {
@@ -63,6 +63,7 @@ export function createCalendarController() {
     discovering = true; discoveryError = false; publish();
     try {
       const result = await invoke("discover_calendar_colors", { forceRefresh });
+      spaceCatalog = await window.BlobUI.SpaceCatalog.load(invoke, false).catch(() => spaceCatalog);
       if (request !== generation) return;
       if (!result || !Array.isArray(result.types) || !Array.isArray(result.views)) throw Error("No calendar catalog was returned.");
       catalog = result; discovered = true; hasCatalog = true; status = "";
@@ -153,7 +154,7 @@ export function createCalendarController() {
     removeType(type) { state.types = state.types.filter(saved => key(saved) !== key(type)); changed(); },
     removeOverride(override) { const saved = entry(active); if (saved) saved.overrides = saved.overrides.filter(item => item !== override); changed(); },
     addOverride(view) { entry(active, true).overrides.push({ target: copy(view.target), rule: { mode: "inherit" } }); screen = "type"; changed(); },
-    views() { const saved = entry(active); return catalog.views.filter(view => view.target.spaceId === active?.spaceId && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)))
+    views() { if (!active) return []; const saved = entry(active); return catalog.views.filter(view => view.target?.spaceId === active?.spaceId && !(saved?.overrides || []).some(item => targetKey(item.target) === targetKey(view.target)))
       .sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source)); },
     viewFor(target) { return window.BlobUI.ViewCatalog.findViewForTarget(catalog.views, target); },
   };

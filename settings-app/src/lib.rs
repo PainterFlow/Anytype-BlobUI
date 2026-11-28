@@ -31,6 +31,7 @@ mod kanban;
 mod kanban_api;
 mod kanban_css;
 mod kanban_snapshot;
+mod low_level;
 mod settings_store;
 mod storage;
 mod themes;
@@ -189,6 +190,10 @@ struct SettingsDraft {
     sidebar_resize_mode: SidebarResizeMode,
     #[serde(default)]
     background_experiment: BackgroundExperiment,
+    #[serde(default)]
+    fullscreen_experiment: FullscreenExperiment,
+    #[serde(default)]
+    always_start_fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -198,6 +203,15 @@ enum BackgroundExperiment {
     Disabled,
     Normal,
     AutostartBackground,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum FullscreenExperiment {
+    #[default]
+    Disabled,
+    FixResizing,
+    EnableFullScreen,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -582,6 +596,33 @@ async fn configure_connection(connection: ConnectionDraft) -> Result<SaveResult,
     })
     .await
     .map_err(|_| "The connection task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+async fn complete_onboarding() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let _guard = wait_save_guard("Wait for the current save to finish.")?;
+        complete_onboarding_blocking()
+    })
+    .await
+    .map_err(|_| "The onboarding task stopped unexpectedly.".to_string())?
+}
+
+fn complete_onboarding_blocking() -> Result<(), String> {
+    let install = resolve_install_directory(&app_data_directory())?;
+    let mut data = load_settings_data(&install)?;
+    if !data.is_object() {
+        return Err("BlobUI data.json must contain a JSON object.".into());
+    }
+    data["onboardingComplete"] = json!(true);
+    #[cfg(test)]
+    {
+        let (_, data_path, _, _) = save_paths(&install)?;
+        storage::write_atomic(&data_path, &serialize_data(&data)?)?;
+    }
+    #[cfg(not(test))]
+    persist_split_settings(&install, &data)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1314,6 +1355,64 @@ fn run_in_background(app: tauri::AppHandle) -> Result<(), String> {
     enter_background(&app)
 }
 
+
+fn low_level_install() -> Result<PathBuf, String> {
+    resolve_install_directory(&app_data_directory())
+}
+
+fn update_low_level_state(patch: Value) -> Result<Value, String> {
+    low_level::update(&low_level_install()?, &patch)
+}
+
+#[tauri::command]
+fn get_low_level_settings() -> Result<Value, String> {
+    low_level::ensure(&low_level_install()?)
+}
+
+#[tauri::command]
+fn update_low_level_settings(patch: Value) -> Result<Value, String> {
+    update_low_level_state(patch)
+}
+
+#[tauri::command]
+fn toggle_window_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let fullscreen = !window.is_maximized().map_err(|error| error.to_string())?;
+    if fullscreen { window.maximize().map_err(|error| error.to_string())?; }
+    else { window.unmaximize().map_err(|error| error.to_string())?; }
+    let _ = update_low_level_state(json!({"fullscreen": fullscreen}));
+    Ok(fullscreen)
+}
+
+#[tauri::command]
+fn set_window_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    if fullscreen { window.maximize().map_err(|error| error.to_string())?; }
+    else { window.unmaximize().map_err(|error| error.to_string())?; }
+    let _ = update_low_level_state(json!({"fullscreen": fullscreen}));
+    Ok(())
+}
+
+
+#[tauri::command]
+fn set_ui_zoom(window: tauri::WebviewWindow, scale: f64) -> Result<(), String> {
+    window.set_zoom(scale.clamp(0.64, 2.0)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn record_window_size(window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.is_maximized().map_err(|error| error.to_string())? { return Ok(()); }
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    return update_low_level_state(json!({
+        "windowWidth": size.width as f64 / scale,
+        "windowHeight": size.height as f64 / scale,
+    })).map(|_| ());
+}
+
+#[tauri::command]
+fn clear_cache() -> Result<(), String> {
+    crate::metadata_cache::clear()
+}
+
 #[tauri::command]
 fn minimize_window(window: tauri::WebviewWindow) -> Result<(), String> {
     window.minimize().map_err(|error| error.to_string())
@@ -1436,7 +1535,12 @@ fn load_app_state() -> Result<AppState, String> {
         let configured_api_state = data
             .pointer("/apiConnection/enabled")
             .and_then(Value::as_bool);
-        onboarding_complete = configured_api_state.is_some() || credential_exists;
+        onboarding_complete = data
+            .get("onboardingComplete")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || configured_api_state.is_some()
+            || credential_exists;
         api_port = api_connection
             .and_then(|connection| connection.get("port"))
             .and_then(Value::as_u64)
@@ -1999,6 +2103,8 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         "calendarColorsEnabled": settings.calendar_colors_enabled,
         "sidebarResizeMode": settings.sidebar_resize_mode,
         "backgroundExperiment": settings.background_experiment,
+        "fullscreenExperiment": settings.fullscreen_experiment,
+        "alwaysStartFullscreen": settings.always_start_fullscreen,
     });
     let mut codex_values = json!(settings.codex_integration);
     if let Some(mut previous) = data
@@ -2027,7 +2133,9 @@ fn apply_settings(data: &mut Value, install: &Path, settings: &SettingsDraft) {
         for (name, value) in values {
             target.insert(name.clone(), value.clone());
         }
-        target.remove("discussionFade");
+        for obsolete in ["discussionFade", "startOnLogin", "fullscreen", "uiScale", "sidebarWidth", "sidebarCollapsed", "windowWidth", "windowHeight"] {
+            target.remove(obsolete);
+        }
     }
 }
 
@@ -2504,6 +2612,17 @@ fn settings_from_data(data: &Value) -> SettingsDraft {
             Some("normal") => BackgroundExperiment::Normal,
             Some("autostart-background") => BackgroundExperiment::AutostartBackground,
             _ => BackgroundExperiment::Disabled,
+        },
+        always_start_fullscreen: read_bool(local, "alwaysStartFullscreen")
+            .or_else(|| read_bool(Some(normalized), "alwaysStartFullscreen"))
+            .unwrap_or(false),
+        fullscreen_experiment: match read_string(local, "fullscreenExperiment")
+            .or_else(|| read_string(Some(normalized), "fullscreenExperiment"))
+            .as_deref()
+        {
+            Some("fix-resizing") => FullscreenExperiment::FixResizing,
+            Some("enable-full-screen") => FullscreenExperiment::EnableFullScreen,
+            _ => FullscreenExperiment::Disabled,
         },
         sidebar_resize_mode: match read_string(local, "sidebarResizeMode")
             .or_else(|| read_string(Some(normalized), "sidebarResizeMode"))
@@ -2986,6 +3105,7 @@ pub fn app_main() {
             reveal_api_key,
             get_calendar_api_availability,
             configure_connection,
+            complete_onboarding,
             get_app_state,
             reload_custom_themes,
             get_anytype_theme,
@@ -3014,6 +3134,13 @@ pub fn app_main() {
             simulate_update,
             uninstall_blobui,
             minimize_window,
+            toggle_window_fullscreen,
+            set_window_fullscreen,
+            get_low_level_settings,
+            update_low_level_settings,
+            set_ui_zoom,
+            record_window_size,
+            clear_cache,
             open_component_catalog,
             hide_window,
             run_in_background,
@@ -3095,6 +3222,19 @@ pub fn app_main() {
                     .join("shortcuts.json");
                 hotkey::start(app.handle().clone(), &shortcuts);
             }
+            if let Some((install, _)) = launch_storage.as_ref() {
+                if let Ok(low_level) = low_level::ensure(install) {
+                    let width = low_level.get("windowWidth").and_then(Value::as_f64).unwrap_or(960.0);
+                    let height = low_level.get("windowHeight").and_then(Value::as_f64).unwrap_or(740.0);
+                    let _ = main_window.set_size(tauri::LogicalSize::new(width, height));
+                    let settings_json = settings_root_for_install(install).ok()
+                        .and_then(|root| settings_store::load(&root).ok()).unwrap_or_default();
+                    let experiment = settings_json.pointer("/settings/fullscreenExperiment").and_then(Value::as_str).unwrap_or("");
+                    let always = settings_json.pointer("/settings/alwaysStartFullscreen").and_then(Value::as_bool).unwrap_or(false);
+                    let was_fullscreen = low_level.get("fullscreen").and_then(Value::as_bool).unwrap_or(false);
+                    if experiment == "enable-full-screen" && (always || was_fullscreen) { let _ = main_window.maximize(); }
+                }
+            }
             anyblob::start(app.handle().clone());
             let pending_background = consume_pending_launch_request(".blobui-background-next");
             if !pending_background && !env::args().any(|argument| argument == "--background") {
@@ -3133,6 +3273,8 @@ impl Default for SettingsDraft {
             calendar_colors_enabled: true,
             sidebar_resize_mode: SidebarResizeMode::Off,
             background_experiment: BackgroundExperiment::Disabled,
+            fullscreen_experiment: FullscreenExperiment::Disabled,
+            always_start_fullscreen: false,
         }
     }
 }

@@ -103,7 +103,9 @@ const intervals = [];
 let nextTimerId = 1;
 let saveError = null;
 let connectionError = null;
+let kanbanRefreshError = null;
 const connectionRequests = [];
+const acceptedKanbanRefreshes = [];
 const fileReaders = [];
 let delayFileRead = false;
 let copiedLogs = '';
@@ -151,7 +153,7 @@ const context = {
       return id;
     },
     clearTimeout(id) { timers.delete(id); },
-    addEventListener(name, handler) { this.handlers[name] = handler; },
+    addEventListener(name, handler) { const previous = this.handlers[name]; this.handlers[name] = previous ? (...args) => { previous(...args); handler(...args); } : handler; },
     dispatchEvent(event) { this.handlers[event.type]?.(event); return true; },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     __TAURI__: {
@@ -195,13 +197,17 @@ const context = {
       if (name === 'get_app_state') {
         if (loadErrorScenario && !recoveryCompleted) throw new Error('BlobUI data.json is not valid JSON.');
         return {
-        ready: true, theme: 'dark',
+        ready: true, theme: 'dark', onboardingComplete: true,
         apiPort: 31009, apiIp: '', hasSavedApiKey: true, startupMode: startupModeScenario || 'off',
         defaultBannerPreview: 'data:image/png;base64,default-preview',
         settings: {
           fontFamily: 'Libron', codeFontFamily: 'Consolas', accentColor: 'Blob Pink',
           bannerImage: '',
           tabHoverEffect: false, linkHoverEffect: false, objectMentionHoverEffect: false,
+          codexIntegration: { objectMentions: {
+            spaces: { all: false, items: [] },
+            types: { all: false, items: [{ spaceId: 'space-1', id: 'task', name: 'Task', space: 'Workspace' }] },
+          } },
         },
         };
       }
@@ -260,6 +266,10 @@ const context = {
         if (deferGeneralSave) return new Promise(resolve => { pendingGeneralSaveResolve = resolve; });
         return { calendarStatus: 'cached' };
       }
+      if (name === 'refresh_kanban_results') {
+        if (kanbanRefreshError) throw new Error(kanbanRefreshError);
+        return { revision: 'kanban-refresh-revision', calculatedAt: '2026-11-27T12:00:00Z', categories: 1, info: [] };
+      }
     } } },
   },
 };
@@ -283,7 +293,7 @@ const status = () => element('status-message').textContent;
 const settingsCss = fs.readFileSync(path.join(__dirname, '../ui/styles.css'), 'utf8');
 for (const shortcut of ['openSettings', 'rebuildCss', 'openComponentCatalog', 'showOnboarding', 'simulateUpdate', 'quitSettings']) assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), new RegExp(`\\"${shortcut}\\"`));
 assert.match(settingsCss, /\.space-preview-row[^}]*font-family:\s*var\(--font-interface\)/);
-assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*54%/);
+assert.match(settingsCss, /\.visibility-field\s*\{[^}]*width:\s*min\(54%, 420px\)/);
 assert.match(settingsCss, /\.visibility-field:hover \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field:focus-within \.visibility-toggle/);
 assert.match(settingsCss, /\.visibility-field\[data-filled="true"\] \.visibility-toggle/);
@@ -343,6 +353,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   };
   context.window.BlobUI.FormulaPage = {
     read: () => ({ version: 2, display: 'balanced', definitions: [] }),
+    acceptRefresh(result) { acceptedKanbanRefreshes.push(result); },
     restore() {}, init() {}, setLocked() {}, refresh() {}, reload() {}, async load() {},
   };
   // Use the real shared picker; browser coverage verifies its layout and keyboard behavior.
@@ -419,6 +430,41 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
           return row;
         }));
       }
+      if ('blobuiVersionLabel' in patch) element('blobui-version').textContent = patch.blobuiVersionLabel;
+      if ('anytypeVersionLabel' in patch) element('anytype-version').textContent = patch.anytypeVersionLabel;
+      if ('updateVersionText' in patch) element('update-version').textContent = patch.updateVersionText;
+      if ('updateStatusText' in patch) element('update-status').textContent = patch.updateStatusText;
+      if ('updateStatusError' in patch) element('update-status').classList.toggle('error', patch.updateStatusError);
+      if ('checkUpdatesLabel' in patch) element('check-updates-button').textContent = patch.checkUpdatesLabel;
+      if ('checkUpdatesDisabled' in patch) element('check-updates-button').disabled = patch.checkUpdatesDisabled;
+      if ('updateNowVisible' in patch) element('update-now-button').hidden = !patch.updateNowVisible;
+      if ('updateNowDisabled' in patch) element('update-now-button').disabled = patch.updateNowDisabled;
+      if ('updateNowTitle' in patch) {
+        element('update-now-button').title = patch.updateNowTitle;
+        element('update-now-button').setAttribute('aria-label', patch.updateNowTitle);
+      }
+      if ('updaterControlsDisabled' in patch) {
+        element('automatic-updates-enabled').disabled = patch.updaterControlsDisabled;
+        element('automatic-checks-enabled').disabled = patch.updaterControlsDisabled;
+      }
+      if ('automaticUpdatesChecked' in patch) element('automatic-updates-enabled').checked = patch.automaticUpdatesChecked;
+      if ('automaticChecksChecked' in patch) element('automatic-checks-enabled').checked = patch.automaticChecksChecked;
+      if ('backupActionsDisabled' in patch) {
+        element('create-blob-backup-button').disabled = patch.backupActionsDisabled;
+        element('import-blob-backup-button').disabled = patch.backupActionsDisabled;
+      }
+      if ('blobBackupStatusText' in patch) element('blob-backup-status').textContent = patch.blobBackupStatusText;
+      if ('blobBackupStatusError' in patch) element('blob-backup-status').classList.toggle('error', patch.blobBackupStatusError);
+      if ('installDirectoryValue' in patch) element('install-directory').value = patch.installDirectoryValue;
+      if ('installDirectoryDisabled' in patch) element('install-directory').disabled = patch.installDirectoryDisabled;
+      if ('installDirectoryInvalid' in patch) element('install-directory').classList.toggle('invalid', patch.installDirectoryInvalid);
+      if ('installDirectoryBusy' in patch) {
+        if (patch.installDirectoryBusy) element('install-directory').setAttribute('aria-busy', 'true');
+        else element('install-directory').removeAttribute('aria-busy');
+      }
+      if ('clearCacheDisabled' in patch) element('clear-cache-button').disabled = patch.clearCacheDisabled;
+      if ('uninstallDisabled' in patch) element('uninstall-button').disabled = patch.uninstallDisabled;
+      if ('updaterSettingsError' in patch) element('updater-settings-error').textContent = patch.updaterSettingsError;
       if ('releaseNotesMedia' in patch) {
         element('release-notes-content').innerHTML = patch.releaseNotesMedia
           ? context.window.BlobUI.Markdown.render(patch.releaseNotesMedia.markdown, patch.releaseNotesMedia) : '';
@@ -439,24 +485,31 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('save-button').handlers.click = () => context.testApp.save();
   element('kanban-view-style').handlers.change = () => context.testApp.changeKanbanStyle(element('kanban-view-style').value);
   element('discard-button').handlers.click = () => context.testApp.openDiscardConfirmation();
+  element('install-directory').handlers.click = () => context.testApp.selectAnytypeFolder();
+  element('install-directory').handlers.input = () => context.testApp.changeInstallDirectory(element('install-directory').value);
+  element('automatic-updates-enabled').handlers.change = () => context.testApp.changeUpdaterSetting('automaticUpdatesEnabled', element('automatic-updates-enabled').checked);
+  element('automatic-checks-enabled').handlers.change = () => context.testApp.changeUpdaterSetting('automaticChecksEnabled', element('automatic-checks-enabled').checked);
+  element('clear-cache-button').handlers.click = () => context.testApp.clearCache();
+  element('check-updates-button').handlers.click = () => context.testApp.checkUpdatesAction();
+  element('update-now-button').handlers.click = () => context.testApp.applyUpdate();
+  element('create-blob-backup-button').handlers.click = () => context.testApp.createBlobBackup();
+  element('import-blob-backup-button').handlers.click = () => context.testApp.importBlobBackup();
+  element('uninstall-button').handlers.click = () => context.testApp.openUninstallConfirmation();
   const apiModalButtons = ['api-key-removal-close', 'api-key-removal-undo', 'api-key-removal-save'];
   const discardModalButtons = ['discard-confirmation-close', 'discard-confirmation-undo'];
   const uninstallModalButtons = ['uninstall-close', 'uninstall-cancel', 'uninstall-confirm'];
   const releaseNotesButtons = ['release-notes-previous', 'release-notes-after'];
-  [...apiModalButtons, ...discardModalButtons, ...uninstallModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
+  [...apiModalButtons, ...discardModalButtons, ...releaseNotesButtons].forEach(id => { element(id).hidden = false; });
   element('api-key-removal-dialog').hidden = false;
   element('api-key-removal-dialog').children.push(...apiModalButtons.map(element));
   element('discard-confirmation-dialog').hidden = false;
   element('discard-confirmation-dialog').children.push(...discardModalButtons.map(element));
-  element('uninstall-button').hidden = false;
-  element('uninstall-dialog').hidden = false;
-  element('uninstall-dialog').children.push(...uninstallModalButtons.map(element));
   element('release-notes-dialog').hidden = false;
   element('release-notes-dialog').children.push(...releaseNotesButtons.map(element));
   assert.equal(element('log-button').hidden, true, 'Logs stay hidden before any messages arrive.');
   await flush();
-  for (let turn = 0; turn < 10 && element('autoplay-videos').disabled; turn += 1) await flush();
-  assert.equal(element('autoplay-videos').disabled, false, 'Updater controls unlock after saved App Settings load.');
+  for (let turn = 0; turn < 10 && element('automatic-updates-enabled').disabled; turn += 1) await flush();
+  assert.equal(element('automatic-updates-enabled').disabled, false, 'Updater controls unlock after saved App Settings load.');
   if (startupModeScenario) {
     for (let turn = 0; turn < 10 && ![...timers.values()].some(timer => timer.delay === 1600); turn += 1) await flush();
     assert([...timers.values()].some(timer => timer.delay === 1600), 'Autostart delays the initial metadata refresh by 1.6 seconds.');
@@ -569,30 +622,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('advanced-nav').handlers.click();
   assert.equal(element('advanced-page').hidden, false, 'Advanced Settings shows all controls on one page.');
   assert.equal(element('page-title').textContent, 'Advanced Settings');
-  const uninstallCallsBeforeCancel = calls.filter(name => name === 'uninstall_blobui').length;
-  element('uninstall-button').focus();
-  element('uninstall-button').handlers.click();
-  assert.equal(element('uninstall-backdrop').hidden, false, 'Uninstall opens its confirmation dialog.');
-  assert.equal(activeElement, element('uninstall-cancel'), 'The confirmation opens with Cancel focused.');
-  element('uninstall-cancel').handlers.click();
-  finishRemovalTransition();
-  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel closes the uninstall dialog.');
-  assert.equal(calls.filter(name => name === 'uninstall_blobui').length, uninstallCallsBeforeCancel, 'Cancel never invokes the native uninstaller.');
-  element('uninstall-error').textContent = 'stale error';
-  element('uninstall-button').handlers.click();
-  assert.equal(element('uninstall-error').textContent, '', 'Opening the dialog clears an earlier failure.');
-  await element('uninstall-confirm').handlers.click();
-  assert.equal(calls.at(-1), 'uninstall_blobui', 'Confirm invokes the native uninstaller.');
-  assert.match(element('uninstall-error').textContent, /Uninstall fixture failed/, 'A native uninstall error stays visible in the dialog.');
-  assert.equal(element('uninstall-confirm').disabled, false, 'The confirmation button is restored after a failed or returned invocation.');
-  element('uninstall-cancel').handlers.click();
-  finishRemovalTransition();
-  assert.equal(element('uninstall-backdrop').hidden, true, 'Cancel remains available after a native failure.');
-  assert.equal(element('autoplay-videos').checked, true, 'Missing autoplay preference defaults on.');
-  await changeToggle('autoplay-videos', false);
-  assert.equal(element('save-button').hidden, false);
-  context.window.BlobUI.discardChanges();
-  assert.equal(element('autoplay-videos').checked, true, 'Undo restores autoplay.');
   const initialFolder = element('install-directory').value;
   await element('install-directory').handlers.click();
   assert.equal(element('install-directory').value, initialFolder, 'Canceling the folder picker preserves the selected folder.');
@@ -621,7 +650,6 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   const generalSavesBeforeUpdaterSave = savedSettings.length;
   await input('install-directory', 'C:\\BlobUI\\AnytypeData');
   context.testApp.changeStartupMode('background');
-  await changeToggle('autoplay-videos', false);
   await changeToggle('automatic-updates-enabled', true);
   await changeToggle('automatic-checks-enabled', true);
   context.testApp.changeReleaseChannel('dev');
@@ -630,7 +658,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   await element('save-button').handlers.click();
   assert.equal(savedUpdaterSettings.length, 1);
   assert.deepEqual(savedUpdaterSettings.at(-1), {
-    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", autoplayVideos: false, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
+    installDirectory: 'C:\\BlobUI\\AnytypeData', startupMode: "background", startupModeNormal: "off", startupModeExperiment: "background", autoplayVideos: true, automaticUpdatesEnabled: true, automaticChecksEnabled: true, releaseChannel: 'dev',
   });
   assert.equal(savedSettings.length, generalSavesBeforeUpdaterSave, 'Saving App Settings does not rebuild custom.css.');
   assert.match(status(), /Loaded settings from the selected Anytype data folder/);
@@ -652,7 +680,7 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   element('discard-confirmation-undo').handlers.click();
   finishRemovalTransition();
   assert.equal(element('automatic-updates-enabled').checked, true, 'Undo restores saved App Settings toggles.');
-  assert.equal(element('startup-mode').value, 'background', 'Undo restores the startup preference.');
+  assert.equal(element('startup-mode').value, 'off', 'Undo restores the startup preference for the active experiment context.');
   context.testApp.changeReleaseChannel('release');
   assert.equal(viewState.releaseChannel, 'release', 'Changing Release Channel edits the updater draft.');
   context.window.BlobUI.discardChanges();
@@ -992,6 +1020,9 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
 
   let altRPrevented = false;
   const saveCallsBeforeAltR = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeAltR = calls.filter(name => name === 'refresh_kanban_results').length;
+  const acceptedRefreshesBeforeAltR = acceptedKanbanRefreshes.length;
+  assert.equal(refreshCallsBeforeAltR, 0, 'Ordinary saves must not recalculate Kanban results.');
   await context.document.handlers.keydown({
     key: 'r', code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false,
     preventDefault() { altRPrevented = true; },
@@ -999,9 +1030,23 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert(altRPrevented, 'Alt+R must stay out of the focused input.');
   await flush();
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeAltR + 1, 'The in-window shortcut must use the existing save/rebuild action.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeAltR + 1, 'Alt+R must recalculate saved Kanban results.');
+  assert(calls.lastIndexOf('refresh_kanban_results') > calls.lastIndexOf('save_settings'), 'Kanban results refresh after custom.css is rebuilt.');
+  assert.equal(acceptedKanbanRefreshes.length, acceptedRefreshesBeforeAltR + 1, 'The calculation page receives the refreshed timestamp.');
+  assert.equal(acceptedKanbanRefreshes.at(-1).calculatedAt, '2026-11-27T12:00:00Z');
   const saveCallsBeforeGlobalEvent = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeGlobalEvent = calls.filter(name => name === 'refresh_kanban_results').length;
   await Promise.all([rebuildListener(), rebuildListener()]);
   assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeGlobalEvent + 1, 'A background hotkey event must start only one rebuild.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeGlobalEvent + 1, 'A background hotkey event must start only one Kanban recalculation.');
+  kanbanRefreshError = 'Anytype API unavailable.';
+  const saveCallsBeforeFailedRefresh = calls.filter(name => name === 'save_settings').length;
+  const refreshCallsBeforeFailedRefresh = calls.filter(name => name === 'refresh_kanban_results').length;
+  await rebuildListener();
+  assert.equal(calls.filter(name => name === 'save_settings').length, saveCallsBeforeFailedRefresh + 1, 'A Kanban refresh failure does not block the custom.css rebuild.');
+  assert.equal(calls.filter(name => name === 'refresh_kanban_results').length, refreshCallsBeforeFailedRefresh + 1);
+  assert.equal(status(), 'custom.css was rebuilt, but Kanban calculations could not be refreshed. Anytype API unavailable.');
+  kanbanRefreshError = null;
 
   element('log-button').handlers.click();
   assert.equal(element('log-popup').hidden, false);
@@ -1072,10 +1117,11 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(calls.length, count, 'Window control clicks must not start a drag.');
   const welcome = element('onboarding-welcome');
   const onboarding = element('onboarding');
-  const api = element('onboarding-api');
+  const preferences = element('onboarding-preferences');
+  const connection = element('onboarding-connection');
+  const guide = element('onboarding-guide');
   const shell = element('settings-shell');
   context.document.activeElement = element('font-family');
-  const beforeOnboarding = calls.length;
   const unsavedFont = element('font-family').value;
   const debugKey = {
     key: 'z', code: 'KeyZ', ctrlKey: true, altKey: true, shiftKey: false, metaKey: false, repeat: false,
@@ -1085,13 +1131,23 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   assert.equal(onboarding.hidden, true, 'Key repeat must not open onboarding.');
   context.document.handlers.keydown({ ...debugKey, metaKey: true });
   assert.equal(onboarding.hidden, true, 'Modified shortcuts must not open onboarding.');
+  element('help-keybinds').handlers.click();
+  assert.equal(element('keybinds-backdrop').hidden, false);
   context.document.handlers.keydown(debugKey);
+  assert.equal(onboarding.hidden, true, 'Onboarding waits for the open modal to close.');
+  assert.equal(element('keybinds-backdrop').hidden, false, 'The modal close animation starts before onboarding opens.');
+  finishRemovalTransition();
+  assert.equal(element('keybinds-backdrop').hidden, true, 'Onboarding closes the open modal.');
+  const onboardingDelay = [...timers.entries()].find(([, timer]) => timer.delay === 150);
+  assert(onboardingDelay, 'Onboarding waits for modal teardown.');
+  timers.delete(onboardingDelay[0]);
+  onboardingDelay[1].callback();
   assert.equal(onboarding.hidden, false);
   assert.equal(welcome.hidden, false);
   assert.equal(shell.inert, true);
   assert(element('root').classList.contains('onboarding-active'));
   welcome.handlers.click();
-  assert.equal(api.hidden, true, 'Welcome fades out before the choice screen opens.');
+  assert.equal(preferences.hidden, true, 'Welcome fades out before the questions open.');
   function finishOnboardingTransition() {
     const pending = [...timers.entries()].filter(([, timer]) => timer.delay === 320).at(-1);
     assert(pending, 'Onboarding must schedule a transition.');
@@ -1100,78 +1156,99 @@ assert.match(fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8'), /5 \
   }
   finishOnboardingTransition();
   assert.equal(welcome.hidden, true);
-  assert.equal(api.hidden, false);
-  assert(element('onboarding-api-title').focused);
-  element('onboarding-api-option').handlers.click();
-  assert.equal(onboarding.dataset.apiChoice, 'api');
-  element('onboarding-no-api-option').handlers.click();
-  assert.equal(onboarding.dataset.apiChoice, 'api', 'Ignore repeated selections during transition.');
+  assert.equal(preferences.hidden, false);
+  assert(element('onboarding-preferences-title').focused);
+  assert.equal(element('onboarding-preview-interface').hidden, false, 'The first preview is the default.');
+  element('onboarding-choice-codex').handlers.pointerenter();
+  assert.equal(element('onboarding-preview-codex').hidden, false, 'Hovering a choice updates the preview.');
+  assert.equal(element('onboarding-preview-interface').hidden, true);
+
+  await changeToggle('onboarding-option-annoying', true);
+  assert.equal(element('onboarding-warning-write').classList.contains('visible'), false);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), false);
+  await changeToggle('onboarding-option-notion', true);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), true, 'Notion-style API features need read access.');
+  await changeToggle('onboarding-option-codex', true);
+  assert.equal(element('onboarding-warning-read').classList.contains('visible'), false);
+  assert.equal(element('onboarding-warning-write').classList.contains('visible'), true, 'Anyblob needs read-write access.');
+  assert.equal(element('connection-access-level').textContent, 'Read-write');
+
+  element('onboarding-forward').handlers.click();
   finishOnboardingTransition();
-  assert.equal(element('onboarding-connection').hidden, false, 'API choice must open connection setup.');
-  assert.equal(element('connection-key').type, 'password', 'Onboarding keys start concealed.');
-  assert.equal(element('connection-port').type, 'text', 'Onboarding ports start readable.');
-  element('connection-key-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-key').type, 'text');
-  element('connection-port-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-port').type, 'password');
-  element('connection-port-visibility').handlers.click({ preventDefault() {} });
-  assert.equal(element('connection-port').type, 'text');
+  assert.equal(connection.hidden, false, 'API-dependent choices open the connection page.');
+  element('onboarding-back').handlers.click();
+  finishOnboardingTransition();
+  assert.equal(preferences.hidden, false);
+  assert.equal(element('onboarding-option-annoying').checked, true, 'Choices persist while moving backward.');
+  assert.equal(element('onboarding-option-codex').checked, true);
+  assert.equal(element('onboarding-preview-interface').hidden, false, 'Re-entering the questions resets the preview.');
+  element('onboarding-forward').handlers.click();
+  finishOnboardingTransition();
+  assert.equal(connection.hidden, false);
+
   const beforeInvalidConnection = connectionRequests.length;
   const submit = () => element('connection-form').handlers.submit({ preventDefault() {} });
-  submit();
-  assert.match(element('connection-error').textContent, /Enter your Anytype/);
   element('connection-key').value = 'test-key';
   await element('connection-key').handlers.input();
   element('connection-port').value = '65536';
   await element('connection-port').handlers.input();
-  assert.equal(element('connection-key-field').dataset.filled, 'true');
-  assert.equal(element('connection-port-field').dataset.filled, 'true');
   submit();
   assert.match(element('connection-error').textContent, /Port must/);
   assert.equal(connectionRequests.length, beforeInvalidConnection, 'Invalid onboarding values must not start a connection request.');
-  element('connection-port').value = '';
-  await element('connection-port').handlers.input();
-  connectionError = 'Could not connect to Anytype.';
-  submit();
-  await flush();
-  assert.match(element('connection-error').textContent, /Could not connect/);
-  assert.equal(onboarding.hidden, false, 'Failure must keep the setup page open.');
-  assert.equal(connectionRequests.at(-1).port, null, 'Blank port uses the backend default.');
-  connectionError = null;
+  assert.equal(connection.hidden, false, 'Invalid connection values keep the user on the connection page.');
   element('connection-port').value = '31010';
   await element('connection-port').handlers.input();
+  assert.equal(element('connection-key-field').dataset.filled, 'true');
+  assert.equal(element('connection-port-field').dataset.filled, 'true');
+  element('connection-error').textContent = '';
   submit();
-  assert.equal(element('connection-confirm').disabled, true);
-  assert.equal(element('connection-key-visibility').disabled, true, 'Connection visibility controls disable while saving.');
-  await flush();
-  assert.equal(connectionRequests.at(-1).port, 31010);
+  finishOnboardingTransition();
+  assert.equal(guide.hidden, false, 'The Anyblob choice opens the guide after the API page.');
+
+  const savesBeforeFinish = savedSettings.length;
+  element('onboarding-forward').handlers.click();
+  assert.equal(element('onboarding-forward').disabled, true, 'Navigation locks while onboarding finishes.');
+  for (let turn = 0; turn < 6; turn += 1) await flush();
+  assert.equal(savedSettings.length, savesBeforeFinish + 1, 'Choices apply only when onboarding finishes.');
+  const onboardingSettings = savedSettings.at(-1);
+  assert.equal(onboardingSettings.tabHoverEffect, false);
+  assert.equal(onboardingSettings.linkHoverEffect, false);
+  assert.equal(onboardingSettings.objectMentionHoverEffect, false);
+  assert.equal(onboardingSettings.kanbanViewStyle, 'balanced');
+  assert.equal(onboardingSettings.calendarColorsEnabled, true);
+  assert.equal(onboardingSettings.codexIntegration.objectMentions.spaces.all, true, 'Disabled mention spaces are enabled.');
+  const mentionTypes = onboardingSettings.codexIntegration.objectMentions.types;
+  assert.equal(mentionTypes.all, false, 'Existing object mention type filters are preserved.');
+  assert.equal(mentionTypes.items.length, 1);
+  assert.equal(mentionTypes.items[0].spaceId, 'space-1');
+  assert.equal(mentionTypes.items[0].id, 'task');
+  assert.equal(mentionTypes.items[0].name, 'Task');
+  assert.equal(mentionTypes.items[0].space, 'Workspace');
   assert.equal(connectionRequests.at(-1).apiKey, 'test-key');
-  assert.equal(element('connection-key').value, '', 'Clear the key after saving.');
-  assert.equal(element('connection-key').type, 'password', 'Clearing a submitted key resets it to concealed.');
-  assert.equal(element('connection-key-visibility').attributes['aria-pressed'], 'false');
-  assert.equal(element('connection-key-field').dataset.filled, 'false');
+  assert.equal(connectionRequests.at(-1).port, 31010);
+  assert(calls.includes('configure_anyblob'), 'The Anyblob choice enables Anyblob.');
+  assert(calls.includes('configure_anyblob_agents_guide'), 'The Anyblob choice enables the AGENTS.md page.');
   finishOnboardingTransition();
   assert.equal(onboarding.hidden, true);
   assert.equal(shell.inert, false);
   assert(shell.classList.contains('onboarding-entering'));
+  assert.equal(element('connection-key').value, '', 'The submitted key is cleared from temporary onboarding state.');
+
+  const savedAfterFinish = savedSettings.length;
+  const connectionsAfterFinish = connectionRequests.length;
   context.document.handlers.keydown(debugKey);
   welcome.handlers.click();
   finishOnboardingTransition();
-  element('onboarding-no-api-option').handlers.click();
-  await flush();
-  assert.equal(connectionRequests.at(-1).enabled, false);
-  assert.equal(connectionRequests.at(-1).apiKey, '');
-  assert.equal(onboarding.dataset.apiChoice, 'no-api');
-  finishOnboardingTransition();
-  assert.equal(onboarding.hidden, true, 'No API mode skips connection setup.');
+  await changeToggle('onboarding-option-interface', true);
   context.document.handlers.keydown(debugKey);
-  welcome.handlers.click();
-  const pendingTimerIds = [...timers.keys()];
+  assert.equal(element('onboarding-option-interface').checked, true, 'Repeating the onboarding shortcut keeps the temporary choice.');
   context.document.handlers.keydown({ key: 'Escape', preventDefault() {} });
-  assert(pendingTimerIds.some(id => !timers.has(id)), 'Exit cancels the pending transition.');
-  assert.equal(onboarding.hidden, true);
-  assert.equal(shell.inert, false);
+  assert.equal(onboarding.hidden, true, 'Escape closes onboarding.');
+  assert.equal(savedSettings.length, savedAfterFinish, 'Escape discards temporary onboarding settings.');
+  assert.equal(connectionRequests.length, connectionsAfterFinish, 'Escape discards temporary onboarding connection edits.');
+  assert.equal(element('onboarding-option-interface').checked, false, 'Discarded choices reset for the next opening.');
   assert.equal(element('font-family').value, unsavedFont);
+
   element('advanced-nav').handlers.click();
   await input('advanced-api-key', 'replacement-test-key');
   await input('advanced-api-port', '31011');

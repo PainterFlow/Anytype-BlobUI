@@ -17,10 +17,11 @@ import {
 } from "../shared/settings-controls.jsx";
 import { DisclosurePanel } from "../shared/disclosure.jsx";
 import { ExpandableSearch } from "../shared/search.jsx";
-import { SelectPicker } from "../shared/select-picker.jsx";
+import { AdvancedSelector, SelectPicker } from "../shared/select-picker.jsx";
 import { Tabs } from "../shared/tabs.jsx";
 import { FilterIcon, ReloadIcon, SearchIcon } from "../shared/catalog-icons.jsx";
 import { HelpTooltip } from "../shared/help-tooltip.jsx";
+import { CatalogList, CatalogListRow, CatalogListToolbar } from "../shared/catalog-list.jsx";
 import { Sidebar } from "./shell.jsx";
 
 const pickerOptions = [
@@ -30,9 +31,32 @@ const pickerOptions = [
 ];
 
 const sourceOptions = [
-  { value: "types", label: "Object types", description: "Types and their properties" },
-  { value: "collections", label: "Collections", description: "Saved groups of objects" },
-  { value: "queries", label: "Queries", description: "Filtered object lists" },
+  { value: "types", label: "Object types", icon: "📄" },
+  { value: "collections", label: "Collections", icon: "🗂️" },
+  { value: "queries", label: "Queries", icon: "🔎" },
+];
+
+const listSections = [
+  { id: "personal", label: "Personal space", icon: "🙂", items: [
+    { id: "tasks", title: "Tasks", meta: "Private", icon: "✅" },
+    { id: "notes", title: "Notes", meta: "Private" },
+  ]},
+  { id: "work", label: "Work space", icon: "💼", items: [
+    { id: "projects", title: "Projects", meta: "Work", icon: "📁" },
+  ]},
+];
+
+const typeSections = [
+  { id: "personal", label: "Personal space", options: [
+    { value: "personal-task", label: "Task", icon: "✅" },
+    { value: "personal-note", label: "Note", icon: "📝" },
+    { value: "personal-bookmark", label: "Bookmark", icon: "🔖" },
+  ]},
+  { id: "work", label: "Work space", options: [
+    { value: "work-project", label: "Project", icon: "📁" },
+    { value: "work-meeting", label: "Meeting", icon: "📅" },
+    { value: "work-person", label: "Person", icon: "👤" },
+  ]},
 ];
 
 const searchExamples = [
@@ -141,10 +165,18 @@ export function ComponentCatalog({ onClose }) {
   const [selectedTab, setSelectedTab] = useState(0);
   const [selectedStyle, setSelectedStyle] = useState("balanced");
   const [selectedSources, setSelectedSources] = useState(["types"]);
+  const [selectedTypes, setSelectedTypes] = useState(["personal-task"]);
   const [enabled, setEnabled] = useState(true);
   const [search, setSearch] = useState("");
+  const [listQuery, setListQuery] = useState("");
+  const [listFilter, setListFilter] = useState([]);
   const [expanded, setExpanded] = useState(true);
   const [message, setMessage] = useState("Controls below use the same components as Settings.");
+  const visibleListSections = listSections.map(section => ({ ...section, items: section.items.filter(item => {
+    const matchesQuery = item.title.toLocaleLowerCase().includes(listQuery.trim().toLocaleLowerCase());
+    const matchesFilter = !listFilter.length || (listFilter.includes("icons") && item.icon) || (listFilter.includes("no-icons") && !item.icon);
+    return matchesQuery && matchesFilter;
+  }) })).filter(section => section.items.length);
   const disclosureToggle = useRef(null);
   const scrollContainer = useRef(null);
   const pickerSurface = useRef(null);
@@ -228,7 +260,7 @@ export function ComponentCatalog({ onClose }) {
             </SettingsGroup>
           </CatalogSection>
 
-          <CatalogSection title="Text fields and pickers" description="Editable text, secret visibility, single select, and multi-select controls.">
+          <CatalogSection title="Text fields and pickers" description="Editable text, secret visibility, selectors, sections, icons, and search.">
             <div ref={pickerSurface} className="component-catalog-picker-surface">
               <SettingsGroup className="settings-list component-catalog-fields">
                 <TextField label="Interface font" inputAttributes={{ id: "catalog-font", defaultValue: "Inter" }} />
@@ -242,11 +274,26 @@ export function ComponentCatalog({ onClose }) {
                 <div className="component-catalog-picker-row">
                   <span id="catalog-sources-label">Source categories</span>
                   <SelectPicker id="catalog-sources" label="Source categories" labelId="catalog-sources-label" valueId="catalog-sources-value"
-                    portalRef={pickerSurface} options={sourceOptions} value={selectedSources} multiple closeOnSelect={false}
+                    portalRef={pickerSurface} options={sourceOptions} value={selectedSources} multiple selectionLimit={2} closeOnSelect={false}
                     caption={`${selectedSources.length} selected`} onChange={setSelectedSources} />
+                </div>
+                <div className="component-catalog-picker-row">
+                  <span id="catalog-types-label">Filtered object types</span>
+                  <AdvancedSelector id="catalog-types" label="Filtered object types" sections={typeSections}
+                    portalRef={pickerSurface} value={selectedTypes} multiple closeOnSelect={false}
+                    caption={selectedTypes.length ? `${selectedTypes.length} selected` : "None"}
+                    placeholder="Search object types" onChange={setSelectedTypes} />
                 </div>
               </SettingsGroup>
             </div>
+          </CatalogSection>
+
+          <CatalogSection title="Catalog lists" description="Grouped rows support space and item icons, secondary text, and keyboard-safe hover styling.">
+            <CatalogListToolbar prefix="catalog-list-demo" searchLabel="Search catalog rows" query={listQuery} onQueryChange={setListQuery}
+              reloadLabel="Reload catalog rows" onReload={() => {}} filterLabel="Filter catalog rows" filterMultiple filterCloseOnSelect={false}
+              filterValue={listFilter} onFilterChange={setListFilter} filterOptions={[{ value: "icons", label: "With icons" }, { value: "no-icons", label: "Without icons" }]} />
+            <CatalogList sections={visibleListSections} emptyMessage="No catalog rows match." renderItem={item => <CatalogListRow key={item.id} icon={item.icon} title={item.title}
+              meta={item.meta} onClick={() => setMessage(`${item.title} row selected.`)} />} />
           </CatalogSection>
 
           <CatalogSection title="Tabs" description="Keyboard navigation, selection, and the animated indicator.">
@@ -294,6 +341,7 @@ export function ComponentCatalog({ onClose }) {
             <div className="component-catalog-help-preview">
               <span className="kanban-setting-title">Color by property</span>
               <HelpTooltip label="About color rules" text="Rules use the optional Anytype Local API v2 connection." />
+              <HelpTooltip variant="warning" label="Experimental option warning" text="Experimental option. Expect interface bugs, but it should cause no data loss." />
             </div>
           </CatalogSection>
 

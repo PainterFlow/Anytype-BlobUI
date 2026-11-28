@@ -4,7 +4,7 @@ import "../help-tooltip.css";
 
 const popoverGap = 7;
 
-export function HelpTooltip({ label, text, size = "normal", icon = null, onClick, dialogId }) {
+export function HelpTooltip({ label, text, size = "normal", variant = "info", icon = null, onClick, dialogId }) {
   const tooltipId = `help-tooltip-${useId()}`;
   const rootRef = useRef(null);
   const popoverRef = useRef(null);
@@ -78,7 +78,7 @@ export function HelpTooltip({ label, text, size = "normal", icon = null, onClick
   }, [open, text]);
 
   return <>
-    <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}`} data-open={open}
+    <span ref={rootRef} className={`help-tooltip${size === "large" ? " help-tooltip-large" : ""}${variant === "warning" ? " help-tooltip-warning" : ""}`} data-open={open}
       onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}>
       <button type="button" className="help-tooltip-trigger" aria-label={label} aria-describedby={hasTooltip ? tooltipId : undefined}
         aria-haspopup={dialogId ? "dialog" : undefined} aria-controls={dialogId}
@@ -89,11 +89,13 @@ export function HelpTooltip({ label, text, size = "normal", icon = null, onClick
         }}
         data-action={onClick ? "" : undefined}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}>
-        {icon || <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="10" cy="10" r="8.25" />
-          <path d="M7.65 7.45a2.37 2.37 0 0 1 4.7.4c0 1.65-2.35 1.8-2.35 3.45" />
-          <path d="M10 14.2h.01" strokeWidth="1.65" />
-        </svg>}
+        {icon || (variant === "warning"
+          ? <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round"><circle cx="10" cy="10" r="8.25" /><path d="M10 5.7v5.1" /><path d="M10 14.2h.01" strokeWidth="1.65" /></svg>
+          : <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="10" cy="10" r="8.25" />
+            <path d="M7.65 7.45a2.37 2.37 0 0 1 4.7.4c0 1.65-2.35 1.8-2.35 3.45" />
+            <path d="M10 14.2h.01" strokeWidth="1.65" />
+          </svg>)}
       </button>
     </span>
     {hasTooltip && createPortal(<span ref={popoverRef} id={tooltipId} className="help-tooltip-popover" role="tooltip" data-open={open}>{text}</span>, document.body)}

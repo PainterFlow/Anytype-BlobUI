@@ -82,6 +82,10 @@ impl Client {
             port,
         })
     }
+    pub(crate) fn binary(&self, path: &str) -> Result<(String, Vec<u8>), String> {
+        api::request_binary(&self.key, &self.ip, self.port, path)
+    }
+
     pub(crate) fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
         let response = api::request(&self.key, &self.ip, self.port, method, path, body)?;
         let explicit_view = path.split_once('?').is_some_and(|(_, query)|
@@ -289,6 +293,7 @@ impl Client {
             .and_then(Value::as_str)
             .unwrap_or("Untitled")
             .to_string();
+        let source_icon = crate::codex::icon_value(self, space_id, if row["icon"].is_null() { &document["icon"] } else { &row["icon"] });
         let mut candidates = Vec::new();
         let mut unreadable = 0;
         let mut exposed_by_block = BTreeMap::new();
@@ -349,6 +354,7 @@ impl Client {
                         .into(),
                     space: space_name.into(),
                     source: source.clone(),
+                    icon: source_icon.clone(),
                     kind: if kind == Some("collections") {
                         "Collection"
                     } else if kind == Some("types") {
@@ -468,7 +474,7 @@ impl Client {
             let name = space.get("name").and_then(Value::as_str).unwrap_or("Space");
             let rows = self.pages(
                 "POST",
-                &format!("/v2/spaces/{}/search", enc(&sid)),
+                &format!("/v2/spaces/{}/search?ids=full", enc(&sid)),
                 Some(&json!({})),
             )?;
             let mut discovered = self.discover_rows(&sid, name, &rows)?;
@@ -485,6 +491,7 @@ impl Client {
                 };
                 let mut row = type_row;
                 row["id"] = Value::String(required(&document, "id")?);
+                if row["icon"].is_null() && !document["icon"].is_null() { row["icon"] = document["icon"].clone(); }
                 let found = self.discover_document(&sid, name, &row, &document)?;
                 discovered.unreadable += found.unreadable;
                 discovered.views.extend(found.views);
@@ -741,6 +748,7 @@ struct DiscoveredView {
     space: String,
     source: String,
     kind: String,
+    icon: Option<Value>,
     raw: Value,
     source_signature: Option<String>,
     available_keys: Option<BTreeSet<String>>,
@@ -777,6 +785,7 @@ impl DiscoveredView {
             space: self.space,
             source: self.source,
             kind: self.kind,
+            icon: self.icon,
             source_signature: self.source_signature,
             properties,
             unsupported_reason: None,

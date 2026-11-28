@@ -90,7 +90,10 @@
 
     const views = groups.map(group => {
       const representative = chooseRepresentative(group);
-      return cloneView(representative, uniqueTargets(group, representative));
+      const withIcon = representative && !representative.icon
+        ? { ...representative, icon: group.find(view => view && view.icon)?.icon }
+        : representative;
+      return cloneView(withIcon, uniqueTargets(group, representative));
     });
     const spacesById = new Map();
     for (const view of Array.isArray(input) ? input : []) {

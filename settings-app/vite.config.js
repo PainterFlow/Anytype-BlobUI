@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config';
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const uiDirectory = path.join(projectDirectory, 'ui');
 const markdownDirectory = path.join(projectDirectory, 'markdowns');
-const markdownAssets = ['Changelogs.md', 'dev-guide.md', 'anyblob-guide.md', 'md-images.yaml'];
+const markdownAssets = ['Changelogs.md', 'dev-guide.md', 'anyblob-guide.md', 'kanban-calc-guide.md', 'custom-themes-guide.md', 'md-images.yaml'];
 
 async function readMarkdownAsset(name) {
   const source = path.join(markdownDirectory, name);
@@ -59,6 +59,24 @@ export default defineConfig({
         server.middlewares.use('/anyblob-guide.md', async (_request, response, next) => {
           try {
             const guide = await readMarkdownAsset('anyblob-guide.md');
+            response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+            response.end(guide);
+          } catch (error) {
+            next(error);
+          }
+        });
+        server.middlewares.use('/kanban-calc-guide.md', async (_request, response, next) => {
+          try {
+            const guide = await readMarkdownAsset('kanban-calc-guide.md');
+            response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+            response.end(guide);
+          } catch (error) {
+            next(error);
+          }
+        });
+        server.middlewares.use('/custom-themes-guide.md', async (_request, response, next) => {
+          try {
+            const guide = await readMarkdownAsset('custom-themes-guide.md');
             response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
             response.end(guide);
           } catch (error) {

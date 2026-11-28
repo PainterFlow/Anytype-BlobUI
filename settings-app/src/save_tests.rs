@@ -273,6 +273,8 @@ fn native_save_compiles_css_and_preserves_unmanaged_files() {
         calendar_colors_enabled: true,
         sidebar_resize_mode: SidebarResizeMode::Off,
         background_experiment: BackgroundExperiment::Disabled,
+        always_start_fullscreen: false,
+        fullscreen_experiment: FullscreenExperiment::Disabled,
     };
     let result = save_settings_blocking(draft.clone()).expect("native Save must compile locally");
     assert_eq!(result.calendar_status, "cached");

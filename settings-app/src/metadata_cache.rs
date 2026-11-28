@@ -12,12 +12,15 @@ use std::{
 struct File {
     version: u32,
     entries: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    fallback_entries: BTreeMap<String, Value>,
 }
 #[derive(Default)]
 struct Entry {
     completed: Option<Instant>,
     result: Option<Result<Value, String>>,
 }
+const VERSION: u32 = 3;
 static FLIGHTS: OnceLock<Mutex<BTreeMap<String, Arc<Mutex<Entry>>>>> = OnceLock::new();
 static DISK: Mutex<()> = Mutex::new(());
 fn path() -> PathBuf {
@@ -53,22 +56,56 @@ fn path() -> PathBuf {
     }
 }
 fn read(path: &Path) -> File {
-    std::fs::read(path)
+    let parsed = std::fs::read(path)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<File>(&bytes).ok())
-        .filter(|file| file.version == 1)
-        .unwrap_or_else(|| File {
-            version: 1,
+        .and_then(|bytes| serde_json::from_slice::<File>(&bytes).ok());
+    match parsed {
+        Some(file) if file.version == VERSION => file,
+        Some(mut file) if file.version == 2 => {
+            let entries = std::mem::take(&mut file.entries);
+            file.fallback_entries.extend(entries);
+            file.version = VERSION;
+            file
+        }
+        _ => File {
+            version: VERSION,
             ..File::default()
-        })
+        },
+    }
 }
+pub fn clear() -> Result<(), String> {
+    let path = path();
+    if let Ok(mut flights) = FLIGHTS.get_or_init(Default::default).lock() { flights.clear(); }
+    let _disk = DISK.lock().map_err(|_| "Metadata file lock failed.")?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("The metadata cache could not be cleared.".into()),
+    }
+}
+
+fn stale<T: DeserializeOwned>(path: &Path, catalog: &str, args: &Value) -> Option<T> {
+    let file = read(path);
+    file.entries.iter().chain(file.fallback_entries.iter()).find_map(|(key, value)| {
+        let key = serde_json::from_str::<Value>(key).ok()?;
+        if key.get(1)?.as_str()? != catalog || key.get(2)? != args { return None; }
+        serde_json::from_value::<T>(value.clone()).ok()
+    })
+}
+
 pub fn get<T: Serialize + DeserializeOwned>(
     catalog: &str,
     args: Value,
     force: bool,
     fetch: impl FnOnce(&crate::kanban_api::Client) -> Result<T, String>,
 ) -> Result<T, String> {
-    let client = crate::kanban_api::Client::connect()?;
+    let client = match crate::kanban_api::Client::connect() {
+        Ok(client) => client,
+        Err(error) => {
+            let cache = path();
+            return stale(&cache, catalog, &args).ok_or(error);
+        }
+    };
     let scope = client.metadata_scope();
     get_at(
         &path(),
@@ -243,6 +280,31 @@ mod tests {
             json!([4])
         );
     }
+    #[test]
+    fn legacy_entries_refresh_online_but_remain_offline_fallbacks() {
+        let path = fixture("legacy-fallback");
+        let key = serde_json::to_string(&("scope", "types", Value::Null)).unwrap();
+        let mut entries = BTreeMap::new();
+        entries.insert(key, json!(["legacy"]));
+        let legacy = File { version: 2, entries, fallback_entries: BTreeMap::new() };
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+        assert_eq!(stale::<Value>(&path, "types", &Value::Null).unwrap(), json!(["legacy"]));
+        let value: Vec<String> = get_at(
+            &path,
+            "scope",
+            "types",
+            Value::Null,
+            false,
+            || Ok(vec!["fresh".into()]),
+            || Ok(()),
+        ).unwrap();
+        assert_eq!(value, vec!["fresh"]);
+        let saved = read(&path);
+        assert_eq!(saved.fallback_entries.len(), 1);
+        assert_eq!(stale::<Value>(&path, "types", &Value::Null).unwrap(), json!(["fresh"]));
+    }
+
     #[test]
     fn malformed_incompatible_and_wrong_shape_are_misses() {
         let path = fixture("corrupt");

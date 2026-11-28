@@ -34,6 +34,10 @@ pub struct UpdaterPreferences {
     pub automatic_updates_enabled: bool,
     pub automatic_checks_enabled: bool,
     pub release_channel: ReleaseChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_mode_normal: Option<crate::autostart::AutostartMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_mode_experiment: Option<crate::autostart::AutostartMode>,
     pub last_checked_at: Option<String>,
     pub latest_version: Option<String>,
     pub last_failed_install_version: Option<String>,
@@ -50,6 +54,8 @@ impl Default for UpdaterPreferences {
             automatic_updates_enabled: false,
             automatic_checks_enabled: true,
             release_channel: ReleaseChannel::Release,
+            startup_mode_normal: None,
+            startup_mode_experiment: None,
             last_checked_at: None,
             latest_version: None,
             last_failed_install_version: None,
@@ -72,6 +78,10 @@ pub struct UpdaterSettingsDraft {
     pub release_channel: ReleaseChannel,
     #[serde(default)]
     pub startup_mode: crate::autostart::AutostartMode,
+    #[serde(default)]
+    pub startup_mode_normal: Option<crate::autostart::AutostartMode>,
+    #[serde(default)]
+    pub startup_mode_experiment: Option<crate::autostart::AutostartMode>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -84,6 +94,8 @@ pub struct UpdaterState {
     pub release_channel: ReleaseChannel,
     pub start_on_login: bool,
     pub startup_mode: crate::autostart::AutostartMode,
+    pub startup_mode_normal: Option<crate::autostart::AutostartMode>,
+    pub startup_mode_experiment: Option<crate::autostart::AutostartMode>,
     pub current_version: String,
     pub latest_version: Option<String>,
     pub update_available: bool,
@@ -223,6 +235,11 @@ pub fn load_preferences(path: &Path) -> Result<UpdaterPreferences, String> {
                 if let Some(value) = saved.get("releaseChannel").and_then(Value::as_str)
                     .and_then(ReleaseChannel::from_settings_value)
                 { preferences.release_channel = value; }
+                preferences.startup_mode_normal = saved.get("startupModeNormal")
+                    .and_then(|value| serde_json::from_value::<crate::autostart::AutostartMode>(value.clone()).ok())
+                    .filter(|mode| *mode != crate::autostart::AutostartMode::Background);
+                preferences.startup_mode_experiment = saved.get("startupModeExperiment")
+                    .and_then(|value| serde_json::from_value::<crate::autostart::AutostartMode>(value.clone()).ok());
             }
         }
     }
@@ -289,7 +306,7 @@ fn save_preferences(path: &Path, preferences: &UpdaterPreferences) -> Result<(),
     let mut settings = serde_json::Map::new();
     if root.is_some() {
         if let Some(fields) = cached.as_object_mut() {
-            for key in ["installDirectory", "autoplayVideos", "automaticUpdatesEnabled", "automaticChecksEnabled", "releaseChannel"] {
+            for key in ["installDirectory", "autoplayVideos", "automaticUpdatesEnabled", "automaticChecksEnabled", "releaseChannel", "startupModeNormal", "startupModeExperiment"] {
                 if let Some(value) = fields.remove(key) {
                     settings.insert(key.into(), value);
                 }
@@ -361,6 +378,18 @@ pub fn save_settings(
     preferences.automatic_updates_enabled = draft.automatic_updates_enabled;
     preferences.automatic_checks_enabled = draft.automatic_checks_enabled;
     preferences.release_channel = draft.release_channel;
+    let inferred_normal = if draft.startup_mode == crate::autostart::AutostartMode::Background {
+        crate::autostart::AutostartMode::Normal
+    } else {
+        draft.startup_mode
+    };
+    preferences.startup_mode_normal = draft.startup_mode_normal
+        .filter(|mode| *mode != crate::autostart::AutostartMode::Background)
+        .or(preferences.startup_mode_normal)
+        .or(Some(inferred_normal));
+    preferences.startup_mode_experiment = draft.startup_mode_experiment
+        .or(preferences.startup_mode_experiment)
+        .or(Some(draft.startup_mode));
     if channel_changed {
         preferences.latest_version = None;
         preferences.last_check_status = Some("idle".into());
@@ -425,6 +454,8 @@ fn state_for(
         release_channel: preferences.release_channel,
         start_on_login: false,
         startup_mode: crate::autostart::AutostartMode::Disabled,
+        startup_mode_normal: preferences.startup_mode_normal,
+        startup_mode_experiment: preferences.startup_mode_experiment,
         current_version: if fallback_runtime.is_some_and(is_development_runtime) {
             env!("BLOBUI_BUILD_VERSION").into()
         } else { current },

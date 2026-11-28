@@ -455,3 +455,45 @@ pub(crate) fn content_request(
         }
     }else{error})
 }
+
+pub fn request_binary(api_key: &str, ip: &str, port: u16, path: &str) -> Result<(String, Vec<u8>), String> {
+    let address = ip.parse::<IpAddr>().map_err(|_| "API key IP must be a valid IPv4 or IPv6 address.".to_string())?;
+    let socket = SocketAddr::new(address, port);
+    let mut stream = TcpStream::connect_timeout(&socket, TIMEOUT).map_err(|error| network_error(&error))?;
+    stream.set_read_timeout(Some(TIMEOUT)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
+    stream.set_write_timeout(Some(TIMEOUT)).map_err(|_| "Could not configure the Anytype API connection timeout.".to_string())?;
+    let request = SecretBuffer::new(format!("GET {path} HTTP/1.1\r\nHost: {socket}\r\nAuthorization: Bearer {api_key}\r\nAnytype-Version: 2025-11-08\r\nAccept: */*\r\nConnection: close\r\n\r\n"));
+    stream.write_all(request.as_bytes()).map_err(|error| network_error(&error))?;
+    let mut response = Vec::new();
+    stream.take((MAX_RESPONSE_BYTES + 64 * 1024) as u64).read_to_end(&mut response).map_err(|error| network_error(&error))?;
+    let split = response.windows(4).position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| "Anytype returned an invalid HTTP response.".to_string())?;
+    let header = std::str::from_utf8(&response[..split]).map_err(|_| "Anytype returned an invalid HTTP response.".to_string())?;
+    let status = header.lines().next().and_then(|line| line.split_whitespace().nth(1)).and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "Anytype returned an invalid HTTP response.".to_string())?;
+    let headers = header.lines().skip(1).filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_string())).collect::<Vec<_>>();
+    let mut body = &response[split + 4..];
+    if headers.iter().any(|(name, value)| name == "transfer-encoding" && value.contains("chunked")) {
+        let decoded = decode_chunked(body)?;
+        return binary_status(status, &headers, decoded, api_key).map_err(|error| format!("GET {path}: {error}"));
+    }
+    if let Some((_, length)) = headers.iter().find(|(name, _)| name == "content-length") {
+        let length = length.parse::<usize>().map_err(|_| "Anytype returned an invalid HTTP response.".to_string())?;
+        if length > MAX_RESPONSE_BYTES { return Err("Anytype returned a response that is too large.".into()); }
+        if body.len() < length { return Err("Anytype returned an incomplete HTTP response.".into()); }
+        body = &body[..length];
+    }
+    binary_status(status, &headers, body.to_vec(), api_key).map_err(|error| format!("GET {path}: {error}"))
+}
+
+fn binary_status(status: u16, headers: &[(String, String)], body: Vec<u8>, api_key: &str) -> Result<(String, Vec<u8>), String> {
+    if !(200..300).contains(&status) {
+        let error = parse_json_status(status, &body, api_key).err().unwrap_or_else(|| http_error(status));
+        return Err(if api_key.is_empty() { error } else { error.replace(api_key, "[redacted]") });
+    }
+    let content_type = headers.iter().find(|(name, _)| name == "content-type").map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "application/octet-stream".into());
+    if !content_type.starts_with("image/") { return Err("Anytype returned a non-image icon response.".into()); }
+    Ok((content_type, body))
+}

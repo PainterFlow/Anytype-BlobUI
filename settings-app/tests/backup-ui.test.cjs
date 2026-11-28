@@ -65,7 +65,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     assert.equal(await page.locator('#startup-mode').count(), 0);
     await page.locator('#advanced-experiments-tab').click();
     assert.equal(await page.locator('#background-experiment').getAttribute('value'), 'disabled');
-    await chooseExperiment('Variant 1');
+    await chooseExperiment('Background Button');
     await page.locator('#window-close').click();
     assert.equal(await page.evaluate(() => window.mockCalls.at(-1).command), 'quit_app');
     assert.equal(await page.locator('#window-background').isVisible(), true);
@@ -79,7 +79,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#discard-confirmation-undo').click();
     await page.waitForFunction(() => document.getElementById('window-background').hidden && !document.getElementById('settings-shell').inert);
     await page.locator('#advanced-experiments-tab').click();
-    await chooseExperiment('Variant 2');
+    await chooseExperiment('Autostart in Background');
     await page.locator('#window-close').click();
     assert.equal(await page.evaluate(() => window.mockCalls.at(-1).command), 'quit_app');
     assert.equal(await page.locator('#advanced-experiments-panel #startup-mode, #advanced-experiments-panel #start-on-login').count(), 0);
@@ -101,11 +101,11 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.waitForFunction(() => window.savedStartupMode === 'background' && document.getElementById('save-button').hidden);
     assert.equal(await page.evaluate(() => window.mockCalls.findLast(call => call.command === 'save_updater_settings').args.settings.startupMode), 'background');
     await page.locator('#advanced-experiments-tab').click();
-    await chooseExperiment('Variant 1');
+    await chooseExperiment('Background Button');
     await page.locator('#advanced-app-tab').click();
-    assert.equal(await page.locator('#start-on-login').isChecked(), true);
+    assert.equal(await page.locator('#start-on-login').isChecked(), false, 'The normal startup variant uses its own saved value.');
     await page.locator('#advanced-experiments-tab').click();
-    await chooseExperiment('Variant 2');
+    await chooseExperiment('Autostart in Background');
     await page.locator('#advanced-app-tab').click();
     assert.match(await page.locator('#startup-mode').textContent(), /Autostart in background/, 'Changing variants preserves the saved background startup mode.');
     await page.locator('#startup-mode').click();
@@ -114,10 +114,10 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.locator('#discard-confirmation-undo').click();
     await page.waitForFunction(() => document.getElementById('startup-mode').textContent.includes('Autostart in background') && !document.getElementById('settings-shell').inert);
 
-    assert.equal(await page.locator('#advanced-app-panel > section').count(), 5);
-    assert.equal(await page.locator('#advanced-app-panel > section').first().getAttribute('aria-labelledby'), 'app-general-heading');
-    assert.equal(await page.locator('.app-backup-row').count(), 2);
-    assert.equal(await page.locator('.app-backup-row .app-backup-description').count(), 2);
+    assert.equal(await page.locator('#advanced-app-panel > section').count(), 3);
+    assert.equal(await page.locator('#advanced-app-panel > section').first().getAttribute('aria-labelledby'), 'updates-heading');
+    assert.equal(await page.locator('.app-backup-row').count(), 3);
+    assert.equal(await page.locator('.app-backup-row .app-backup-description').count(), 1);
     assert.equal(await page.locator('.app-general-settings .settings-list').count(), 0);
     assert.equal(await page.locator('#blob-backup-status').count(), 1);
     await page.setViewportSize({ width: 700, height: 850 });
@@ -131,7 +131,7 @@ test('import and export preserve cancellation, refresh restored settings, and bl
     await page.screenshot({ path: path.resolve(__dirname, '../../.test-run/app-settings-dark.png'), fullPage: true });
     const ordering = await page.evaluate(() => {
       const before = (left, right) => Boolean(document.getElementById(left).compareDocumentPosition(document.getElementById(right)) & Node.DOCUMENT_POSITION_FOLLOWING);
-      return before('updates-heading', 'backup-heading') && before('backup-heading', 'uninstall-button');
+      return before('updates-heading', 'backup-heading') && before('backup-heading', 'installation-heading');
     });
     assert.equal(ordering, true);
     assert.equal(await page.locator('#create-blob-backup-button').isEnabled(), true);

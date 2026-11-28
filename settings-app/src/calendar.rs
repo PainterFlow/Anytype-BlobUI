@@ -79,7 +79,7 @@ pub(crate) fn type_properties(document: &Value, properties: &[Value]) -> Vec<Val
     properties.iter().filter(|p| matches!(p["format"].as_str(), Some("select" | "multi_select" | "checkbox"))
         && p["key"].as_str().is_some_and(|key| keys.contains(key))).cloned().collect()
 }
-pub(crate) fn calendar_views(space: &str, space_name: &str, document: &Value) -> Vec<Value> {
+pub(crate) fn calendar_views(client: Option<&Client>, space: &str, space_name: &str, document: &Value) -> Vec<Value> {
     let Some(object_id) = document["id"].as_str() else { return Vec::new(); };
     let mut views = Vec::new();
     for block in document["blocks"].as_array().into_iter().flatten() {
@@ -87,8 +87,12 @@ pub(crate) fn calendar_views(space: &str, space_name: &str, document: &Value) ->
         for view in block["views"].as_array().into_iter().flatten() {
             if view["type"] != "calendar" && view["layout"] != "calendar" { continue; }
             let Some(view_id) = view["id"].as_str() else { continue; };
-            views.push(json!({"target": {"spaceId":space,"objectId":object_id,"blockId":block_id,"viewId":view_id},
-                "name":name(view),"space":space_name,"source":name(document),"kind":"Calendar"}));
+            let mut output = json!({"target": {"spaceId":space,"objectId":object_id,"blockId":block_id,"viewId":view_id},
+                "name":name(view),"space":space_name,"source":name(document),"kind":"Calendar"});
+            if let Some(client) = client {
+                if let Some(icon) = crate::codex::icon_value(client, space, &document["icon"]) { output["icon"] = icon; }
+            }
+            views.push(output);
         }
     }
     views
@@ -129,15 +133,19 @@ pub fn discover(client: &Client) -> Result<Value, String> {
         }) {
             let (row, result) = result;
             let (key, document) = result?;
+            let mut type_icon = row["icon"].clone();
             let eligible = match document {
                 Ok(mut document) => {
                     if document["name"].as_str().is_none() { document["name"] = json!(name(row)); }
-                    views.extend(calendar_views(&sid, name(&space), &document));
+                    if type_icon.is_null() { type_icon = document["icon"].clone(); }
+                    views.extend(calendar_views(Some(client), &sid, name(&space), &document));
                     type_properties(&document, &properties)
                 }
                 Err(error) => { info.push(format!("Could not read type '{}'. {error}", name(row))); Vec::new() }
             };
-            types.push(json!({"spaceId":sid,"space":name(&space),"key":key,"name":name(row),"properties":eligible}));
+            let mut type_row = json!({"spaceId":sid,"space":name(&space),"key":key,"name":name(row),"properties":eligible});
+            if let Some(icon) = crate::codex::icon_value(client, &sid, &type_icon) { type_row["icon"] = icon; }
+            types.push(type_row);
         }
         let rows = client.pages("POST", &format!("/v2/spaces/{}/search?ids=full", enc(&sid)), Some(&json!({})))?;
         for (row, result) in parallel_metadata(&rows, |row| -> Result<_, String> {
@@ -147,7 +155,7 @@ pub fn discover(client: &Client) -> Result<Value, String> {
             match result? {
                 Ok(mut document) => {
                     if document["name"].as_str().is_none() { document["name"] = json!(name(row)); }
-                    views.extend(calendar_views(&sid, name(&space), &document));
+                    views.extend(calendar_views(Some(client), &sid, name(&space), &document));
                 }
                 Err(error) => info.push(format!("Could not inspect calendar views in '{}'. {error}", name(row))),
             }
@@ -345,7 +353,7 @@ mod tests {
     }
     #[test]
     fn calendar_discovery_uses_calendar_layout_without_kanban_requirements() {
-        let views = calendar_views("space", "Work", &json!({"id":"host","name":"Tasks","blocks":[{"id":"inline","object_id":"source","views":[{"id":"calendar-a","type":"calendar","name":"Month"},{"id":"calendar-b","layout":"calendar","name":"Week"},{"id":"board","type":"kanban"}]}]}));
+        let views = calendar_views(None, "space", "Work", &json!({"id":"host","name":"Tasks","blocks":[{"id":"inline","object_id":"source","views":[{"id":"calendar-a","type":"calendar","name":"Month"},{"id":"calendar-b","layout":"calendar","name":"Week"},{"id":"board","type":"kanban"}]}]}));
         assert_eq!(views.len(), 2); assert_eq!(views[0]["target"]["objectId"], "host");
     }
 

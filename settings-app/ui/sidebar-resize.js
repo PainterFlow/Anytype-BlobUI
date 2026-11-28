@@ -27,13 +27,13 @@
     tooltip.style.left = `${Math.max(8, Math.min(rect.right + 10, root.innerWidth - box.width - 8))}px`;
     tooltip.style.top = `${Math.max(8, Math.min(rect.top + (rect.height - box.height) / 2, root.innerHeight - box.height - 8))}px`;
   }
-  let mode = "standard", width = 256, collapsed = false, drag = null;
+  let mode = "standard", width = 280, collapsed = false, drag = null, fullscreen = false;
   try {
     const saved = JSON.parse(root.localStorage.getItem(key));
     if (Number.isFinite(saved?.width)) width = Math.max(160, Math.min(320, saved.width));
     collapsed = saved?.collapsed === true;
   } catch (_) { /* Storage may be unavailable. Keep session defaults. */ }
-  const max = () => Math.max(160, Math.min(320, root.innerWidth * .4));
+  const max = () => Math.max(160, Math.min(fullscreen ? 520 : 320, root.innerWidth * .4));
   const current = () => mode === "pro" && collapsed ? 56 : Math.min(width, max());
   const handles = [];
   function updateNativeTooltips() {
@@ -45,6 +45,7 @@
   }
   function persist() {
     try { root.localStorage.setItem(key, JSON.stringify({ width, collapsed })); } catch (_) { /* Session state still works. */ }
+    UI.LowLevelSettings?.update({ sidebarWidth: width, sidebarCollapsed: collapsed });
   }
   function render() {
     hideTooltip();
@@ -127,6 +128,19 @@
     if (event.key === "Escape" && drag) { event.preventDefault(); event.stopImmediatePropagation(); finish(true); }
   }, true);
   root.addEventListener("unload", () => { observer.disconnect(); resizeObserver.disconnect(); });
-  UI.SidebarResize = { setMode(value) { finish(true); mode = "standard"; render(); } };
+  UI.SidebarResize = {
+    setMode(value) { finish(true); mode = "standard"; render(); },
+    setGeometry(geometry) {
+      if (Number.isFinite(geometry?.sidebarWidth)) width = Math.max(160, Math.min(max(), geometry.sidebarWidth));
+      collapsed = geometry?.sidebarCollapsed === true;
+      render();
+    },
+    setFullscreen(value) {
+      fullscreen = value === true;
+      if (!fullscreen && width > 320) width = 320;
+      render();
+    },
+    current,
+  };
   render();
 })(window);

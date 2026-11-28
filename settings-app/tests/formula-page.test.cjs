@@ -74,18 +74,47 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length),initialDiscoveries+1,'A reload queued while locked flushes once when an immediate unlock happens.');
     assert.equal(await page.locator('#kanban-views-panel-1').isVisible(),false,'Unlock retries queued discovery while the calculation tab is hidden.');
     await openFormulas(page);await page.locator('.formula-view-row').first().waitFor();
+    const guideTrigger=page.getByRole('button',{name:'Kanban calculations help',exact:true});
+    assert.equal(await guideTrigger.getAttribute('aria-haspopup'),'dialog');
+    assert.equal(await guideTrigger.getAttribute('aria-controls'),'kanban-calc-guide-dialog');
+    await guideTrigger.click();
+    const guideDialog=page.locator('#kanban-calc-guide-dialog');
+    await guideDialog.waitFor({state:'visible'});
+    await page.waitForFunction(()=>document.querySelector('#kanban-calc-guide-dialog .markdown-content')?.textContent.includes('Create a calculation'));
+    const guideText=await guideDialog.locator('.markdown-content').textContent();
+    for (const expected of ['\\property{"Estimate"}{"sum"}','\\sqrt[degree]{body}','$configure-kanban-calculations']) {
+      assert.ok(guideText.includes(expected),`The Kanban calculation guide includes ${expected}.`);
+    }
+    assert.equal(await guideDialog.locator('a[href="https://katex.org/docs/supported.html"]').count(),1);
+    const guideTable=await page.evaluate(()=>{
+      const dialog=document.getElementById('kanban-calc-guide-dialog');
+      const content=dialog.querySelector('.markdown-content');
+      const table=content.querySelector('table');
+      const longest=[...table.querySelectorAll('td code')].reduce((a,b)=>b.textContent.length>a.textContent.length?b:a);
+      return {dialogOverflow:dialog.scrollWidth-dialog.clientWidth,contentOverflow:content.scrollWidth-content.clientWidth,
+        tableRightOverflow:table.getBoundingClientRect().right-content.getBoundingClientRect().right,
+        wrappedLines:longest.getClientRects().length};
+    });
+    assert.ok(guideTable.dialogOverflow<=1,'The guide dialog has no horizontal overflow.');
+    assert.ok(guideTable.contentOverflow<=1,'The markdown content does not overflow horizontally.');
+    assert.ok(guideTable.tableRightOverflow<=1,'The markdown table stays inside the content width.');
+    assert.ok(guideTable.wrappedLines>1,'Long table code wraps across lines instead of widening the table.');
+    assert.equal(await page.evaluate(()=>document.getElementById('settings-shell').inert),true);
+    await page.keyboard.press('Escape');
+    await guideDialog.waitFor({state:'hidden'});
+    assert.equal(await page.evaluate(()=>document.getElementById('settings-shell').inert),false);
     assert.equal(await page.locator('.formula-intro,#formula-calculated-at').count(),0);
     assert.equal(await page.locator('.formula-view-row').count(),2);
     const rows=await page.locator('.formula-view-row').evaluateAll(nodes=>nodes.map(n=>({font:getComputedStyle(n.querySelector('.formula-view-name')).fontSize,radius:getComputedStyle(n).borderRadius})));
     assert.equal(rows[0].font,rows[1].font);assert.notEqual(rows[0].radius,'0px');
     assert.equal(await page.locator('.formula-view').first().evaluate(n=>getComputedStyle(n).borderTopWidth),'0px');
     await page.locator('#formula-filter').click();
-    await page.locator('#formula-filter-options [data-value="spc001"]').click();
+    await page.locator('#formula-filter-options [data-value="query"]').click();
     assert.equal(await page.locator('#formula-filter').getAttribute('aria-expanded'),'true');
-    await page.locator('#formula-filter-options [data-value="spc002"]').click();
-    assert.equal(await page.locator('#formula-filter-options [data-value="spc001"]').getAttribute('aria-selected'),'false');
+    
+    
     assert.equal(await page.locator('.formula-view-row:visible').count(),1);
-    await page.locator('#formula-filter-options [data-value=""]').click();
+    await page.locator('#formula-filter-options [data-value="query"]').click();
     await page.keyboard.press('Escape');
     await page.locator('#formula-search-toggle').click();await page.locator('#formula-search').fill('Launch');
     assert.equal(await page.locator('.formula-view-row:visible').count(),1);
@@ -134,10 +163,10 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.equal(await source.inputValue(),'2\\frac{1}{'.replaceAll('\\\\','\\'),'Keypad preserves incomplete source.');
     await key('Clear calculation').click();assert.equal(await source.inputValue(),'');assert.equal((await read()).definitions.length,0);
     await key('Insert property').click();
-    assert.deepEqual(await modal.locator('.formula-property-picker [role="option"] .kanban-option-label').allTextContents(),['Estimate']);
-    await modal.getByRole('option',{name:'Estimate',exact:true}).click();
+    assert.deepEqual(await page.locator('#formula-property-options [role="option"] .kanban-option-label').allTextContents(),['Estimate']);
+    await page.getByRole('option',{name:'Estimate',exact:true}).click();
     assert.equal(await source.inputValue(),'','A property requires an explicit aggregation choice.');
-    await modal.getByRole('option',{name:'Average',exact:true}).click();
+    await page.getByRole('option',{name:'Average',exact:true}).click();
     assert.equal(await source.inputValue(),'\\property{"Estimate"}{"average"}'.replaceAll('\\\\','\\'));
     assert.equal((await read()).definitions[0].tokens[0].operation,'average');
     await source.fill('12');await source.evaluate(n=>n.setSelectionRange(1,1));await key('Card count').click();
@@ -176,21 +205,21 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     await page.setViewportSize({width:1050,height:1000});
     await page.locator('.formula-view-row').filter({hasText:'Tasks'}).click();await modal.waitFor({state:'visible'});
     await key('Show LaTeX').click();await key('Insert property').click();
-    assert.equal(await modal.locator('.formula-property-picker [role="option"]').count(),0);
-    assert.equal(await modal.locator('.formula-property-picker [role="status"]').innerText(),'No number or boolean properties in this view');
+    assert.equal(await page.locator('#formula-property-options [role="option"]').count(),0);
+    assert.equal(await page.locator('#formula-property-options [role="status"]').innerText(),'No number or boolean properties in this view');
     await close();
     await page.evaluate(()=>{window.__propertyList=[{key:'dup-a',name:'Estimate',format:'checkbox'},{key:'dup-z',name:'Estimate',format:'number'},{key:'done',name:'Done',format:'boolean'}];});
     const beforeProperties=await page.evaluate(()=>window.__calls.filter(c=>c==='discover_kanban_views').length);
     await page.locator('#formula-reload').click();await page.waitForFunction(n=>window.__calls.filter(c=>c==='discover_kanban_views').length>n,beforeProperties);
     await open();await key('Show LaTeX').click();await key('Clear calculation').click();await key('Insert property').click();
-    assert.deepEqual(await modal.locator('.formula-property-picker [role="option"] .kanban-option-label').allTextContents(),['Estimate','Estimate','Done']);
-    assert.deepEqual(await modal.locator('.formula-property-picker [role="option"] .kanban-select-option-description').allTextContents(),['\\property{"Estimate"}#1','\\property{"Estimate"}#2','\\property{"Done"}']);
-    await modal.locator('.formula-property-picker [role="option"]').nth(1).click();await modal.getByRole('option',{name:'Median',exact:true}).click();
+    assert.deepEqual(await page.locator('#formula-property-options [role="option"] .kanban-option-label').allTextContents(),['Estimate #1','Estimate #2','Done']);
+    assert.equal(await page.locator('#formula-property-options .kanban-select-option-description').count(),0);
+    await page.locator('#formula-property-options [role="option"]').nth(1).click();await page.getByRole('option',{name:'Median',exact:true}).click();
     const duplicateToken=(await read()).definitions[0].tokens[0];assert.equal(duplicateToken.property,'dup-z');assert.equal(duplicateToken.operation,'median');
     const perCardPrefix='\\property{"Estimate"}#2{"sum"}{';
     await source.fill(perCardPrefix+'}');
     await source.evaluate((node,position)=>node.setSelectionRange(position,position),perCardPrefix.length);
-    await key('Insert property').click();await modal.getByRole('option',{name:'Done',exact:true}).click();
+    await key('Insert property').click();await page.getByRole('option',{name:'Done',exact:true}).click();
     assert.equal(await source.inputValue(),perCardPrefix+'\\property{"Done"}}','An empty per-card expression inserts a bare property without aggregation.');
     assert.equal(await key('Insert property').getAttribute('aria-expanded'),'false');
     assert.deepEqual((await read()).definitions[0].tokens[0].calculation,[{kind:'property',property:'done'}]);
@@ -207,12 +236,12 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     assert.deepEqual(await page.evaluate(()=>window.__saves.at(-1).definitions[0].tokens),nestedState.definitions[0].tokens);
     await open();
     await source.fill(perCardPrefix+'1+');
-    await key('Insert property').click();await modal.getByRole('option',{name:'Done',exact:true}).click();
+    await key('Insert property').click();await page.getByRole('option',{name:'Done',exact:true}).click();
     assert.equal(await source.inputValue(),perCardPrefix+'1+\\property{"Done"}','Incomplete per-card source retains its text and scope.');
     await source.fill(nested);
     const replacementStart=nested.indexOf('\\property{"Done"}');
     await source.evaluate((node,range)=>node.setSelectionRange(...range),[replacementStart,replacementStart+'\\property{"Done"}'.length]);
-    await key('Insert property').click();await modal.locator('.formula-property-picker [role="option"]').nth(0).click();
+    await key('Insert property').click();await page.locator('#formula-property-options [role="option"]').nth(0).click();
     assert.equal(await source.inputValue(),nested.replace('\\property{"Done"}','\\property{"Estimate"}#1'),'A selected nested property is replaced without changing the surrounding calculation.');
     await close();
     await page.evaluate(()=>{window.__propertyList=[{key:'price',name:'Price {net}',format:'number'},{key:'quantity',name:'Quantity',format:'number'}];});
@@ -223,7 +252,7 @@ test('calculator modal, fraction editing, view filters, persistence, and recover
     const quotedPrefix='\\property{"Price {net}"}{"sum"}{\\property{"Price {net}"}';
     await source.fill(quotedPrefix+'}');
     await source.evaluate((node,position)=>node.setSelectionRange(position,position),quotedPrefix.length);
-    await key('Insert property').click();await modal.getByRole('option',{name:'Quantity',exact:true}).click();
+    await key('Insert property').click();await page.getByRole('option',{name:'Quantity',exact:true}).click();
     assert.equal(await source.inputValue(),quotedPrefix+'*\\property{"Quantity"}}','Quoted braces do not hide a nested property boundary or its per-card scope.');
     await close();
     await open();

@@ -1,13 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { SelectPicker } from "./shared/select-picker.jsx";
-import { FilterIcon } from "./shared/catalog-icons.jsx";
-
-const searchPath = "M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9869 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z";
-
-function IconButton({ id, label, children, ...props }) {
-  return <button type="button" id={id} className="neutral-icon-button" aria-label={label} title={label} {...props}>{children}</button>;
-}
+import { CatalogList, CatalogListRow, CatalogListToolbar, groupIntoSections } from "./shared/catalog-list.jsx";
 
 /** React view for the saved Kanban view catalog. The controller owns discovery and persistence. */
 export function FormulaPageView({
@@ -22,55 +16,29 @@ export function FormulaPageView({
   const reloadViews = controller ? () => controller.reloadViews() : onReload;
   const selectView = controller ? (view, row) => controller.selectView(view.target, row) : onSelect;
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(false);
-  const [space, setSpace] = useState("");
-  const searchInput = useRef(null);
-  const searchToggle = useRef(null);
-  const spaces = useMemo(() => [...new Map(data.views.map(view => [view.target?.spaceId, view.space || "Unnamed space"]))]
-    .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0])), [data.views]);
-  const matching = data.views.filter(view => (!space || view.target?.spaceId === space)
+  const [kindFilters, setKindFilters] = useState([]);
+  const spaces = useMemo(() => {
+    if (Array.isArray(data.spaceCatalog) && data.spaceCatalog.length) return data.spaceCatalog.map(row => [row.id, row.name || "Unnamed space", row.icon]);
+    return [...new Map(data.views.map(view => [view.target?.spaceId, view.space || "Unnamed space"]))]
+      .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+  }, [data.views, data.spaceCatalog]);
+  const spaceEntries = useMemo(() => spaces.map(([id, name, icon]) => ({ id, name, icon })), [spaces]);
+  const kindOf = view => view.kind === "Query" ? "query" : view.kind === "Collection" ? "collection" : "objectType";
+  const matching = data.views.filter(view => (!kindFilters.length || kindFilters.includes(kindOf(view)))
     && [view.name, view.space, view.source, view.kind].filter(Boolean).join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const sections = useMemo(() => groupIntoSections(matching, spaceEntries, view => view.target?.spaceId), [matching, spaceEntries]);
 
-  useEffect(() => { if (!expanded) setQuery(""); }, [expanded]);
   return <>
-    <div className="formula-toolbar">
-      <div id="formula-search-control" className="expandable-search" data-expanded={String(expanded)}>
-        <IconButton id="formula-search-toggle" ref={searchToggle} label="Search Kanban views" tabIndex={data.locked ? -1 : 0}
-          aria-controls="formula-search" aria-expanded={expanded} onClick={() => {
-            const next = !expanded; setExpanded(next);
-            if (next) requestAnimationFrame(() => searchInput.current?.focus({ preventScroll: true }));
-          }}>
-          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none"><path d={searchPath} fill="currentColor" /></svg>
-        </IconButton>
-        <label htmlFor="formula-search" className="sr-only">Search Kanban views</label>
-        <input id="formula-search" ref={searchInput} type="search" placeholder="Search Kanban views" tabIndex={expanded ? 0 : -1}
-          value={query} disabled={data.locked} onChange={event => setQuery(event.target.value)} onBlur={event => {
-            if (!event.currentTarget.value) setExpanded(false);
-          }} onKeyDown={event => {
-            if (event.key === "Escape") { event.preventDefault(); setQuery(""); setExpanded(false); searchToggle.current?.focus({ preventScroll: true }); }
-          }} />
-      </div>
-      <IconButton id="formula-reload" label="Reload available views" disabled={data.locked || data.discovering}
-        aria-busy={data.discovering} onClick={reloadViews}>
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 5.5v4h-4M15.8 9.2a6 6 0 1 0-.7 4" /></svg>
-      </IconButton>
-      <SelectPicker id="formula-filter" rootId="formula-filter-control" menuId="formula-filter-options"
-        label="Filter by space" title="Filter by space" icon={<FilterIcon />} pressed={Boolean(space)}
-        triggerClassName={space ? "is-filtered" : ""} disabled={data.locked || data.discovering}
-        options={[{ value: "", label: "All spaces" }, ...spaces.map(([value, label]) => ({ value, label }))]}
-        value={space} onChange={setSpace} closeOnSelect={false} />
-    </div>
+    <CatalogListToolbar prefix="formula" searchLabel="Search Kanban views" query={query} onQueryChange={setQuery}
+      reloadLabel="Reload available views" onReload={reloadViews} locked={data.locked} busy={data.discovering}
+      filterLabel="Filter by view type" filterMultiple filterCloseOnSelect={false} filterValue={kindFilters} onFilterChange={setKindFilters}
+      filterOptions={[{ value: "objectType", label: "Object type" }, { value: "query", label: "Query" }, { value: "collection", label: "Collection" }]} />
     <p id="formula-storage-message" className="field-error" role="status" aria-live="polite" data-status={data.success ? "success" : "error"}>{data.message}</p>
     <fieldset id="formula-fields" aria-label="Kanban formulas" disabled={data.locked}>
       <div id="formula-contents">
-        {matching.map((view, index) => <section className="formula-view" key={JSON.stringify(view.target || index)}>
-          <button type="button" className="formula-view-row" data-active={String(!!view.active)} aria-pressed={!!view.active} onClick={event => selectView(view, event.currentTarget)}>
-            <span className="formula-view-name">{view.name}</span>
-            <span className="formula-source">{[view.space, view.source, view.kind].filter(Boolean).join(" · ")}</span>
-            {view.unsupported && <span className="formula-view-warning">{view.unsupported}</span>}
-          </button>
-        </section>)}
-        {!matching.length && <p className="input-hint formula-empty-message">{query || space ? "No matching Kanban views." : data.loading || data.discovering ? "Loading Kanban views…" : "No accessible Kanban views found."}</p>}
+        <CatalogList sections={sections} emptyClassName="formula-empty-message" emptyMessage={query || kindFilters.length ? "No matching Kanban views." : data.loading || data.discovering ? "Loading Kanban views…" : "No accessible Kanban views found."}
+          renderItem={(view, index) => <CatalogListRow key={JSON.stringify(view.target || index)} icon={view.icon} title={view.name} meta={view.source}
+            warning={view.unsupported} active={!!view.active} onClick={event => selectView(view, event.currentTarget)} />} />
       </div>
     </fieldset>
   </>;

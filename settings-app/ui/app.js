@@ -53,20 +53,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (index !== 0) resetAdvancedVisibility();
     view.update({ advancedTab: index });
   }
-  const installDirectory = el("install-directory");
-
   const autoplayVideos = el("autoplay-videos");
   function applyAutoplay(value) {
     if (autoplayVideos) autoplayVideos.checked = value !== false;
     window.BlobUI.VideoPlayer?.setAutoplay(value !== false);
   }
-  const automaticUpdatesEnabled = el("automatic-updates-enabled");
-  const automaticChecksEnabled = el("automatic-checks-enabled");
-  const checkUpdatesButton = el("check-updates-button");
-  const updateNowButton = el("update-now-button");
-  const createBlobBackupButton = el("create-blob-backup-button");
-  const importBlobBackupButton = el("import-blob-backup-button");
-  const blobBackupStatus = el("blob-backup-status");
   const advancedApiKey = el("advanced-api-key");
   const advancedApiIp = el("advanced-api-ip");
   const advancedApiPort = el("advanced-api-port");
@@ -194,6 +185,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     "object-mention-hover-effect": "objectMentionHoverEffect",
     "collapsed-categories": "collapsedCategories",
     "calendar-colors-enabled": "calendarColorsEnabled",
+    "always-start-fullscreen": "alwaysStartFullscreen",
   };
 
   const presentSettingsFields = view.updateSettingsFields;
@@ -253,9 +245,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   let updaterState = null;
   let updaterSettingsLoaded = false;
   let updaterBusyOperation = "";
+  let updateStatusTransientMessage = "";
   let blobFolderBusy = false;
   let blobRestoreReloadFailed = false;
   let uninstallBusy = false;
+  let clearCacheBusy = false;
+  let lowLevelState = window.BlobUI.LowLevelSettings?.snapshot?.() || { uiScale: 1, fullscreen: false };
+  let windowSizeTimer = 0;
   let selectedBlobBackupDirectory = null;
   let pendingAutomaticUpdate = false;
   let connectionBusy = false;
@@ -357,12 +353,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   const updatePageScrollbar = setupScrollbar(pageContent, ".settings-content");
   const updateReleaseNotesScrollbar = setupScrollbar(el("release-notes-dialog"), "#release-notes-content");
   const updateConnectionScrollbar = setupScrollbar(el("connection-scroll"), ".connection-content");
-  const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-options");
+  const updateOnboardingScrollbar = setupScrollbar(el("onboarding-scroll"), ".onboarding-questions-layout");
+  const updateOnboardingGuideScrollbar = setupScrollbar(el("onboarding-guide-scroll"), "#onboarding-guide-content");
   const updateLogsScrollbar = setupScrollbar(logEntries, ".log-entry");
   listen(window, "resize", () => {
     updatePageScrollbar();
     updateOnboardingScrollbar();
     updateConnectionScrollbar();
+    updateOnboardingGuideScrollbar();
   });
 
   const nativeService = createNativeService({
@@ -588,7 +586,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         ? previewForPreset(preset) : settings.accentColor;
       return toHexColor(value) || String(value).trim().toLowerCase();
     }
-    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
+    return !!left && !!right && left.fontFamily === right.fontFamily && left.codeFontFamily === right.codeFontFamily && accentIdentity(left) === accentIdentity(right) && left.enableCustomThemes === right.enableCustomThemes && left.basedTheme === right.basedTheme && left.themePreset === right.themePreset && left.themeColor === right.themeColor && left.includeSelections === right.includeSelections && left.bannerImage === right.bannerImage && left.reducedMotion === right.reducedMotion && left.tabHoverEffect === right.tabHoverEffect && left.linkHoverEffect === right.linkHoverEffect && left.objectMentionHoverEffect === right.objectMentionHoverEffect && left.kanbanViewStyle === right.kanbanViewStyle && left.collapsedCategories === right.collapsedCategories && left.calendarColorsEnabled === right.calendarColorsEnabled && left.sidebarResizeMode === right.sidebarResizeMode && left.backgroundExperiment === right.backgroundExperiment && left.fullscreenExperiment === right.fullscreenExperiment && left.alwaysStartFullscreen === right.alwaysStartFullscreen && JSON.stringify(left.codexIntegration) === JSON.stringify(right.codexIntegration);
   }
 
   function effectiveIncludeSelections(settings = draft) {
@@ -606,10 +604,29 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     return !!left && !!right
       && left.installDirectory === right.installDirectory
       && left.startupMode === right.startupMode
+      && left.startupModeNormal === right.startupModeNormal
+      && left.startupModeExperiment === right.startupModeExperiment
       && left.autoplayVideos === right.autoplayVideos
       && left.automaticUpdatesEnabled === right.automaticUpdatesEnabled
       && left.automaticChecksEnabled === right.automaticChecksEnabled
       && left.releaseChannel === right.releaseChannel;
+  }
+
+  function validStartupMode(value, allowBackground = true) {
+    return ["off", "foreground"].includes(value) || (allowBackground && value === "background") ? value : "";
+  }
+
+  function updaterStartupForExperiment(settings, experiment) {
+    if (experiment === "autostart-background") {
+      return validStartupMode(settings?.startupModeExperiment) || validStartupMode(settings?.startupModeNormal, false) || "off";
+    }
+    return validStartupMode(settings?.startupModeNormal, false) || "off";
+  }
+
+  function syncUpdaterStartupControl() {
+    if (!updaterDraft) return;
+    updaterDraft.startupMode = updaterStartupForExperiment(updaterDraft, draft?.backgroundExperiment);
+    view.update({ startupMode: updaterDraft.startupMode });
   }
 
   function copyUpdaterSettings(settings) {
@@ -617,10 +634,16 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     const displayDirectory = directory.startsWith("\\\\?\\UNC\\")
       ? "\\\\" + directory.slice(8)
       : directory.startsWith("\\\\?\\") ? directory.slice(4) : directory;
+    const registryMode = validStartupMode(settings?.startupMode) || (settings?.startOnLogin ? "foreground" : "off");
+    const startupModeNormal = validStartupMode(settings?.startupModeNormal, false)
+      || (registryMode === "background" ? "foreground" : registryMode);
+    const startupModeExperiment = validStartupMode(settings?.startupModeExperiment) || registryMode;
     return {
       installDirectory: displayDirectory,
-      startupMode: ["off", "foreground", "background"].includes(settings?.startupMode) ? settings.startupMode : settings?.startOnLogin ? "foreground" : "off",
-      autoplayVideos: settings?.autoplayVideos !== false,
+      startupMode: registryMode,
+      startupModeNormal,
+      startupModeExperiment,
+      autoplayVideos: true,
       automaticUpdatesEnabled: !!(settings && settings.automaticUpdatesEnabled),
       automaticChecksEnabled: !!(settings && settings.automaticChecksEnabled),
       releaseChannel: ["release", "dev"].includes(settings?.releaseChannel) ? settings.releaseChannel : "release",
@@ -630,25 +653,27 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function assignUpdaterSettings(settings) {
     updaterDraft = copyUpdaterSettings(settings);
     initialUpdaterSettings = { ...updaterDraft };
-    installDirectory.value = updaterDraft.installDirectory;
-    view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
-    applyAutoplay(updaterDraft.autoplayVideos);
-    automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
-    automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
+    syncUpdaterStartupControl();
+    view.update({ releaseChannel: updaterDraft.releaseChannel });
+    applyAutoplay(true);
     updaterSettingsLoaded = true;
     updateSaveButton();
   }
 
-  function renderUpdaterState() {
+  function backupActionsDisabled() {
+    const settingsDirty = !!draft && hasUnsavedChanges();
+    const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
+      && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
+    return !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
+      || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
+  }
+
+  function syncAdvancedControls() {
     const state = updaterState || {};
     const updateAvailable = state.updateAvailable === true;
     const simulated = state.status === "simulated";
     const currentVersion = String(state.currentVersion || "");
     const latestVersion = String(state.latestVersion || "");
-    el("blobui-version").textContent = currentVersion ? "BlobUI " + currentVersion : "BlobUI version unavailable";
-    el("update-version").textContent = currentVersion
-      ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
-      : "";
     const fallbackMessage = state.status === "checking" ? "Checking for updates…"
       : state.status === "updating" ? "Downloading the update. Settings will close and reopen automatically."
       : simulated ? "Preview update available. No files have been changed."
@@ -657,19 +682,36 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       : state.status === "updated" ? "Update completed."
       : state.status === "error" ? "Could not check for updates."
       : "Check for updates to see if a newer version is available.";
-    el("update-status").textContent = String(state.message || fallbackMessage);
-    el("update-status").classList.toggle("error", state.status === "error");
-    checkUpdatesButton.textContent = updaterBusyOperation === "checking" ? "Checking…"
-      : updaterBusyOperation === "updating" ? "Updating…"
-      : updateAvailable ? "Update now"
-      : state.status === "current" || state.status === "updated" ? "You're up to date"
-      : "Check for updates";
-    checkUpdatesButton.disabled = !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed;
-    updateNowButton.hidden = !updateAvailable;
-    updateNowButton.disabled = !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges();
-    updateNowButton.title = simulated ? "Preview update only" : "Update now";
-    updateNowButton.setAttribute("aria-label", simulated ? "Preview update only" : "Update now");
-    renderBlobBackupControls();
+    const settingsLocked = saveBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed;
+    view.update({
+      blobuiVersionLabel: currentVersion ? "BlobUI " + currentVersion : "BlobUI version unavailable",
+      updateVersionText: currentVersion
+        ? "Current version " + currentVersion + (updateAvailable && latestVersion ? " · Latest version " + latestVersion : "")
+        : "",
+      updateStatusText: updateStatusTransientMessage || String(state.message || fallbackMessage),
+      updateStatusError: state.status === "error",
+      checkUpdatesLabel: updaterBusyOperation === "checking" ? "Checking…"
+        : updaterBusyOperation === "updating" ? "Updating…"
+        : updateAvailable ? "Update now"
+        : state.status === "current" || state.status === "updated" ? "You're up to date"
+        : "Check for updates",
+      checkUpdatesDisabled: !updaterSettingsLoaded || !window.appReady || !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed,
+      updateNowVisible: updateAvailable,
+      updateNowDisabled: !!updaterBusyOperation || saveBusy || blobFolderBusy || blobRestoreReloadFailed || hasUnsavedChanges(),
+      updateNowTitle: simulated ? "Preview update only" : "Update now",
+      backupActionsDisabled: backupActionsDisabled(),
+      updaterControlsDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
+      automaticUpdatesChecked: updaterDraft?.automaticUpdatesEnabled === true,
+      automaticChecksChecked: updaterDraft?.automaticChecksEnabled === true,
+      installDirectoryValue: updaterDraft ? String(updaterDraft.installDirectory || "") : "",
+      installDirectoryDisabled: settingsLocked || !updaterSettingsLoaded,
+      clearCacheDisabled: settingsLocked || !draft || !window.appReady || clearCacheBusy,
+      uninstallDisabled: !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy,
+    });
+  }
+
+  function renderUpdaterState() {
+    syncAdvancedControls();
   }
 
   function isInstallingUpdate() {
@@ -677,14 +719,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function renderBlobBackupControls() {
-    const settingsDirty = !!draft && hasUnsavedChanges();
-    const updaterDirty = !!updaterDraft && !!initialUpdaterSettings
-      && !updaterSettingsEqual(updaterDraft, initialUpdaterSettings);
-    const disabled = !window.appReady || !updaterSettingsLoaded || saveBusy || !!updaterBusyOperation
-      || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy || settingsDirty || updaterDirty;
-    createBlobBackupButton.disabled = disabled;
-    importBlobBackupButton.disabled = disabled;
-    el("uninstall-button").disabled = !window.appReady || saveBusy || !!updaterBusyOperation || blobFolderBusy || blobRestoreReloadFailed || uninstallBusy;
+    syncAdvancedControls();
   }
 
   function maybeApplyPendingAutomaticUpdate() {
@@ -703,6 +738,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function mergeUpdaterState(state) {
+    updateStatusTransientMessage = "";
     if (state && typeof state === "object") updaterState = { ...(updaterState || {}), ...state };
     renderUpdaterState();
   }
@@ -716,7 +752,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       updaterState = { status: "error", message: error.message || String(error) };
       if (!updaterSettingsLoaded) {
         assignUpdaterSettings({
-          installDirectory: installDirectory.value || "",
+          installDirectory: updaterDraft?.installDirectory || "",
           startupMode: "off",
           automaticUpdatesEnabled: false,
           automaticChecksEnabled: false,
@@ -1021,7 +1057,10 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (updaterBusyOperation && !(fromAutomaticCheck && updaterBusyOperation === "checking")) return;
     if (saveBusy || bannerReadPending || hasUnsavedChanges()) {
       if (fromAutomaticCheck) pendingAutomaticUpdate = true;
-      else el("update-status").textContent = "Save or undo your pending settings before installing the update.";
+      else {
+        updateStatusTransientMessage = "Save or undo your pending settings before installing the update.";
+        renderUpdaterState();
+      }
       return;
     }
     updaterBusyOperation = "updating";
@@ -1100,12 +1139,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
   const shortcutActions = [
     ["openSettings", "Open Settings from Anytype"],
-    ["rebuildCss", "Rebuild custom.css"],
+    ["rebuildCss", "Rebuild custom.css and calculations"],
     ["refreshMetadata", "Reload BlobUI", { code: "KeyR", ctrl: true }],
     ["openComponentCatalog", "Open component catalog"],
     ["showOnboarding", "Show setup guide"],
     ["simulateUpdate", "Preview an update"],
     ["quitSettings", "Quit BlobUI Settings"],
+    ["toggleFullscreen", "Toggle full screen"],
   ];
   const defaultShortcutBindings = [
     { action: "openSettings", code: "Numpad1", ctrl: false, alt: false, shift: false, meta: false },
@@ -1114,6 +1154,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     { action: "showOnboarding", code: "F8", ctrl: false, alt: false, shift: false, meta: false },
     { action: "simulateUpdate", code: "F9", ctrl: false, alt: false, shift: false, meta: false },
     { action: "quitSettings", code: "KeyQ", ctrl: true, alt: false, shift: false, meta: false },
+    { action: "toggleFullscreen", code: "F11", ctrl: false, alt: false, shift: false, meta: false },
   ];
   let shortcutBindings = defaultShortcutBindings;
   let shortcutBindingsLoaded = false;
@@ -1158,7 +1199,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     finally { if (shortcutBindingsRequest === pending) shortcutBindingsRequest = null; }
   }
   function renderShortcutBindings() {
-    view.update({ shortcutRows: shortcutActions.map(([action, label, fixedBinding]) => {
+    view.update({ shortcutRows: shortcutActions.filter(([action]) => action !== "toggleFullscreen" || draft?.fullscreenExperiment === "enable-full-screen").map(([action, label, fixedBinding]) => {
       const binding = fixedBinding || shortcutBindings.find(item => item.action === action);
       return { action, label, fixed: Boolean(fixedBinding), disabled: !fixedBinding && !shortcutBindingsLoaded,
         capturing: shortcutCaptureAction === action, shortcut: binding ? formatShortcut(binding) : "" };
@@ -1304,12 +1345,9 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     invalidateBannerRead();
     assignDraftToForm(snapshot.settings);
     if (snapshot.updaterSettings) {
-      updaterDraft = copyUpdaterSettings(snapshot.updaterSettings);
-      installDirectory.value = updaterDraft.installDirectory;
+      updaterDraft = { ...snapshot.updaterSettings };
       view.update({ startupMode: updaterDraft.startupMode, releaseChannel: updaterDraft.releaseChannel });
-      applyAutoplay(updaterDraft.autoplayVideos);
-      automaticUpdatesEnabled.checked = updaterDraft.automaticUpdatesEnabled;
-      automaticChecksEnabled.checked = updaterDraft.automaticChecksEnabled;
+      applyAutoplay(true);
     }
     lastCustomAccent = snapshot.settings.accentMode === "native" ? null : {
       accentMode: snapshot.settings.accentMode,
@@ -1379,10 +1417,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       startupModeDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       releaseChannelDisabled: settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady,
       backgroundExperimentDisabled: settingsLocked || !draft || !window.appReady,
+      fullscreenExperimentDisabled: settingsLocked || !draft || !window.appReady,
       kanbanStyleDisabled: settingsLocked || !draft });
     const themeColorControls = [themeHueInput, themeSaturationInput, themeBrightnessInput, themeColorValue];
     document.querySelectorAll("#preferences-page input, #accessibility-page input, #calendar-events-page input, #kanban-views-page input, #advanced-page input, #onboarding input").forEach((control) => {
-      if (control.id === "start-on-login") return;
+      if (["start-on-login", "install-directory", "automatic-updates-enabled", "automatic-checks-enabled"].includes(control.id)) return;
       control.disabled = settingsLocked || !draft || (!!draft && draft.accentMode === "native" && [hueInput, saturationInput, brightnessInput, accentValue].includes(control))
         || (themeColorControls.includes(control) && !draft.enableCustomThemes);
     });
@@ -1396,22 +1435,18 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     bannerImageInput.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     chooseBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
     resetBannerImage.disabled = settingsLocked || bannerReadPending || !draft || !window.appReady;
-    [installDirectory, autoplayVideos, automaticUpdatesEnabled, automaticChecksEnabled].forEach((control) => {
-      control.disabled = settingsLocked || !draft || !updaterSettingsLoaded || !window.appReady;
-    });
-    installDirectory.disabled = settingsLocked || !updaterSettingsLoaded;
     Object.keys(visibilityFields).forEach((inputId) => {
       visibilityFields[inputId].button.disabled = settingsLocked || !draft;
     });
     ["discard-confirmation-close", "discard-confirmation-undo", "api-key-removal-close", "api-key-removal-undo", "api-key-removal-save"]
       .forEach((id) => { el(id).disabled = settingsLocked; });
-    ["onboarding-welcome", "onboarding-no-api-option", "onboarding-api-option", "connection-key-visibility", "connection-port-visibility", "connection-back", "connection-confirm"]
+    ["onboarding-welcome", "onboarding-skip", "onboarding-back", "onboarding-forward", "onboarding-option-interface", "onboarding-option-annoying", "onboarding-option-codex", "onboarding-option-notion", "connection-key-visibility", "connection-port-visibility"]
       .forEach((id) => { el(id).disabled = isInstallingUpdate() || connectionBusy; });
+    updateOnboardingNavigation();
     apiKeyRemovalSave.disabled = settingsLocked;
     apiKeyRemovalUndo.disabled = settingsLocked;
     apiKeyRemovalClose.disabled = settingsLocked;
-    renderUpdaterState();
-    renderBlobBackupControls();
+    syncAdvancedControls();
     maybeApplyPendingAutomaticUpdate();
   }
 
@@ -1449,10 +1484,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       calendarColorsEnabled: settings.calendarColorsEnabled !== false,
       sidebarResizeMode: "standard",
       backgroundExperiment: ["normal", "autostart-background"].includes(settings.backgroundExperiment) ? settings.backgroundExperiment : "disabled",
+      fullscreenExperiment: ["fix-resizing", "enable-full-screen"].includes(settings.fullscreenExperiment) ? settings.fullscreenExperiment : "disabled",
+      alwaysStartFullscreen: settings.alwaysStartFullscreen === true,
     };
   }
 
   function assignDraftToForm(settings) {
+    const previousFullscreenExperiment = draft?.fullscreenExperiment;
     draft = normalizedSettings(settings);
     window.BlobUI.CodexPage?.render();
     presentSettingsFields({
@@ -1466,6 +1504,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     });
     root.dataset.reducedMotion = String(draft.reducedMotion);
     syncIncludeSelectionsPreview();
+    syncFullscreenExperiment(previousFullscreenExperiment);
     view.update({ kanbanStyle: draft.kanbanViewStyle, backgroundExperiment: draft.backgroundExperiment });
     window.BlobUI.SidebarResize?.setMode(draft.sidebarResizeMode);
     renderPicker(true);
@@ -1568,11 +1607,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
 
     void loadShortcutBindings();
     invoke("get_anytype_version").then((version) => {
-      el("anytype-version").textContent = typeof version === "string" && version.trim() ? version : "Anytype unknown";
-    }).catch(() => { el("anytype-version").textContent = "Anytype unknown"; });
+      view.update({ anytypeVersionLabel: typeof version === "string" && version.trim() ? version : "Anytype unknown" });
+    }).catch(() => { view.update({ anytypeVersionLabel: "Anytype unknown" }); });
     updateSaveButton();
-    const needsOnboarding = state.ready && state.onboardingComplete === false;
-    if (needsOnboarding) showOnboarding();
+    onboardingCompletionPending = state.ready && state.onboardingComplete === false;
+    if (onboardingCompletionPending) showOnboarding();
     if (!state.ready) {
       setStatus(state.message || "Run scripts/Install.ps1 once to set up BlobUI before saving.", "error");
     } else if (state.hotkeyError) {
@@ -1589,7 +1628,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         }, startupDelay);
       } else void window.BlobUI.AppReload.run({ checkUpdates: false, startup: true });
     }
-    if (state.ready && !needsOnboarding) void showReleaseNotesOrContinue();
+    if (state.ready && !onboardingCompletionPending) void showReleaseNotesOrContinue();
   }
 
   async function reloadTargetAppState({ reloadFormulas = false } = {}) {
@@ -1948,13 +1987,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (updaterSettingsChanged) {
       const directory = updaterDraft.installDirectory.trim();
       const validDirectory = directory.length > 0 && directory.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(directory);
-      installDirectory.classList.toggle("invalid", !validDirectory);
-      el("updater-settings-error").textContent = validDirectory ? "" : "Enter a valid Anytype data folder.";
+      view.update({
+        installDirectoryInvalid: !validDirectory,
+        updaterSettingsError: validDirectory ? "" : "Enter a valid Anytype data folder.",
+      });
       if (!validDirectory) invalid = true;
       else updaterDraft.installDirectory = directory;
     } else {
-      installDirectory.classList.remove("invalid");
-      el("updater-settings-error").textContent = "";
+      view.update({ installDirectoryInvalid: false, updaterSettingsError: "" });
     }
     const connectionChanged = connectionHasChanges();
     const updaterPathChanged = updaterSettingsChanged
@@ -1992,7 +2032,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       return;
     }
 
-    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment }, initialDraft);
+    const nonExperimentSettingsChanged = !settingsEqual({ ...draft, backgroundExperiment: initialDraft.backgroundExperiment, fullscreenExperiment: initialDraft.fullscreenExperiment }, initialDraft);
     const advancedSaveWithEmptyKey = connectionChanged || (!advancedPage.hidden && nonExperimentSettingsChanged);
     const apiKeyWillBeEmpty = !keepExistingKey && !apiKey;
     if (advancedSaveWithEmptyKey && apiKeyWillBeEmpty && !options.confirmKeyRemoval) {
@@ -2025,6 +2065,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     let formulasSaved = false;
     let calendarRulesSaved = false;
     let updaterSettingsSaved = false;
+    let kanbanRefreshError = null;
     try {
       let result = null;
       await window.BlobUI.AnyblobDraft.save();
@@ -2065,12 +2106,25 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
         updaterSettingsSaved = true;
         updaterDraft = { ...submittedUpdaterSettings };
         initialUpdaterSettings = { ...submittedUpdaterSettings };
-        installDirectory.value = updaterDraft.installDirectory;
+        view.update({ installDirectoryValue: updaterDraft.installDirectory });
         editSession.commit({ updaterSettings: { ...initialUpdaterSettings } });
         if (updaterPathChanged) await reloadTargetAppState();
         else mergeUpdaterState(savedUpdaterState || {});
       }
-      if (settingsChanged || options.forceRebuild) {
+      if (options.forceRebuild && !formulasChanged) {
+        try {
+          const refreshed = await invoke("refresh_kanban_results");
+          window.BlobUI.FormulaPage.acceptRefresh?.(refreshed);
+        } catch (error) {
+          kanbanRefreshError = error;
+        }
+      }
+      if (kanbanRefreshError) {
+        const reason = kanbanRefreshError.message || String(kanbanRefreshError);
+        setStatus(settingsChanged || connectionChanged || formulasChanged || calendarRulesChanged || updaterSettingsChanged
+          ? "Changes were saved and custom.css was rebuilt, but Kanban calculations could not be refreshed. " + reason
+          : "custom.css was rebuilt, but Kanban calculations could not be refreshed. " + reason, "error", true, kanbanRefreshError);
+      } else if (settingsChanged || options.forceRebuild) {
         if (result && typeof result.themeCss === "string") {
           applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
         }
@@ -2286,6 +2340,8 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   function changeStartupMode(value) {
     if (!updaterDraft || saveBusy || isInstallingUpdate() || !["off", "foreground", "background"].includes(value)) return;
     updaterDraft.startupMode = value;
+    if (draft?.backgroundExperiment === "autostart-background") updaterDraft.startupModeExperiment = value;
+    else updaterDraft.startupModeNormal = value === "background" ? "foreground" : value;
     view.update({ startupMode: value });
     markDirty();
   }
@@ -2297,9 +2353,29 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     markDirty();
   }
 
+  function syncFullscreenExperiment(previousExperiment) {
+    if (!draft) return;
+    root.dataset.fullscreenExperiment = draft.fullscreenExperiment;
+    view.update({ fullscreenExperiment: draft.fullscreenExperiment });
+    renderShortcutBindings();
+    if (previousExperiment !== draft.fullscreenExperiment) applyUiScale();
+    if (previousExperiment === "enable-full-screen" && draft.fullscreenExperiment !== "enable-full-screen") {
+      invoke("set_window_fullscreen", { fullscreen: false }).catch(() => {});
+    }
+  }
+
+  function changeFullscreenExperiment(value) {
+    if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "fix-resizing", "enable-full-screen"].includes(value)) return;
+    const previousExperiment = draft.fullscreenExperiment;
+    draft.fullscreenExperiment = value;
+    syncFullscreenExperiment(previousExperiment);
+    markDirty();
+  }
+
   function changeBackgroundExperiment(value) {
     if (!draft || saveBusy || isInstallingUpdate() || !["disabled", "normal", "autostart-background"].includes(value)) return;
     draft.backgroundExperiment = value;
+    syncUpdaterStartupControl();
     view.update({ backgroundExperiment: value });
     markDirty();
   }
@@ -2314,14 +2390,12 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   async function selectAnytypeFolder() {
     if (folderPickerBusy || saveBusy || isInstallingUpdate() || !updaterDraft) return;
     folderPickerBusy = true;
-    installDirectory.setAttribute("aria-busy", "true");
+    view.update({ installDirectoryBusy: true });
     try {
       const selected = await invoke("select_anytype_folder", { currentDirectory: updaterDraft.installDirectory });
       if (!selected || saveBusy || isInstallingUpdate()) return;
-      installDirectory.value = selected;
       updaterDraft.installDirectory = selected;
-      installDirectory.classList.remove("invalid");
-      el("updater-settings-error").textContent = "";
+      view.update({ installDirectoryValue: selected, installDirectoryInvalid: false, updaterSettingsError: "" });
       if (!window.appReady) {
         await invoke("recover_install_directory", { installDirectory: selected });
         initialUpdaterSettings = { ...updaterDraft };
@@ -2330,44 +2404,50 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       }
       markDirty();
     } catch (error) {
-      el("updater-settings-error").textContent = error.message || String(error);
+      view.update({ updaterSettingsError: error.message || String(error) });
     } finally {
       folderPickerBusy = false;
-      installDirectory.removeAttribute("aria-busy");
+      view.update({ installDirectoryBusy: false });
     }
   }
-  listen(installDirectory, "click", selectAnytypeFolder);
-  listen(installDirectory, "keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      selectAnytypeFolder();
-    }
-  });
-  listen(installDirectory, "input", () => {
-    if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
-    updaterDraft.installDirectory = installDirectory.value;
-    installDirectory.classList.remove("invalid");
-    el("updater-settings-error").textContent = "";
-    markDirty();
-  });
-  for (const [control, property] of [
 
-    [autoplayVideos, "autoplayVideos"],
-    [automaticUpdatesEnabled, "automaticUpdatesEnabled"],
-    [automaticChecksEnabled, "automaticChecksEnabled"],
-  ]) {
-    listen(control, "change", () => {
-      if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
-      updaterDraft[property] = control.checked;
-      if (property === "autoplayVideos") applyAutoplay(control.checked);
-      markDirty();
-    });
+  function changeInstallDirectory(value) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
+    updaterDraft.installDirectory = String(value ?? "");
+    view.update({ installDirectoryValue: updaterDraft.installDirectory, installDirectoryInvalid: false, updaterSettingsError: "" });
+    markDirty();
   }
-  listen(checkUpdatesButton, "click", () => {
+
+  function changeUpdaterSetting(property, checked) {
+    if (!updaterDraft || saveBusy || isInstallingUpdate()) return;
+    if (!["automaticUpdatesEnabled", "automaticChecksEnabled"].includes(property)) return;
+    updaterDraft[property] = checked === true;
+    markDirty();
+  }
+
+  async function clearCache() {
+    if (clearCacheBusy || saveBusy || isInstallingUpdate() || !window.appReady) return;
+    clearCacheBusy = true;
+    updateSaveButton();
+    try {
+      await invoke("clear_cache");
+      window.BlobUI.SpaceCatalog?.invalidate();
+      window.BlobUI.ObjectMentions?.discoverTypes?.(true).catch(() => {});
+      addLog("Cache cleared.", "info");
+      setStatus("Cache cleared.", "info", false);
+    } catch (error) {
+      addLog("Cache could not be cleared. " + String(error.message || error), "error", error);
+      setStatus("Cache could not be cleared. Check Logs.", "error", false);
+    } finally {
+      clearCacheBusy = false;
+      updateSaveButton();
+    }
+  }
+
+  function checkUpdatesAction() {
     if (updaterState && updaterState.updateAvailable === true) applyUpdate();
     else checkForUpdates(false);
-  });
-  listen(updateNowButton, "click", () => applyUpdate());
+  }
   const externalLinkController = window.BlobUI.ExternalLinks.attach(document, {
     open: url => invoke("open_external_link", { url }),
     onError(error) {
@@ -2385,11 +2465,11 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     initialFocus: el("uninstall-cancel"), fallbackFocus: el("uninstall-button"),
     inertTargets: [el("settings-shell"), el("title-drag-region")],
   });
-  listen(el("uninstall-button"), "click", () => {
+  function openUninstallConfirmation() {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy || !window.appReady) return;
     el("uninstall-error").textContent = "";
     uninstallModal.open();
-  });
+  }
   ["uninstall-close", "uninstall-cancel"].forEach((id) => listen(el(id), "click", () => uninstallModal.close()));
   listen(el("uninstall-confirm"), "click", async () => {
     if (saveBusy || updaterBusyOperation || blobFolderBusy || uninstallBusy) return;
@@ -2408,16 +2488,16 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
   });
   function setBlobBackupStatus(message, isError = false) {
-    blobBackupStatus.textContent = message;
-    blobBackupStatus.classList.toggle("error", isError);
+    view.update({ blobBackupStatusText: message, blobBackupStatusError: isError });
   }
-  listen(createBlobBackupButton, "click", async () => {
-    if (createBlobBackupButton.disabled) return;
+
+  async function createBlobBackup() {
+    if (backupActionsDisabled()) return;
     blobFolderBusy = true;
     updateSaveButton();
     try {
       const destination = await invoke("select_blob_backup_destination", {
-        currentDirectory: installDirectory.value || null,
+        currentDirectory: updaterDraft?.installDirectory || null,
       });
       if (!destination) return;
       const backup = await invoke("create_blob_backup", { destinationDirectory: destination });
@@ -2428,14 +2508,15 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       blobFolderBusy = false;
       updateSaveButton();
     }
-  });
-  listen(importBlobBackupButton, "click", async () => {
-    if (importBlobBackupButton.disabled) return;
+  }
+
+  async function importBlobBackup() {
+    if (backupActionsDisabled()) return;
     blobFolderBusy = true;
     updateSaveButton();
     try {
       const backup = await invoke("select_blob_backup_folder", {
-        currentDirectory: installDirectory.value || null,
+        currentDirectory: updaterDraft?.installDirectory || null,
       });
       if (!backup) return;
       selectedBlobBackupDirectory = backup;
@@ -2448,7 +2529,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       blobFolderBusy = false;
       updateSaveButton();
     }
-  });
+  }
   ["blob-import-close", "blob-import-cancel"].forEach((id) => {
     listen(el(id), "click", () => blobImportModal.close());
   });
@@ -2573,6 +2654,40 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     el("help-button").focus();
   });
 
+  let appliedUiScale = 1;
+  function automaticUiScale() {
+    if (!["fix-resizing", "enable-full-screen"].includes(draft?.fullscreenExperiment)) return 1;
+    const width = window.innerWidth * appliedUiScale;
+    let automatic = width >= 1500 ? 1.08 : width <= 850 ? 0.94 : 1;
+    if (lowLevelState.fullscreen && width >= 1500) automatic += 0.04;
+    const manual = draft?.fullscreenExperiment === "enable-full-screen" ? lowLevelState.uiScale || 1 : 1;
+    return Math.max(0.75, Math.min(1.65, automatic * manual));
+  }
+  function applyUiScale() {
+    const scale = automaticUiScale();
+    if (Math.abs(scale - appliedUiScale) < 0.005) return;
+    appliedUiScale = scale;
+    invoke("set_ui_zoom", { scale }).catch(() => {});
+  }
+  function changeUiScale(delta) {
+    if (draft?.fullscreenExperiment !== "enable-full-screen") return;
+    const next = Math.max(0.8, Math.min(1.5, Math.round(((lowLevelState.uiScale || 1) + delta) * 20) / 20));
+    if (next === lowLevelState.uiScale) return;
+    lowLevelState = { ...lowLevelState, uiScale: next };
+    window.BlobUI.LowLevelSettings?.update({ uiScale: next });
+    applyUiScale();
+  }
+  function syncFullscreenState(fullscreen) {
+    lowLevelState = { ...lowLevelState, fullscreen: fullscreen === true };
+    window.BlobUI.SidebarResize?.setFullscreen(lowLevelState.fullscreen);
+    applyUiScale();
+  }
+  function scheduleWindowSizeSave() {
+    if (!Number.isFinite(window.innerWidth) || !Number.isFinite(window.innerHeight)) return;
+    window.clearTimeout(windowSizeTimer);
+    windowSizeTimer = window.setTimeout(() => invoke("record_window_size").catch(() => {}), 450);
+  }
+
   async function windowAction(command) {
     try {
       await invoke(command);
@@ -2582,6 +2697,13 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
   listen(el("window-background"), "click", () => windowAction("run_in_background"));
   listen(el("window-minimize"), "click", () => windowAction("minimize_window"));
+  listen(el("window-fullscreen"), "click", async () => {
+    try {
+      syncFullscreenState(await invoke("toggle_window_fullscreen"));
+    } catch (error) {
+      setStatus(error.message || String(error), "error", true, error);
+    }
+  });
   listen(el("window-close"), "click", () => windowAction(
     ["normal", "autostart-background"].includes(draft?.backgroundExperiment) ? "quit_app" : "hide_window"
   ));
@@ -2589,19 +2711,37 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   listen(el("open-repository"), "click", () => windowAction("open_project_repository"));
   const onboarding = el("onboarding");
   const onboardingWelcome = el("onboarding-welcome");
-  const onboardingApi = el("onboarding-api");
-  const apiOptions = [el("onboarding-no-api-option"), el("onboarding-api-option")];
-  // Add future pages here. Every page advances through the same transition;
-  // reaching the end always reveals the main app.
+  const onboardingPreferences = el("onboarding-preferences");
+  const onboardingConnection = el("onboarding-connection");
+  const onboardingGuide = el("onboarding-guide");
+  const onboardingOptionInputs = {
+    interface: el("onboarding-option-interface"),
+    annoying: el("onboarding-option-annoying"),
+    codex: el("onboarding-option-codex"),
+    notion: el("onboarding-option-notion"),
+  };
+  const onboardingChoiceRows = {
+    interface: el("onboarding-choice-interface"),
+    annoying: el("onboarding-choice-annoying"),
+    codex: el("onboarding-choice-codex"),
+    notion: el("onboarding-choice-notion"),
+  };
+  const onboardingPreviewKeys = ["interface", "annoying", "codex", "notion"];
+  const emptyOnboardingSelections = () => ({ interface: false, annoying: false, codex: false, notion: false });
+  let onboardingSelections = emptyOnboardingSelections();
+  const requiresOnboardingApi = () => onboardingSelections.codex || onboardingSelections.notion;
+  const requiresOnboardingGuide = () => onboardingSelections.codex;
   const onboardingSteps = [
     { page: onboardingWelcome, focus: onboardingWelcome },
-    { page: onboardingApi, focus: el("onboarding-api-title") },
-    { page: el("onboarding-connection"), focus: el("connection-title"), when: () => onboarding.dataset.apiChoice === "api" },
+    { page: onboardingPreferences, focus: el("onboarding-preferences-title") },
+    { page: onboardingConnection, focus: el("connection-title"), when: requiresOnboardingApi },
+    { page: onboardingGuide, focus: el("onboarding-guide-title"), when: requiresOnboardingGuide },
   ];
   let onboardingStep = 0;
   let onboardingPreviousFocus = null;
   let onboardingTransition = null;
-  let onboardingAfterGuideClose = false;
+  let onboardingAfterModalClose = false;
+  let onboardingCompletionPending = false;
 
   function showDocumentation() {
     if (!onboarding.hidden || documentationModal.isOpen()) return;
@@ -2620,40 +2760,109 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     settingsShell.classList.remove("onboarding-entering");
   }
 
-  function showOnboardingStep(index) {
-    onboardingStep = index;
-    onboardingSteps.forEach(({ page }, position) => { page.hidden = position !== index; });
-    updateOnboardingScrollbar();
-    updateConnectionScrollbar();
-    onboardingSteps[index].focus.focus();
+  function onboardingStepVisible(step) {
+    return !step.when || step.when();
   }
 
-  function showOnboarding(previousFocus = null) {
-    if (connectionBusy || isInstallingUpdate()) return;
-    if (documentationModal.isOpen()) {
-      if (onboardingAfterGuideClose) return;
-      onboardingAfterGuideClose = true;
-      const guideFocus = documentationPreviousFocus;
-      documentationModal.close({ restoreFocus: false });
-      window.setTimeout(() => {
-        onboardingAfterGuideClose = false;
-        if (!disposed && onboarding.hidden) showOnboarding(guideFocus);
-      }, 150);
-      return;
-    }
-    if (onboarding.hidden) {
-      if (!previousFocus) onboardingPreviousFocus = document.activeElement;
-      else onboardingPreviousFocus = previousFocus.closest("[hidden], [inert]") ? el("help-button") : previousFocus;
-    }
-    resetOnboardingTransition();
-    closeLogs();
-    apiOptions.forEach((item) => item.setAttribute("aria-pressed", "false"));
-    delete onboarding.dataset.apiChoice;
+  function visibleOnboardingIndexes() {
+    return onboardingSteps.map((step, index) => onboardingStepVisible(step) ? index : -1).filter(index => index >= 0);
+  }
+
+  function setOnboardingPreview(key) {
+    onboardingPreviewKeys.forEach(name => {
+      el("onboarding-preview-" + name).hidden = name !== key;
+    });
+  }
+
+  function setRequirementTooltip(element, visible) {
+    element.classList.toggle("visible", visible);
+    element.setAttribute("aria-hidden", String(!visible));
+    const button = element.querySelector("button");
+    if (button) button.disabled = !visible;
+  }
+
+  function updateOnboardingRequirements() {
+    setRequirementTooltip(el("onboarding-warning-write"), onboardingSelections.codex);
+    setRequirementTooltip(el("onboarding-warning-read"), onboardingSelections.notion && !onboardingSelections.codex);
+    const write = onboardingSelections.codex;
+    el("connection-intro").textContent = write
+      ? "Add a read-write API key to enable Anyblob and Codex integration."
+      : "Add your read-only API key to enable Calendar Colors and data-powered features.";
+    el("connection-access-level").textContent = write ? "Read-write" : "Read only";
+    el("connection-key-note").textContent = write
+      ? "Your key stays on this computer, encrypted for your Windows account. Anyblob can only use the spaces and actions your key and BlobUI permissions allow."
+      : "Your key stays on this computer, encrypted for your Windows account. BlobUI only reads the spaces you allow.";
+    updateOnboardingNavigation();
+  }
+
+  function resetOnboardingDraft() {
+    onboardingSelections = emptyOnboardingSelections();
+    Object.entries(onboardingOptionInputs).forEach(([key, input]) => {
+      input.checked = false;
+      onboardingSelections[key] = false;
+    });
     el("connection-key").value = "";
+    el("connection-port").value = currentApiPort === 31009 ? "" : String(currentApiPort);
     resetVisibilityField("connection-key");
     resetVisibilityField("connection-port");
     el("connection-error").textContent = "";
     el("onboarding-choice-error").textContent = "";
+    setOnboardingPreview("interface");
+    updateOnboardingRequirements();
+  }
+
+  function updateOnboardingNavigation() {
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    const last = position === visible.length - 1;
+    const connectionReady = !requiresOnboardingApi() || el("connection-key").value.trim() || hasSavedApiKey;
+    const controlsBusy = connectionBusy || isInstallingUpdate();
+    el("onboarding-back").disabled = controlsBusy || position <= 0;
+    el("onboarding-forward").disabled = controlsBusy || (onboardingSteps[onboardingStep].page === onboardingConnection && !connectionReady);
+    el("onboarding-forward").setAttribute("aria-label", last ? "Finish onboarding" : "Continue");
+    el("onboarding-forward").title = last ? "Finish onboarding" : "Continue";
+    el("onboarding-skip").disabled = controlsBusy;
+  }
+
+  function showOnboardingStep(index) {
+    onboardingStep = index;
+    onboardingSteps.forEach(({ page }, position) => { page.hidden = position !== index; });
+    if (onboardingSteps[index].page === onboardingPreferences) setOnboardingPreview("interface");
+    if (onboardingSteps[index].page === onboardingGuide) window.dispatchEvent(new Event("blobui-onboarding-guide-open"));
+    updateOnboardingScrollbar();
+    updateConnectionScrollbar();
+    updateOnboardingGuideScrollbar();
+    updateOnboardingNavigation();
+    onboardingSteps[index].focus.focus();
+  }
+
+  function closeModalsForOnboarding() {
+    return window.BlobUI.closeOpenModals?.({ restoreFocus: false }) === true;
+  }
+
+  function showOnboarding(previousFocus = null) {
+    if (connectionBusy || isInstallingUpdate()) return;
+    if (!onboarding.hidden) {
+      onboardingSteps[onboardingStep].focus.focus();
+      return;
+    }
+    if (onboardingAfterModalClose) return;
+    if (closeModalsForOnboarding()) {
+      onboardingAfterModalClose = true;
+      const returnFocus = previousFocus || (documentationModal.isOpen() ? documentationPreviousFocus : document.activeElement);
+      window.setTimeout(() => {
+        onboardingAfterModalClose = false;
+        if (!disposed && onboarding.hidden) showOnboarding(returnFocus);
+      }, 150);
+      return;
+    }
+    if (onboarding.hidden) {
+      const focusCandidate = previousFocus || document.activeElement;
+      onboardingPreviousFocus = focusCandidate?.closest?.("[hidden], [inert]") ? el("help-button") : focusCandidate;
+    }
+    resetOnboardingTransition();
+    closeLogs();
+    resetOnboardingDraft();
     settingsShell.inert = true;
     root.classList.add("onboarding-active");
     onboarding.hidden = false;
@@ -2661,145 +2870,264 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   }
 
   function closeOnboarding() {
-    if (connectionBusy || isInstallingUpdate()) return;
-    el("connection-key").value = "";
-    resetVisibilityField("connection-key");
     resetOnboardingTransition();
     onboarding.hidden = true;
     settingsShell.inert = false;
     root.classList.remove("onboarding-active");
     settingsShell.classList.add("onboarding-entering");
+    resetOnboardingDraft();
     if (onboardingPreviousFocus) onboardingPreviousFocus.focus();
     showReleaseNotesOrContinue();
   }
 
-  function advanceOnboarding() {
-    if (isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
+  async function markOnboardingComplete() {
+    if (!onboardingCompletionPending) return;
+    await invoke("complete_onboarding");
+    onboardingCompletionPending = false;
+  }
+
+  function cancelOnboarding() {
+    if (connectionBusy || isInstallingUpdate()) return;
+    closeOnboarding();
+    markOnboardingComplete().catch(error => {
+      onboardingCompletionPending = true;
+      addLog("Onboarding completion could not be saved. " + String(error.message || error), "error", error);
+    });
+  }
+
+  function transitionOnboardingStep(index) {
+    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
     const current = onboardingSteps[onboardingStep].page;
     current.classList.add("leaving");
     onboardingTransition = window.setTimeout(() => {
       onboardingTransition = null;
       current.classList.remove("leaving");
-      let next = onboardingStep + 1;
-      while (next < onboardingSteps.length && onboardingSteps[next].when && !onboardingSteps[next].when()) next += 1;
-      if (next < onboardingSteps.length) {
-        showOnboardingStep(next);
-      } else {
-        closeOnboarding();
-      }
+      showOnboardingStep(index);
     }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
   }
 
-  listen(onboardingWelcome, "click", advanceOnboarding);
-  function setConnectionBusy(busy) {
-    connectionBusy = busy;
-    apiOptions.forEach((option) => { option.disabled = busy; });
-    el("connection-confirm").disabled = busy;
-    el("connection-back").disabled = busy;
-    el("connection-key").disabled = busy;
-    el("connection-port").disabled = busy;
-    el("connection-key-visibility").disabled = busy;
-    el("connection-port-visibility").disabled = busy;
-    el("connection-confirm").textContent = busy ? "Connecting…" : "Confirm";
+  function moveOnboarding(offset) {
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    const nextPosition = position + offset;
+    if (position < 0 || nextPosition < 0 || nextPosition >= visible.length) return;
+    transitionOnboardingStep(visible[nextPosition]);
   }
 
-  async function applyConnection(enabled, apiKey = "", port = null) {
-    if (isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed) return;
+  function finishOnboardingTransition() {
+    if (onboardingTransition !== null) return;
+    const current = onboardingSteps[onboardingStep].page;
+    current.classList.add("leaving");
+    onboardingTransition = window.setTimeout(() => {
+      onboardingTransition = null;
+      current.classList.remove("leaving");
+      closeOnboarding();
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320);
+  }
+
+  function copySettings(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function applyOnboardingChoices(settings) {
+    const next = copySettings(settings);
+    if (onboardingSelections.interface) {
+      next.enableCustomThemes = true;
+      next.themePreset = "dark-mode-plus.css";
+      next.accentMode = "custom";
+      next.accentPreset = "";
+      next.accentColor = "#de50de";
+      next.includeSelections = false;
+    }
+    if (onboardingSelections.annoying) {
+      next.tabHoverEffect = false;
+      next.linkHoverEffect = false;
+      next.objectMentionHoverEffect = false;
+      next.kanbanViewStyle = "balanced";
+    }
+    if (onboardingSelections.codex) {
+      next.codexIntegration = window.BlobUI.CodexPage.normalize(next.codexIntegration);
+      const mentions = next.codexIntegration.objectMentions;
+      const selectionEnabled = selection => selection?.all === true || (Array.isArray(selection?.items) && selection.items.length > 0);
+      if (!selectionEnabled(mentions.spaces)) mentions.spaces = { all: true, items: [] };
+      if (!selectionEnabled(mentions.types)) mentions.types = { all: true, items: [] };
+    }
+    if (onboardingSelections.notion) {
+      next.calendarColorsEnabled = true;
+    }
+    return next;
+  }
+
+  function acceptOnboardingConnection(connection) {
     const advancedWasDirty = connectionHasChanges();
-    const appliedPort = port || 31009;
+    const appliedPort = connection.port || 31009;
+    currentApiPort = appliedPort;
+    hasSavedApiKey = true;
+    if (!advancedWasDirty) {
+      assignAdvancedConnection({ apiIp: currentApiIp, apiPort: currentApiPort, hasSavedApiKey });
+    } else {
+      initialApiDraft = {
+        ip: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
+        port: currentApiPort === 31009 ? "" : String(currentApiPort),
+      };
+      if (!advancedKeyEdited) {
+        advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
+        advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
+      }
+      el("advanced-api-key-hint").textContent = hasSavedApiKey
+        ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
+        : "Enter a new read-only Anytype API v2 key.";
+    }
+    resetAdvancedVisibility();
+    editSession.commit({ connection: readConnectionBaseline() });
+  }
+
+  function applyOnboardingSettingsResult(savedSettings, localSettings, result) {
+    assignDraftToForm(localSettings);
+    initialDraft = copySettings(savedSettings);
+    editSession.commit({ settings: copySettings(savedSettings) });
+    if (result && typeof result.themeCss === "string") applyTheme(lastHostTheme, result.themeCss, result.previewTheme);
+    updateSaveButton();
+  }
+
+  function validateOnboardingConnection() {
+    if (!requiresOnboardingApi()) return true;
+    const key = el("connection-key").value.trim();
+    const portText = el("connection-port").value.trim();
+    if (!key && !hasSavedApiKey) {
+      el("connection-error").textContent = "Enter your Anytype API v2 key, or save one in Advanced Settings first.";
+      el("connection-key").focus();
+      return false;
+    }
+    if (key && (key.length > 4096 || /[\x00-\x1f\x7f]/.test(key))) {
+      el("connection-error").textContent = "Enter your Anytype API v2 key.";
+      el("connection-key").focus();
+      return false;
+    }
+    if (portText && (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535)) {
+      el("connection-error").textContent = "Port must be a whole number from 1 to 65535.";
+      el("connection-port").focus();
+      return false;
+    }
+    return true;
+  }
+
+  async function finishOnboarding() {
+    if (connectionBusy || isInstallingUpdate() || blobFolderBusy || blobRestoreReloadFailed || !draft) return;
+    if (!validateOnboardingConnection()) return;
+    const key = el("connection-key").value.trim();
+    const portText = el("connection-port").value.trim();
+    const baselineSettings = copySettings(editSession.getBaseline().settings || draft);
+    const savedSettings = applyOnboardingChoices(baselineSettings);
+    const localSettings = applyOnboardingChoices(draft);
+    const settingsChanged = !settingsEqual(savedSettings, baselineSettings);
+    const connection = requiresOnboardingApi() ? {
+      enabled: true,
+      apiKey: key,
+      keepExistingKey: !key && hasSavedApiKey,
+      ip: currentApiIp || null,
+      port: portText ? Number(portText) : null,
+    } : null;
     setConnectionBusy(true);
     el("connection-error").textContent = "";
+    el("onboarding-choice-error").textContent = "";
+    let result = null;
     try {
-      const result = await invoke("configure_connection", { connection: {
-        enabled,
-        apiKey,
-        keepExistingKey: false,
-        ip: currentApiIp || null,
-        port,
-      } });
-      window.appReady = true;
-      currentApiPort = appliedPort;
-      hasSavedApiKey = enabled;
-      if (!advancedWasDirty) {
-        assignAdvancedConnection({ apiIp: currentApiIp, apiPort: currentApiPort, hasSavedApiKey });
-      } else {
-        initialApiDraft = {
-          ip: currentApiIp === "127.0.0.1" ? "" : currentApiIp,
-          port: currentApiPort === 31009 ? "" : String(currentApiPort),
-        };
-        if (!advancedKeyEdited) {
-          advancedApiKey.value = hasSavedApiKey ? SAVED_KEY_MASK : "";
-          advancedApiKey.placeholder = hasSavedApiKey ? "" : "Paste a read-only API v2 key";
-        }
-        el("advanced-api-key-hint").textContent = hasSavedApiKey
-          ? "A key is saved. Leave the masked value unchanged to keep it, or clear it to remove it."
-          : "Enter a new read-only Anytype API v2 key.";
+      if (connection) {
+        await invoke("configure_connection", { connection });
+        window.appReady = true;
+        acceptOnboardingConnection(connection);
+        window.BlobUI.FormulaPage.reload();
+        window.BlobUI.CalendarPage?.reload();
       }
-      resetAdvancedVisibility();
-      editSession.commit({ connection: readConnectionBaseline() });
-      updateSaveButton();
-      const calendarPending = enabled && result && result.calendarStatus === "cached";
-      setStatus(calendarPending
-        ? "Anytype connected. Calendar data could not refresh yet; try saving again later."
-        : enabled ? "Anytype connected. Press Ctrl+R in Anytype to reload CSS." : "API features disabled. Press Ctrl+R in Anytype to reload CSS.", "info");
-      el("connection-key").value = "";
-      resetVisibilityField("connection-key");
-      advanceOnboarding();
+      if (settingsChanged) result = await invoke("save_settings", { settings: savedSettings });
+      if (onboardingSelections.codex) {
+        const anyblob = await invoke("anyblob_status");
+        if (anyblob?.enabled !== true) await invoke("configure_anyblob", { enabled: true });
+        if (anyblob?.agentsGuide !== true) await invoke("configure_anyblob_agents_guide", { agentsGuide: true });
+        window.BlobUI.AnyblobDraft.commit({ enabled: true, agentsGuide: true });
+      }
+      await markOnboardingComplete();
+      applyOnboardingSettingsResult(savedSettings, localSettings, result);
+      setStatus("Onboarding finished. Press Ctrl+R in Anytype to apply.", "info");
+      finishOnboardingTransition();
     } catch (error) {
-      if (enabled) {
-        el("connection-error").textContent = error.message || String(error);
-      } else {
-        setStatus(error.message || String(error), "error", true, error);
-        el("onboarding-choice-error").textContent = "Could not apply this choice. Check your BlobUI installation and try again.";
-      }
+      const message = error.message || String(error);
+      if (requiresOnboardingApi()) el("connection-error").textContent = message;
+      else el("onboarding-choice-error").textContent = message;
+      setStatus(message, "error", true, error);
     } finally {
       setConnectionBusy(false);
       void refreshCalendarApiAvailability(true);
     }
   }
 
-  apiOptions.forEach((option) => listen(option, "click", () => {
-    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingSteps[onboardingStep].page !== onboardingApi || onboardingTransition !== null) return;
-    apiOptions.forEach((item) => item.setAttribute("aria-pressed", String(item === option)));
-    el("onboarding-choice-error").textContent = "";
-    const enabled = option === apiOptions[1];
-    onboarding.dataset.apiChoice = enabled ? "api" : "no-api";
-    if (enabled) advanceOnboarding();
-    else applyConnection(false, "", currentApiPort);
-  }));
+  function advanceOnboarding() {
+    if (connectionBusy || isInstallingUpdate() || onboarding.hidden || onboardingTransition !== null) return;
+    if (onboardingSteps[onboardingStep].page === onboardingConnection && !validateOnboardingConnection()) return;
+    const visible = visibleOnboardingIndexes();
+    const position = visible.indexOf(onboardingStep);
+    if (position >= 0 && position === visible.length - 1) void finishOnboarding();
+    else moveOnboarding(1);
+  }
 
-  listen(el("connection-back"), "click", () => {
-    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null) return;
-    resetOnboardingTransition();
-    showOnboardingStep(onboardingSteps.findIndex(({ page }) => page === onboardingApi));
+  function setConnectionBusy(busy) {
+    connectionBusy = busy;
+    Object.values(onboardingOptionInputs).forEach(input => { input.disabled = busy; });
+    el("connection-key").disabled = busy;
+    el("connection-port").disabled = busy;
+    el("connection-key-visibility").disabled = busy;
+    el("connection-port-visibility").disabled = busy;
+    updateOnboardingNavigation();
+  }
+
+  Object.entries(onboardingOptionInputs).forEach(([key, input]) => listen(input, "change", () => {
+    onboardingSelections[key] = input.checked === true;
+    updateOnboardingRequirements();
+  }));
+  Object.entries(onboardingChoiceRows).forEach(([key, row]) => {
+    listen(row, "pointerenter", () => setOnboardingPreview(key));
+    listen(row, "focusin", () => setOnboardingPreview(key));
   });
+  listen(el("connection-key"), "input", updateOnboardingNavigation);
+  listen(el("connection-port"), "input", updateOnboardingNavigation);
+  listen(onboardingWelcome, "click", advanceOnboarding);
+  listen(el("onboarding-forward"), "click", advanceOnboarding);
+  listen(el("onboarding-back"), "click", () => moveOnboarding(-1));
+  listen(el("onboarding-skip"), "click", cancelOnboarding);
   listen(el("connection-form"), "submit", (event) => {
     event.preventDefault();
-    if (connectionBusy || isInstallingUpdate() || onboardingTransition !== null || onboarding.hidden) return;
-    const key = el("connection-key").value.trim();
-    const portText = el("connection-port").value.trim();
-    if (!key || key.length > 4096 || /[\x00-\x1f\x7f]/.test(key)) {
-      el("connection-error").textContent = "Enter your Anytype API v2 key.";
-      el("connection-key").focus();
-      return;
-    }
-    if (portText && (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535)) {
-      el("connection-error").textContent = "Port must be a whole number from 1 to 65535.";
-      el("connection-port").focus();
-      return;
-    }
-    applyConnection(true, key, portText ? Number(portText) : null);
+    advanceOnboarding();
   });
 
   listen(document, "keydown", (event) => {
     if (event.defaultPrevented) return;
-    if (blobFolderBusy || blobRestoreReloadFailed || blobImportModal.isOpen()
-      || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
     const matches = (action) => {
       const binding = shortcutBindings.find((item) => item.action === action);
       return binding && event.code === binding.code && event.ctrlKey === binding.ctrl
         && event.altKey === binding.alt && event.shiftKey === binding.shift && event.metaKey === binding.meta;
     };
+    if (blobFolderBusy || blobRestoreReloadFailed) return;
+    if (matches("showOnboarding") && !shortcutCaptureAction) {
+      event.preventDefault();
+      if (!event.repeat) showOnboarding();
+      return;
+    }
+    if (blobImportModal.isOpen() || apiKeyRemovalModal.isOpen() || discardConfirmationModal.isOpen() || keybindModal.isOpen()) return;
+    if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && draft?.fullscreenExperiment === "enable-full-screen") {
+      const zoomIn = ["Equal", "NumpadAdd"].includes(event.code) || event.key === "+";
+      const zoomOut = ["Minus", "NumpadSubtract"].includes(event.code) || event.key === "-";
+      if (zoomIn || zoomOut) {
+        event.preventDefault();
+        if (!event.repeat) changeUiScale(zoomIn ? 0.05 : -0.05);
+        return;
+      }
+    }
+    if (matches("toggleFullscreen") && draft?.fullscreenExperiment === "enable-full-screen") {
+      event.preventDefault();
+      if (!event.repeat) el("window-fullscreen").click();
+      return;
+    }
     if (matches("openComponentCatalog")) {
       event.preventDefault();
       if (!event.repeat) {
@@ -2814,11 +3142,6 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
       if (!event.repeat) save({ forceRebuild: true });
       return;
     }
-    if (matches("showOnboarding")) {
-      event.preventDefault();
-      if (!event.repeat) showOnboarding();
-      return;
-    }
     if (matches("simulateUpdate")) {
       event.preventDefault();
       if (!event.repeat) simulateUpdate();
@@ -2826,7 +3149,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     }
     if (event.key === "Escape" && !onboarding.hidden) {
       event.preventDefault();
-      closeOnboarding();
+      cancelOnboarding();
       return;
     }
     if (event.key === "Escape" && !logPopup.hidden) {
@@ -2951,7 +3274,14 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
   window.BlobUI.FormulaPage.init({ onChange: markDirty, onInfo: (message, error) => addLog(message, error ? "error" : "info", error), onBusyChange(value) { saveBusy = value; updateSaveButton(); } });
   window.appReady = false;
   listen(window, "focus", requestSavedRefresh);
-  const initialStateLoaded = savedStateSubscription.then(() => loadState({ refreshMetadata: true })).catch(error => {
+  listen(window, "resize", () => { scheduleWindowSizeSave(); applyUiScale(); });
+  const lowLevelLoaded = window.BlobUI.LowLevelSettings?.init ? window.BlobUI.LowLevelSettings.init(invoke).then(state => {
+    lowLevelState = { ...lowLevelState, ...state };
+    window.BlobUI.SidebarResize?.setGeometry(state);
+    window.BlobUI.SidebarResize?.setFullscreen(state.fullscreen === true);
+    applyUiScale();
+  }).catch(() => {}) : Promise.resolve();
+  const initialStateLoaded = Promise.all([savedStateSubscription, lowLevelLoaded]).then(() => loadState({ refreshMetadata: true })).catch(error => {
     addLog("Settings could not be loaded. " + String(error.message || error), "error", error);
   }).finally(() => {
     if (disposed) return;
@@ -2966,6 +3296,7 @@ export function startSettingsApp({ view, createNativeService, tauri = window.__T
     if (initialUpdaterSettings && initialUpdaterSettings.automaticChecksEnabled && !simulationActive) return checkForUpdates(true);
   }, 5 * 60 * 1000);
   listen(window.matchMedia("(prefers-color-scheme: light)"), "change", refreshTheme);
-  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, save, beginShortcutCapture,
+  return { dispose, showSettingsPage, openSection, openFeature, selectCalendarTab, selectKanbanTab, selectAdvancedTab, changeSettingField, changeKanbanStyle, changeStartupMode, changeReleaseChannel, changeBackgroundExperiment, changeFullscreenExperiment, save, beginShortcutCapture,
+    changeUpdaterSetting, changeInstallDirectory, selectAnytypeFolder, clearCache, checkUpdatesAction, applyUpdate, createBlobBackup, importBlobBackup, openUninstallConfirmation,
     openDiscardConfirmation: window.BlobUI.openDiscardConfirmation };
 }

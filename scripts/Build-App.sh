@@ -90,6 +90,10 @@ cp -f -- "$frontendOutputDirectory/dev-guide.md" "$distributionDirectory/dev-gui
 assert_workspace_build_path "$frontendOutputDirectory/anyblob-guide.md" >/dev/null
 assert_workspace_build_path "$distributionDirectory/anyblob-guide.md" >/dev/null
 cp -f -- "$frontendOutputDirectory/anyblob-guide.md" "$distributionDirectory/anyblob-guide.md"
+[[ -f $markdownDirectory/kanban-calc-guide.md && -f $frontendOutputDirectory/kanban-calc-guide.md ]] || { printf '%s\n' 'The Settings frontend did not bundle settings-app/markdowns/kanban-calc-guide.md.' >&2; exit 1; }
+assert_workspace_build_path "$frontendOutputDirectory/kanban-calc-guide.md" >/dev/null
+assert_workspace_build_path "$distributionDirectory/kanban-calc-guide.md" >/dev/null
+cp -f -- "$frontendOutputDirectory/kanban-calc-guide.md" "$distributionDirectory/kanban-calc-guide.md"
 for releaseNotesFile in Changelogs.md md-images.yaml; do
     source_file="$markdownDirectory/$releaseNotesFile"
     [[ -f $source_file ]] || { printf 'The Settings app build is missing its release notes file: %s\n' "$source_file" >&2; exit 1; }

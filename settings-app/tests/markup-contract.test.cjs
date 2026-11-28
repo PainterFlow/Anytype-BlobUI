@@ -51,12 +51,12 @@ test('mounted screens retain accessible controls, ordering and initial state', a
         switches: switches.every(id => get(id)?.type === 'checkbox' && get(id).getAttribute('role') === 'switch' && get(id).labels.length > 0),
         customThemesDefaultOff: !get('enable-custom-themes').checked && get('based-theme-select').querySelector('button').disabled && get('custom-theme-select').querySelector('button').disabled && get('theme-color-value').disabled,
         visibility: fields.every(id => get(id).labels.length > 0 && get(id).parentElement.id === id + '-field' && get(id).nextElementSibling.id === id + '-visibility' && get(id + '-visibility').hasAttribute('aria-pressed')),
-        ordering: before('preferences-nav', 'accessibility-nav') && before('accessibility-nav', 'calendar-events-nav') && before('calendar-events-nav', 'kanban-views-nav') && before('kanban-views-nav', 'advanced-nav') && before('enable-custom-themes', 'based-theme-select') && get('advanced-app-panel').contains(get('start-on-login')) && !get('startup-mode') && get('advanced-experiments-panel').contains(get('background-experiment')) && get('window-background').hidden && before('updates-heading', 'backup-heading') && before('backup-heading', 'uninstall-button') && before('help-whats-new', 'help-dev-guide') && before('help-dev-guide', 'help-keybinds'),
+        ordering: before('preferences-nav', 'accessibility-nav') && before('accessibility-nav', 'calendar-events-nav') && before('calendar-events-nav', 'kanban-views-nav') && before('kanban-views-nav', 'advanced-nav') && before('enable-custom-themes', 'based-theme-select') && get('advanced-app-panel').contains(get('start-on-login')) && get('advanced-experiments-panel').contains(get('background-experiment')) && get('window-background').hidden && before('updates-heading', 'backup-heading') && before('backup-heading', 'installation-heading') && before('help-whats-new', 'help-dev-guide') && before('help-dev-guide', 'help-keybinds'),
         numeric: get('connection-port').inputMode === 'numeric' && get('advanced-api-port').inputMode === 'numeric' && get('advanced-api-ip').inputMode === 'decimal',
         folder: get('install-directory').readOnly && get('install-directory').getAttribute('aria-haspopup') === 'dialog',
         calendar: get('calendar-colors-enabled').checked && get('calendar-colors-enabled').disabled,
         hidden: get('advanced-app-panel').hidden && get('release-notes-current-tag').hidden && get('release-notes-latest-tag').hidden,
-        modals: ['uninstall', 'blob-import', 'api-key-removal', 'discard-confirmation', 'help-error'].every(id => get(id + '-dialog').getAttribute('role') === 'alertdialog' && get(id + '-dialog').getAttribute('aria-modal') === 'true'),
+        modals: ['blob-import', 'api-key-removal', 'discard-confirmation', 'help-error'].every(id => get(id + '-dialog').getAttribute('role') === 'alertdialog' && get(id + '-dialog').getAttribute('aria-modal') === 'true'),
         undo: get('api-key-removal-undo').textContent === 'Undo' && get('discard-confirmation-undo').textContent === 'Undo' && !get('api-key-removal-dismiss') && !get('api-key-removal-cancel'),
         preview: Boolean(document.querySelector('.space-sidebar-preview[inert][role="img"]')) && ['image/png', 'image/jpeg', 'image/webp'].every(type => get('banner-image-input').accept.includes(type)),
         stable: first === get('font-family') && first.value === 'Draft' && first.selectionStart === 1 && first.selectionEnd === 3,
@@ -64,5 +64,18 @@ test('mounted screens retain accessible controls, ordering and initial state', a
     });
     assert.deepEqual(result.problems, [], 'ARIA references must resolve in the mounted DOM');
     for (const [name, value] of Object.entries(result)) if (name !== 'problems') assert.equal(value, true, name);
+
+    await page.locator('#advanced-nav').click();
+    await page.locator('#advanced-app-tab').click();
+    await page.waitForFunction(() => !document.getElementById('advanced-app-panel').hidden);
+    const folderVisibility = await page.locator('#install-directory').evaluate(input => {
+      const style = getComputedStyle(input);
+      const rect = input.getBoundingClientRect();
+      return { opacity: style.opacity, position: style.position, width: rect.width, height: rect.height };
+    });
+    assert.notEqual(folderVisibility.opacity, '0', 'Anytype Folder input must not use hidden switch styling');
+    assert.notEqual(folderVisibility.position, 'absolute', 'Anytype Folder input must stay in the row layout');
+    assert.ok(folderVisibility.width > 200, `Anytype Folder input width was ${folderVisibility.width}`);
+    assert.ok(folderVisibility.height >= 48, `Anytype Folder input height was ${folderVisibility.height}`);
   } finally { await browser.close(); }
 });

@@ -30,14 +30,14 @@
   let discoveryRequested = false;
   let discoveryGeneration = 0;
   const viewSubscribers = new Set();
-  let searchText = "", selectedSpace = "";
+  let searchText = "", selectedSpace = "", spaceCatalog = [];
   function snapshot() {
     return {
       views: records.map(record => ({ ...record.view, key: record.key, active: !!activeRecord && activeRecord.viewKey === record.key })),
       loading, locked: locked || loading, discovering, message: pageMessage,
       success: messageSuccess, display: state.display, calculatedAt,
       active: activeRecord ? calculatorSnapshot(activeRecord) : null,
-      searchText, selectedSpace,
+      searchText, selectedSpace, spaceCatalog,
     };
   }
   function publish() { const value = snapshot(); viewSubscribers.forEach(listener => listener(value)); }
@@ -54,10 +54,17 @@
       status, markup: math.toMathML(tokens, record.view.properties),
       unsupported: record.view.unsupported || "", hasSaved: !!targetDefinition(record.view.target),
       pendingProperty: record.pendingProperty || "",
-      properties: (record.view.properties || []).filter(property => ["number", "boolean", "checkbox"].includes(property.format)
-        && typeof property.key === "string" && typeof property.name === "string").map(property => ({
-          key: property.key, name: property.name, description: math.propertyReference(property.key, record.view.properties),
-        })),
+      properties: (() => {
+        const valid = (record.view.properties || []).filter(property => ["number", "boolean", "checkbox"].includes(property.format)
+          && typeof property.key === "string" && typeof property.name === "string");
+        const names = new Map();
+        valid.forEach(property => names.set(property.name, (names.get(property.name) || 0) + 1));
+        return valid.map(property => {
+          const reference = math.propertyReference(property.key, record.view.properties);
+          const duplicate = names.get(property.name) > 1 ? reference.match(/#(\d+)$/)?.[1] : "";
+          return { key: property.key, name: duplicate ? `${property.name} #${duplicate}` : property.name, description: reference };
+        });
+      })(),
       locked: locked || loading,
     };
   }
@@ -88,6 +95,14 @@
     const timestamp = calculatedAt ? new Date(calculatedAt) : null;
     const formatted = timestamp && !Number.isNaN(timestamp.valueOf()) ? timestamp.toLocaleString() : "Not calculated yet";
     target.textContent = "Last calculated: " + formatted + ". Saved calculations are applied after you press Ctrl+R in Anytype.";
+  }
+  function acceptRefreshResult(result) {
+    if (!result) return;
+    (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
+    configurationRevision = result.revision || configurationRevision;
+    calculatedAt = result.calculatedAt || calculatedAt;
+    updateTimestamp();
+    publish();
   }
   function parseFraction(tokens) {
     if (!Array.isArray(tokens) || tokens.length < 7 || tokens[0].kind !== "open") return null;
@@ -527,6 +542,7 @@
     syncLocks();
     try {
       const result = await invoke("discover_kanban_views", { forceRefresh });
+      spaceCatalog = await window.BlobUI.SpaceCatalog.load(invoke, false).catch(() => spaceCatalog);
       if (!result || !Array.isArray(result.views)) throw Error("Anytype did not return a view list.");
       if (generation !== discoveryGeneration) return;
       catalog = result.views;
@@ -665,6 +681,7 @@
       calculatedAt = result.calculatedAt || "";
       loadError = ""; setMessage(""); updateTimestamp();
     },
+    acceptRefresh: acceptRefreshResult,
     isPersisted: () => JSON.stringify(state) === JSON.stringify(persistedState),
     restore(value) {
       draftGeneration++;
@@ -683,6 +700,7 @@
       discoveryGeneration++;
       discovering = false;
       catalog = [];
+      spaceCatalog = [];
       searchText = ""; selectedSpace = "";
       draftGeneration++;
       if (calculatorModal?.isOpen()) calculatorModal.close({ restoreFocus: false });
@@ -743,10 +761,7 @@
       try {
         const result = await bridge("refresh_kanban_results");
         if (!result) return null;
-        (result.info || []).forEach(message => api?.onInfo?.("Anytype API. " + message));
-        configurationRevision = result.revision || configurationRevision;
-        calculatedAt = result.calculatedAt || calculatedAt;
-        updateTimestamp();
+        acceptRefreshResult(result);
         setMessage("Results refreshed. Press Ctrl+R in Anytype to apply.", true);
         return result;
       } catch (error) {
